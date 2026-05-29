@@ -75,6 +75,24 @@ by the engine — a transform never sees them.
 Backfill uses the DBLog/Sequin watermark pattern (keyset pagination + low/high watermarks via an internal
 `cdc.watermark` sentinel) so the snapshot merges with the live stream with no gaps and live always wins.
 
+### Per-row scoping (multi-tenancy)
+
+When the enrichment `DbContext` — or the destination — must be derived from the changed row's own data
+(e.g. a `TenantId`), declare a scope key and supply a scoped context factory:
+
+```csharp
+cdc.UseScopedContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)))  // tenant conn or query-filter
+   .Map<Order>()
+       .ScopedBy(o => o.TenantId)                     // scope key from the change
+       .UsingTransform<OrderDoc, OrderTransform>()    // transform receives the tenant-scoped db
+       .ScopedDestination(key => $"orders_{key}");    // per-tenant index (optional)
+```
+
+The engine sub-groups each transaction's changes by scope key and invokes the transform once per tenant
+with a context built for that tenant (one context per tenant per batch). `ScopedDestination` also routes
+each document — and deletes — to the tenant's destination; because deletes must resolve the key, that
+table is marked to require `REPLICA IDENTITY FULL`. With neither, behavior is unchanged (one shared context).
+
 ## Running locally
 
 ```bash

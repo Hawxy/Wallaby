@@ -164,13 +164,18 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
                 BackfillVersion = registration.BackfillVersion,
                 Transform = registration.TransformFactory!(_services),
                 DocumentIdSelector = registration.DocumentIdSelector,
+                ScopeKeySelector = registration.ScopeKeySelector,
+                DestinationSelector = registration.DestinationSelector,
             };
             backfillTables.Add((captured, registration.BackfillVersion));
         }
 
         var sinks = _config.Sinks.ToDictionary(s => s.Name, s => s.Factory(_services));
 
-        _router = new MappingChangeRouter(mappings, _ => new ValueTask<DbContext>(_dbContextFactory.CreateDbContext()));
+        IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
+            ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
+            : new DefaultEnrichmentContextProvider(() => _dbContextFactory.CreateDbContext());
+        _router = new MappingChangeRouter(mappings, contextProvider);
         _dispatcher = new SinkDispatcher(sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger);
         _coordinator = new WatermarkBackfillCoordinator(
             _options.ConnectionString, new PostgresBackfillStore(_options.ConnectionString), _logger) { ChunkSize = _options.ChunkSize };

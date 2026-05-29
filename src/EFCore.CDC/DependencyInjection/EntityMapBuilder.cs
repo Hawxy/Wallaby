@@ -40,6 +40,28 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
         return this;
     }
 
+    /// <summary>
+    /// Derive a per-row scope key (e.g. tenant id) from the change. The engine sub-groups the transform
+    /// batch by this key and supplies a scope-scoped enrichment <c>DbContext</c> (see <c>UseScopedContext</c>);
+    /// it also feeds <see cref="ScopedDestination"/>.
+    /// </summary>
+    public EntityMapBuilder<TEntity> ScopedBy(Func<TEntity, object?> keySelector)
+    {
+        _registration.ScopeKeySelector = change => change.Entity is TEntity entity ? keySelector(entity) : null;
+        return this;
+    }
+
+    /// <summary>
+    /// Route documents to a destination computed from the scope key (e.g. an index per tenant). Requires
+    /// <see cref="ScopedBy"/>; because deletes must also resolve the destination, the table is marked to need
+    /// <c>REPLICA IDENTITY FULL</c> so the scope key is present on delete.
+    /// </summary>
+    public EntityMapBuilder<TEntity> ScopedDestination(Func<object?, string?> destinationByScopeKey)
+    {
+        _registration.DestinationSelector = destinationByScopeKey;
+        return this;
+    }
+
     /// <summary>Use a transform instance.</summary>
     public EntityMapBuilder<TEntity> UsingTransform<TDocument>(ICdcTransform<TEntity, TDocument> transform)
     {

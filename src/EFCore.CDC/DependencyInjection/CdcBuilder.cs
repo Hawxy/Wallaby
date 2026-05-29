@@ -1,5 +1,6 @@
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Sinks;
+using Microsoft.EntityFrameworkCore;
 
 namespace EFCore.CDC.DependencyInjection;
 
@@ -54,6 +55,17 @@ public sealed class CdcBuilder
     public CdcBuilder AddDelegateSink(string name, Func<SinkBatch, CancellationToken, Task<DeliveryResult>> handler)
         => AddSink(new DelegateSink(name, handler));
 
+    /// <summary>
+    /// Build the enrichment <see cref="DbContext"/> handed to transforms from a row's scope key (e.g. tenant),
+    /// e.g. by selecting a tenant connection string or a context carrying the tenant for global query filters.
+    /// Used by mappings that declare <c>ScopedBy(...)</c>.
+    /// </summary>
+    public CdcBuilder UseScopedContext(Func<object?, IServiceProvider, DbContext> factory)
+    {
+        _configuration.ScopedContextFactory = factory;
+        return this;
+    }
+
     /// <summary>Map an entity to a sink/destination via a transform.</summary>
     public EntityMapBuilder<TEntity> Map<TEntity>() where TEntity : class
     {
@@ -102,6 +114,21 @@ public sealed class CdcBuilder
             {
                 throw new CdcConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>() is missing a transform. Call .UsingTransform(...).");
+            }
+            if (mapping.DestinationSelector is not null && mapping.ScopeKeySelector is null)
+            {
+                throw new CdcConfigurationException(
+                    $"Map<{mapping.EntityClrType.Name}>().ScopedDestination(...) requires .ScopedBy(...) to provide the scope key.");
+            }
+            if (mapping.ScopeKeySelector is not null && mapping.DestinationSelector is null && _configuration.ScopedContextFactory is null)
+            {
+                throw new CdcConfigurationException(
+                    $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register UseScopedContext(...).");
+            }
+            // Scoped destinations must resolve the scope key on deletes too, which needs full old-row values.
+            if (mapping.DestinationSelector is not null)
+            {
+                _configuration.RequiresFullReplicaIdentity.Add(mapping.EntityClrType);
             }
         }
 

@@ -1,4 +1,5 @@
 using EFCore.CDC.TestModel;
+using Microsoft.EntityFrameworkCore;
 
 namespace EFCore.CDC.Testing;
 
@@ -17,16 +18,43 @@ public sealed class TestDatabase(string connectionString)
     }
 
     public async Task<int> AddProductAsync(int categoryId, string name, decimal price = 1m)
+        => await AddProductAsync(categoryId, name, tenantId: 0, price);
+
+    public async Task<int> AddProductAsync(int categoryId, string name, int tenantId, decimal price = 1m)
     {
         await using var ctx = NewContext();
         var product = new Product
         {
             Name = name, Price = price, Sku = name, Status = ProductStatus.Active,
-            Tags = [], Description = "", CategoryId = categoryId,
+            Tags = [], Description = "", CategoryId = categoryId, TenantId = tenantId,
         };
         ctx.Products.Add(product);
         await ctx.SaveChangesAsync();
         return product.Id;
+    }
+
+    /// <summary>Insert several products in a single transaction (one CDC batch), each with its own tenant.</summary>
+    public async Task<IReadOnlyList<int>> AddProductsAsync(int categoryId, IEnumerable<(string Name, int Tenant)> items)
+    {
+        await using var ctx = NewContext();
+        var products = items.Select(i => new Product
+        {
+            Name = i.Name, TenantId = i.Tenant, Price = 1m, Sku = i.Name,
+            Status = ProductStatus.Active, Tags = [], Description = "", CategoryId = categoryId,
+        }).ToList();
+        ctx.Products.AddRange(products);
+        await ctx.SaveChangesAsync();
+        return products.Select(p => p.Id).ToList();
+    }
+
+    /// <summary>Set a table's replica identity to FULL so old-row values (incl. scope keys) are present on delete.</summary>
+    public async Task SetReplicaIdentityFullAsync(string table)
+    {
+        await using var ctx = NewContext();
+        // Trusted, test-only DDL; a table identifier cannot be parameterized.
+#pragma warning disable EF1002, EF1003
+        await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE " + table + " REPLICA IDENTITY FULL");
+#pragma warning restore EF1002, EF1003
     }
 
     public async Task<IReadOnlyList<(int Id, string Name)>> AddProductsAsync(int categoryId, params string[] names)

@@ -37,6 +37,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private readonly Dictionary<Type, EntityMapping> _mappings = [];
     private readonly Dictionary<Type, string?> _backfillTypes = [];
     private bool _broadcast;
+    private Func<object?, DbContext>? _scopedContextFactory;
 
     private IModel? _model;
     private CdcModel? _cdcModel;
@@ -104,7 +105,9 @@ public sealed class CdcTestHarness : IAsyncDisposable
         string? destination,
         Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, object?>>> transform,
         bool backfill = false,
-        string? backfillVersion = null)
+        string? backfillVersion = null,
+        Func<TEntity, object?>? scopeKey = null,
+        Func<object?, string?>? scopedDestination = null)
         where TEntity : class
     {
         _mappings[typeof(TEntity)] = new EntityMapping
@@ -114,6 +117,8 @@ public sealed class CdcTestHarness : IAsyncDisposable
             Destination = destination,
             BackfillVersion = backfillVersion,
             Transform = new TransformInvoker<TEntity, object>(new DelegateTransform<TEntity, object>(transform)),
+            ScopeKeySelector = scopeKey is null ? null : change => change.Entity is TEntity e ? scopeKey(e) : null,
+            DestinationSelector = scopedDestination,
         };
         if (backfill)
         {
@@ -124,7 +129,8 @@ public sealed class CdcTestHarness : IAsyncDisposable
 
     /// <summary>Map an entity to a sink/destination via a simple per-row projection.</summary>
     public CdcTestHarness Project<TEntity>(
-        string sink, string? destination, Func<TEntity, object> document, bool backfill = false, string? backfillVersion = null)
+        string sink, string? destination, Func<TEntity, object> document, bool backfill = false, string? backfillVersion = null,
+        Func<TEntity, object?>? scopeKey = null, Func<object?, string?>? scopedDestination = null)
         where TEntity : class
         => Map<TEntity>(sink, destination, (_, changes, _) =>
         {
@@ -134,7 +140,14 @@ public sealed class CdcTestHarness : IAsyncDisposable
                 documents[change.Key] = document(change.Entity!);
             }
             return Task.FromResult<IReadOnlyDictionary<DocumentKey, object?>>(documents);
-        }, backfill, backfillVersion);
+        }, backfill, backfillVersion, scopeKey, scopedDestination);
+
+    /// <summary>Build the enrichment <see cref="DbContext"/> from a row's scope key (for tenant tests).</summary>
+    public CdcTestHarness UseScopedContext(Func<object?, DbContext> factory)
+    {
+        _scopedContextFactory = factory;
+        return this;
+    }
 
     // ---- lifecycle ----
 
@@ -163,9 +176,12 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _coordinator = new WatermarkBackfillCoordinator(
             _connectionString, new PostgresBackfillStore(_connectionString), NullLogger.Instance) { ChunkSize = ChunkSize };
 
+        IEnrichmentContextProvider contextProvider = _scopedContextFactory is { } scoped
+            ? new ScopedEnrichmentContextProvider((key, _) => scoped(key), NullServiceProvider.Instance)
+            : new DefaultEnrichmentContextProvider(_newContext);
         IChangeRouter router = _broadcast
             ? new BroadcastChangeRouter(_sinks.Keys.ToList())
-            : new MappingChangeRouter(_mappings, _ => new ValueTask<DbContext>(_newContext()));
+            : new MappingChangeRouter(_mappings, contextProvider);
 
         _pipeline = new CdcPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks),
@@ -278,5 +294,11 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _model = context.Model;
         _cdcModel = ModelToCdcModel.Build(_model, new CaptureSpec { CaptureAllMapped = true });
         _materializer = new EntityMaterializer(_model);
+    }
+
+    private sealed class NullServiceProvider : IServiceProvider
+    {
+        public static readonly NullServiceProvider Instance = new();
+        public object? GetService(Type serviceType) => null;
     }
 }
