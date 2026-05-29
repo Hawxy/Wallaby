@@ -1,0 +1,39 @@
+# Local dev stack for EFCore.CDC end-to-end runs and integration tests.
+#   docker compose -f samples/docker-compose.yml up -d
+#
+# Postgres is started with logical decoding enabled so the library can create
+# a pgoutput replication slot. Meilisearch is the v1 search-index destination.
+services:
+  postgres:
+    image: postgres:17
+    command:
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_wal_senders=10"
+    environment:
+      POSTGRES_USER: cdc
+      POSTGRES_PASSWORD: cdc
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cdc -d app"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    environment:
+      MEILI_MASTER_KEY: masterKey
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7700/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

@@ -88,9 +88,11 @@ Insert/update/delete rows in the `products` table and watch the Meilisearch `pro
 ## Tests
 
 - Unit tests (no Docker): `dotnet run --project tests/EFCore.CDC.UnitTests`
-- Integration tests (Testcontainers — needs Docker): `dotnet run --project tests/EFCore.CDC.IntegrationTests`
+- Core integration tests (Testcontainers Postgres — needs Docker): `dotnet run --project tests/EFCore.CDC.IntegrationTests`
+- Meilisearch integration tests (Testcontainers Postgres + Meilisearch): `dotnet run --project tests/EFCore.CDC.Meilisearch.IntegrationTests`
 
-Both projects use [TUnit](https://tunit.dev/).
+All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Postgres container) live in
+`tests/EFCore.CDC.TestInfrastructure`.
 
 ## Notes & limitations (v1)
 

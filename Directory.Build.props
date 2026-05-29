@@ -1,0 +1,19 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Packaging defaults: only the two library projects opt back in. -->
+    <IsPackable>false</IsPackable>
+    <Authors>EFCore.CDC contributors</Authors>
+    <Product>EFCore.CDC</Product>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Postgres Change Data Capture for .NET, driven by your EF Core model.</Description>
+  </PropertyGroup>
+
+</Project>
