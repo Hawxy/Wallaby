@@ -33,13 +33,6 @@ internal sealed class StateSchemaBootstrapper
             consistent_point pg_lsn      NULL,
             created_at       timestamptz NOT NULL DEFAULT now()
         );
-
-        -- Single-row sentinel table written to emit low/high watermarks during backfill.
-        CREATE TABLE IF NOT EXISTS cdc.watermark (
-            id    int  PRIMARY KEY,
-            token text NOT NULL
-        );
-        INSERT INTO cdc.watermark (id, token) VALUES (1, '') ON CONFLICT (id) DO NOTHING;
         """;
 
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)

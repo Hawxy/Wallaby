@@ -1,11 +1,12 @@
 namespace EFCore.CDC.Internal;
 
-/// <summary>Names of the library's internal schema and tables in the source database.</summary>
+/// <summary>Names of the library's internal schema and the watermark message prefixes.</summary>
 internal static class CdcSchema
 {
     public const string Schema = "cdc";
-    public const string WatermarkTable = "watermark";
 
-    /// <summary>Schema-qualified watermark table, e.g. for matching decoded changes.</summary>
-    public const string WatermarkSchema = Schema;
+    /// <summary>Root prefix for generic WAL messages used as backfill watermarks.</summary>
+    public const string WatermarkPrefix = "cdc.watermark";
+    public const string WatermarkLowPrefix = WatermarkPrefix + ".low";
+    public const string WatermarkHighPrefix = WatermarkPrefix + ".high";
 }

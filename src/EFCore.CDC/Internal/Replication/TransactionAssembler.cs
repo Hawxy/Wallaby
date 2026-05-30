@@ -1,4 +1,6 @@
+using System.Text;
 using EFCore.CDC.Abstractions;
+using EFCore.CDC.Internal;
 using EFCore.CDC.Model;
 using Npgsql.Replication.PgOutput.Messages;
 
@@ -8,11 +10,13 @@ namespace EFCore.CDC.Internal.Replication;
 /// Groups a stream of pgoutput messages into committed transactions. DML messages between
 /// <see cref="BeginMessage"/> and <see cref="CommitMessage"/> are decoded and buffered; on commit the
 /// buffer is stamped with the commit LSN/timestamp and returned. Relation and truncate messages are
-/// not (yet) surfaced as changes.
+/// not (yet) surfaced as changes. Generic WAL messages with the <c>cdc.watermark.*</c> prefix are
+/// buffered as <see cref="Watermark"/>s for the backfill coordinator.
 /// </summary>
 internal sealed class TransactionAssembler
 {
     private readonly List<RawChange> _buffer = [];
+    private readonly List<Watermark> _watermarks = [];
 
     /// <summary>
     /// Process one message. Returns a committed transaction when a <see cref="CommitMessage"/> is seen,
@@ -24,6 +28,11 @@ internal sealed class TransactionAssembler
         {
             case BeginMessage:
                 _buffer.Clear();
+                _watermarks.Clear();
+                return null;
+
+            case LogicalDecodingMessage msg when msg.Prefix.StartsWith(CdcSchema.WatermarkPrefix, StringComparison.Ordinal):
+                _watermarks.Add(new Watermark(msg.Prefix, await ReadAsStringAsync(msg.Data, ct)));
                 return null;
 
             case InsertMessage insert:
@@ -53,6 +62,7 @@ internal sealed class TransactionAssembler
                 var transaction = Finalize(
                     (ulong)commit.CommitLsn, (ulong)commit.TransactionEndLsn, commit.TransactionCommitTimestamp);
                 _buffer.Clear();
+                _watermarks.Clear();
                 return transaction;
 
             default:
@@ -127,7 +137,17 @@ internal sealed class TransactionAssembler
             EndLsn = endLsn,
             CommitTimestamp = timestamp,
             Changes = changes,
+            Watermarks = _watermarks.Count == 0 ? Array.Empty<Watermark>() : _watermarks.ToArray(),
         };
+    }
+
+    // pgoutput recycles the LogicalDecodingMessage (its Data stream is backed by the connection buffer),
+    // so we MUST fully consume the stream in the same loop iteration before reading the next message.
+    private static async Task<string> ReadAsStringAsync(Stream data, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        await data.CopyToAsync(buffer, ct);
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
     private static DateTimeOffset? NormalizeTimestamp(DateTime value)

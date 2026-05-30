@@ -72,8 +72,9 @@ by the engine — a transform never sees them.
 - Trigger a manual backfill at runtime: resolve `ICdcBackfillManager` and call
   `RequestBackfillAsync<Product>()`. Requests are persisted and executed by the current leader.
 
-Backfill uses the DBLog/Sequin watermark pattern (keyset pagination + low/high watermarks via an internal
-`cdc.watermark` sentinel) so the snapshot merges with the live stream with no gaps and live always wins.
+Backfill uses the DBLog/Sequin watermark pattern (keyset pagination + low/high watermarks emitted via
+`pg_logical_emit_message` and decoded from pgoutput as generic WAL messages) so the snapshot merges
+with the live stream with no gaps and live always wins.
 
 ### Per-row scoping (multi-tenancy)
 

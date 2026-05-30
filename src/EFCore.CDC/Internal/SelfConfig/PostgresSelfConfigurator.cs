@@ -96,15 +96,12 @@ internal sealed class PostgresSelfConfigurator(
         }
     }
 
-    // The captured tables plus the internal watermark sentinel table (needed so backfill watermarks
-    // flow through the same replication stream).
     private static IEnumerable<(string Schema, string Table)> DesiredTables(CdcModel model)
     {
         foreach (var table in model.Tables)
         {
             yield return (table.Schema, table.TableName);
         }
-        yield return (CdcSchema.Schema, CdcSchema.WatermarkTable);
     }
 
     private async Task<(bool Created, string? ConsistentPoint)> EnsureSlotAsync(NpgsqlConnection connection, CancellationToken ct)

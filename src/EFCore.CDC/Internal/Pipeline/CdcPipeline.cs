@@ -12,9 +12,10 @@ namespace EFCore.CDC.Internal.Pipeline;
 /// records the checkpoint. This ordering preserves at-least-once delivery.
 /// <para>
 /// When a <see cref="WatermarkBackfillCoordinator"/> is supplied, the pipeline also recognizes the
-/// <c>cdc.watermark</c> sentinel changes that bracket backfill chunks: it records concurrent live-change
-/// keys between the watermarks and, at the high watermark, emits the chunk's surviving snapshot rows
-/// through the same routing/sink path (guaranteeing correct ordering relative to live changes).
+/// <c>cdc.watermark.*</c> generic WAL messages that bracket backfill chunks: it records concurrent
+/// live-change keys between the watermarks and, at the high watermark, emits the chunk's surviving
+/// snapshot rows through the same routing/sink path (guaranteeing correct ordering relative to live
+/// changes).
 /// </para>
 /// </summary>
 internal sealed class CdcPipeline(
@@ -37,19 +38,8 @@ internal sealed class CdcPipeline(
         await foreach (var transaction in stream.ReadAsync(ct))
         {
             var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
-            var watermarkTokens = new List<string>();
-
             foreach (var raw in transaction.Changes)
             {
-                if (raw.Schema == CdcSchema.Schema && raw.TableName == CdcSchema.WatermarkTable)
-                {
-                    if (raw.NewValues.FirstOrDefault(v => v.ColumnName == "token")?.Value is string { Length: > 0 } token)
-                    {
-                        watermarkTokens.Add(token);
-                    }
-                    continue;
-                }
-
                 var changeEvent = changeEventFactory.Create(raw);
                 if (changeEvent is not null)
                 {
@@ -60,9 +50,12 @@ internal sealed class CdcPipeline(
             // A low watermark opens recording for its table before subsequent live changes are seen.
             if (backfill is not null)
             {
-                foreach (var token in watermarkTokens)
+                foreach (var wm in transaction.Watermarks)
                 {
-                    backfill.OnLowWatermark(token);
+                    if (wm.Prefix == CdcSchema.WatermarkLowPrefix)
+                    {
+                        backfill.OnLowWatermark(wm.Token);
+                    }
                 }
 
                 foreach (var ev in appEvents)
@@ -79,9 +72,9 @@ internal sealed class CdcPipeline(
             // A high watermark closes the chunk: emit its surviving snapshot rows in stream order.
             if (backfill is not null)
             {
-                foreach (var token in watermarkTokens)
+                foreach (var wm in transaction.Watermarks)
                 {
-                    if (backfill.TryTakeHighWindow(token, out var window))
+                    if (wm.Prefix == CdcSchema.WatermarkHighPrefix && backfill.TryTakeHighWindow(wm.Token, out var window))
                     {
                         await EmitBackfillChunkAsync(window, ct);
                     }

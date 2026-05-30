@@ -50,16 +50,10 @@ public class SelfConfigTests(PostgresFixture pg)
         var plugin = await PgExec.ScalarStringAsync(conn,
             "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", slot));
         await Assert.That(plugin).IsEqualTo("pgoutput");
-
-        // All five mapped tables are in the publication...
+        
         await Assert.That(await PgExec.ScalarLongAsync(conn,
             "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p AND schemaname IN ('public', 'sales')",
             default, ("p", pub))).IsEqualTo(5L);
-
-        // ...plus the internal watermark sentinel table used for backfill coordination.
-        await Assert.That(await PgExec.ScalarLongAsync(conn,
-            "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p AND schemaname = 'cdc' AND tablename = 'watermark'",
-            default, ("p", pub))).IsEqualTo(1L);
 
         // State tables exist.
         foreach (var table in new[] { "cdc.checkpoint", "cdc.backfill_state", "cdc.slot_registry" })

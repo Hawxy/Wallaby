@@ -1,7 +1,7 @@
 namespace EFCore.CDC.Abstractions;
 
 /// <summary>
-/// A materialized change, in a Sequin-style envelope. The current row state is exposed
+/// A materialized change. The current row state is exposed
 /// both as a typed entity (<see cref="Entity"/>) and as a property-name keyed bag
 /// (<see cref="Record"/>); modified columns' previous values are in <see cref="Changes"/>.
 /// </summary>

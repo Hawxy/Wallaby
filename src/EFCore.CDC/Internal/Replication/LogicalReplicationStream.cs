@@ -17,7 +17,10 @@ internal sealed class LogicalReplicationStream(
     private readonly LogicalReplicationConnection _connection = new(connectionString);
     private readonly PgOutputReplicationSlot _slot = new(slotName);
     // Binary mode so Npgsql decodes values to proper CLR types (e.g. DateTime, decimal) rather than text.
-    private readonly PgOutputReplicationOptions _options = new(publicationName, PgOutputProtocolVersion.V1, binary: true);
+    // messages: true asks pgoutput to forward generic WAL messages from pg_logical_emit_message — the
+    // transport for backfill low/high watermarks.
+    private readonly PgOutputReplicationOptions _options =
+        new(publicationName, PgOutputProtocolVersion.V1, binary: true, streamingMode: null, messages: true);
 
     /// <summary>Stream committed transactions until cancelled.</summary>
     public async IAsyncEnumerable<CommittedTransaction> ReadAsync([EnumeratorCancellation] CancellationToken ct)

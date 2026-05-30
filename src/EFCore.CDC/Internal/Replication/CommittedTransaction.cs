@@ -16,4 +16,14 @@ internal sealed class CommittedTransaction
 
     public DateTimeOffset? CommitTimestamp { get; init; }
     public required IReadOnlyList<RawChange> Changes { get; init; }
+
+    /// <summary>
+    /// Generic WAL messages (from <c>pg_logical_emit_message</c>) seen inside this transaction, in
+    /// arrival order. Used by the backfill coordinator to bracket snapshot chunks with low/high
+    /// watermarks; empty for ordinary data transactions.
+    /// </summary>
+    public IReadOnlyList<Watermark> Watermarks { get; init; } = Array.Empty<Watermark>();
 }
+
+/// <summary>A decoded generic WAL message: prefix routes the consumer, token identifies the chunk.</summary>
+internal readonly record struct Watermark(string Prefix, string Token);

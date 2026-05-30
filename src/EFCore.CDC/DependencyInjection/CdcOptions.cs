@@ -38,7 +38,7 @@ public sealed class CdcOptions
     public bool AutoBackfillOnVersionChange { get; set; } = true;
 
     /// <summary>How long a standby node waits before retrying to acquire leadership.</summary>
-    public TimeSpan StandbyRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan StandbyRetryInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>How long to wait before retrying after a failed leader session.</summary>
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);

@@ -14,8 +14,9 @@ internal sealed class PendingWindow
     private IReadOnlyList<RawChange> _buffer = [];
 
     public required string QualifiedTable { get; init; }
-    public required string LowToken { get; init; }
-    public required string HighToken { get; init; }
+
+    /// <summary>Single per-window token; the low/high distinction comes from the message prefix.</summary>
+    public required string Token { get; init; }
 
     /// <summary>Primary keys of live changes observed for this table within the window.</summary>
     public HashSet<DocumentKey> SeenKeys { get; } = [];

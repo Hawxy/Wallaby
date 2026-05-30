@@ -11,16 +11,15 @@ namespace EFCore.CDC.Internal.Backfill;
 
 /// <summary>
 /// Coordinates DBLog-style watermark backfill. The backfill task snapshots a table in keyset chunks,
-/// bracketing each chunk with low/high watermark writes to <c>cdc.watermark</c>. The live pipeline (which
-/// receives those watermarks through the same replication stream) records concurrent change keys between
-/// the watermarks and emits the deduplicated snapshot rows at the high watermark — guaranteeing no gaps
-/// and that live changes always win for overlapping keys.
+/// bracketing each chunk with low/high watermark emissions via <c>pg_logical_emit_message</c>. The live
+/// pipeline (which receives those messages through pgoutput as <c>LogicalDecodingMessage</c>) records
+/// concurrent change keys between the watermarks and emits the deduplicated snapshot rows at the high
+/// watermark — guaranteeing no gaps and that live changes always win for overlapping keys.
 /// </summary>
 internal sealed class WatermarkBackfillCoordinator(
     string connectionString, IBackfillStateStore store, ILogger logger)
 {
-    private readonly ConcurrentDictionary<string, PendingWindow> _byLowToken = new();
-    private readonly ConcurrentDictionary<string, PendingWindow> _byHighToken = new();
+    private readonly ConcurrentDictionary<string, PendingWindow> _byToken = new();
     private readonly ConcurrentDictionary<string, PendingWindow> _recordingByTable = new();
 
     public int ChunkSize { get; init; } = 500;
@@ -42,16 +41,14 @@ internal sealed class WatermarkBackfillCoordinator(
             var window = new PendingWindow
             {
                 QualifiedTable = table.QualifiedName,
-                LowToken = Guid.NewGuid().ToString("N"),
-                HighToken = Guid.NewGuid().ToString("N"),
+                Token = Guid.NewGuid().ToString("N"),
             };
-            _byLowToken[window.LowToken] = window;
-            _byHighToken[window.HighToken] = window;
+            _byToken[window.Token] = window;
 
-            await WriteWatermarkAsync(window.LowToken, ct);
+            await EmitWatermarkAsync(CdcSchema.WatermarkLowPrefix, window.Token, ct);
             var chunk = await pager.ReadChunkAsync(cursor, ChunkSize, ct);
             window.Buffer = chunk.Rows;
-            await WriteWatermarkAsync(window.HighToken, ct);
+            await EmitWatermarkAsync(CdcSchema.WatermarkHighPrefix, window.Token, ct);
 
             await window.Completed.Task.WaitAsync(ct);
 
@@ -71,18 +68,23 @@ internal sealed class WatermarkBackfillCoordinator(
         logger.LogInformation("Backfill of {Table} complete ({Rows} rows).", table.QualifiedName, rowsCopied);
     }
 
-    private async Task WriteWatermarkAsync(string token, CancellationToken ct)
+    // Transactional=true so the message commits with its own auto-commit transaction, preserving
+    // commit-order interleaving with data-change transactions in pgoutput.
+    private async Task EmitWatermarkAsync(string prefix, string token, CancellationToken ct)
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(ct);
-        await PgExec.ExecuteAsync(connection, "UPDATE cdc.watermark SET token = @token WHERE id = 1", ct, ("token", token));
+        await PgExec.ExecuteAsync(
+            connection,
+            "SELECT pg_logical_emit_message(true, @prefix, @token)", ct,
+            ("prefix", prefix), ("token", token));
     }
 
     // ---- pipeline side ----
 
     public void OnLowWatermark(string token)
     {
-        if (_byLowToken.TryGetValue(token, out var window))
+        if (_byToken.TryGetValue(token, out var window))
         {
             _recordingByTable[window.QualifiedTable] = window;
         }
@@ -98,9 +100,8 @@ internal sealed class WatermarkBackfillCoordinator(
 
     public bool TryTakeHighWindow(string token, out PendingWindow window)
     {
-        if (_byHighToken.TryRemove(token, out var found))
+        if (_byToken.TryRemove(token, out var found))
         {
-            _byLowToken.TryRemove(found.LowToken, out _);
             _recordingByTable.TryRemove(new KeyValuePair<string, PendingWindow>(found.QualifiedTable, found));
             window = found;
             return true;
