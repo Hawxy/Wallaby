@@ -13,12 +13,13 @@ internal static class PgOutputDecoder
     /// <summary>Read all columns of a replication tuple, copying values out.</summary>
     public static async Task<RawColumn[]> ReadTupleAsync(ReplicationTuple tuple, CancellationToken ct)
     {
-        var columns = new List<RawColumn>(tuple.NumColumns);
+        var columns = new RawColumn[tuple.NumColumns];
+        var i = 0;
         await foreach (var value in tuple.WithCancellation(ct))
         {
-            columns.Add(await ReadValueAsync(value, ct));
+            columns[i++] = await ReadValueAsync(value, ct);
         }
-        return columns.ToArray();
+        return columns;
     }
 
     private static async ValueTask<RawColumn> ReadValueAsync(ReplicationValue value, CancellationToken ct)

@@ -36,6 +36,10 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.LogInformation("Starting backfill of {Table}.", table.QualifiedName);
 
+        // Hold a single connection across all watermark emissions for this backfill — keeps the
+        // session alive and avoids the per-watermark open/auth overhead (two emissions per chunk).
+        await using var emitter = await dataSource.OpenConnectionAsync(ct);
+
         while (!ct.IsCancellationRequested)
         {
             var window = new PendingWindow
@@ -45,10 +49,10 @@ internal sealed class WatermarkBackfillCoordinator(
             };
             _byToken[window.Token] = window;
 
-            await EmitWatermarkAsync(CdcSchema.WatermarkLowPrefix, window.Token, ct);
+            await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
             var chunk = await pager.ReadChunkAsync(cursor, ChunkSize, ct);
             window.Buffer = chunk.Rows;
-            await EmitWatermarkAsync(CdcSchema.WatermarkHighPrefix, window.Token, ct);
+            await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
 
             await window.Completed.Task.WaitAsync(ct);
 
@@ -70,14 +74,11 @@ internal sealed class WatermarkBackfillCoordinator(
 
     // Transactional=true so the message commits with its own auto-commit transaction, preserving
     // commit-order interleaving with data-change transactions in pgoutput.
-    private async Task EmitWatermarkAsync(string prefix, string token, CancellationToken ct)
-    {
-        await using var connection = await dataSource.OpenConnectionAsync(ct);
-        await PgExec.ExecuteAsync(
+    private static Task EmitWatermarkAsync(NpgsqlConnection connection, string prefix, string token, CancellationToken ct)
+        => PgExec.ExecuteAsync(
             connection,
             "SELECT pg_logical_emit_message(true, @prefix, @token)", ct,
             ("prefix", prefix), ("token", token));
-    }
 
     // ---- pipeline side ----
 
@@ -88,6 +89,9 @@ internal sealed class WatermarkBackfillCoordinator(
             _recordingByTable[window.QualifiedTable] = window;
         }
     }
+
+    public bool IsRecording(string qualifiedTable)
+        => !_recordingByTable.IsEmpty && _recordingByTable.ContainsKey(qualifiedTable);
 
     public void RecordLiveKey(string qualifiedTable, DocumentKey key)
     {

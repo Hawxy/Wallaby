@@ -29,8 +29,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     public EntityMapBuilder<TEntity> KeyedBy(Func<TEntity, object> keySelector)
     {
         _registration.DocumentIdSelector = change => change.Entity is TEntity entity
-            ? keySelector(entity)?.ToString() ?? new DocumentKey(change.PrimaryKey).ToString()
-            : new DocumentKey(change.PrimaryKey).ToString();
+            ? keySelector(entity)?.ToString() ?? change.Key.ToString()
+            : change.Key.ToString();
         return this;
     }
 

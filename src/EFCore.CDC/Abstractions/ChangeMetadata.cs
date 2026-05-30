@@ -22,6 +22,8 @@ public sealed record ChangeMetadata(
     int CommitIdx,
     bool IsBackfill)
 {
+    private string? _qualifiedTableName;
+
     /// <summary>The schema-qualified table name, e.g. <c>public.orders</c>.</summary>
-    public string QualifiedTableName => $"{TableSchema}.{TableName}";
+    public string QualifiedTableName => _qualifiedTableName ??= $"{TableSchema}.{TableName}";
 }

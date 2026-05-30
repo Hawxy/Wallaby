@@ -27,6 +27,11 @@ public record ChangeEvent(
 {
     /// <summary>The CLR type of the mapped entity for the source table.</summary>
     public Type EntityClrType { get; init; } = typeof(object);
+
+    /// <summary>
+    /// The primary key of this change as a <see cref="DocumentKey"/>.
+    /// </summary>
+    public DocumentKey Key => field ??= new DocumentKey(PrimaryKey);
 }
 
 /// <summary>
@@ -46,7 +51,11 @@ public sealed record ChangeEvent<TEntity>(
     public Type EntityClrType => typeof(TEntity);
 
     /// <summary>The primary key of this change as a <see cref="DocumentKey"/>.</summary>
-    public DocumentKey Key => new(PrimaryKey);
+    public DocumentKey Key
+    {
+        get => field ??= new DocumentKey(PrimaryKey);
+        internal init;
+    }
 
     public TKey GetPrimaryKey<TKey>()
     {

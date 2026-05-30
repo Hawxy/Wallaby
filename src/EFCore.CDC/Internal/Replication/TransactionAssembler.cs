@@ -123,12 +123,11 @@ internal sealed class TransactionAssembler
         var changes = new RawChange[_buffer.Count];
         for (var i = 0; i < _buffer.Count; i++)
         {
-            changes[i] = _buffer[i] with
-            {
-                CommitLsn = commitLsn,
-                CommitTimestamp = timestamp,
-                CommitIdx = i,
-            };
+            var change = _buffer[i];
+            change.CommitLsn = commitLsn;
+            change.CommitTimestamp = timestamp;
+            change.CommitIdx = i;
+            changes[i] = change;
         }
 
         return new CommittedTransaction

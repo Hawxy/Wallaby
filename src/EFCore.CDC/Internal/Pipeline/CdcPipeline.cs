@@ -73,7 +73,12 @@ internal sealed class CdcPipeline(
 
                 foreach (var ev in appEvents)
                 {
-                    backfill.RecordLiveKey(ev.Metadata.QualifiedTableName, new DocumentKey(ev.PrimaryKey));
+                    // Avoid forcing DocumentKey materialization unless a backfill window is recording
+                    // for the same table — the common steady-state hot path.
+                    if (backfill.IsRecording(ev.Metadata.QualifiedTableName))
+                    {
+                        backfill.RecordLiveKey(ev.Metadata.QualifiedTableName, ev.Key);
+                    }
                 }
             }
 
@@ -108,7 +113,7 @@ internal sealed class CdcPipeline(
             foreach (var raw in window.Buffer)
             {
                 var changeEvent = changeEventFactory.Create(raw);
-                if (changeEvent is not null && !window.SeenKeys.Contains(new DocumentKey(changeEvent.PrimaryKey)))
+                if (changeEvent is not null && !window.SeenKeys.Contains(changeEvent.Key))
                 {
                     events.Add(changeEvent);
                 }

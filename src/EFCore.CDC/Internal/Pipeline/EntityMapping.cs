@@ -27,7 +27,7 @@ internal sealed class EntityMapping
     public Func<object?, string?>? DestinationSelector { get; init; }
 
     public string GetDocumentId(ChangeEvent change)
-        => DocumentIdSelector?.Invoke(change) ?? new DocumentKey(change.PrimaryKey).ToString();
+        => DocumentIdSelector?.Invoke(change) ?? change.Key.ToString();
 
     /// <summary>The scope key for a change (null when the mapping is not scoped, or the entity is unavailable).</summary>
     public object? GetScopeKey(ChangeEvent change)

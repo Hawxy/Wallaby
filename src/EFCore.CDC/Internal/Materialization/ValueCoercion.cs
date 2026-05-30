@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -10,6 +11,10 @@ namespace EFCore.CDC.Internal.Materialization;
 /// </summary>
 internal static class ValueCoercion
 {
+    // Cache the case-insensitive enum-name → underlying-value map per enum type. Enum.Parse goes
+    // through reflection + IL emit on first call; afterwards it's still a few dictionary probes,
+    // but caching collapses it to a single lookup per row.
+    private static readonly ConcurrentDictionary<Type, Dictionary<string, object>> EnumByName = new();
     public static object? ToModelValue(object? rawValue, Type modelClrType, ValueConverter? converter)
     {
         if (converter is null)
@@ -43,9 +48,16 @@ internal static class ValueCoercion
 
         if (target.IsEnum)
         {
-            return rawValue is string enumText
-                ? Enum.Parse(target, enumText, ignoreCase: true)
-                : Enum.ToObject(target, rawValue);
+            if (rawValue is string enumText)
+            {
+                var map = EnumByName.GetOrAdd(target, BuildEnumMap);
+                if (map.TryGetValue(enumText, out var cached))
+                {
+                    return cached;
+                }
+                return Enum.Parse(target, enumText, ignoreCase: true);
+            }
+            return Enum.ToObject(target, rawValue);
         }
 
         if (target == typeof(Guid))
@@ -86,5 +98,16 @@ internal static class ValueCoercion
         }
 
         return rawValue;
+    }
+
+    private static Dictionary<string, object> BuildEnumMap(Type enumType)
+    {
+        // Case-insensitive lookup so we match Enum.Parse(ignoreCase: true) semantics.
+        var map = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in Enum.GetNames(enumType))
+        {
+            map[name] = Enum.Parse(enumType, name);
+        }
+        return map;
     }
 }

@@ -1,7 +1,10 @@
+using System.Linq.Expressions;
+using System.Reflection;
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace EFCore.CDC.Internal.Materialization;
@@ -42,30 +45,42 @@ internal sealed class EntityMaterializer
         }
 
         var source = (change.Action == ChangeAction.Delete ? change.OldValues : change.NewValues) ?? [];
-        var sourceByColumn = ToColumnMap(source);
 
         var entity = plan.Factory();
         var record = new Dictionary<string, object?>(plan.Columns.Count);
-        foreach (var column in plan.Columns)
-        {
-            if (!sourceByColumn.TryGetValue(column.ColumnName, out var raw) || raw.IsUnchangedToast)
-            {
-                continue; // value not present (or unchanged-TOAST): leave default, omit from record
-            }
 
-            var modelValue = ValueCoercion.ToModelValue(raw.Value, column.ClrType, column.Converter);
-            column.Setter?.Invoke(entity, modelValue);
-            record[column.PropertyName] = modelValue;
+        // Iterate the source columns once and look up the per-table plan, avoiding a per-call
+        // Dictionary<string, RawColumn> allocation.
+        for (var i = 0; i < source.Count; i++)
+        {
+            var column = source[i];
+            if (column.IsUnchangedToast) continue;
+            if (!plan.ColumnsByName.TryGetValue(column.ColumnName, out var columnPlan)) continue;
+
+            var modelValue = ValueCoercion.ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
+            if (modelValue is null && !columnPlan.AcceptsNull)
+            {
+                // pgoutput emits non-identity columns as nulls on DELETE/REPLICA IDENTITY DEFAULT.
+                // The freshly-constructed entity already has default(T) for the property; skip the set.
+                record[columnPlan.PropertyName] = null;
+                continue;
+            }
+            columnPlan.Setter?.SetClrValue(entity, modelValue);
+            record[columnPlan.PropertyName] = modelValue;
         }
 
-        var primaryKey = plan.PrimaryKey
-            .Select(pk => record[pk.PropertyName] ?? throw new InvalidOperationException("Missing primary key value"))
-            .ToList();
+        var pkPlans = plan.PrimaryKey;
+        var primaryKey = new object[pkPlans.Count];
+        for (var i = 0; i < pkPlans.Count; i++)
+        {
+            primaryKey[i] = record[pkPlans[i].PropertyName]
+                ?? throw new InvalidOperationException("Missing primary key value");
+        }
 
         IReadOnlyDictionary<string, object?>? changes = null;
-        if (change.Action == ChangeAction.Update && change.OldValues is { Count: > 0 })
+        if (change.Action == ChangeAction.Update && change.OldValues is { Count: > 0 } oldValues)
         {
-            changes = BuildChanges(plan, change.OldValues, record);
+            changes = BuildChanges(plan, oldValues, record);
         }
 
         row = new MaterializedRow(entity, record, changes, primaryKey, plan.ClrType);
@@ -75,35 +90,23 @@ internal sealed class EntityMaterializer
     private static Dictionary<string, object?> BuildChanges(
         EntityPlan plan, IReadOnlyList<RawColumn> oldValues, IReadOnlyDictionary<string, object?> newRecord)
     {
-        var oldByColumn = ToColumnMap(oldValues);
         var changes = new Dictionary<string, object?>();
 
-        foreach (var column in plan.Columns)
+        for (var i = 0; i < oldValues.Count; i++)
         {
-            if (!oldByColumn.TryGetValue(column.ColumnName, out var raw) || raw.IsUnchangedToast)
-            {
-                continue;
-            }
+            var column = oldValues[i];
+            if (column.IsUnchangedToast) continue;
+            if (!plan.ColumnsByName.TryGetValue(column.ColumnName, out var columnPlan)) continue;
 
-            var oldValue = ValueCoercion.ToModelValue(raw.Value, column.ClrType, column.Converter);
-            var hasNew = newRecord.TryGetValue(column.PropertyName, out var newValue);
+            var oldValue = ValueCoercion.ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
+            var hasNew = newRecord.TryGetValue(columnPlan.PropertyName, out var newValue);
             if (!hasNew || !Equals(oldValue, newValue))
             {
-                changes[column.PropertyName] = oldValue;
+                changes[columnPlan.PropertyName] = oldValue;
             }
         }
 
         return changes;
-    }
-
-    private static Dictionary<string, RawColumn> ToColumnMap(IReadOnlyList<RawColumn> columns)
-    {
-        var map = new Dictionary<string, RawColumn>(columns.Count);
-        foreach (var column in columns)
-        {
-            map[column.ColumnName] = column;
-        }
-        return map;
     }
 
     private static EntityPlan BuildPlan(IEntityType entityType, string table)
@@ -112,21 +115,30 @@ internal sealed class EntityMaterializer
 
         var columns = new List<ColumnPlan>();
         var byProperty = new Dictionary<string, ColumnPlan>();
+        var byColumn = new Dictionary<string, ColumnPlan>();
         foreach (var property in entityType.GetProperties())
         {
             var columnName = property.GetColumnName(storeObject);
             if (columnName is null) continue;
 
+            // GetSetter() returns EF Core's compiled IClrPropertySetter, which already handles
+            // backing fields, shadow properties (no-op), and the PropertyBag indexer used by
+            // shared-type entities (e.g. skip-navigation join tables). It's marked internal but
+            // is the standard escape hatch used by EF providers/extensions.
             var plan = new ColumnPlan
             {
                 ColumnName = columnName,
                 PropertyName = property.Name,
                 ClrType = property.ClrType,
+                AcceptsNull = !property.ClrType.IsValueType || Nullable.GetUnderlyingType(property.ClrType) is not null,
                 Converter = property.GetValueConverter(),
-                Setter = BuildSetter(property),
+#pragma warning disable EF1001
+                Setter = property.IsShadowProperty() ? null : ((IRuntimePropertyBase)property).GetSetter(),
+#pragma warning restore EF1001
             };
             columns.Add(plan);
             byProperty[property.Name] = plan;
+            byColumn[columnName] = plan;
         }
 
         var primaryKey = entityType.FindPrimaryKey()!.Properties
@@ -137,33 +149,24 @@ internal sealed class EntityMaterializer
         return new EntityPlan
         {
             ClrType = clrType,
-            Factory = () => Activator.CreateInstance(clrType)!,
+            Factory = BuildFactory(clrType),
             Columns = columns,
+            ColumnsByName = byColumn,
             PrimaryKey = primaryKey,
         };
     }
 
-    private static Action<object, object?>? BuildSetter(IProperty property)
+    private static Func<object> BuildFactory(Type clrType)
     {
-        if (property.PropertyInfo is { CanWrite: true } propertyInfo)
+        // For types without an accessible parameterless ctor (rare in EF models), fall back to Activator.
+        var ctor = clrType.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+            binder: null, types: Type.EmptyTypes, modifiers: null);
+        if (ctor is null)
         {
-            // Shared-type entities (e.g. skip-navigation join tables) back every property by the
-            // PropertyBag indexer — invoking it needs the property name as the index argument.
-            if (property.IsIndexerProperty())
-            {
-                var key = property.Name;
-                var index = new object?[] { key };
-                return (entity, value) => propertyInfo.SetValue(entity, value, index);
-            }
-            return (entity, value) => propertyInfo.SetValue(entity, value);
+            return () => Activator.CreateInstance(clrType)!;
         }
-
-        if (property.FieldInfo is { } fieldInfo)
-        {
-            return (entity, value) => fieldInfo.SetValue(entity, value);
-        }
-
-        return null; // shadow property: recorded but not settable on the CLR instance
+        var newExpr = Expression.New(ctor);
+        return Expression.Lambda<Func<object>>(Expression.Convert(newExpr, typeof(object))).Compile();
     }
 
     private sealed class EntityPlan
@@ -171,6 +174,7 @@ internal sealed class EntityMaterializer
         public required Type ClrType { get; init; }
         public required Func<object> Factory { get; init; }
         public required IReadOnlyList<ColumnPlan> Columns { get; init; }
+        public required IReadOnlyDictionary<string, ColumnPlan> ColumnsByName { get; init; }
         public required IReadOnlyList<ColumnPlan> PrimaryKey { get; init; }
     }
 
@@ -179,7 +183,8 @@ internal sealed class EntityMaterializer
         public required string ColumnName { get; init; }
         public required string PropertyName { get; init; }
         public required Type ClrType { get; init; }
+        public required bool AcceptsNull { get; init; }
         public ValueConverter? Converter { get; init; }
-        public Action<object, object?>? Setter { get; init; }
+        public IClrPropertySetter? Setter { get; init; }
     }
 }

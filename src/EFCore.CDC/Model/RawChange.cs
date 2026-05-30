@@ -8,6 +8,8 @@ namespace EFCore.CDC.Model;
 /// </summary>
 public sealed record RawChange
 {
+    private string? _qualifiedName;
+
     /// <summary>The pgoutput relation id (table OID) this change belongs to.</summary>
     public required uint RelationId { get; init; }
 
@@ -30,14 +32,14 @@ public sealed record RawChange
     public IReadOnlyList<RawColumn>? OldValues { get; init; }
 
     /// <summary>Commit LSN of the originating transaction; zero for backfill reads.</summary>
-    public ulong CommitLsn { get; init; }
+    public ulong CommitLsn { get; internal set; }
 
     /// <summary>Commit timestamp of the originating transaction; null for backfill reads.</summary>
-    public DateTimeOffset? CommitTimestamp { get; init; }
+    public DateTimeOffset? CommitTimestamp { get; internal set; }
 
     /// <summary>Zero-based index of this change within its transaction.</summary>
-    public int CommitIdx { get; init; }
+    public int CommitIdx { get; internal set; }
 
     /// <summary>The schema-qualified table name, e.g. <c>public.orders</c>.</summary>
-    public string QualifiedName => $"{Schema}.{TableName}";
+    public string QualifiedName => _qualifiedName ??= $"{Schema}.{TableName}";
 }

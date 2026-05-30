@@ -16,7 +16,7 @@ internal sealed class BroadcastChangeRouter(IReadOnlyList<string> sinkNames) : I
 
         foreach (var change in changes)
         {
-            var documentId = new DocumentKey(change.PrimaryKey).ToString();
+            var documentId = change.Key.ToString();
             var isDeletion = change.Action == ChangeAction.Delete;
 
             foreach (var sinkName in sinkNames)

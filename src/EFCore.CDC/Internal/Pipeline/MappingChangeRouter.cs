@@ -45,7 +45,7 @@ internal sealed class MappingChangeRouter(
                 var byKey = new Dictionary<DocumentKey, ChangeEvent>();
                 foreach (var change in groupChanges.Where(c => c.Action != ChangeAction.Delete))
                 {
-                    byKey[new DocumentKey(change.PrimaryKey)] = change;
+                    byKey[change.Key] = change;
                 }
 
                 if (byKey.Count == 0)
@@ -64,8 +64,7 @@ internal sealed class MappingChangeRouter(
 
                     foreach (var change in subset)
                     {
-                        var key = new DocumentKey(change.PrimaryKey);
-                        if (documents.TryGetValue(key, out var document) && document is not null)
+                        if (documents.TryGetValue(change.Key, out var document) && document is not null)
                         {
                             routed.Add(Upsert(mapping, change, document, destination));
                         }

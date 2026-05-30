@@ -31,21 +31,24 @@ public sealed class MeilisearchSink : ISink
     {
         try
         {
-            foreach (var group in GroupByIndex(batch.Records))
+            var groups = GroupByIndex(batch.Records);
+            if (groups.Count <= 1)
             {
-                var index = _client.Index(group.Index);
-                
-                if (group.Upserts.Count > 0)
+                foreach (var group in groups)
                 {
-                    var info = await index.AddDocumentsAsync(group.Upserts, _options.PrimaryKey, ct);
-                    await WaitAsync(index, info, ct);
+                    await DispatchGroupAsync(group, ct);
                 }
-
-                if (group.Deletions.Count > 0)
+            }
+            else
+            {
+                // Index-level operations are independent; fan out across indexes in parallel.
+                // Within each index we still preserve the upsert-before-delete order.
+                var tasks = new Task[groups.Count];
+                for (var i = 0; i < groups.Count; i++)
                 {
-                    var info = await index.DeleteDocumentsAsync(group.Deletions, ct);
-                    await WaitAsync(index, info, ct);
+                    tasks[i] = DispatchGroupAsync(groups[i], ct);
                 }
+                await Task.WhenAll(tasks);
             }
 
             return DeliveryResult.Success;
@@ -58,6 +61,23 @@ public sealed class MeilisearchSink : ISink
         {
             // Network/HTTP/Meili task failures are treated as retryable; the dispatcher backs off.
             return DeliveryResult.Retry($"Meilisearch delivery failed: {ex.Message}", ex);
+        }
+    }
+
+    private async Task DispatchGroupAsync(IndexGroup group, CancellationToken ct)
+    {
+        var index = _client.Index(group.Index);
+
+        if (group.Upserts.Count > 0)
+        {
+            var info = await index.AddDocumentsAsync(group.Upserts, _options.PrimaryKey, ct);
+            await WaitAsync(index, info, ct);
+        }
+
+        if (group.Deletions.Count > 0)
+        {
+            var info = await index.DeleteDocumentsAsync(group.Deletions, ct);
+            await WaitAsync(index, info, ct);
         }
     }
 
@@ -76,10 +96,10 @@ public sealed class MeilisearchSink : ISink
         }
     }
 
-    private IEnumerable<IndexGroup> GroupByIndex(IReadOnlyList<SinkRecord> records)
+    private List<IndexGroup> GroupByIndex(IReadOnlyList<SinkRecord> records)
     {
         var groups = new Dictionary<string, IndexGroup>();
-        var order = new List<string>();
+        var ordered = new List<IndexGroup>();
 
         foreach (var record in records)
         {
@@ -91,7 +111,7 @@ public sealed class MeilisearchSink : ISink
             {
                 group = new IndexGroup(indexName);
                 groups[indexName] = group;
-                order.Add(indexName);
+                ordered.Add(group);
             }
 
             var id = SanitizeId(record.DocumentId);
@@ -101,14 +121,33 @@ public sealed class MeilisearchSink : ISink
             }
             else
             {
-                var node = JsonSerializer.SerializeToNode(record.Document, record.Document!.GetType()) as JsonObject
-                           ?? new JsonObject();
-                node[_options.PrimaryKey] = JsonValue.Create(id);
-                group.Upserts.Add(node);
+                group.Upserts.Add(BuildUpsertDocument(record.Document!, id));
             }
         }
 
-        return order.Select(name => groups[name]);
+        return ordered;
+    }
+
+    private object BuildUpsertDocument(object document, string id)
+    {
+        // Fast path: transforms in this codebase typically return Dictionary<string, object?>.
+        // Stamp the primary key in place of a SerializeToNode round-trip.
+        if (document is IDictionary<string, object?> dict)
+        {
+            // Defensive copy so transform-returned dictionaries aren't mutated by us.
+            var copy = new Dictionary<string, object?>(dict.Count + 1, StringComparer.Ordinal);
+            foreach (var kvp in dict)
+            {
+                copy[kvp.Key] = kvp.Value;
+            }
+            copy[_options.PrimaryKey] = id;
+            return copy;
+        }
+
+        var node = JsonSerializer.SerializeToNode(document, document.GetType()) as JsonObject
+                   ?? new JsonObject();
+        node[_options.PrimaryKey] = JsonValue.Create(id);
+        return node;
     }
 
     /// <summary>Meilisearch document ids allow only [a-zA-Z0-9-_]; replace anything else (e.g. composite-key separators).</summary>
@@ -127,7 +166,7 @@ public sealed class MeilisearchSink : ISink
     private sealed class IndexGroup(string index)
     {
         public string Index { get; } = index;
-        public List<JsonObject> Upserts { get; } = [];
+        public List<object> Upserts { get; } = [];
         public List<string> Deletions { get; } = [];
     }
 }

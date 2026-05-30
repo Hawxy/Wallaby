@@ -26,7 +26,10 @@ internal sealed class TransformInvoker<TEntity, TDocument>(ICdcTransform<TEntity
         {
             typed.Add(new ChangeEvent<TEntity>(
                 change.Action, change.Metadata, change.Entity as TEntity,
-                change.Record, change.Changes, change.PrimaryKey));
+                change.Record, change.Changes, change.PrimaryKey)
+            {
+                Key = change.Key,
+            });
         }
 
         var documents = await transform.TransformAsync(db, typed, ct);
