@@ -10,7 +10,7 @@ using Npgsql;
 namespace EFCore.CDC.Internal.Backfill;
 
 /// <summary>
-/// Coordinates DBLog-style watermark backfill. The backfill task snapshots a table in keyset chunks,
+/// Coordinates Sequin-style watermark backfill. The backfill task snapshots a table in keyset chunks,
 /// bracketing each chunk with low/high watermark emissions via <c>pg_logical_emit_message</c>. The live
 /// pipeline (which receives those messages through pgoutput as <c>LogicalDecodingMessage</c>) records
 /// concurrent change keys between the watermarks and emits the deduplicated snapshot rows at the high

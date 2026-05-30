@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Internal.Pipeline;
 using Microsoft.EntityFrameworkCore;
@@ -84,6 +85,20 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     {
         _registration.TransformFactory = _ =>
             new TransformInvoker<TEntity, TDocument>(new DelegateTransform<TEntity, TDocument>(handler));
+        return this;
+    }
+
+    /// <summary>
+    /// Declare that changes to the table behind <paramref name="navigation"/> should fan out and re-emit
+    /// this entity. Use this when the transform reads data from related tables (a referenced principal,
+    /// a many-to-many skip-navigation's join table, or an owned side table) — otherwise those changes
+    /// would not reach the pipeline. The navigation expression is resolved against the EF Core model at
+    /// startup; it must point at a single one-hop navigation (no chains, no method calls).
+    /// </summary>
+    public EntityMapBuilder<TEntity> DependsOn<TNav>(Expression<Func<TEntity, TNav>> navigation)
+    {
+        ArgumentNullException.ThrowIfNull(navigation);
+        _registration.DeclaredDependencies.Add(navigation);
         return this;
     }
 }

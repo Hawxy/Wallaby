@@ -10,8 +10,7 @@ namespace EFCore.CDC.Internal.Backfill;
 /// </summary>
 internal sealed class PendingWindow
 {
-    private readonly object _gate = new();
-    private IReadOnlyList<RawChange> _buffer = [];
+    private readonly Lock _gate = new();
 
     public required string QualifiedTable { get; init; }
 
@@ -27,7 +26,7 @@ internal sealed class PendingWindow
     /// <summary>The snapshot rows for this chunk (set by the backfill task before writing the high watermark).</summary>
     public IReadOnlyList<RawChange> Buffer
     {
-        get { lock (_gate) return _buffer; }
-        set { lock (_gate) _buffer = value; }
-    }
+        get { lock (_gate) return field; }
+        set { lock (_gate) field = value; }
+    } = [];
 }

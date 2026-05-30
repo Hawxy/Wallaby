@@ -10,5 +10,5 @@ internal sealed record MaterializedRow(
     object? Entity,
     IReadOnlyDictionary<string, object?> Record,
     IReadOnlyDictionary<string, object?>? Changes,
-    IReadOnlyList<object?> PrimaryKey,
+    IReadOnlyList<object> PrimaryKey,
     Type EntityClrType);

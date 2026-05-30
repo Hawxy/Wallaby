@@ -26,7 +26,8 @@ internal sealed class CdcPipeline(
     ICheckpointStore checkpoints,
     string slotName,
     ILogger logger,
-    WatermarkBackfillCoordinator? backfill = null)
+    WatermarkBackfillCoordinator? backfill = null,
+    DependentChangeResolver? dependentResolver = null)
 {
     /// <summary>The highest LSN acknowledged to the server. Useful for observing progress.</summary>
     public ulong LastAcknowledgedLsn { get; private set; }
@@ -44,6 +45,18 @@ internal sealed class CdcPipeline(
                 if (changeEvent is not null)
                 {
                     appEvents.Add(changeEvent);
+                }
+
+                if (dependentResolver is not null)
+                {
+                    foreach (var synthetic in await dependentResolver.ResolveAsync(raw, ct))
+                    {
+                        var fannedOut = changeEventFactory.Create(synthetic);
+                        if (fannedOut is not null)
+                        {
+                            appEvents.Add(fannedOut);
+                        }
+                    }
                 }
             }
 

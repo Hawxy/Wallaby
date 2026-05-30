@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<Label> Labels => Set<Label>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
@@ -37,6 +38,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     v => JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>());
             b.Property(p => p.Description).HasColumnType("text");
             b.HasOne(p => p.Category).WithMany(c => c.Products).HasForeignKey(p => p.CategoryId);
+            b.HasMany(p => p.Labels)
+                .WithMany(l => l.Products)
+                .UsingEntity(j => j.ToTable("product_labels"));
+        });
+
+        modelBuilder.Entity<Label>(b =>
+        {
+            b.ToTable("labels");
+            b.HasKey(l => l.Id);
         });
 
         modelBuilder.Entity<Customer>(b =>

@@ -23,7 +23,7 @@ public record ChangeEvent(
     object? Entity,
     IReadOnlyDictionary<string, object?> Record,
     IReadOnlyDictionary<string, object?>? Changes,
-    IReadOnlyList<object?> PrimaryKey)
+    IReadOnlyList<object> PrimaryKey)
 {
     /// <summary>The CLR type of the mapped entity for the source table.</summary>
     public Type EntityClrType { get; init; } = typeof(object);
@@ -39,7 +39,7 @@ public sealed record ChangeEvent<TEntity>(
     TEntity? Entity,
     IReadOnlyDictionary<string, object?> Record,
     IReadOnlyDictionary<string, object?>? Changes,
-    IReadOnlyList<object?> PrimaryKey)
+    IReadOnlyList<object> PrimaryKey)
     where TEntity : class
 {
     /// <summary>The CLR type of the mapped entity (<typeparamref name="TEntity"/>).</summary>
@@ -47,4 +47,9 @@ public sealed record ChangeEvent<TEntity>(
 
     /// <summary>The primary key of this change as a <see cref="DocumentKey"/>.</summary>
     public DocumentKey Key => new(PrimaryKey);
+
+    public TKey GetPrimaryKey<TKey>()
+    {
+        return (TKey)PrimaryKey[0];
+    }
 }

@@ -1,3 +1,4 @@
+using EFCore.CDC.Abstractions;
 using EFCore.CDC.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -7,7 +8,10 @@ namespace EFCore.CDC.Internal.SelfConfig;
 /// <summary>
 /// Resolves a <see cref="CdcModel"/> from an EF Core <see cref="IModel"/> and a <see cref="CaptureSpec"/>.
 /// Declared entities fail fast on problems (no PK, owned, view); the "all mapped" mode silently skips
-/// entities that can't be captured (owned, keyless, or not table-backed).
+/// entities that can't be captured (owned, keyless, or not table-backed). Per-mapping
+/// <c>DependsOn(...)</c> navigation expressions are resolved through <see cref="DependencyAnalyzer"/>
+/// — pulling additional dependent tables into the capture set and emitting the fan-out
+/// <see cref="DependentBinding"/>s the live pipeline uses.
 /// </summary>
 internal static class ModelToCdcModel
 {
@@ -16,12 +20,15 @@ internal static class ModelToCdcModel
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(spec);
 
-        return spec.CaptureAllMapped
-            ? BuildFromAllMapped(model, spec)
-            : BuildFromDeclared(model, spec);
+        var primaries = spec.CaptureAllMapped
+            ? BuildPrimariesFromAllMapped(model, spec)
+            : BuildPrimariesFromDeclared(model, spec);
+
+        var (allTables, bindings) = AttachDependents(model, primaries, spec);
+        return new CdcModel(allTables, bindings);
     }
 
-    private static CdcModel BuildFromDeclared(IModel model, CaptureSpec spec)
+    private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromDeclared(IModel model, CaptureSpec spec)
     {
         if (spec.DeclaredEntities.Count == 0)
         {
@@ -30,7 +37,7 @@ internal static class ModelToCdcModel
                 "or opt into CaptureAllMappedTables().");
         }
 
-        var tables = new List<CapturedTable>(spec.DeclaredEntities.Count);
+        var primaries = new List<(IEntityType, CapturedTable)>(spec.DeclaredEntities.Count);
         foreach (var clrType in spec.DeclaredEntities.Distinct())
         {
             var entityType = model.FindEntityType(clrType)
@@ -55,15 +62,15 @@ internal static class ModelToCdcModel
                     $"Entity '{clrType.FullName}' has no primary key. pgoutput logical replication requires a primary key to capture changes.");
             }
 
-            tables.Add(BuildTable(entityType, spec.RequiresFullReplicaIdentity.Contains(clrType)));
+            primaries.Add((entityType, BuildTable(entityType, spec.RequiresFullReplicaIdentity.Contains(clrType))));
         }
 
-        return new CdcModel(tables);
+        return primaries;
     }
 
-    private static CdcModel BuildFromAllMapped(IModel model, CaptureSpec spec)
+    private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromAllMapped(IModel model, CaptureSpec spec)
     {
-        var tables = new List<CapturedTable>();
+        var primaries = new List<(IEntityType, CapturedTable)>();
         var seen = new HashSet<(string, string)>();
 
         foreach (var entityType in model.GetEntityTypes())
@@ -76,11 +83,62 @@ internal static class ModelToCdcModel
             var tableName = entityType.GetTableName()!;
             if (!seen.Add((schema, tableName))) continue;        // de-dup shared tables (e.g. TPH)
 
-            var requiresFull = entityType.ClrType is { } clr && spec.RequiresFullReplicaIdentity.Contains(clr);
-            tables.Add(BuildTable(entityType, requiresFull));
+            var requiresFull = spec.RequiresFullReplicaIdentity.Contains(entityType.ClrType);
+            primaries.Add((entityType, BuildTable(entityType, requiresFull)));
         }
 
-        return new CdcModel(tables);
+        return primaries;
+    }
+
+    private static (IReadOnlyList<CapturedTable> All, IReadOnlyList<DependentBinding> Bindings) AttachDependents(
+        IModel model, List<(IEntityType EntityType, CapturedTable Table)> primaries, CaptureSpec spec)
+    {
+        // Union of primary + dependent tables, de-duplicated by (schema, table). A table that is both
+        // primary-mapped and the target of a DependsOn appears once — the primary capture is canonical.
+        var byQualifiedName = primaries.ToDictionary(
+            p => (p.Table.Schema, p.Table.TableName),
+            p => p.Table);
+        var bindings = new List<DependentBinding>();
+
+        foreach (var (entityType, primaryTable) in primaries)
+        {
+            if (!spec.DeclaredDependencies.TryGetValue(entityType.ClrType, out var expressions) || expressions.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var expr in expressions)
+            {
+                var resolution = DependencyAnalyzer.Analyze(entityType, expr);
+                var depTable = GetOrAddDependentTable(byQualifiedName, resolution.DependentEntityType);
+                bindings.Add(new DependentBinding
+                {
+                    PrimaryTable = primaryTable,
+                    DependentTable = depTable,
+                    Lookup = resolution.Lookup,
+                });
+            }
+        }
+
+        return (byQualifiedName.Values.ToList(), bindings);
+    }
+
+    private static CapturedTable GetOrAddDependentTable(
+        Dictionary<(string Schema, string Table), CapturedTable> byQualifiedName, IEntityType dependentEntityType)
+    {
+        var schema = dependentEntityType.GetSchema() ?? "public";
+        var tableName = dependentEntityType.GetTableName()
+            ?? throw new CdcConfigurationException(
+                $"Dependency target '{dependentEntityType.ClrType.FullName}' has no table — it must be a table-backed entity.");
+
+        if (byQualifiedName.TryGetValue((schema, tableName), out var existing))
+        {
+            return existing;
+        }
+
+        var built = BuildTable(dependentEntityType, requiresFullReplicaIdentity: false);
+        byQualifiedName[(schema, tableName)] = built;
+        return built;
     }
 
     private static CapturedTable BuildTable(IEntityType entityType, bool requiresFullReplicaIdentity)
@@ -89,7 +147,9 @@ internal static class ModelToCdcModel
         var tableName = entityType.GetTableName()!;
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
-        var primaryKey = entityType.FindPrimaryKey()!;
+        var primaryKey = entityType.FindPrimaryKey()
+            ?? throw new CdcConfigurationException(
+                $"Entity '{entityType.ClrType.FullName}' has no primary key. pgoutput logical replication requires a primary key.");
         var pkPropertyNames = primaryKey.Properties.Select(p => p.Name).ToHashSet();
 
         var columnsByProperty = new Dictionary<string, CapturedColumn>();

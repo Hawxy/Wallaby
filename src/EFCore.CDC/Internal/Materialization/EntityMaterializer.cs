@@ -59,7 +59,7 @@ internal sealed class EntityMaterializer
         }
 
         var primaryKey = plan.PrimaryKey
-            .Select(pk => record.TryGetValue(pk.PropertyName, out var value) ? value : null)
+            .Select(pk => record[pk.PropertyName] ?? throw new InvalidOperationException("Missing primary key value"))
             .ToList();
 
         IReadOnlyDictionary<string, object?>? changes = null;

@@ -17,6 +17,50 @@ public sealed class TestDatabase(string connectionString)
         return category.Id;
     }
 
+    public async Task SetCategoryNameAsync(int id, string name)
+    {
+        await using var ctx = NewContext();
+        var category = await ctx.Categories.FindAsync(id);
+        category!.Name = name;
+        await ctx.SaveChangesAsync();
+    }
+
+    public async Task<int> AddLabelAsync(string name)
+    {
+        await using var ctx = NewContext();
+        var label = new Label { Name = name };
+        ctx.Labels.Add(label);
+        await ctx.SaveChangesAsync();
+        return label.Id;
+    }
+
+    public async Task SetLabelNameAsync(int id, string name)
+    {
+        await using var ctx = NewContext();
+        var label = await ctx.Labels.FindAsync(id);
+        label!.Name = name;
+        await ctx.SaveChangesAsync();
+    }
+
+    /// <summary>Add a label link to a product via the EF Core skip-navigation (writes to <c>product_labels</c>).</summary>
+    public async Task AttachLabelAsync(int productId, int labelId)
+    {
+        await using var ctx = NewContext();
+        var product = await ctx.Products.Include(p => p.Labels).FirstAsync(p => p.Id == productId);
+        var label = await ctx.Labels.FindAsync(labelId);
+        product.Labels.Add(label!);
+        await ctx.SaveChangesAsync();
+    }
+
+    /// <summary>Remove a label link from a product (deletes from <c>product_labels</c>).</summary>
+    public async Task DetachLabelAsync(int productId, int labelId)
+    {
+        await using var ctx = NewContext();
+        var product = await ctx.Products.Include(p => p.Labels).FirstAsync(p => p.Id == productId);
+        product.Labels.RemoveAll(l => l.Id == labelId);
+        await ctx.SaveChangesAsync();
+    }
+
     public async Task<int> AddProductAsync(int categoryId, string name, decimal price = 1m)
         => await AddProductAsync(categoryId, name, tenantId: 0, price);
 

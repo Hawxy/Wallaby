@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Internal.Backfill;
 using EFCore.CDC.Internal.Materialization;
@@ -36,6 +37,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private readonly Dictionary<string, ISink> _sinks = [];
     private readonly Dictionary<Type, EntityMapping> _mappings = [];
     private readonly Dictionary<Type, string?> _backfillTypes = [];
+    private readonly Dictionary<Type, List<LambdaExpression>> _declaredDependencies = [];
     private bool _broadcast;
     private Func<object?, DbContext>? _scopedContextFactory;
 
@@ -47,6 +49,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private LogicalReplicationStream? _stream;
     private CdcPipeline? _pipeline;
     private WatermarkBackfillCoordinator? _coordinator;
+    private DependentChangeResolver? _dependentResolver;
     private Task? _pipelineTask;
 
     public CdcTestHarness(string connectionString, Func<DbContext> contextFactory, CdcNames? names = null)
@@ -149,6 +152,22 @@ public sealed class CdcTestHarness : IAsyncDisposable
         return this;
     }
 
+    /// <summary>
+    /// Declare a dependency: changes to the table behind <paramref name="navigation"/> should fan out
+    /// and re-emit <typeparamref name="TPrimary"/>. Mirrors the production
+    /// <c>EntityMapBuilder.DependsOn(...)</c> API.
+    /// </summary>
+    public CdcTestHarness DependsOn<TPrimary, TNav>(Expression<Func<TPrimary, TNav>> navigation)
+    {
+        if (!_declaredDependencies.TryGetValue(typeof(TPrimary), out var list))
+        {
+            list = [];
+            _declaredDependencies[typeof(TPrimary)] = list;
+        }
+        list.Add(navigation);
+        return this;
+    }
+
     // ---- lifecycle ----
 
     /// <summary>Validate the server and create the publication/slot/state schema for the whole model.</summary>
@@ -183,9 +202,13 @@ public sealed class CdcTestHarness : IAsyncDisposable
             ? new BroadcastChangeRouter(_sinks.Keys.ToList())
             : new MappingChangeRouter(_mappings, contextProvider);
 
+        _dependentResolver = _cdcModel!.DependentBindings.Count > 0
+            ? new DependentChangeResolver(_connectionString, _cdcModel)
+            : null;
+
         _pipeline = new CdcPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks),
-            new PostgresCheckpointStore(_connectionString), Names.Slot, NullLogger.Instance, _coordinator);
+            new PostgresCheckpointStore(_connectionString), Names.Slot, NullLogger.Instance, _coordinator, _dependentResolver);
 
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
         return Task.CompletedTask;
@@ -260,6 +283,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _stream = null;
         _pipeline = null;
         _coordinator = null;
+        _dependentResolver = null;
 
         if (fault is not null)
         {
@@ -292,7 +316,14 @@ public sealed class CdcTestHarness : IAsyncDisposable
 
         using var context = _newContext();
         _model = context.Model;
-        _cdcModel = ModelToCdcModel.Build(_model, new CaptureSpec { CaptureAllMapped = true });
+        var declared = _declaredDependencies.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<LambdaExpression>)kv.Value);
+        _cdcModel = ModelToCdcModel.Build(_model, new CaptureSpec
+        {
+            CaptureAllMapped = true,
+            DeclaredDependencies = declared,
+        });
         _materializer = new EntityMaterializer(_model);
     }
 

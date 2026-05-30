@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+
 namespace EFCore.CDC.Internal.SelfConfig;
 
 /// <summary>
@@ -15,4 +17,13 @@ internal sealed class CaptureSpec
 
     /// <summary>Entity types that need <c>REPLICA IDENTITY FULL</c> (a transform reads old values / full row).</summary>
     public IReadOnlySet<Type> RequiresFullReplicaIdentity { get; init; } = new HashSet<Type>();
+
+    /// <summary>
+    /// Per-primary-entity navigation expressions declared via <c>DependsOn(...)</c>. Each entry's key
+    /// is the primary CLR type; the values are <c>Expression&lt;Func&lt;TEntity, TNav&gt;&gt;</c> lambdas
+    /// resolved against the EF Core model at startup to produce dependent-table captures and fan-out
+    /// bindings.
+    /// </summary>
+    public IReadOnlyDictionary<Type, IReadOnlyList<LambdaExpression>> DeclaredDependencies { get; init; }
+        = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
 }

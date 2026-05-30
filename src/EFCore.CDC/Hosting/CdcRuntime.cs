@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.DependencyInjection;
 using EFCore.CDC.Internal.Backfill;
@@ -34,6 +35,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private WatermarkBackfillCoordinator _coordinator = null!;
     private PostgresSelfConfigurator _selfConfigurator = null!;
     private PostgresCheckpointStore _checkpoints = null!;
+    private DependentChangeResolver? _dependentResolver;
     private IReadOnlyList<(CapturedTable Table, string? Version)> _backfillTables = [];
 
     public CdcRuntime(
@@ -100,7 +102,8 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
         await using var stream = new LogicalReplicationStream(_options.ConnectionString, _options.SlotName, _options.PublicationName);
         var pipeline = new CdcPipeline(
-            stream, new ChangeEventFactory(_materializer), _router, _dispatcher, _checkpoints, _options.SlotName, _logger, _coordinator);
+            stream, new ChangeEventFactory(_materializer), _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
+            _coordinator, _dependentResolver);
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var scheduler = new BackfillScheduler(
@@ -132,11 +135,21 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
     private void BuildComponents()
     {
+        var declaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
+        foreach (var mapping in _config.Mappings.Values)
+        {
+            if (mapping.DeclaredDependencies.Count > 0)
+            {
+                declaredDependencies[mapping.EntityClrType] = mapping.DeclaredDependencies;
+            }
+        }
+
         var captureSpec = new CaptureSpec
         {
             CaptureAllMapped = _config.CaptureAllMapped,
             DeclaredEntities = _config.DeclaredEntities,
             RequiresFullReplicaIdentity = _config.RequiresFullReplicaIdentity,
+            DeclaredDependencies = declaredDependencies,
         };
 
         IModel model;
@@ -179,6 +192,9 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _dispatcher = new SinkDispatcher(sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger);
         _coordinator = new WatermarkBackfillCoordinator(
             _options.ConnectionString, new PostgresBackfillStore(_options.ConnectionString), _logger) { ChunkSize = _options.ChunkSize };
+        _dependentResolver = _cdcModel.DependentBindings.Count > 0
+            ? new DependentChangeResolver(_options.ConnectionString, _cdcModel)
+            : null;
         _checkpoints = new PostgresCheckpointStore(_options.ConnectionString);
         _selfConfigurator = new PostgresSelfConfigurator(
             _options.ConnectionString,

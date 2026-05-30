@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Internal.Pipeline;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +27,14 @@ internal sealed class MappingRegistration
 
     /// <summary>Per-scope-key destination (e.g. index-per-tenant); falls back to <see cref="Destination"/>.</summary>
     public Func<object?, string?>? DestinationSelector { get; set; }
+
+    /// <summary>
+    /// Navigation expressions declared via <c>DependsOn(...)</c>. Each expression points at a single
+    /// EF Core navigation (reference, collection, or skip-navigation) whose target/join table should
+    /// be captured and fan changes out to this entity. Resolved against the EF Core <c>IModel</c> at
+    /// startup by <c>DependencyAnalyzer</c>.
+    /// </summary>
+    public List<LambdaExpression> DeclaredDependencies { get; } = [];
 }
 
 /// <summary>The immutable result of the fluent builder, consumed by the runtime.</summary>

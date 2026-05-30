@@ -32,6 +32,17 @@ public class Product
     public string Description { get; set; } = "";
     public int CategoryId { get; set; }
     public Category? Category { get; set; }
+
+    /// <summary>Many-to-many skip-navigation, backed by an implicit shared-type join table.</summary>
+    public List<Label> Labels { get; set; } = [];
+}
+
+/// <summary>Many-to-many counterpart for <see cref="Product"/> via a skip-navigation.</summary>
+public class Label
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public List<Product> Products { get; set; } = [];
 }
 
 /// <summary>Single-PK customer entity (placed in the default schema).</summary>
