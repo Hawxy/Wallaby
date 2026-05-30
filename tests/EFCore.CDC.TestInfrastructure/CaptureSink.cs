@@ -1,6 +1,6 @@
 using EFCore.CDC.Abstractions;
 
-namespace EFCore.CDC.Testing;
+namespace EFCore.CDC.TestInfrastructure;
 
 /// <summary>
 /// An <see cref="ISink"/> that records every delivered record for assertions. Thread-safe; supports

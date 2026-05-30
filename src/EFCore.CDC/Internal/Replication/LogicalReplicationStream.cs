@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Npgsql;
 using Npgsql.Replication;
 using Npgsql.Replication.PgOutput;
 using NpgsqlTypes;
@@ -11,6 +12,12 @@ namespace EFCore.CDC.Internal.Replication;
 /// caller (via <see cref="AcknowledgeAsync"/>) so the slot's <c>confirmed_flush_lsn</c> only advances
 /// after downstream delivery, preserving at-least-once semantics.
 /// </summary>
+/// <remarks>
+/// We construct a <see cref="LogicalReplicationConnection"/> directly from the supplied connection
+/// string — replication connections run in a special protocol mode and cannot be obtained from
+/// <see cref="NpgsqlDataSource.OpenConnectionAsync(CancellationToken)"/>, and Npgsql strips the
+/// password from <c>NpgsqlDataSource.ConnectionString</c> so we can't reuse it for auth.
+/// </remarks>
 internal sealed class LogicalReplicationStream(
     string connectionString, string slotName, string publicationName) : IAsyncDisposable
 {

@@ -9,17 +9,17 @@ public sealed class CdcBuilder
 {
     private readonly CdcConfiguration _configuration = new() { Options = new CdcOptions() };
 
-    /// <summary>Set the source Postgres connection string.</summary>
-    public CdcBuilder UseConnectionString(string connectionString)
-    {
-        _configuration.Options.ConnectionString = connectionString;
-        return this;
-    }
-
     /// <summary>Configure options (slot/publication names, chunk size, auto-backfill, etc.).</summary>
     public CdcBuilder ConfigureOptions(Action<CdcOptions> configure)
     {
         configure(_configuration.Options);
+        return this;
+    }
+
+    /// <summary>Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill reads.</summary>
+    public CdcBuilder UseConnectionString(string connectionString)
+    {
+        _configuration.Options.ConnectionString = connectionString;
         return this;
     }
 
@@ -88,7 +88,7 @@ public sealed class CdcBuilder
         var options = _configuration.Options;
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
-            throw new CdcConfigurationException("A connection string is required. Call UseConnectionString(...).");
+            throw new CdcConfigurationException("A connection string must be supplied via UseConnectionString(...).");
         }
         if (string.IsNullOrWhiteSpace(options.SlotName) || string.IsNullOrWhiteSpace(options.PublicationName))
         {

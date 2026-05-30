@@ -1,6 +1,7 @@
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Meilisearch;
-using EFCore.CDC.Testing;
+using EFCore.CDC.Meilisearch.IntegrationTests.Infrastructure;
+using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using TUnit.Core.Interfaces;
@@ -57,8 +58,8 @@ public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
         await harness.StartAsync();
 
         // Touch the products once so they land in the index (no backfill in this test).
-        await harness.Db.UpdateProductNameAsync(product1, "P1");
-        await harness.Db.UpdateProductNameAsync(product2, "P2");
+        await harness.Db.UpdateProductNameAsync(product1, "P3");
+        await harness.Db.UpdateProductNameAsync(product2, "P4");
 
         var probe = new MeiliProbe(meili);
         await harness.WaitUntilAsync(async () =>
@@ -89,7 +90,7 @@ public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
         await harness.StartAsync();
 
         // Seed: the product starts with no labels. Touch it once so the document exists in the sink.
-        await harness.Db.UpdateProductNameAsync(productId, "P-labels");
+        await harness.Db.UpdateProductNameAsync(productId, "P-labels-2");
         var probe = new MeiliProbe(meili);
         await harness.WaitUntilAsync(async () =>
                 (await probe.GetAsync(index, productId.ToString()))?["labels"] is { } labels && labels.AsArray().Count == 0,

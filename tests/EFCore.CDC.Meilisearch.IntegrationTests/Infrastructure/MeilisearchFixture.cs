@@ -2,14 +2,14 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using TUnit.Core.Interfaces;
 
-namespace EFCore.CDC.Meilisearch.IntegrationTests;
+namespace EFCore.CDC.Meilisearch.IntegrationTests.Infrastructure;
 
 /// <summary>A shared Meilisearch container for sink integration tests.</summary>
 public sealed class MeilisearchFixture : IAsyncInitializer, IAsyncDisposable
 {
     private const string MasterKey = "masterKey";
 
-    private readonly IContainer _container = new ContainerBuilder("getmeili/meilisearch:v1.12")
+    private readonly IContainer _container = new ContainerBuilder("getmeili/meilisearch:v1.45.1")
         .WithEnvironment("MEILI_MASTER_KEY", MasterKey)
         .WithEnvironment("MEILI_ENV", "development")
         .WithPortBinding(7700, true)

@@ -1,4 +1,4 @@
-namespace EFCore.CDC.Testing;
+namespace EFCore.CDC.TestInfrastructure;
 
 /// <summary>Polls an asynchronous condition until it holds or a timeout elapses.</summary>
 public static class Polling

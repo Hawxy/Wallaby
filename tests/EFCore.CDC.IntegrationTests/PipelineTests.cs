@@ -1,6 +1,5 @@
 using EFCore.CDC.Abstractions;
-using EFCore.CDC.Testing;
-using TUnit.Core.Interfaces;
+using EFCore.CDC.TestInfrastructure;
 
 namespace EFCore.CDC.IntegrationTests;
 

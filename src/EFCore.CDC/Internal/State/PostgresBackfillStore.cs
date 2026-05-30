@@ -4,12 +4,11 @@ using Npgsql;
 namespace EFCore.CDC.Internal.State;
 
 /// <summary>Stores per-table backfill state in <c>cdc.backfill_state</c>.</summary>
-internal sealed class PostgresBackfillStore(string connectionString) : IBackfillStateStore
+internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBackfillStateStore
 {
     public async Task<BackfillState?> GetAsync(string tableQualifiedName, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
             "SELECT status, transform_version, cursor_json, rows_copied, updated_at FROM cdc.backfill_state WHERE table_qualified = @t",
@@ -22,8 +21,7 @@ internal sealed class PostgresBackfillStore(string connectionString) : IBackfill
 
     public async Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
             "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at FROM cdc.backfill_state",
@@ -40,8 +38,7 @@ internal sealed class PostgresBackfillStore(string connectionString) : IBackfill
 
     public async Task SaveAsync(BackfillState state, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
             """

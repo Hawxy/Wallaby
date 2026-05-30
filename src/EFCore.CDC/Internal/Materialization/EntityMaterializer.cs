@@ -147,6 +147,14 @@ internal sealed class EntityMaterializer
     {
         if (property.PropertyInfo is { CanWrite: true } propertyInfo)
         {
+            // Shared-type entities (e.g. skip-navigation join tables) back every property by the
+            // PropertyBag indexer — invoking it needs the property name as the index argument.
+            if (property.IsIndexerProperty())
+            {
+                var key = property.Name;
+                var index = new object?[] { key };
+                return (entity, value) => propertyInfo.SetValue(entity, value, index);
+            }
             return (entity, value) => propertyInfo.SetValue(entity, value);
         }
 

@@ -8,12 +8,11 @@ namespace EFCore.CDC.Internal.State;
 /// Stores the replication checkpoint in <c>cdc.checkpoint</c> as a <c>pg_lsn</c>. This is supplementary
 /// bookkeeping; the authoritative resume position is the slot's <c>confirmed_flush_lsn</c> on the server.
 /// </summary>
-internal sealed class PostgresCheckpointStore(string connectionString) : ICheckpointStore
+internal sealed class PostgresCheckpointStore(NpgsqlDataSource dataSource) : ICheckpointStore
 {
     public async Task<Checkpoint?> GetAsync(string slotName, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
             "SELECT confirmed_lsn, updated_at FROM cdc.checkpoint WHERE slot_name = @s", connection);
@@ -32,8 +31,7 @@ internal sealed class PostgresCheckpointStore(string connectionString) : ICheckp
 
     public async Task SaveAsync(string slotName, Checkpoint checkpoint, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
             """

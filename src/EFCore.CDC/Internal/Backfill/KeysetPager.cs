@@ -11,7 +11,7 @@ internal sealed record BackfillChunk(IReadOnlyList<RawChange> Rows, object?[]? N
 /// Reads a table in primary-key order using keyset (cursor) pagination — never OFFSET — so pages are
 /// stable under concurrent writes. Rows are emitted as <see cref="ChangeAction.Read"/> changes.
 /// </summary>
-internal sealed class KeysetPager(string connectionString, CapturedTable table)
+internal sealed class KeysetPager(NpgsqlDataSource dataSource, CapturedTable table)
 {
     public async Task<BackfillChunk> ReadChunkAsync(object?[]? cursor, int limit, CancellationToken ct)
     {
@@ -21,8 +21,7 @@ internal sealed class KeysetPager(string connectionString, CapturedTable table)
 
         var sql = $"SELECT {columns} FROM {PgExec.QuoteTable(table.Schema, table.TableName)} {where} ORDER BY {orderBy} LIMIT {limit}";
 
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, connection);
         if (cursor is not null)
         {

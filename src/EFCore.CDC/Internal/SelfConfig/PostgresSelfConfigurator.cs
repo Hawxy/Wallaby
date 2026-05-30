@@ -11,7 +11,7 @@ namespace EFCore.CDC.Internal.SelfConfig;
 /// captured model. Uses a normal (non-replication) connection.
 /// </summary>
 internal sealed class PostgresSelfConfigurator(
-    string connectionString,
+    NpgsqlDataSource dataSource,
     SelfConfigOptions options,
     ILogger logger) : ICdcSelfConfigurator
 {
@@ -20,8 +20,7 @@ internal sealed class PostgresSelfConfigurator(
 
     public async Task<SelfConfigResult> EnsureConfiguredAsync(CdcModel model, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await _validator.ValidateAsync(connection, options.SlotName, ct);
         await _stateSchema.EnsureAsync(connection, ct);

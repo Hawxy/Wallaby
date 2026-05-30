@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.DependencyInjection;
+using EFCore.CDC.Internal;
 using EFCore.CDC.Internal.Backfill;
 using EFCore.CDC.Internal.Materialization;
 using EFCore.CDC.Internal.Pipeline;
@@ -23,6 +24,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private readonly IDbContextFactory<TContext> _dbContextFactory;
     private readonly CdcConfiguration _config;
     private readonly CdcOptions _options;
+    private readonly CdcDataSource _dataSource;
     private readonly IClusterLock _clusterLock;
     private readonly IServiceProvider _services;
     private readonly ILogger<CdcRuntime<TContext>> _logger;
@@ -41,6 +43,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     public CdcRuntime(
         IDbContextFactory<TContext> dbContextFactory,
         CdcConfiguration config,
+        CdcDataSource dataSource,
         IClusterLock clusterLock,
         IServiceProvider services,
         ILogger<CdcRuntime<TContext>> logger)
@@ -48,6 +51,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _dbContextFactory = dbContextFactory;
         _config = config;
         _options = config.Options;
+        _dataSource = dataSource;
         _clusterLock = clusterLock;
         _services = services;
         _logger = logger;
@@ -100,14 +104,14 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     {
         await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
 
-        await using var stream = new LogicalReplicationStream(_options.ConnectionString, _options.SlotName, _options.PublicationName);
+        await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
         var pipeline = new CdcPipeline(
             stream, new ChangeEventFactory(_materializer), _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
             _coordinator, _dependentResolver);
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var scheduler = new BackfillScheduler(
-            _backfillTables, new PostgresBackfillStore(_options.ConnectionString), _coordinator,
+            _backfillTables, new PostgresBackfillStore(_dataSource.Source), _coordinator,
             new BackfillSchedulerOptions
             {
                 AutoBackfillNewTables = _options.AutoBackfillNewTables,
@@ -191,13 +195,13 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _router = new MappingChangeRouter(mappings, contextProvider);
         _dispatcher = new SinkDispatcher(sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger);
         _coordinator = new WatermarkBackfillCoordinator(
-            _options.ConnectionString, new PostgresBackfillStore(_options.ConnectionString), _logger) { ChunkSize = _options.ChunkSize };
+            _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger) { ChunkSize = _options.ChunkSize };
         _dependentResolver = _cdcModel.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_options.ConnectionString, _cdcModel)
+            ? new DependentChangeResolver(_dataSource.Source, _cdcModel)
             : null;
-        _checkpoints = new PostgresCheckpointStore(_options.ConnectionString);
+        _checkpoints = new PostgresCheckpointStore(_dataSource.Source);
         _selfConfigurator = new PostgresSelfConfigurator(
-            _options.ConnectionString,
+            _dataSource.Source,
             new SelfConfigOptions
             {
                 SlotName = _options.SlotName,

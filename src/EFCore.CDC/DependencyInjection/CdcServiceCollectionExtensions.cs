@@ -1,5 +1,6 @@
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Hosting;
+using EFCore.CDC.Internal;
 using EFCore.CDC.Internal.Backfill;
 using EFCore.CDC.Internal.SelfConfig;
 using EFCore.CDC.Internal.State;
@@ -14,8 +15,10 @@ namespace EFCore.CDC.DependencyInjection;
 public static class CdcServiceCollectionExtensions
 {
     /// <summary>
-    /// Add Postgres CDC driven by <typeparamref name="TContext"/>. The consumer must also register an
-    /// <see cref="IDbContextFactory{TContext}"/> (e.g. via <c>AddDbContextFactory&lt;TContext&gt;</c>).
+    /// Add Postgres CDC driven by <typeparamref name="TContext"/>. The consumer must also register
+    /// an <see cref="IDbContextFactory{TContext}"/> (e.g. via <c>AddDbContextFactory&lt;TContext&gt;</c>)
+    /// and supply a connection string via <c>cdc.UseConnectionString(...)</c>. CDC owns a pooled
+    /// <c>NpgsqlDataSource</c> built from that connection string for all of its non-replication work.
     /// </summary>
     public static IServiceCollection AddCdc<TContext>(this IServiceCollection services, Action<CdcBuilder> configure)
         where TContext : DbContext
@@ -27,14 +30,18 @@ public static class CdcServiceCollectionExtensions
         services.AddSingleton(configuration);
         services.AddSingleton(configuration.Options);
 
-        services.AddSingleton<IClusterLock>(_ => new Internal.Cluster.PostgresAdvisoryLock(configuration.Options.ConnectionString));
+        services.AddSingleton(_ => new CdcDataSource(configuration.Options.ConnectionString));
+
+        services.AddSingleton<IClusterLock>(sp =>
+            new Internal.Cluster.PostgresAdvisoryLock(sp.GetRequiredService<CdcDataSource>().Source));
 
         services.AddSingleton<ICdcBackfillManager>(sp =>
         {
             var factory = sp.GetRequiredService<IDbContextFactory<TContext>>();
             using var context = factory.CreateDbContext();
             var model = ModelToCdcModel.Build(context.Model, ToCaptureSpec(configuration));
-            return new DefaultBackfillManager(model, new PostgresBackfillStore(configuration.Options.ConnectionString));
+            return new DefaultBackfillManager(
+                model, new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source));
         });
 
         services.AddSingleton<CdcRuntime<TContext>>();

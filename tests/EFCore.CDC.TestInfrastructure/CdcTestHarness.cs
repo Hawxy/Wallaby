@@ -11,8 +11,9 @@ using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 
-namespace EFCore.CDC.Testing;
+namespace EFCore.CDC.TestInfrastructure;
 
 /// <summary>
 /// Drives a CDC pipeline against a real Postgres for integration tests, removing the per-test boilerplate
@@ -33,6 +34,7 @@ namespace EFCore.CDC.Testing;
 public sealed class CdcTestHarness : IAsyncDisposable
 {
     private readonly string _connectionString;
+    private readonly NpgsqlDataSource _dataSource;
     private readonly Func<DbContext> _newContext;
     private readonly Dictionary<string, ISink> _sinks = [];
     private readonly Dictionary<Type, EntityMapping> _mappings = [];
@@ -55,6 +57,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     public CdcTestHarness(string connectionString, Func<DbContext> contextFactory, CdcNames? names = null)
     {
         _connectionString = connectionString;
+        _dataSource = NpgsqlDataSource.Create(connectionString);
         _newContext = contextFactory;
         Names = names ?? CdcNames.Unique();
         Db = new TestDatabase(connectionString);
@@ -76,7 +79,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     /// <summary>A backfill manager bound to this harness's database (for manual <c>RequestBackfillAsync</c>).</summary>
     public ICdcBackfillManager BackfillManager
     {
-        get { EnsureModel(); return new DefaultBackfillManager(_cdcModel!, new PostgresBackfillStore(_connectionString)); }
+        get { EnsureModel(); return new DefaultBackfillManager(_cdcModel!, new PostgresBackfillStore(_dataSource)); }
     }
 
     // ---- configuration ----
@@ -175,7 +178,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     {
         EnsureModel();
         await new PostgresSelfConfigurator(
-                _connectionString,
+                _dataSource,
                 new SelfConfigOptions { SlotName = Names.Slot, PublicationName = Names.Publication },
                 NullLogger.Instance)
             .EnsureConfiguredAsync(_cdcModel!, ct);
@@ -193,7 +196,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _stream = new LogicalReplicationStream(_connectionString, Names.Slot, Names.Publication);
         _coordinator = new WatermarkBackfillCoordinator(
-            _connectionString, new PostgresBackfillStore(_connectionString), NullLogger.Instance) { ChunkSize = ChunkSize };
+            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance) { ChunkSize = ChunkSize };
 
         IEnrichmentContextProvider contextProvider = _scopedContextFactory is { } scoped
             ? new ScopedEnrichmentContextProvider((key, _) => scoped(key), NullServiceProvider.Instance)
@@ -203,12 +206,12 @@ public sealed class CdcTestHarness : IAsyncDisposable
             : new MappingChangeRouter(_mappings, contextProvider);
 
         _dependentResolver = _cdcModel!.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_connectionString, _cdcModel)
+            ? new DependentChangeResolver(_dataSource, _cdcModel)
             : null;
 
         _pipeline = new CdcPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks),
-            new PostgresCheckpointStore(_connectionString), Names.Slot, NullLogger.Instance, _coordinator, _dependentResolver);
+            new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance, _coordinator, _dependentResolver);
 
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
         return Task.CompletedTask;
@@ -228,7 +231,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
             .ToList();
 
         var scheduler = new BackfillScheduler(
-            tables, new PostgresBackfillStore(_connectionString), _coordinator, new BackfillSchedulerOptions(), NullLogger.Instance);
+            tables, new PostgresBackfillStore(_dataSource), _coordinator, new BackfillSchedulerOptions(), NullLogger.Instance);
         await scheduler.RunDueBackfillsAsync(_cts.Token);
     }
 
@@ -297,6 +300,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
         {
             await StopAsync();
         }
+        await _dataSource.DisposeAsync();
     }
 
     private void ThrowIfPipelineFaulted()

@@ -11,7 +11,7 @@ namespace EFCore.CDC.Internal.Pipeline;
 /// <c>SELECT</c> against the source database. Returned <see cref="RawChange"/>s carry the originating
 /// transaction's commit metadata so the pipeline's ordering and watermark accounting are preserved.
 /// </summary>
-internal sealed class DependentChangeResolver(string connectionString, CdcModel model)
+internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcModel model)
 {
     public async Task<IReadOnlyList<RawChange>> ResolveAsync(RawChange change, CancellationToken ct)
     {
@@ -29,8 +29,7 @@ internal sealed class DependentChangeResolver(string connectionString, CdcModel 
         }
 
         var synthetic = new List<RawChange>();
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         foreach (var binding in bindings)
         {

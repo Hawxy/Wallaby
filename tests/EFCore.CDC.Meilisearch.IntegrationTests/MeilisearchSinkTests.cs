@@ -1,6 +1,7 @@
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Meilisearch;
-using EFCore.CDC.Testing;
+using EFCore.CDC.Meilisearch.IntegrationTests.Infrastructure;
+using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using TUnit.Core.Interfaces;

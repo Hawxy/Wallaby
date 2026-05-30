@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using Meilisearch;
 
-namespace EFCore.CDC.Meilisearch.IntegrationTests;
+namespace EFCore.CDC.Meilisearch.IntegrationTests.Infrastructure;
 
 /// <summary>Small helper for asserting on / managing a Meilisearch index in tests.</summary>
 public sealed class MeiliProbe(string host, string apiKey)

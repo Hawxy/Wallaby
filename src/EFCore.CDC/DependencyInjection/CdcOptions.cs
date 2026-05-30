@@ -13,9 +13,6 @@ public enum CdcDeadLetterPolicy
 /// <summary>Configuration for a CDC instance, set via the fluent builder / <c>ConfigureOptions</c>.</summary>
 public sealed class CdcOptions
 {
-    /// <summary>Connection string to the source Postgres database (used for SQL, state, and replication).</summary>
-    public string ConnectionString { get; set; } = "";
-
     /// <summary>Logical replication slot name.</summary>
     public string SlotName { get; set; } = "efcore_cdc_slot";
 
@@ -42,6 +39,9 @@ public sealed class CdcOptions
 
     /// <summary>How long to wait before retrying after a failed leader session.</summary>
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Postgres connection string. Set via <see cref="CdcBuilder.UseConnectionString"/>.</summary>
+    public string ConnectionString { get; internal set; } = string.Empty;
 
     /// <summary>What to do when a sink permanently fails (or exhausts retries) for a batch.</summary>
     public CdcDeadLetterPolicy DeadLetterPolicy { get; set; } = CdcDeadLetterPolicy.Halt;

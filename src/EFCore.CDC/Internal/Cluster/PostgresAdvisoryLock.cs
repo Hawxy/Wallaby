@@ -8,13 +8,12 @@ namespace EFCore.CDC.Internal.Cluster;
 /// connection. Because the lock is session-scoped, it is released automatically if the holder's
 /// connection drops (process crash, network partition) — giving fast, dependency-free failover.
 /// </summary>
-internal sealed class PostgresAdvisoryLock(string connectionString) : IClusterLock
+internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource) : IClusterLock
 {
     public async Task<IClusterLockHandle?> TryAcquireAsync(string key, CancellationToken ct)
     {
         var lockKey = StableKey(key);
-        var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        var connection = await dataSource.OpenConnectionAsync(ct);
         try
         {
             var acquired = await PgExec.ScalarBoolAsync(connection, "SELECT pg_try_advisory_lock(@k)", ct, ("k", lockKey));

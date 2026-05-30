@@ -1,11 +1,10 @@
 using EFCore.CDC.Abstractions;
 using EFCore.CDC.Internal.Replication;
 using EFCore.CDC.Internal.SelfConfig;
-using EFCore.CDC.Testing;
 using EFCore.CDC.Model;
+using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Logging.Abstractions;
-using TUnit.Core.Interfaces;
 
 namespace EFCore.CDC.IntegrationTests;
 
@@ -28,7 +27,7 @@ public class ReplicationDecoderTests(PostgresFixture pg)
 
         // 1) Create slot + publication (captures from now on).
         var configurator = new PostgresSelfConfigurator(
-            pg.ConnectionString,
+            pg.DataSource,
             new SelfConfigOptions { SlotName = slot, PublicationName = pub },
             NullLogger.Instance);
         await configurator.EnsureConfiguredAsync(BuildAllMappedModel(), CancellationToken.None);

@@ -1,7 +1,6 @@
-using EFCore.CDC.Meilisearch;
-using EFCore.CDC.Testing;
+using EFCore.CDC.Meilisearch.IntegrationTests.Infrastructure;
+using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
-using TUnit.Core.Interfaces;
 
 namespace EFCore.CDC.Meilisearch.IntegrationTests;
 

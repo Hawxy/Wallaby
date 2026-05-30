@@ -17,7 +17,7 @@ namespace EFCore.CDC.Internal.Backfill;
 /// watermark — guaranteeing no gaps and that live changes always win for overlapping keys.
 /// </summary>
 internal sealed class WatermarkBackfillCoordinator(
-    string connectionString, IBackfillStateStore store, ILogger logger)
+    NpgsqlDataSource dataSource, IBackfillStateStore store, ILogger logger)
 {
     private readonly ConcurrentDictionary<string, PendingWindow> _byToken = new();
     private readonly ConcurrentDictionary<string, PendingWindow> _recordingByTable = new();
@@ -29,7 +29,7 @@ internal sealed class WatermarkBackfillCoordinator(
     /// <summary>Snapshot a table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
     public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
     {
-        var pager = new KeysetPager(connectionString, table);
+        var pager = new KeysetPager(dataSource, table);
         var existing = await store.GetAsync(table.QualifiedName, ct);
         var cursor = DeserializeCursor(existing?.CursorJson, table);
         var rowsCopied = existing?.RowsCopied ?? 0;
@@ -72,8 +72,7 @@ internal sealed class WatermarkBackfillCoordinator(
     // commit-order interleaving with data-change transactions in pgoutput.
     private async Task EmitWatermarkAsync(string prefix, string token, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
         await PgExec.ExecuteAsync(
             connection,
             "SELECT pg_logical_emit_message(true, @prefix, @token)", ct,

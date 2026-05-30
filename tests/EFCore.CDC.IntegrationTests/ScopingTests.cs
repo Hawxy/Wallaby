@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using EFCore.CDC.Abstractions;
-using EFCore.CDC.Testing;
+using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
-using TUnit.Core.Interfaces;
 
 namespace EFCore.CDC.IntegrationTests;
 

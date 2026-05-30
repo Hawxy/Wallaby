@@ -1,14 +1,11 @@
 using EFCore.CDC.Internal;
 using EFCore.CDC.Internal.SelfConfig;
-using EFCore.CDC.Internal.State;
-using EFCore.CDC.Testing;
 using EFCore.CDC.Model;
+using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Testcontainers.PostgreSql;
-using TUnit.Core.Interfaces;
 
 namespace EFCore.CDC.IntegrationTests;
 
@@ -23,7 +20,7 @@ public class SelfConfigTests(PostgresFixture pg)
     }
 
     private PostgresSelfConfigurator CreateConfigurator(string slot, string pub) =>
-        new(pg.ConnectionString,
+        new(pg.DataSource,
             new SelfConfigOptions { SlotName = slot, PublicationName = pub },
             NullLogger.Instance);
 
@@ -94,8 +91,9 @@ public class SelfConfigTests(PostgresFixture pg)
         await plain.StartAsync();
         try
         {
+            await using var plainSource = NpgsqlDataSource.Create(plain.GetConnectionString());
             var configurator = new PostgresSelfConfigurator(
-                plain.GetConnectionString(),
+                plainSource,
                 new SelfConfigOptions { SlotName = "x", PublicationName = "y" },
                 NullLogger.Instance);
 
