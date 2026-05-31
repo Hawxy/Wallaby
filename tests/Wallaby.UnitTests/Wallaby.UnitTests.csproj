@@ -1,19 +1,20 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
-    <UserSecretsId>efcore-cdc-sample-worker</UserSecretsId>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="NSubstitute" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wallaby\Wallaby.csproj" />
     <ProjectReference Include="..\..\src\Wallaby.Sinks.Meilisearch\Wallaby.Sinks.Meilisearch.csproj" />
+    <ProjectReference Include="..\Wallaby.TestModel\Wallaby.TestModel.csproj" />
   </ItemGroup>
 
 </Project>

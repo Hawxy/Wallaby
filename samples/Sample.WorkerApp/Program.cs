@@ -1,8 +1,8 @@
-using EFCore.CDC.Abstractions;
-using EFCore.CDC.DependencyInjection;
-using EFCore.CDC.Meilisearch;
+using Wallaby.Sinks.Meilisearch;
 using Microsoft.EntityFrameworkCore;
 using Sample.WorkerApp;
+using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
 
 var builder = Host.CreateApplicationBuilder(args);
 

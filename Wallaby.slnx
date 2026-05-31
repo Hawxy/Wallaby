@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
+    <Project Path="src/Wallaby/Wallaby.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wallaby.IntegrationTests/Wallaby.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Meilisearch.IntegrationTests/Wallaby.Meilisearch.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
+    <Project Path="tests/Wallaby.TestModel/Wallaby.TestModel.csproj" />
+    <Project Path="tests/Wallaby.UnitTests/Wallaby.UnitTests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Sample.WorkerApp/Sample.WorkerApp.csproj" />
+  </Folder>
+</Solution>

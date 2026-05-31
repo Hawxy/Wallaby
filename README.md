@@ -1,4 +1,4 @@
-# EFCore.CDC
+# Wallaby
 
 Postgres Change Data Capture for .NET, driven by your **EF Core model**.
 

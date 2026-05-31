@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Postgres Change Data Capture for .NET, driven by your EF Core model: self-configuration, EF Core transforms/enrichment, pluggable destinations, and watermark-coordinated backfill.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.Meilisearch.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Polly.Core" />
+  </ItemGroup>
+
+</Project>

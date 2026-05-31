@@ -1,0 +1,54 @@
+using Wallaby.Abstractions;
+using Wallaby.Internal.Pipeline;
+using Wallaby.Sinks;
+
+namespace EFCore.CDC.UnitTests;
+
+public class SinkDispatcherTests
+{
+    private static readonly ChangeMetadata Meta = new("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+
+    private static IReadOnlyList<RoutedDocument> OneRecord() =>
+        [new RoutedDocument("sink", new SinkRecord(Destination: null, "1", Document: new { x = 1 }, IsDeletion: false, Meta))];
+
+    private static Dictionary<string, ISink> FailingSink() => new()
+    {
+        ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Permanent("boom"))),
+    };
+
+    [Test]
+    public async Task Permanent_failure_halts_by_default()
+    {
+        var dispatcher = new SinkDispatcher(FailingSink());
+
+        await Assert.That(async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None))
+            .Throws<Exception>();
+    }
+
+    [Test]
+    public async Task Permanent_failure_is_skipped_when_configured()
+    {
+        var dispatcher = new SinkDispatcher(FailingSink(), skipFailedBatches: true);
+
+        // Should complete without throwing (batch is dead-lettered).
+        await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None);
+    }
+
+    [Test]
+    public async Task Successful_delivery_passes_records_to_the_sink()
+    {
+        var received = 0;
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (batch, _) =>
+            {
+                Interlocked.Add(ref received, batch.Records.Count);
+                return Task.FromResult(DeliveryResult.Success);
+            }),
+        };
+
+        await new SinkDispatcher(sinks).DispatchAsync(OneRecord(), CancellationToken.None);
+
+        await Assert.That(received).IsEqualTo(1);
+    }
+}
