@@ -480,3 +480,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+docs/.vitepress/dist
+docs/.vitepress/cache
