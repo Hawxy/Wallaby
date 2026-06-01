@@ -17,7 +17,7 @@ public enum BackfillStatus
 }
 
 /// <summary>
-/// Persisted per-table backfill bookkeeping, stored in <c>cdc.backfill_state</c>.
+/// Persisted per-table backfill bookkeeping, stored in <c>wallaby.backfill_state</c>.
 /// </summary>
 /// <param name="TableQualifiedName">Schema-qualified source table name (e.g. <c>public.orders</c>).</param>
 /// <param name="Status">Current lifecycle status.</param>

@@ -23,7 +23,7 @@ The first shipped sink is **Meilisearch** — keep a search index continuously i
 ```csharp
 builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(conn));
 
-builder.Services.AddCdc<AppDbContext>(cdc =>
+builder.Services.AddWallaby<AppDbContext>(cdc =>
 {
     cdc.UseConnectionString(conn)
        .ConfigureOptions(o => { o.SlotName = "app_cdc"; o.PublicationName = "app_cdc_pub"; })
@@ -33,18 +33,18 @@ builder.Services.AddCdc<AppDbContext>(cdc =>
        .Map<Product>()
             .ToSink("meili", destination: "products")
             .WithBackfillVersion("v1")           // bump to force a reindex/backfill
-            .UsingTransform<Dictionary<string, object?>>((db, changes, ct) =>
+            .UsingTransform((db, changes, ct) =>
             {
-                var docs = new Dictionary<DocumentKey, Dictionary<string, object?>?>();
+                var docs = new Dictionary<DocumentKey, CdcDocument?>();
                 foreach (var c in changes)
-                    docs[c.Key] = new Dictionary<string, object?> { ["name"] = c.Entity!.Name };
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, Dictionary<string, object?>?>>(docs);
+                    docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
             });
 });
 ```
 
 On startup the library validates the server (`wal_level=logical`, replication role, slot headroom),
-creates the `cdc` state schema, the publication, and the replication slot, backfills the mapped tables,
+creates the `wallaby` state schema, the publication, and the replication slot, backfills the mapped tables,
 then streams live changes — all on a single elected leader.
 
 ### Transforms
@@ -52,18 +52,20 @@ then streams live changes — all on a single elected leader.
 All enrichment/transformation goes through one interface:
 
 ```csharp
-public interface ICdcTransform<TEntity, TDocument> where TEntity : class
+public interface ICdcTransform<TEntity> where TEntity : class
 {
-    Task<IReadOnlyDictionary<DocumentKey, TDocument?>> TransformAsync(
+    Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> TransformAsync(
         DbContext db, IReadOnlyList<ChangeEvent<TEntity>> changes, CancellationToken ct);
 }
 ```
 
-Implement it as a class (`.UsingTransform<MyTransform, MyDoc>()`, DI-constructed) or inline
-(`.UsingTransform<MyDoc>((db, changes, ct) => ...)`). Inside, project from `change.Entity`, or query
-`db` (EF Core LINQ with `Include`, or `db.Database.SqlQuery<T>(...)`) to flatten an aggregate. Return one
-document per source key; omit a key (or map it to `null`) to delete it from the sink. Deletes are handled
-by the engine — a transform never sees them.
+A document is a `CdcDocument` — a field bag (`new CdcDocument { ["name"] = ... }`, a
+`Dictionary<string, object?>` subclass). Implement the interface as a class
+(`.UsingTransform<MyTransform>()`, DI-constructed) or inline (`.UsingTransform((db, changes, ct) => ...)`).
+Inside, project from `change.Entity`, or query `db` (EF Core LINQ with `Include`, or
+`db.Database.SqlQuery<T>(...)`) to flatten an aggregate. Return one document per source key; omit a key
+(or map it to `null`) to delete it from the sink. Deletes are handled by the engine — a transform never
+sees them.
 
 ### Backfill
 
@@ -85,7 +87,7 @@ When the enrichment `DbContext` — or the destination — must be derived from 
 cdc.UseScopedContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)))  // tenant conn or query-filter
    .Map<Order>()
        .ScopedBy(o => o.TenantId)                     // scope key from the change
-       .UsingTransform<OrderDoc, OrderTransform>()    // transform receives the tenant-scoped db
+       .UsingTransform<OrderTransform>()              // transform receives the tenant-scoped db
        .ScopedDestination(key => $"orders_{key}");    // per-tenant index (optional)
 ```
 

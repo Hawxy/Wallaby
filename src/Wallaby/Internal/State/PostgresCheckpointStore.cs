@@ -5,7 +5,7 @@ using Wallaby.Abstractions;
 namespace Wallaby.Internal.State;
 
 /// <summary>
-/// Stores the replication checkpoint in <c>cdc.checkpoint</c> as a <c>pg_lsn</c>. This is supplementary
+/// Stores the replication checkpoint in <c>wallaby.checkpoint</c> as a <c>pg_lsn</c>. This is supplementary
 /// bookkeeping; the authoritative resume position is the slot's <c>confirmed_flush_lsn</c> on the server.
 /// </summary>
 internal sealed class PostgresCheckpointStore(NpgsqlDataSource dataSource) : ICheckpointStore
@@ -15,7 +15,7 @@ internal sealed class PostgresCheckpointStore(NpgsqlDataSource dataSource) : ICh
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT confirmed_lsn, updated_at FROM cdc.checkpoint WHERE slot_name = @s", connection);
+            "SELECT confirmed_lsn, updated_at FROM wallaby.checkpoint WHERE slot_name = @s", connection);
         cmd.Parameters.AddWithValue("s", slotName);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -35,7 +35,7 @@ internal sealed class PostgresCheckpointStore(NpgsqlDataSource dataSource) : ICh
 
         await using var cmd = new NpgsqlCommand(
             """
-            INSERT INTO cdc.checkpoint (slot_name, confirmed_lsn, updated_at)
+            INSERT INTO wallaby.checkpoint (slot_name, confirmed_lsn, updated_at)
             VALUES (@s, @lsn::pg_lsn, now())
             ON CONFLICT (slot_name) DO UPDATE
                 SET confirmed_lsn = EXCLUDED.confirmed_lsn,

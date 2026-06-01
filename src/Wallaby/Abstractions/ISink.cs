@@ -39,13 +39,13 @@ public sealed record DeliveryResult(DeliveryStatus Status, string? Error = null,
 /// The sink-specific destination (index/topic/table). Null means the sink's default destination.
 /// </param>
 /// <param name="DocumentId">Stable id for upsert/delete, derived from the source primary key.</param>
-/// <param name="Document">The document payload to upsert; null when <paramref name="IsDeletion"/> is true.</param>
+/// <param name="Document">The field-bag document to upsert; null when <paramref name="IsDeletion"/> is true.</param>
 /// <param name="IsDeletion">True to delete <paramref name="DocumentId"/> from the destination.</param>
 /// <param name="Metadata">Source provenance for observability/idempotency.</param>
 public sealed record SinkRecord(
     string? Destination,
     string DocumentId,
-    object? Document,
+    IReadOnlyDictionary<string, object?>? Document,
     bool IsDeletion,
     ChangeMetadata Metadata);
 

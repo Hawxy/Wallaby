@@ -19,7 +19,7 @@ internal sealed record SelfConfigResult(
 
 /// <summary>
 /// Brings the source Postgres database into a state where CDC can run: validates server settings,
-/// ensures the <c>cdc</c> state schema, and creates/reconciles the publication and replication slot.
+/// ensures the <c>wallaby</c> state schema, and creates/reconciles the publication and replication slot.
 /// </summary>
 internal interface ICdcSelfConfigurator
 {

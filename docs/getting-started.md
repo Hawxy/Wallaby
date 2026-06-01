@@ -1,85 +1,105 @@
+---
+outline: deep
+---
+
 # Getting Started
 
-Install `Wallaby` using nuget.
+Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
+**EF Core entities**, lets you transform/enrich them, and routes the resulting documents to pluggable
+**sinks** (destinations).
 
-## Syntax Highlighting
+## Install
 
-VitePress provides Syntax Highlighting powered by [Shiki](https://github.com/shikijs/shiki), with additional features like line-highlighting:
-
-**Input**
-
-````md
-```js{4}
-export default {
-  data () {
-    return {
-      msg: 'Highlighted!'
-    }
-  }
-}
-```
-````
-
-**Output**
-
-```js{4}
-export default {
-  data () {
-    return {
-      msg: 'Highlighted!'
-    }
-  }
-}
+```bash
+dotnet add package Wallaby
+dotnet add package Wallaby.Sinks.Meilisearch   # optional
 ```
 
-## Custom Containers
+Both target **.NET 10**.
 
-**Input**
+## Server prerequisites
 
-```md
-::: info
-This is an info box.
-:::
+Your Postgres server must already have:
 
-::: tip
-This is a tip.
-:::
+- **`wal_level = logical`** set in ``=postgresql.conf`  required for logical replication.
+- A role with the **`REPLICATION`** attribute (or superuser) for the connection string you give Wallaby.
+- Headroom in `max_replication_slots` and `max_wal_senders` (one slot/sender per Wallaby cluster).
 
-::: warning
-This is a warning.
-:::
+Wallaby validates these on startup and fails fast with an actionable error if something is missing.
 
-::: danger
-This is a dangerous warning.
-:::
+## Register
 
-::: details
-This is a details block.
-:::
+`AddWallaby<TContext>` is driven by your existing `DbContext`. You must also register an
+`IDbContextFactory<TContext>` (Wallaby opens fresh contexts for enrichment), and supply a connection
+string via `UseConnectionString(...)`.
+
+```csharp
+using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
+using Wallaby.Sinks.Meilisearch;
+
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(conn));
+
+builder.Services.AddWallaby<AppDbContext>(cdc =>
+{
+    cdc.UseConnectionString(conn)
+       .ConfigureOptions(o =>
+       {
+           o.SlotName = "app_cdc";
+           o.PublicationName = "app_cdc_pub";
+       })
+       .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
+
+       // A mapping is routing only; the transform shapes the document.
+       .Map<Product>()
+            .ToSink("meili", destination: "products")
+            .WithBackfillVersion("v1")
+            .UsingTransform((_, changes, _) =>
+            {
+                var docs = new Dictionary<DocumentKey, CdcDocument?>(changes.Count);
+                foreach (var c in changes)
+                    docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name, ["price"] = c.Entity!.Price };
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+            });
+});
+
+await builder.Build().RunAsync();
 ```
 
-**Output**
+On startup Wallaby validates the server, creates the `wallaby` state schema, the publication, and the
+replication slot, backfills the mapped tables, then streams live changes. Wallably automatically
 
-::: info
-This is an info box.
-:::
+## What gets tracked
 
-::: tip
-This is a tip.
-:::
+Only entities you **declare** are captured and added to the publication:
 
-::: warning
-This is a warning.
-:::
+- `Map<T>()` declares a table *and* routes it to a sink.
+- `Capture<T>()` declares a table without routing it by itself (useful for [dependent fan-out](/transforms#dependent-tables)).
+- `CaptureAllMappedTables()` opts every mapped entity in (not recommended)
 
-::: danger
-This is a dangerous warning.
-:::
+Captured tables must have a primary key.
 
-::: details
-This is a details block.
-:::
+## Options
 
-## More
+`ConfigureOptions(o => ...)` exposes:
 
-Check out the documentation for the [full list of markdown extensions](https://vitepress.dev/guide/markdown).
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `SlotName` / `PublicationName` | `efcore_cdc_slot` / `efcore_cdc_pub` | Names Wallaby creates/uses. |
+| `ChunkSize` | `500` | Backfill keyset page size. |
+| `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |
+| `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
+| `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
+| `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
+| `StandbyRetryInterval` / `LeaderRetryInterval` | `5s` | Leader-election retry cadence. |
+| `DeadLetterPolicy` | `Halt` | `Halt` stops on a permanent sink failure; `Skip` logs and drops the batch. |
+
+## Next steps
+
+- [Transforms](/transforms) — shaping and enriching documents.
+- [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
+- [Backfill](/backfill) — initial snapshots and version-triggered reindex.
+- [Multi-tenancy](/multi-tenancy) — per-row scoped contexts and destinations.
+- [Observability](/observability) — OpenTelemetry metrics and traces.

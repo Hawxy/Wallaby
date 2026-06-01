@@ -31,8 +31,8 @@ public class ScopingTests(PostgresFixture pg)
 
                 var docs = changes.ToDictionary(
                     c => c.Key,
-                    c => (object?)new Dictionary<string, object?> { ["tenant"] = ((Product)c.Entity!).TenantId });
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, object?>>(docs);
+                    c => (CdcDocument?)new CdcDocument { ["tenant"] = ((Product)c.Entity!).TenantId });
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
             }, scopeKey: p => p.TenantId);
 
         await harness.SelfConfigureAsync();

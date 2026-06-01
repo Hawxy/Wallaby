@@ -21,7 +21,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
-        services.AddCdc<AppDbContext>(cdc =>
+        services.AddWallaby<AppDbContext>(cdc =>
         {
             cdc.UseConnectionString(pg.ConnectionString)
                .ConfigureOptions(o =>
@@ -35,14 +35,14 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
                .Map<Product>()
                    .ToSink("meili", destination: index)
                    .WithBackfillVersion(Guid.NewGuid().ToString("N")) // unique => isolates this test's backfill state
-                   .UsingTransform<Dictionary<string, object?>>((_, changes, _) =>
+                   .UsingTransform((_, changes, _) =>
                    {
-                       var docs = new Dictionary<DocumentKey, Dictionary<string, object?>?>();
+                       var docs = new Dictionary<DocumentKey, CdcDocument?>();
                        foreach (var c in changes)
                        {
-                           docs[c.Key] = new Dictionary<string, object?> { ["name"] = c.Entity!.Name };
+                           docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
                        }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, Dictionary<string, object?>?>>(docs);
+                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
                    });
         });
         return services.BuildServiceProvider();
@@ -66,7 +66,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
     }
 
     [Test]
-    public async Task AddCdc_indexes_changes_end_to_end()
+    public async Task AddWallaby_indexes_changes_end_to_end()
     {
         var names = CdcNames.Unique();
         var index = names.Named("products");

@@ -6,7 +6,7 @@ using Wallaby.Model;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
-/// Default <see cref="ICdcSelfConfigurator"/>: validates the server, ensures the <c>cdc</c> state
+/// Default <see cref="ICdcSelfConfigurator"/>: validates the server, ensures the <c>wallaby</c> state
 /// schema, and creates/reconciles the publication and pgoutput replication slot derived from the
 /// captured model. Uses a normal (non-replication) connection.
 /// </summary>
@@ -120,7 +120,7 @@ internal sealed class PostgresSelfConfigurator(
         await PgExec.ExecuteAsync(
             connection,
             """
-            INSERT INTO cdc.slot_registry (slot_name, publication, consistent_point)
+            INSERT INTO wallaby.slot_registry (slot_name, publication, consistent_point)
             VALUES (@s, @p, @cp::pg_lsn)
             ON CONFLICT (slot_name) DO UPDATE
                 SET publication = EXCLUDED.publication,

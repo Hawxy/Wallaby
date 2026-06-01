@@ -113,7 +113,8 @@ internal sealed class MappingChangeRouter(
         return db;
     }
 
-    private static RoutedDocument Upsert(EntityMapping mapping, ChangeEvent change, object document, string? destination)
+    private static RoutedDocument Upsert(
+        EntityMapping mapping, ChangeEvent change, IReadOnlyDictionary<string, object?> document, string? destination)
         => new(mapping.SinkName, new SinkRecord(
             destination, mapping.GetDocumentId(change), document, IsDeletion: false, change.Metadata));
 

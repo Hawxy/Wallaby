@@ -17,7 +17,7 @@ builder.Services.AddDbContextFactory<SampleDbContext>(o => o.UseNpgsql(postgres)
 // Create the sample schema on startup (demo convenience).
 builder.Services.AddHostedService<SchemaInitializer>();
 
-builder.Services.AddCdc<SampleDbContext>(cdc =>
+builder.Services.AddWallaby<SampleDbContext>(cdc =>
 {
     cdc.UseConnectionString(postgres)
        .ConfigureOptions(o =>
@@ -34,20 +34,20 @@ builder.Services.AddCdc<SampleDbContext>(cdc =>
        .Map<Product>()
             .ToSink("meili", destination: "products")
             .WithBackfillVersion("v1")
-            .UsingTransform<Dictionary<string, object?>>((_, changes, _) =>
+            .UsingTransform((_, changes, _) =>
             {
-                var documents = new Dictionary<DocumentKey, Dictionary<string, object?>?>();
+                var documents = new Dictionary<DocumentKey, CdcDocument?>();
                 foreach (var change in changes)
                 {
                     var product = change.Entity!;
-                    documents[change.Key] = new Dictionary<string, object?>
+                    documents[change.Key] = new CdcDocument
                     {
                         ["name"] = product.Name,
                         ["price"] = product.Price,
                         ["category"] = product.Category,
                     };
                 }
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, Dictionary<string, object?>?>>(documents);
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(documents);
             });
 });
 

@@ -36,7 +36,7 @@ public record ChangeEvent(
 
 /// <summary>
 /// Strongly-typed view of a <see cref="ChangeEvent"/> for a known entity type, handed to
-/// <see cref="ICdcTransform{TEntity,TDocument}"/> implementations.
+/// <see cref="ICdcTransform{TEntity}"/> implementations.
 /// </summary>
 public sealed record ChangeEvent<TEntity>(
     ChangeAction Action,

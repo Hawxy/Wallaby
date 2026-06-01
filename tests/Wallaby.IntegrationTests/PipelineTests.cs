@@ -7,7 +7,7 @@ namespace EFCore.CDC.IntegrationTests;
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
 public class PipelineTests(PostgresFixture pg)
 {
-    private static string? NameOf(SinkRecord r) => (r.Document as ChangeEvent)?.Record.GetValueOrDefault("Name") as string;
+    private static string? NameOf(SinkRecord r) => r.Document?.GetValueOrDefault("Name") as string;
 
     private static List<string> ProductNames(CaptureSink capture)
         => capture.For("products").Select(NameOf).Where(n => n is not null).Select(n => n!).ToList();

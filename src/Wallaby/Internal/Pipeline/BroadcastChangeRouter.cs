@@ -4,8 +4,9 @@ namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
 /// A simple router that sends every change to every registered sink, using the change's primary key as
-/// the document id and the <see cref="ChangeEvent"/> itself as the document payload. Used before
-/// mapping/transform-based routing is configured (and as a default for sinks without a transform).
+/// the document id and the change's current values (<see cref="ChangeEvent.Record"/>) as the document
+/// payload. Used before mapping/transform-based routing is configured (and as a default for sinks
+/// without a transform).
 /// </summary>
 internal sealed class BroadcastChangeRouter(IReadOnlyList<string> sinkNames) : IChangeRouter
 {
@@ -24,7 +25,7 @@ internal sealed class BroadcastChangeRouter(IReadOnlyList<string> sinkNames) : I
                 routed.Add(new RoutedDocument(sinkName, new SinkRecord(
                     Destination: null,
                     DocumentId: documentId,
-                    Document: isDeletion ? null : change,
+                    Document: isDeletion ? null : change.Record,
                     IsDeletion: isDeletion,
                     Metadata: change.Metadata)));
             }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
+using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 
 namespace EFCore.CDC.IntegrationTests;
@@ -51,7 +52,7 @@ public class TelemetryTests(PostgresFixture pg)
     {
         await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
         var capture = harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new { p.Name }, backfill: true);
+        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name }, backfill: true);
 
         await harness.SelfConfigureAsync();
 
@@ -75,7 +76,7 @@ public class TelemetryTests(PostgresFixture pg)
     {
         await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
         harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new { p.Name });
+        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
         await harness.SelfConfigureAsync();

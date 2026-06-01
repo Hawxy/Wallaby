@@ -21,7 +21,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
         await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products");
         harness.AddSink(Sink())
-            .Project<Product>("meili", index, p => new Dictionary<string, object?> { ["name"] = p.Name });
+            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name });
         await harness.SelfConfigureAsync();
 
         var probe = new MeiliProbe(meili);
@@ -54,11 +54,11 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
                     .Include(o => o.Lines)
                     .ToListAsync(ct);
 
-                var docs = new Dictionary<DocumentKey, object?>();
+                var docs = new Dictionary<DocumentKey, CdcDocument?>();
                 foreach (var o in orders)
                 {
                     docs[new DocumentKey(new object?[] { o.Id })] =
-                        new Dictionary<string, object?> { ["customer"] = o.Customer?.Name, ["lineCount"] = o.Lines.Count };
+                        new CdcDocument { ["customer"] = o.Customer?.Name, ["lineCount"] = o.Lines.Count };
                 }
                 return docs;
             });
@@ -91,11 +91,11 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
                     .SqlQuery<ProductRow>($"SELECT \"Id\" AS \"Id\", \"Name\" AS \"Name\" FROM products WHERE \"Id\" = ANY({ids})")
                     .ToListAsync(ct);
 
-                var docs = new Dictionary<DocumentKey, object?>();
+                var docs = new Dictionary<DocumentKey, CdcDocument?>();
                 foreach (var row in rows)
                 {
                     docs[new DocumentKey(new object?[] { row.Id })] =
-                        row.Name == "skip" ? null : new Dictionary<string, object?> { ["name"] = row.Name };
+                        row.Name == "skip" ? null : new CdcDocument { ["name"] = row.Name };
                 }
                 return docs;
             });

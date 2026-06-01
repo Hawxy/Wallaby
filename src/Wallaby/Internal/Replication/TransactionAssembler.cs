@@ -9,7 +9,7 @@ namespace Wallaby.Internal.Replication;
 /// Groups a stream of pgoutput messages into committed transactions. DML messages between
 /// <see cref="BeginMessage"/> and <see cref="CommitMessage"/> are decoded and buffered; on commit the
 /// buffer is stamped with the commit LSN/timestamp and returned. Relation and truncate messages are
-/// not (yet) surfaced as changes. Generic WAL messages with the <c>cdc.watermark.*</c> prefix are
+/// not (yet) surfaced as changes. Generic WAL messages with the <c>wallaby.watermark.*</c> prefix are
 /// buffered as <see cref="Watermark"/>s for the backfill coordinator.
 /// </summary>
 internal sealed class TransactionAssembler

@@ -26,10 +26,10 @@ public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
                 .Where(p => ids.Contains(p.Id))
                 .ToListAsync(ct);
 
-            var documents = new Dictionary<DocumentKey, object?>();
+            var documents = new Dictionary<DocumentKey, CdcDocument?>();
             foreach (var product in products)
             {
-                documents[new DocumentKey(product.Id)] = new Dictionary<string, object?>
+                documents[new DocumentKey(product.Id)] = new CdcDocument
                 {
                     ["name"] = product.Name,
                     ["category"] = product.Category?.Name,

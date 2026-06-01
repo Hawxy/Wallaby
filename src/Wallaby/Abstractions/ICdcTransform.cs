@@ -15,18 +15,17 @@ namespace Wallaby.Abstractions;
 /// </para>
 /// </remarks>
 /// <typeparam name="TEntity">The mapped entity type for the source table.</typeparam>
-/// <typeparam name="TDocument">The shape produced for the destination.</typeparam>
-public interface ICdcTransform<TEntity, TDocument>
+public interface ICdcTransform<TEntity>
     where TEntity : class
 {
     /// <summary>
-    /// Produce a document per source key. Omit a key from the result (or map it to <c>null</c>)
-    /// to emit a deletion for that key at the sink.
+    /// Produce a <see cref="CdcDocument"/> per source key. Omit a key from the result (or map it to
+    /// <c>null</c>) to emit a deletion for that key at the sink.
     /// </summary>
     /// <param name="db">A scoped <see cref="DbContext"/> usable for enrichment queries.</param>
     /// <param name="changes">The batch of insert/update/read changes for <typeparamref name="TEntity"/>.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyDictionary<DocumentKey, TDocument?>> TransformAsync(
+    Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> TransformAsync(
         DbContext db,
         IReadOnlyList<ChangeEvent<TEntity>> changes,
         CancellationToken ct);

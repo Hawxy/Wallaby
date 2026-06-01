@@ -113,7 +113,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     public CdcTestHarness Map<TEntity>(
         string sink,
         string? destination,
-        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, object?>>> transform,
+        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>>> transform,
         bool backfill = false,
         string? backfillVersion = null,
         Func<TEntity, object?>? scopeKey = null,
@@ -126,7 +126,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
             SinkName = sink,
             Destination = destination,
             BackfillVersion = backfillVersion,
-            Transform = new TransformInvoker<TEntity, object>(new DelegateTransform<TEntity, object>(transform)),
+            Transform = new TransformInvoker<TEntity>(new DelegateTransform<TEntity>(transform)),
             ScopeKeySelector = scopeKey is null ? null : change => change.Entity is TEntity e ? scopeKey(e) : null,
             DestinationSelector = scopedDestination,
         };
@@ -139,17 +139,17 @@ public sealed class CdcTestHarness : IAsyncDisposable
 
     /// <summary>Map an entity to a sink/destination via a simple per-row projection.</summary>
     public CdcTestHarness Project<TEntity>(
-        string sink, string? destination, Func<TEntity, object> document, bool backfill = false, string? backfillVersion = null,
+        string sink, string? destination, Func<TEntity, CdcDocument?> document, bool backfill = false, string? backfillVersion = null,
         Func<TEntity, object?>? scopeKey = null, Func<object?, string?>? scopedDestination = null)
         where TEntity : class
         => Map<TEntity>(sink, destination, (_, changes, _) =>
         {
-            var documents = new Dictionary<DocumentKey, object?>();
+            var documents = new Dictionary<DocumentKey, CdcDocument?>();
             foreach (var change in changes)
             {
                 documents[change.Key] = document(change.Entity!);
             }
-            return Task.FromResult<IReadOnlyDictionary<DocumentKey, object?>>(documents);
+            return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(documents);
         }, backfill, backfillVersion, scopeKey, scopedDestination);
 
     /// <summary>Build the enrichment <see cref="DbContext"/> from a row's scope key (for tenant tests).</summary>

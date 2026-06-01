@@ -4,21 +4,21 @@ using Wallaby.Abstractions;
 namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
-/// Non-generic adapter that lets the router invoke a strongly-typed <see cref="ICdcTransform{TEntity,TDocument}"/>
-/// over a batch of change events without knowing the generic types.
+/// Non-generic adapter that lets the router invoke a strongly-typed <see cref="ICdcTransform{TEntity}"/>
+/// over a batch of change events without knowing the entity type.
 /// </summary>
 internal interface ITransformInvoker
 {
-    Task<IReadOnlyDictionary<DocumentKey, object?>> InvokeAsync(
+    Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> InvokeAsync(
         DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct);
 }
 
-/// <summary>Wraps an <see cref="ICdcTransform{TEntity,TDocument}"/> as an <see cref="ITransformInvoker"/>.</summary>
-internal sealed class TransformInvoker<TEntity, TDocument>(ICdcTransform<TEntity, TDocument> transform)
+/// <summary>Wraps an <see cref="ICdcTransform{TEntity}"/> as an <see cref="ITransformInvoker"/>.</summary>
+internal sealed class TransformInvoker<TEntity>(ICdcTransform<TEntity> transform)
     : ITransformInvoker
     where TEntity : class
 {
-    public async Task<IReadOnlyDictionary<DocumentKey, object?>> InvokeAsync(
+    public Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> InvokeAsync(
         DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var typed = new List<ChangeEvent<TEntity>>(changes.Count);
@@ -31,14 +31,6 @@ internal sealed class TransformInvoker<TEntity, TDocument>(ICdcTransform<TEntity
                 Key = change.Key,
             });
         }
-
-        var documents = await transform.TransformAsync(db, typed, ct);
-
-        var boxed = new Dictionary<DocumentKey, object?>(documents.Count);
-        foreach (var (key, document) in documents)
-        {
-            boxed[key] = document;
-        }
-        return boxed;
+        return transform.TransformAsync(db, typed, ct);
     }
 }

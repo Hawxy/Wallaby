@@ -13,7 +13,7 @@ namespace Wallaby.Internal.Pipeline;
 /// records the checkpoint. This ordering preserves at-least-once delivery.
 /// <para>
 /// When a <see cref="WatermarkBackfillCoordinator"/> is supplied, the pipeline also recognizes the
-/// <c>cdc.watermark.*</c> generic WAL messages that bracket backfill chunks: it records concurrent
+/// <c>wallaby.watermark.*</c> generic WAL messages that bracket backfill chunks: it records concurrent
 /// live-change keys between the watermarks and, at the high watermark, emits the chunk's surviving
 /// snapshot rows through the same routing/sink path (guaranteeing correct ordering relative to live
 /// changes).

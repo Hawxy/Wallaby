@@ -1,5 +1,6 @@
 using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
+using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 
@@ -16,7 +17,7 @@ public class TenantDestinationTests(PostgresFixture pg, MeilisearchFixture meili
         var prefix = harness.Names.Named("products"); // unique per test run
         harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
             .Project<Product>("meili", destination: null,
-                document: p => new Dictionary<string, object?> { ["name"] = p.Name },
+                document: p => new CdcDocument { ["name"] = p.Name },
                 scopeKey: p => p.TenantId,
                 scopedDestination: key => $"{prefix}_{key}");
 

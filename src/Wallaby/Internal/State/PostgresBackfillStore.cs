@@ -3,7 +3,7 @@ using Wallaby.Abstractions;
 
 namespace Wallaby.Internal.State;
 
-/// <summary>Stores per-table backfill state in <c>cdc.backfill_state</c>.</summary>
+/// <summary>Stores per-table backfill state in <c>wallaby.backfill_state</c>.</summary>
 internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBackfillStateStore
 {
     public async Task<BackfillState?> GetAsync(string tableQualifiedName, CancellationToken ct)
@@ -11,7 +11,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT status, transform_version, cursor_json, rows_copied, updated_at FROM cdc.backfill_state WHERE table_qualified = @t",
+            "SELECT status, transform_version, cursor_json, rows_copied, updated_at FROM wallaby.backfill_state WHERE table_qualified = @t",
             connection);
         cmd.Parameters.AddWithValue("t", tableQualifiedName);
 
@@ -24,7 +24,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at FROM cdc.backfill_state",
+            "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at FROM wallaby.backfill_state",
             connection);
 
         var results = new List<BackfillState>();
@@ -42,7 +42,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
 
         await using var cmd = new NpgsqlCommand(
             """
-            INSERT INTO cdc.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, updated_at)
+            INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, updated_at)
             VALUES (@t, @s, @v, @c::jsonb, @r, now())
             ON CONFLICT (table_qualified) DO UPDATE
                 SET status = EXCLUDED.status,

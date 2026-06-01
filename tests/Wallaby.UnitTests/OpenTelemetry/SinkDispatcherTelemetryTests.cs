@@ -12,7 +12,7 @@ public class SinkDispatcherTelemetryTests
     private static readonly ChangeMetadata Meta = new("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
 
     private static IReadOnlyList<RoutedDocument> OneRecord() =>
-        [new RoutedDocument("sink", new SinkRecord(Destination: "products", "1", Document: new { x = 1 }, IsDeletion: false, Meta))];
+        [new RoutedDocument("sink", new SinkRecord(Destination: "products", "1", Document: new CdcDocument { ["x"] = 1 }, IsDeletion: false, Meta))];
 
     [Test]
     public async Task Successful_delivery_records_records_delivered_and_duration()

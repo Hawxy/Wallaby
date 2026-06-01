@@ -21,7 +21,7 @@ public static class CdcServiceCollectionExtensions
     /// and supply a connection string via <c>cdc.UseConnectionString(...)</c>. CDC owns a pooled
     /// <c>NpgsqlDataSource</c> built from that connection string for all of its non-replication work.
     /// </summary>
-    public static IServiceCollection AddCdc<TContext>(this IServiceCollection services, Action<CdcBuilder> configure)
+    public static IServiceCollection AddWallaby<TContext>(this IServiceCollection services, Action<CdcBuilder> configure)
         where TContext : DbContext
     {
         var builder = new CdcBuilder();

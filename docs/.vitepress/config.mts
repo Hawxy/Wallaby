@@ -16,7 +16,9 @@ export default defineConfig({
         text: 'Usage',
         items: [
           { text: 'Getting Started', link: '/getting-started' },
-          { text: 'Transforms', link: '/transforms' }
+          { text: 'Transforms', link: '/transforms' },
+          { text: 'Backfill', link: '/backfill' },
+          { text: 'Multi-tenancy', link: '/multi-tenancy' }
         ]
       },
       {

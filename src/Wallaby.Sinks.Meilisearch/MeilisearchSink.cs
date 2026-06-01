@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Meilisearch;
 using Wallaby.Abstractions;
 
@@ -128,26 +126,17 @@ public sealed class MeilisearchSink : ISink
         return ordered;
     }
 
-    private object BuildUpsertDocument(object document, string id)
+    private object BuildUpsertDocument(IReadOnlyDictionary<string, object?> document, string id)
     {
-        // Fast path: transforms in this codebase typically return Dictionary<string, object?>.
-        // Stamp the primary key in place of a SerializeToNode round-trip.
-        if (document is IDictionary<string, object?> dict)
+        // Documents are field bags. Copy defensively (so a transform-returned dictionary isn't mutated)
+        // and stamp the primary key; the Meilisearch client serializes the dictionary as-is.
+        var copy = new Dictionary<string, object?>(document.Count + 1, StringComparer.Ordinal);
+        foreach (var kvp in document)
         {
-            // Defensive copy so transform-returned dictionaries aren't mutated by us.
-            var copy = new Dictionary<string, object?>(dict.Count + 1, StringComparer.Ordinal);
-            foreach (var kvp in dict)
-            {
-                copy[kvp.Key] = kvp.Value;
-            }
-            copy[_options.PrimaryKey] = id;
-            return copy;
+            copy[kvp.Key] = kvp.Value;
         }
-
-        var node = JsonSerializer.SerializeToNode(document, document.GetType()) as JsonObject
-                   ?? new JsonObject();
-        node[_options.PrimaryKey] = JsonValue.Create(id);
-        return node;
+        copy[_options.PrimaryKey] = id;
+        return copy;
     }
 
     /// <summary>Meilisearch document ids allow only [a-zA-Z0-9-_]; replace anything else (e.g. composite-key separators).</summary>

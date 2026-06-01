@@ -1,5 +1,6 @@
 using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
+using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 
@@ -16,7 +17,7 @@ public class BackfillSchedulerIntegrationTests(PostgresFixture pg, MeilisearchFi
         harness.ChunkSize = 2;
         var index = harness.Names.Named("products");
         harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
-            .Project<Product>("meili", index, p => new Dictionary<string, object?> { ["name"] = p.Name }, backfill: true);
+            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name }, backfill: true);
 
         var categoryId = await harness.Db.AddCategoryAsync();
         var ids = await harness.Db.AddProductsAsync(categoryId, Enumerable.Range(0, 6).Select(i => $"s{i}").ToArray());

@@ -56,7 +56,7 @@ public class SelfConfigTests(PostgresFixture pg)
             default, ("p", pub))).IsEqualTo(7L);
 
         // State tables exist.
-        foreach (var table in new[] { "cdc.checkpoint", "cdc.backfill_state", "cdc.slot_registry" })
+        foreach (var table in new[] { "wallaby.checkpoint", "wallaby.backfill_state", "wallaby.slot_registry" })
         {
             await Assert.That(await PgExec.ScalarStringAsync(conn,
                 "SELECT to_regclass(@t)::text", default, ("t", table))).IsEqualTo(table);
@@ -64,7 +64,7 @@ public class SelfConfigTests(PostgresFixture pg)
 
         // Slot registry row recorded.
         await Assert.That(await PgExec.ScalarLongAsync(conn,
-            "SELECT count(*) FROM cdc.slot_registry WHERE slot_name = @s", default, ("s", slot))).IsEqualTo(1L);
+            "SELECT count(*) FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", slot))).IsEqualTo(1L);
     }
 
     [Test]
