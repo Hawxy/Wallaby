@@ -4,7 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>Postgres Change Data Capture for .NET, driven by your EF Core model: self-configuration, EF Core transforms/enrichment, pluggable destinations, and watermark-coordinated backfill.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Postgres Change Data Capture for .NET, driven by your EF Core model: self-configuring logical replication, EF Core transforms/enrichment, pluggable destinations, and watermark-coordinated backfill.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,10 +18,7 @@
   <ItemGroup>
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Options" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Polly.Core" />
   </ItemGroup>
 

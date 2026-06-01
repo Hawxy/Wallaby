@@ -56,19 +56,19 @@ internal sealed class SinkDispatcher
             var batch = new SinkBatch(sinkName, records);
             try
             {
-                await _retry.ExecuteAsync(async token =>
+                await _retry.ExecuteAsync(async static (state, token) =>
                 {
-                    var result = await sink.DeliverAsync(batch, token);
+                    var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
                     switch (result.Status)
                     {
                         case DeliveryStatus.Success:
                             return;
                         case DeliveryStatus.RetryableFailure:
-                            throw new SinkRetryableException(sinkName, result.Error ?? "(unspecified)", result.Exception);
+                            throw new SinkRetryableException(state.SinkName, result.Error ?? "(unspecified)", result.Exception);
                         default:
-                            throw new SinkDeliveryException(sinkName, result.Error ?? "(unspecified)", result.Exception);
+                            throw new SinkDeliveryException(state.SinkName, result.Error ?? "(unspecified)", result.Exception);
                     }
-                }, ct);
+                }, (Sink: sink, SinkName: sinkName, SinkBatch: batch), ct);
             }
             catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
             {
