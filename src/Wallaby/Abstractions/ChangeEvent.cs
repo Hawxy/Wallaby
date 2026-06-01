@@ -57,6 +57,7 @@ public sealed record ChangeEvent<TEntity>(
         internal init;
     }
 
+    /// <summary>The single-column primary key cast to <typeparamref name="TKey"/> (for entities with a non-composite key).</summary>
     public TKey GetPrimaryKey<TKey>()
     {
         return (TKey)PrimaryKey[0];

@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Polly;
 using Polly.Retry;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 
 namespace Wallaby.Internal.Pipeline;
 
@@ -24,13 +26,17 @@ internal sealed class SinkDispatcher
     private readonly IReadOnlyDictionary<string, ISink> _sinks;
     private readonly bool _skipFailedBatches;
     private readonly ILogger _logger;
+    private readonly WallabyInstrumentation _instr;
     private readonly ResiliencePipeline _retry;
 
-    public SinkDispatcher(IReadOnlyDictionary<string, ISink> sinks, bool skipFailedBatches = false, ILogger? logger = null)
+    public SinkDispatcher(
+        IReadOnlyDictionary<string, ISink> sinks, bool skipFailedBatches = false, ILogger? logger = null,
+        WallabyInstrumentation? instrumentation = null)
     {
         _sinks = sinks;
         _skipFailedBatches = skipFailedBatches;
         _logger = logger ?? NullLogger.Instance;
+        _instr = instrumentation ?? WallabyInstrumentation.NoOp;
         _retry = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
             {
@@ -54,29 +60,48 @@ internal sealed class SinkDispatcher
             }
 
             var batch = new SinkBatch(sinkName, records);
+            using var activity = _instr.StartSinkDelivery();
+            if (activity is not null)
+            {
+                activity.SetTag(WallabyInstrumentation.SinkTag, sinkName);
+                activity.SetTag(WallabyInstrumentation.DestinationTag, records.Count > 0 ? records[0].Destination : null);
+                activity.SetTag("wallaby.batch.size", records.Count);
+            }
+
             try
             {
                 await _retry.ExecuteAsync(async static (state, token) =>
                 {
+                    var attemptStart = WallabyInstrumentation.StartTimer();
                     var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
                     switch (result.Status)
                     {
                         case DeliveryStatus.Success:
+                            state.Instr.RecordSinkDelivery(state.SinkName, WallabyInstrumentation.DeliverySuccess, attemptStart);
+                            state.Instr.RecordSinkRecordsDelivered(state.SinkName, state.SinkBatch.Records.Count);
                             return;
                         case DeliveryStatus.RetryableFailure:
+                            state.Instr.RecordSinkDelivery(state.SinkName, WallabyInstrumentation.DeliveryRetryable, attemptStart);
+                            state.Instr.RecordSinkFailure(state.SinkName, WallabyInstrumentation.DeliveryRetryable);
+                            state.Activity?.AddEvent(new ActivityEvent("retry"));
                             throw new SinkRetryableException(state.SinkName, result.Error ?? "(unspecified)", result.Exception);
                         default:
+                            state.Instr.RecordSinkDelivery(state.SinkName, WallabyInstrumentation.DeliveryPermanent, attemptStart);
+                            state.Instr.RecordSinkFailure(state.SinkName, WallabyInstrumentation.DeliveryPermanent);
                             throw new SinkDeliveryException(state.SinkName, result.Error ?? "(unspecified)", result.Exception);
                     }
-                }, (Sink: sink, SinkName: sinkName, SinkBatch: batch), ct);
+                }, (Sink: sink, SinkName: sinkName, SinkBatch: batch, Instr: _instr, Activity: activity), ct);
             }
             catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
             {
+                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+
                 if (!_skipFailedBatches)
                 {
                     throw;
                 }
 
+                _instr.RecordSinkFailure(sinkName, WallabyInstrumentation.DeliveryDeadLetter);
                 _logger.LogWarning(ex, "Dead-lettering {Count} record(s) for sink '{Sink}' (DeadLetterPolicy=Skip).",
                     records.Count, sinkName);
             }

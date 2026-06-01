@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Materialization;
 using Wallaby.Internal.Pipeline;
@@ -69,6 +70,9 @@ public sealed class CdcTestHarness : IAsyncDisposable
 
     public CdcNames Names { get; }
     public TestDatabase Db { get; }
+
+    /// <summary>Telemetry holder threaded through the pipeline; attach a <c>MetricCollector</c>/<c>ActivityListener</c> for assertions.</summary>
+    public WallabyInstrumentation Instrumentation { get; } = new();
 
     /// <summary>Backfill keyset page size (set before <see cref="StartAsync"/>).</summary>
     public int ChunkSize { get; set; } = 50;
@@ -196,22 +200,22 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _stream = new LogicalReplicationStream(_connectionString, Names.Slot, Names.Publication);
         _coordinator = new WatermarkBackfillCoordinator(
-            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance) { ChunkSize = ChunkSize };
+            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
 
         IEnrichmentContextProvider contextProvider = _scopedContextFactory is { } scoped
             ? new ScopedEnrichmentContextProvider((key, _) => scoped(key), NullServiceProvider.Instance)
             : new DefaultEnrichmentContextProvider(_newContext);
         IChangeRouter router = _broadcast
             ? new BroadcastChangeRouter(_sinks.Keys.ToList())
-            : new MappingChangeRouter(_mappings, contextProvider);
+            : new MappingChangeRouter(_mappings, contextProvider, Instrumentation);
 
         _dependentResolver = _cdcModel!.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_dataSource, _cdcModel)
+            ? new DependentChangeResolver(_dataSource, _cdcModel, Instrumentation)
             : null;
 
         _pipeline = new CdcPipeline(
-            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks),
-            new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance, _coordinator, _dependentResolver);
+            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, instrumentation: Instrumentation),
+            new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance, _coordinator, _dependentResolver, Instrumentation);
 
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
         return Task.CompletedTask;

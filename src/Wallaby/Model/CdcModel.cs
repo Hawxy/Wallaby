@@ -11,11 +11,13 @@ public sealed class CdcModel
     private readonly Dictionary<Type, CapturedTable> _byClrType;
     private readonly Dictionary<(string Schema, string Table), List<DependentBinding>> _bindingsByDependentTable;
 
+    /// <summary>Create a model with no dependent fan-out bindings.</summary>
     public CdcModel(IReadOnlyList<CapturedTable> tables)
         : this(tables, Array.Empty<DependentBinding>())
     {
     }
 
+    /// <summary>Create a model from captured tables and the dependent fan-out bindings between them.</summary>
     public CdcModel(IReadOnlyList<CapturedTable> tables, IReadOnlyList<DependentBinding> dependentBindings)
     {
         Tables = tables ?? throw new ArgumentNullException(nameof(tables));

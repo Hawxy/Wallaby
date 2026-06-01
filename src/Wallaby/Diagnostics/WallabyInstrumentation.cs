@@ -1,0 +1,224 @@
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using Wallaby.Abstractions;
+
+namespace Wallaby.Diagnostics;
+
+/// <summary>
+/// Owns Wallaby's OpenTelemetry <see cref="System.Diagnostics.Metrics.Meter"/> and
+/// <see cref="System.Diagnostics.ActivitySource"/> plus every instrument they expose.
+/// </summary>
+public sealed class WallabyInstrumentation : IDisposable
+{
+    /// <summary>The name of the <see cref="System.Diagnostics.Metrics.Meter"/> Wallaby publishes metrics through.</summary>
+    public const string MeterName = "Wallaby";
+
+    /// <summary>The name of the <see cref="System.Diagnostics.ActivitySource"/> Wallaby publishes traces through.</summary>
+    public const string ActivitySourceName = "Wallaby";
+
+    // ---- attribute keys ----
+    internal const string SlotTag = "wallaby.slot";
+    internal const string SinkTag = "wallaby.sink";
+    internal const string EntityTag = "wallaby.entity";
+    internal const string TableTag = "wallaby.table";
+    internal const string ActionTag = "wallaby.action";
+    internal const string SourceTag = "wallaby.source";
+    internal const string DeliveryOutcomeTag = "wallaby.delivery.outcome";
+    internal const string DestinationTag = "wallaby.destination";
+
+    // ---- span names ----
+    internal const string TransactionActivity = "transaction";
+    internal const string DependentResolveActivity = "dependent.resolve";
+    internal const string RouteActivity = "route";
+    internal const string TransformActivity = "transform";
+    internal const string SinkDeliverActivity = "sink.deliver";
+    internal const string BackfillChunkActivity = "backfill.chunk";
+    internal const string AckActivity = "ack";
+
+    // ---- low-cardinality attribute values ----
+    internal const string SourceLive = "live";
+    internal const string SourceBackfill = "backfill";
+    internal const string DeliverySuccess = "success";
+    internal const string DeliveryRetryable = "retryable";
+    internal const string DeliveryPermanent = "permanent";
+    internal const string DeliveryDeadLetter = "dead_letter";
+
+    /// <summary>A shared, never-observed instance for components constructed outside DI (tests, direct use).</summary>
+    internal static readonly WallabyInstrumentation NoOp = new();
+
+    private readonly Meter _meter;
+    private readonly ActivitySource _activitySource;
+
+    private readonly Counter<long> _changesReceived;
+    private readonly Histogram<double> _ingestionLag;
+    private readonly Counter<long> _dependentSynthetic;
+    private readonly Histogram<double> _transformDuration;
+    private readonly Histogram<double> _sinkDeliveryDuration;
+    private readonly Counter<long> _sinkRecordsDelivered;
+    private readonly Counter<long> _sinkDeliveryFailures;
+    private readonly Counter<long> _backfillRows;
+    private readonly UpDownCounter<int> _backfillActive;
+    private readonly Histogram<double> _backfillChunkDuration;
+
+    /// <summary>Create instrumentation whose meter is owned by the host's <see cref="IMeterFactory"/>.</summary>
+    internal WallabyInstrumentation(IMeterFactory meterFactory)
+        : this(meterFactory.Create(MeterName))
+    {
+    }
+
+    /// <summary>Create stand-alone instrumentation (no <see cref="IMeterFactory"/>); used for tests and the no-op instance.</summary>
+    internal WallabyInstrumentation()
+        : this(new Meter(MeterName))
+    {
+    }
+
+    private WallabyInstrumentation(Meter meter)
+    {
+        _meter = meter;
+        _activitySource = new ActivitySource(ActivitySourceName);
+
+        _changesReceived = _meter.CreateCounter<long>(
+            "wallaby.changes.received", unit: "{change}", description: "Materialized change events received from replication and backfill.");
+        _ingestionLag = _meter.CreateHistogram<double>(
+            "wallaby.ingestion.lag", unit: "s", description: "Delay between a source transaction's commit and Wallaby receiving it.");
+        _dependentSynthetic = _meter.CreateCounter<long>(
+            "wallaby.dependent.synthetic", unit: "{change}", description: "Synthetic parent changes produced by dependent-table fan-out.");
+        _transformDuration = _meter.CreateHistogram<double>(
+            "wallaby.transform.duration", unit: "s", description: "Time spent invoking a mapping's transform for a batch.");
+        _sinkDeliveryDuration = _meter.CreateHistogram<double>(
+            "wallaby.sink.delivery.duration", unit: "s", description: "Duration of a single sink delivery attempt.");
+        _sinkRecordsDelivered = _meter.CreateCounter<long>(
+            "wallaby.sink.records.delivered", unit: "{record}", description: "Records accepted by a sink.");
+        _sinkDeliveryFailures = _meter.CreateCounter<long>(
+            "wallaby.sink.delivery.failures", unit: "{failure}", description: "Failed sink deliveries by outcome.");
+        _backfillRows = _meter.CreateCounter<long>(
+            "wallaby.backfill.rows", unit: "{row}", description: "Rows copied during backfill.");
+        _backfillActive = _meter.CreateUpDownCounter<int>(
+            "wallaby.backfill.active", unit: "{table}", description: "Tables currently being backfilled.");
+        _backfillChunkDuration = _meter.CreateHistogram<double>(
+            "wallaby.backfill.chunk.duration", unit: "s", description: "Time to read and emit one backfill chunk.");
+    }
+
+    /// <summary>The underlying meter (exposed for tests that attach a <c>MetricCollector</c>).</summary>
+    internal Meter Meter => _meter;
+
+    // ---- timing ----
+
+    /// <summary>Capture a start timestamp for a duration measurement (pair with a <c>Record*Duration</c> call).</summary>
+    internal static long StartTimer() => Stopwatch.GetTimestamp();
+
+    private static double ElapsedSeconds(long startTimestamp) => Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds;
+
+    // ---- spans ----
+
+    internal Activity? StartTransaction() => _activitySource.StartActivity(TransactionActivity, ActivityKind.Consumer);
+    internal Activity? StartDependentResolve() => _activitySource.StartActivity(DependentResolveActivity);
+    internal Activity? StartRoute() => _activitySource.StartActivity(RouteActivity);
+    internal Activity? StartTransform() => _activitySource.StartActivity(TransformActivity);
+    internal Activity? StartSinkDelivery() => _activitySource.StartActivity(SinkDeliverActivity, ActivityKind.Producer);
+    internal Activity? StartBackfillChunk() => _activitySource.StartActivity(BackfillChunkActivity);
+    internal Activity? StartAck() => _activitySource.StartActivity(AckActivity);
+
+    // ---- ingestion / pipeline ----
+
+    internal void RecordChange(string slot, ChangeAction action, bool backfill)
+    {
+        if (!_changesReceived.Enabled)
+        {
+            return;
+        }
+
+        var tags = new TagList
+        {
+            { SlotTag, slot },
+            { ActionTag, ActionString(action) },
+            { SourceTag, backfill ? SourceBackfill : SourceLive },
+        };
+        _changesReceived.Add(1, tags);
+    }
+
+    internal void RecordIngestionLag(string slot, double lagSeconds)
+    {
+        if (lagSeconds >= 0)
+        {
+            _ingestionLag.Record(lagSeconds, new KeyValuePair<string, object?>(SlotTag, slot));
+        }
+    }
+
+    internal void RecordDependentSynthetic(string table, int count)
+    {
+        if (count > 0)
+        {
+            _dependentSynthetic.Add(count, new KeyValuePair<string, object?>(TableTag, table));
+        }
+    }
+
+    // ---- transform ----
+
+    internal void RecordTransformDuration(string entity, long startTimestamp)
+    {
+        if (_transformDuration.Enabled)
+        {
+            _transformDuration.Record(ElapsedSeconds(startTimestamp), new KeyValuePair<string, object?>(EntityTag, entity));
+        }
+    }
+
+    // ---- sink delivery ----
+
+    internal void RecordSinkDelivery(string sink, string outcome, long startTimestamp)
+    {
+        if (_sinkDeliveryDuration.Enabled)
+        {
+            _sinkDeliveryDuration.Record(
+                ElapsedSeconds(startTimestamp), new TagList { { SinkTag, sink }, { DeliveryOutcomeTag, outcome } });
+        }
+    }
+
+    internal void RecordSinkRecordsDelivered(string sink, long count)
+    {
+        if (count > 0)
+        {
+            _sinkRecordsDelivered.Add(count, new KeyValuePair<string, object?>(SinkTag, sink));
+        }
+    }
+
+    internal void RecordSinkFailure(string sink, string outcome)
+        => _sinkDeliveryFailures.Add(1, new TagList { { SinkTag, sink }, { DeliveryOutcomeTag, outcome } });
+
+    // ---- backfill ----
+
+    internal void BackfillStarted() => _backfillActive.Add(1);
+    internal void BackfillCompleted() => _backfillActive.Add(-1);
+
+    internal void RecordBackfillRows(string table, long rows)
+    {
+        if (rows > 0)
+        {
+            _backfillRows.Add(rows, new KeyValuePair<string, object?>(TableTag, table));
+        }
+    }
+
+    internal void RecordBackfillChunkDuration(string table, long startTimestamp)
+    {
+        if (_backfillChunkDuration.Enabled)
+        {
+            _backfillChunkDuration.Record(ElapsedSeconds(startTimestamp), new KeyValuePair<string, object?>(TableTag, table));
+        }
+    }
+
+    private static string ActionString(ChangeAction action) => action switch
+    {
+        ChangeAction.Insert => "insert",
+        ChangeAction.Update => "update",
+        ChangeAction.Delete => "delete",
+        ChangeAction.Read => "read",
+        _ => "unknown",
+    };
+
+    /// <summary>Disposes the meter and activity source (invoked on host shutdown for the DI singleton).</summary>
+    public void Dispose()
+    {
+        _meter.Dispose();
+        _activitySource.Dispose();
+    }
+}

@@ -1,7 +1,9 @@
+using System.Diagnostics.Metrics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Hosting;
 using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
@@ -30,6 +32,9 @@ public static class CdcServiceCollectionExtensions
         services.AddSingleton(configuration.Options);
 
         services.AddSingleton(_ => new CdcDataSource(configuration.Options.ConnectionString));
+        
+        services.AddMetrics();
+        services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));
 
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(sp.GetRequiredService<CdcDataSource>().Source));

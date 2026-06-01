@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.Diagnostics;
 using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Materialization;
@@ -27,6 +28,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private readonly CdcDataSource _dataSource;
     private readonly IClusterLock _clusterLock;
     private readonly IServiceProvider _services;
+    private readonly WallabyInstrumentation _instrumentation;
     private readonly ILogger<CdcRuntime<TContext>> _logger;
 
     // Built once.
@@ -46,6 +48,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         CdcDataSource dataSource,
         IClusterLock clusterLock,
         IServiceProvider services,
+        WallabyInstrumentation instrumentation,
         ILogger<CdcRuntime<TContext>> logger)
     {
         _dbContextFactory = dbContextFactory;
@@ -54,6 +57,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _dataSource = dataSource;
         _clusterLock = clusterLock;
         _services = services;
+        _instrumentation = instrumentation;
         _logger = logger;
     }
 
@@ -107,7 +111,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
         var pipeline = new CdcPipeline(
             stream, new ChangeEventFactory(_materializer), _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
-            _coordinator, _dependentResolver);
+            _coordinator, _dependentResolver, _instrumentation);
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var scheduler = new BackfillScheduler(
@@ -192,12 +196,13 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
             : new DefaultEnrichmentContextProvider(() => _dbContextFactory.CreateDbContext());
-        _router = new MappingChangeRouter(mappings, contextProvider);
-        _dispatcher = new SinkDispatcher(sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger);
+        _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
+        _dispatcher = new SinkDispatcher(
+            sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(
-            _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger) { ChunkSize = _options.ChunkSize };
+            _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
         _dependentResolver = _cdcModel.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_dataSource.Source, _cdcModel)
+            ? new DependentChangeResolver(_dataSource.Source, _cdcModel, _instrumentation)
             : null;
         _checkpoints = new PostgresCheckpointStore(_dataSource.Source);
         _selfConfigurator = new PostgresSelfConfigurator(

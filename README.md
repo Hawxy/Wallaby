@@ -104,6 +104,21 @@ dotnet run --project samples/Sample.WorkerApp             # self-configures, bac
 Insert/update/delete rows in the `products` table and watch the Meilisearch `products` index stay in sync
 (`curl http://localhost:7700/indexes/products/search -H "Authorization: Bearer masterKey"`).
 
+## Observability
+
+Wallaby emits OpenTelemetry **metrics and traces** through the built-in .NET `Meter`/`ActivitySource`
+(no OpenTelemetry SDK dependency). Observe it by adding its meter and source to your pipeline:
+
+```csharp
+services.AddOpenTelemetry()
+    .WithMetrics(m => m.AddMeter("Wallaby"))
+    .WithTracing(t => t.AddSource("Wallaby"));
+```
+
+You get replication lag, throughput, transform/sink/backfill latencies and outcomes, and a span per
+transaction → transform → sink delivery. See [docs/observability.md](docs/observability.md) for the full
+metric and span catalog.
+
 ## Tests
 
 - Unit tests (no Docker): `dotnet run --project tests/EFCore.CDC.UnitTests`

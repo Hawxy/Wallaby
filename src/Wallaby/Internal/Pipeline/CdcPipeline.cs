@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.State;
@@ -27,8 +28,11 @@ internal sealed class CdcPipeline(
     string slotName,
     ILogger logger,
     WatermarkBackfillCoordinator? backfill = null,
-    DependentChangeResolver? dependentResolver = null)
+    DependentChangeResolver? dependentResolver = null,
+    WallabyInstrumentation? instrumentation = null)
 {
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
+
     /// <summary>The highest LSN acknowledged to the server. Useful for observing progress.</summary>
     public ulong LastAcknowledgedLsn { get; private set; }
 
@@ -38,6 +42,25 @@ internal sealed class CdcPipeline(
 
         await foreach (var transaction in stream.ReadAsync(ct))
         {
+            var lagSeconds = transaction.CommitTimestamp is { } commitTs
+                ? Math.Max(0, (DateTimeOffset.UtcNow - commitTs).TotalSeconds)
+                : -1;
+
+            using var activity = _instr.StartTransaction();
+            if (activity is not null)
+            {
+                activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
+                activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
+                activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
+                activity.SetTag("wallaby.txn.size", transaction.Changes.Count);
+                if (lagSeconds >= 0)
+                {
+                    activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
+                }
+            }
+
+            _instr.RecordIngestionLag(slotName, lagSeconds);
+
             var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
             foreach (var raw in transaction.Changes)
             {
@@ -58,6 +81,11 @@ internal sealed class CdcPipeline(
                         }
                     }
                 }
+            }
+
+            foreach (var ev in appEvents)
+            {
+                _instr.RecordChange(slotName, ev.Action, backfill: false);
             }
 
             // A low watermark opens recording for its table before subsequent live changes are seen.
@@ -99,14 +127,20 @@ internal sealed class CdcPipeline(
                 }
             }
 
-            await stream.AcknowledgeAsync(transaction.EndLsn, ct);
-            LastAcknowledgedLsn = transaction.EndLsn;
-            await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
+            using (var ackActivity = _instr.StartAck())
+            {
+                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
+                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
+                await stream.AcknowledgeAsync(transaction.EndLsn, ct);
+                LastAcknowledgedLsn = transaction.EndLsn;
+                await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
+            }
         }
     }
 
     private async Task EmitBackfillChunkAsync(PendingWindow window, CancellationToken ct)
     {
+        using var activity = _instr.StartBackfillChunk();
         try
         {
             var events = new List<ChangeEvent>(window.Buffer.Count);
@@ -117,6 +151,17 @@ internal sealed class CdcPipeline(
                 {
                     events.Add(changeEvent);
                 }
+            }
+
+            if (activity is not null)
+            {
+                activity.SetTag(WallabyInstrumentation.TableTag, window.QualifiedTable);
+                activity.SetTag("wallaby.chunk.size", events.Count);
+            }
+
+            foreach (var ev in events)
+            {
+                _instr.RecordChange(slotName, ev.Action, backfill: true);
             }
 
             if (events.Count > 0)
@@ -132,6 +177,8 @@ internal sealed class CdcPipeline(
 
     private async Task DispatchAsync(IReadOnlyList<ChangeEvent> events, CancellationToken ct)
     {
+        using var activity = _instr.StartRoute();
+        activity?.SetTag("wallaby.batch.size", events.Count);
         var routed = await router.RouteAsync(events, ct);
         if (routed.Count > 0)
         {

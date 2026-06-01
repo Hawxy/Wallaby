@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Model;
 
 namespace Wallaby.Internal.Pipeline;
@@ -12,11 +13,12 @@ namespace Wallaby.Internal.Pipeline;
 /// <c>SELECT</c> against the source database. Returned <see cref="RawChange"/>s carry the originating
 /// transaction's commit metadata so the pipeline's ordering and watermark accounting are preserved.
 /// </summary>
-internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcModel model)
+internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcModel model, WallabyInstrumentation? instrumentation = null)
 {
     // Bindings live for the process lifetime, so a concurrent cache keyed by binding identity is
     // safe; the resolver itself is created once.
     private readonly ConcurrentDictionary<DependentBinding, BindingPlan> _planCache = new();
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     public async Task<IReadOnlyList<RawChange>> ResolveAsync(RawChange change, CancellationToken ct)
     {
@@ -42,6 +44,8 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcMo
         }
 
         var synthetic = new List<RawChange>();
+        using var activity = _instr.StartDependentResolve();
+        activity?.SetTag(WallabyInstrumentation.TableTag, change.QualifiedName);
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         foreach (var binding in bindings)
@@ -55,6 +59,8 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcMo
             await ResolveOneAsync(connection, change, plan, values, synthetic, ct);
         }
 
+        activity?.SetTag("wallaby.dependent.count", synthetic.Count);
+        _instr.RecordDependentSynthetic(change.QualifiedName, synthetic.Count);
         return synthetic;
     }
 

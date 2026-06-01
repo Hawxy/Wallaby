@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 
 namespace Wallaby.Internal.Pipeline;
 
@@ -13,8 +14,10 @@ namespace Wallaby.Internal.Pipeline;
 /// </summary>
 internal sealed class MappingChangeRouter(
     IReadOnlyDictionary<Type, EntityMapping> mappings,
-    IEnrichmentContextProvider contextProvider) : IChangeRouter
+    IEnrichmentContextProvider contextProvider,
+    WallabyInstrumentation? instrumentation = null) : IChangeRouter
 {
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
     private static readonly object NullScopeKey = new();
     private static readonly object SharedContextKey = new();
 
@@ -59,8 +62,18 @@ internal sealed class MappingChangeRouter(
                     var subset = scopeGroup.ToList();
                     var destination = mapping.ResolveDestination(scopeKey);
                     var db = GetOrCreateContext(contexts, scopeKey);
+                    var entityName = mapping.EntityClrType.Name;
 
+                    using var activity = _instr.StartTransform();
+                    if (activity is not null)
+                    {
+                        activity.SetTag(WallabyInstrumentation.EntityTag, entityName);
+                        activity.SetTag("wallaby.batch.size", subset.Count);
+                    }
+
+                    var transformStart = WallabyInstrumentation.StartTimer();
                     var documents = await mapping.Transform.InvokeAsync(db, subset, ct);
+                    _instr.RecordTransformDuration(entityName, transformStart);
 
                     foreach (var change in subset)
                     {

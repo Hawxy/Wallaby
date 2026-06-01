@@ -25,7 +25,12 @@ public sealed record DependentLookupColumn(string DependentColumn, string Primar
 /// </remarks>
 public sealed class DependentBinding
 {
+    /// <summary>The mapped (primary) table whose rows are re-emitted as synthetic updates.</summary>
     public required CapturedTable PrimaryTable { get; init; }
+
+    /// <summary>The table whose changes trigger the fan-out (a navigation principal or a join/owned table).</summary>
     public required CapturedTable DependentTable { get; init; }
+
+    /// <summary>How to map the changed dependent row back to the affected primary rows.</summary>
     public required IReadOnlyList<DependentLookupColumn> Lookup { get; init; }
 }

@@ -25,6 +25,12 @@ export default defineConfig({
           { text: 'Meilisearch', link: '/sinks/meilisearch' },
           { text: 'Custom', link: '/sinks/custom' },
         ]
+      },
+      {
+        text: 'Operations',
+        items: [
+          { text: 'Observability', link: '/observability' }
+        ]
       }
     ],
 

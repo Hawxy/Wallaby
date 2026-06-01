@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.Materialization;
 using Wallaby.Internal.State;
 using Wallaby.Model;
@@ -17,10 +18,11 @@ namespace Wallaby.Internal.Backfill;
 /// watermark — guaranteeing no gaps and that live changes always win for overlapping keys.
 /// </summary>
 internal sealed class WatermarkBackfillCoordinator(
-    NpgsqlDataSource dataSource, IBackfillStateStore store, ILogger logger)
+    NpgsqlDataSource dataSource, IBackfillStateStore store, ILogger logger, WallabyInstrumentation? instrumentation = null)
 {
     private readonly ConcurrentDictionary<string, PendingWindow> _byToken = new();
     private readonly ConcurrentDictionary<string, PendingWindow> _recordingByTable = new();
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     public int ChunkSize { get; init; } = 500;
 
@@ -36,37 +38,49 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.LogInformation("Starting backfill of {Table}.", table.QualifiedName);
 
-        // Hold a single connection across all watermark emissions for this backfill — keeps the
-        // session alive and avoids the per-watermark open/auth overhead (two emissions per chunk).
-        await using var emitter = await dataSource.OpenConnectionAsync(ct);
-
-        while (!ct.IsCancellationRequested)
+        _instr.BackfillStarted();
+        try
         {
-            var window = new PendingWindow
+            // Hold a single connection across all watermark emissions for this backfill — keeps the
+            // session alive and avoids the per-watermark open/auth overhead (two emissions per chunk).
+            await using var emitter = await dataSource.OpenConnectionAsync(ct);
+
+            while (!ct.IsCancellationRequested)
             {
-                QualifiedTable = table.QualifiedName,
-                Token = Guid.NewGuid().ToString("N"),
-            };
-            _byToken[window.Token] = window;
+                var chunkStart = WallabyInstrumentation.StartTimer();
+                var window = new PendingWindow
+                {
+                    QualifiedTable = table.QualifiedName,
+                    Token = Guid.NewGuid().ToString("N"),
+                };
+                _byToken[window.Token] = window;
 
-            await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
-            var chunk = await pager.ReadChunkAsync(cursor, ChunkSize, ct);
-            window.Buffer = chunk.Rows;
-            await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
+                await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
+                var chunk = await pager.ReadChunkAsync(cursor, ChunkSize, ct);
+                window.Buffer = chunk.Rows;
+                await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
 
-            await window.Completed.Task.WaitAsync(ct);
+                await window.Completed.Task.WaitAsync(ct);
 
-            rowsCopied += chunk.Rows.Count;
-            cursor = chunk.NextCursor;
-            var status = chunk.HasMore ? BackfillStatus.InProgress : BackfillStatus.Completed;
-            await store.SaveAsync(
-                new BackfillState(table.QualifiedName, status, transformVersion, SerializeCursor(cursor), rowsCopied, DateTimeOffset.UtcNow),
-                ct);
+                rowsCopied += chunk.Rows.Count;
+                cursor = chunk.NextCursor;
+                var status = chunk.HasMore ? BackfillStatus.InProgress : BackfillStatus.Completed;
+                await store.SaveAsync(
+                    new BackfillState(table.QualifiedName, status, transformVersion, SerializeCursor(cursor), rowsCopied, DateTimeOffset.UtcNow),
+                    ct);
 
-            if (!chunk.HasMore)
-            {
-                break;
+                _instr.RecordBackfillRows(table.QualifiedName, chunk.Rows.Count);
+                _instr.RecordBackfillChunkDuration(table.QualifiedName, chunkStart);
+
+                if (!chunk.HasMore)
+                {
+                    break;
+                }
             }
+        }
+        finally
+        {
+            _instr.BackfillCompleted();
         }
 
         logger.LogInformation("Backfill of {Table} complete ({Rows} rows).", table.QualifiedName, rowsCopied);
