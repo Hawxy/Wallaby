@@ -21,7 +21,7 @@ Both target **.NET 10**.
 
 Your Postgres server must already have:
 
-- **`wal_level = logical`** set in ``=postgresql.conf`  required for logical replication.
+- **`wal_level = logical`** set in `postgresql.conf`  required for logical replication.
 - A role with the **`REPLICATION`** attribute (or superuser) for the connection string you give Wallaby.
 - Headroom in `max_replication_slots` and `max_wal_senders` (one slot/sender per Wallaby cluster).
 
@@ -69,7 +69,7 @@ await builder.Build().RunAsync();
 ```
 
 On startup Wallaby validates the server, creates the `wallaby` state schema, the publication, and the
-replication slot, backfills the mapped tables, then streams live changes. Wallably automatically
+replication slot, backfills the mapped tables, then streams live changes. Wallably holds a distributed lock so these operations will only run on a single node within a HA environment.
 
 ## What gets tracked
 
@@ -89,6 +89,7 @@ Captured tables must have a primary key.
 | --- | --- | --- |
 | `SlotName` / `PublicationName` | `efcore_cdc_slot` / `efcore_cdc_pub` | Names Wallaby creates/uses. |
 | `ChunkSize` | `500` | Backfill keyset page size. |
+| `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/transforms#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill. |
 | `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |

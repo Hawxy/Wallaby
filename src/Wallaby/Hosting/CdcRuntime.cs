@@ -40,6 +40,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private PostgresSelfConfigurator _selfConfigurator = null!;
     private PostgresCheckpointStore _checkpoints = null!;
     private DependentChangeResolver? _dependentResolver;
+    private IFanoutQueueStore? _fanoutQueue;
     private IReadOnlyList<(CapturedTable Table, string? Version)> _backfillTables = [];
 
     public CdcRuntime(
@@ -111,7 +112,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
         var pipeline = new CdcPipeline(
             stream, new ChangeEventFactory(_materializer), _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
-            _coordinator, _dependentResolver, _instrumentation);
+            _options.MaxBatchSize, _coordinator, _dependentResolver, _fanoutQueue, _instrumentation);
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var scheduler = new BackfillScheduler(
@@ -130,6 +131,16 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             catch (Exception ex) { _logger.LogError(ex, "Backfill scheduler failed."); }
         }, linked.Token);
 
+        // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
+        var fanoutTask = _fanoutQueue is not null
+            ? Task.Run(async () =>
+            {
+                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger).RunAsync(linked.Token); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { _logger.LogError(ex, "Fan-out queue worker failed."); }
+            }, linked.Token)
+            : Task.CompletedTask;
+
         try
         {
             await pipeline.RunAsync(linked.Token);
@@ -138,6 +149,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         {
             await linked.CancelAsync();
             try { await backfillTask; } catch { /* already logged */ }
+            try { await fanoutTask; } catch { /* already logged */ }
         }
     }
 
@@ -204,6 +216,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _dependentResolver = _cdcModel.DependentBindings.Count > 0
             ? new DependentChangeResolver(_dataSource.Source, _cdcModel, _instrumentation)
             : null;
+        _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource.Source) : null;
         _checkpoints = new PostgresCheckpointStore(_dataSource.Source);
         _selfConfigurator = new PostgresSelfConfigurator(
             _dataSource.Source,

@@ -5,7 +5,7 @@ using Wallaby.Diagnostics;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Sinks;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests.OpenTelemetry;
 
 public class SinkDispatcherTelemetryTests
 {

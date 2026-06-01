@@ -98,6 +98,10 @@ public sealed class CdcBuilder
         {
             throw new CdcConfigurationException("ChunkSize must be greater than zero.");
         }
+        if (options.MaxBatchSize <= 0)
+        {
+            throw new CdcConfigurationException("MaxBatchSize must be greater than zero.");
+        }
         if (_configuration.Sinks.Count == 0)
         {
             throw new CdcConfigurationException("At least one sink must be registered (e.g. AddMeilisearchSink/AddDelegateSink).");

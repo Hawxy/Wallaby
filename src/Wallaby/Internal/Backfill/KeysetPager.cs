@@ -1,3 +1,4 @@
+using System.Text;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Model;
@@ -8,22 +9,79 @@ namespace Wallaby.Internal.Backfill;
 internal sealed record BackfillChunk(IReadOnlyList<RawChange> Rows, object?[]? NextCursor, bool HasMore);
 
 /// <summary>
+/// An optional <c>WHERE</c> filter ANDed into every page a <see cref="KeysetPager"/> reads — used to
+/// restrict a snapshot to the rows affected by a dependent fan-out. <see cref="PredicateSql"/> references
+/// <c>@f0..@fN</c> placeholders matched positionally to <see cref="Parameters"/>.
+/// </summary>
+internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> Parameters)
+{
+    /// <summary>
+    /// Build an <c>IN</c>-list filter matching <paramref name="columns"/> against the distinct value
+    /// <paramref name="tuples"/> (each tuple has one value per column). Single-column lookups produce
+    /// <c>"col" IN (@f0, @f1, …)</c>; composite lookups produce a row-value list
+    /// <c>("a","b") IN ((@f0,@f1), (@f2,@f3), …)</c>. An <c>IN</c>-list (rather than <c>= ANY(array)</c>)
+    /// keeps parameter typing simple and uniform across single/composite keys and persisted-then-reloaded values.
+    /// </summary>
+    public static KeysetFilter ForLookup(IReadOnlyList<string> columns, IReadOnlyList<object?[]> tuples)
+    {
+        var parameters = new List<object?>(columns.Count * tuples.Count);
+        var sql = new StringBuilder();
+
+        if (columns.Count == 1)
+        {
+            var col = PgExec.QuoteIdentifier(columns[0]);
+            sql.Append(col).Append(" IN (");
+            for (var i = 0; i < tuples.Count; i++)
+            {
+                if (i > 0) sql.Append(", ");
+                sql.Append("@f").Append(parameters.Count);
+                parameters.Add(tuples[i][0]);
+            }
+            sql.Append(')');
+        }
+        else
+        {
+            var cols = string.Join(", ", columns.Select(PgExec.QuoteIdentifier));
+            sql.Append('(').Append(cols).Append(") IN (");
+            for (var t = 0; t < tuples.Count; t++)
+            {
+                if (t > 0) sql.Append(", ");
+                sql.Append('(');
+                for (var c = 0; c < columns.Count; c++)
+                {
+                    if (c > 0) sql.Append(", ");
+                    sql.Append("@f").Append(parameters.Count);
+                    parameters.Add(tuples[t][c]);
+                }
+                sql.Append(')');
+            }
+            sql.Append(')');
+        }
+
+        return new KeysetFilter(sql.ToString(), parameters);
+    }
+}
+
+/// <summary>
 /// Reads a table in primary-key order using keyset (cursor) pagination — never OFFSET — so pages are
-/// stable under concurrent writes. Rows are emitted as <see cref="ChangeAction.Read"/> changes.
+/// stable under concurrent writes. Rows are emitted as <see cref="ChangeAction.Read"/> changes. An
+/// optional <see cref="KeysetFilter"/> restricts the scan (e.g. to a dependent fan-out's affected rows).
 /// </summary>
 internal sealed class KeysetPager
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly CapturedTable _table;
+    private readonly KeysetFilter? _filter;
     private readonly string[] _columnNames;
     private readonly int[] _pkIndexInColumns;
     private readonly string _firstPageSqlPrefix;
     private readonly string _nextPageSqlPrefix;
 
-    public KeysetPager(NpgsqlDataSource dataSource, CapturedTable table)
+    public KeysetPager(NpgsqlDataSource dataSource, CapturedTable table, KeysetFilter? filter = null)
     {
         _dataSource = dataSource;
         _table = table;
+        _filter = filter;
         _columnNames = table.Columns.Select(c => c.ColumnName).ToArray();
 
         // Map each primary-key column to its index in _columnNames so we can read PK values
@@ -45,8 +103,14 @@ internal sealed class KeysetPager
         var columns = string.Join(", ", _columnNames.Select(PgExec.QuoteIdentifier));
         var orderBy = string.Join(", ", table.PrimaryKey.Select(c => PgExec.QuoteIdentifier(c.ColumnName)));
         var fromOrderBy = $"FROM {PgExec.QuoteTable(table.Schema, table.TableName)} ";
-        _firstPageSqlPrefix = $"SELECT {columns} {fromOrderBy}ORDER BY {orderBy} LIMIT ";
-        _nextPageSqlPrefix = $"SELECT {columns} {fromOrderBy}WHERE {BuildKeysetPredicate()} ORDER BY {orderBy} LIMIT ";
+
+        var firstWhere = filter is null ? string.Empty : $"WHERE {filter.PredicateSql} ";
+        var nextWhere = filter is null
+            ? $"WHERE {BuildKeysetPredicate()} "
+            : $"WHERE {filter.PredicateSql} AND {BuildKeysetPredicate()} ";
+
+        _firstPageSqlPrefix = $"SELECT {columns} {fromOrderBy}{firstWhere}ORDER BY {orderBy} LIMIT ";
+        _nextPageSqlPrefix = $"SELECT {columns} {fromOrderBy}{nextWhere}ORDER BY {orderBy} LIMIT ";
     }
 
     public async Task<BackfillChunk> ReadChunkAsync(object?[]? cursor, int limit, CancellationToken ct)
@@ -55,6 +119,13 @@ internal sealed class KeysetPager
 
         await using var connection = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, connection);
+        if (_filter is not null)
+        {
+            for (var i = 0; i < _filter.Parameters.Count; i++)
+            {
+                cmd.Parameters.AddWithValue($"f{i}", _filter.Parameters[i] ?? DBNull.Value);
+            }
+        }
         if (cursor is not null)
         {
             for (var i = 0; i < cursor.Length; i++)

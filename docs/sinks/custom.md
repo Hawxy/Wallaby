@@ -7,7 +7,7 @@ outline: deep
 A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere — an HTTP API,
 Kafka, another database, a cache.
 
-## The interface
+## Interface
 
 ```csharp
 public interface ISink
@@ -40,14 +40,16 @@ return DeliveryResult.Permanent("schema rejected");  // non-retryable — dead-l
 ```
 
 Retryable failures are retried with exponential backoff and jitter. A permanent failure (or exhausted
-retries) follows the configured `DeadLetterPolicy`: `Halt` stops the pipeline (the batch is retried after
-the leader restarts); `Skip` logs and drops the batch, then continues.
+retries) follows the configured `DeadLetterPolicy`: 
+- `Halt` stops the pipeline (the batch is retried after the leader restarts); 
+- `Skip` logs and drops the batch, then continues.
 
 ## Idempotency & ordering
 
 Delivery is **at-least-once**: the replication slot only advances after a batch is durably delivered, so a
-crash can redeliver the last batch. Make delivery idempotent — upsert and delete by `DocumentId`. Within a
-sink, records preserve commit order; if you batch internally, preserve it.
+crash can redeliver the last batch. Your sink should make delivery idempotent by supporting upsert and delete by `DocumentId`. 
+
+Sinks should also preserve commit order - if you create batches internally, ensure you preserve it.
 
 ## One-time setup
 
@@ -73,7 +75,7 @@ cdc.AddSink("my-sink", sp => new MySink(sp.GetRequiredService<HttpClient>()));
 
 ## The delegate sink
 
-For in-process handlers (tests, side-effects, quick integrations) skip the class and use a lambda:
+For in-process handlers (tests, side-effects, quick integrations), you can skip the class and use a lambda:
 
 ```csharp
 cdc.AddDelegateSink("audit", async (batch, ct) =>

@@ -53,6 +53,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private CdcPipeline? _pipeline;
     private WatermarkBackfillCoordinator? _coordinator;
     private DependentChangeResolver? _dependentResolver;
+    private IFanoutQueueStore? _fanoutQueue;
     private Task? _pipelineTask;
 
     public CdcTestHarness(string connectionString, Func<DbContext> contextFactory, CdcNames? names = null)
@@ -76,6 +77,13 @@ public sealed class CdcTestHarness : IAsyncDisposable
 
     /// <summary>Backfill keyset page size (set before <see cref="StartAsync"/>).</summary>
     public int ChunkSize { get; set; } = 50;
+
+    /// <summary>Maximum records per dispatched batch and per inline fan-out page (set before <see cref="StartAsync"/>).</summary>
+    public int MaxBatchSize { get; set; } = 1000;
+
+    /// <summary>Number of rows currently in the scoped fan-out queue (for coalescing/offload assertions).</summary>
+    public async Task<int> PendingFanoutJobCountAsync()
+        => _fanoutQueue is null ? 0 : (await _fanoutQueue.ListAsync(_cts?.Token ?? CancellationToken.None)).Count;
 
     /// <summary>The highest LSN acknowledged to the server by the running pipeline.</summary>
     public ulong LastAcknowledgedLsn => _pipeline?.LastAcknowledgedLsn ?? 0;
@@ -212,13 +220,29 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _dependentResolver = _cdcModel!.DependentBindings.Count > 0
             ? new DependentChangeResolver(_dataSource, _cdcModel, Instrumentation)
             : null;
+        _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
         _pipeline = new CdcPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, instrumentation: Instrumentation),
-            new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance, _coordinator, _dependentResolver, Instrumentation);
+            new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
+            MaxBatchSize, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
 
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Drain the offloaded scoped fan-out queue once (running each due re-snapshot to completion). Call
+    /// while the pipeline is running, since each scoped backfill round-trips watermarks through it.
+    /// </summary>
+    public async Task<int> DrainFanoutAsync()
+    {
+        if (_fanoutQueue is null || _coordinator is null || _cts is null)
+        {
+            return 0;
+        }
+        var worker = new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel!, NullLogger.Instance);
+        return await worker.DrainOnceAsync(_cts.Token);
     }
 
     /// <summary>Run a backfill scheduler pass for the declared backfill tables (awaits completion).</summary>
@@ -291,6 +315,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _pipeline = null;
         _coordinator = null;
         _dependentResolver = null;
+        _fanoutQueue = null;
 
         if (fault is not null)
         {

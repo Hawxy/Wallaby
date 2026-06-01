@@ -6,7 +6,7 @@ using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.Pipeline;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests.OpenTelemetry;
 
 public class MappingChangeRouterTelemetryTests
 {

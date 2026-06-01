@@ -25,6 +25,29 @@ public sealed class TestDatabase(string connectionString)
         await ctx.SaveChangesAsync();
     }
 
+    /// <summary>Rename several categories in a single transaction (one CDC batch with multiple dependent changes).</summary>
+    public async Task SetCategoryNamesAsync(IEnumerable<(int Id, string Name)> renames)
+    {
+        await using var ctx = NewContext();
+        foreach (var (id, name) in renames)
+        {
+            var category = await ctx.Categories.FindAsync(id);
+            category!.Name = name;
+        }
+        await ctx.SaveChangesAsync();
+    }
+
+    /// <summary>Rename a category and one of its products in the same transaction (dependent + primary in one batch).</summary>
+    public async Task RenameCategoryAndProductAsync(int categoryId, string categoryName, int productId, string productName)
+    {
+        await using var ctx = NewContext();
+        var category = await ctx.Categories.FindAsync(categoryId);
+        category!.Name = categoryName;
+        var product = await ctx.Products.FindAsync(productId);
+        product!.Name = productName;
+        await ctx.SaveChangesAsync();
+    }
+
     public async Task<int> AddLabelAsync(string name)
     {
         await using var ctx = NewContext();

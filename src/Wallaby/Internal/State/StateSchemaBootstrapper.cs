@@ -33,6 +33,19 @@ internal sealed class StateSchemaBootstrapper
             consistent_point pg_lsn      NULL,
             created_at       timestamptz NOT NULL DEFAULT now()
         );
+
+        CREATE TABLE IF NOT EXISTS wallaby.fanout_queue (
+            table_qualified text        NOT NULL,
+            lookup_hash     text        NOT NULL,
+            lookup_columns  text[]      NOT NULL,
+            lookup_values   jsonb       NOT NULL,
+            status          text        NOT NULL,
+            cursor_json     jsonb       NULL,
+            rows_copied     bigint      NOT NULL DEFAULT 0,
+            requested_at    timestamptz NOT NULL DEFAULT now(),
+            updated_at      timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (table_qualified, lookup_hash)
+        );
         """;
 
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)

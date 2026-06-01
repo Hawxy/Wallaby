@@ -38,7 +38,6 @@ Requests are persisted, so they survive restarts and are executed by whichever n
 leadership, and a request made on a standby node is still honored. `GetStatusAsync()` returns the current
 state of every tracked table.
 
-
 ## How it works
 
 Each table is snapshotted in keyset-paged chunks
@@ -49,8 +48,16 @@ sink path** as live changes. If a row is changed live during the window, the liv
 
 Progress is persisted per table, so a backfill resumes from its last cursor after a restart.
 
+## Scoped (fan-out) backfill
+
+The same engine also re-snapshots a *subset* of a table's rows on demand. When a [dependent fan-out](/transforms#dependent-tables)
+is wider than one page, its tail is enqueued as a **scoped backfill job** (filtered to the affected keys)
+that runs asynchronously on the leader — so the triggering transaction is acknowledged immediately instead
+of blocking on a huge re-index. These jobs coalesce per (table, key set), are chunked and resumable just
+like a full backfill, and emit through the same transform/sink path. See [Transforms → Scaling fan-out](/transforms#scaling-fan-out).
+
 ## Tuning & safety
 
-- `ChunkSize` (default 500) sets the keyset page size.
+- `ChunkSize` (default 500) sets the keyset page size; `MaxBatchSize` (default 1000) bounds each dispatched batch.
 - Re-backfills are safe because sinks are idempotent (upsert/delete by id).
 - A backfill of a large table is chunked and resumable, so it can be interrupted and will continue.

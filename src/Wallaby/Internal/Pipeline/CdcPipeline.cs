@@ -4,6 +4,7 @@ using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.State;
+using Wallaby.Model;
 
 namespace Wallaby.Internal.Pipeline;
 
@@ -11,6 +12,13 @@ namespace Wallaby.Internal.Pipeline;
 /// The live replication pipeline: reads committed transactions, materializes change events, routes them
 /// to sinks, and — only after all sinks accept the batch — acknowledges the commit to the server and
 /// records the checkpoint. This ordering preserves at-least-once delivery.
+/// <para>
+/// Dependent-table changes fan out to synthetic updates of the affected primary rows. The first page per
+/// binding is dispatched inline (excluding any primary key already changed live in the same transaction —
+/// live wins); when more rows remain, the tail is enqueued as a scoped backfill so the transaction can be
+/// acknowledged without waiting on a potentially huge re-index. Every dispatch is sliced into batches of
+/// at most <c>maxBatchSize</c> records so no sink/transform sees an unbounded batch.
+/// </para>
 /// <para>
 /// When a <see cref="WatermarkBackfillCoordinator"/> is supplied, the pipeline also recognizes the
 /// <c>wallaby.watermark.*</c> generic WAL messages that bracket backfill chunks: it records concurrent
@@ -27,8 +35,10 @@ internal sealed class CdcPipeline(
     ICheckpointStore checkpoints,
     string slotName,
     ILogger logger,
+    int maxBatchSize,
     WatermarkBackfillCoordinator? backfill = null,
     DependentChangeResolver? dependentResolver = null,
+    IFanoutQueueStore? fanoutQueue = null,
     WallabyInstrumentation? instrumentation = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
@@ -61,6 +71,7 @@ internal sealed class CdcPipeline(
 
             _instr.RecordIngestionLag(slotName, lagSeconds);
 
+            // Materialize the live changes (no inline fan-out; that is resolved separately below).
             var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
             foreach (var raw in transaction.Changes)
             {
@@ -68,18 +79,6 @@ internal sealed class CdcPipeline(
                 if (changeEvent is not null)
                 {
                     appEvents.Add(changeEvent);
-                }
-
-                if (dependentResolver is not null)
-                {
-                    foreach (var synthetic in await dependentResolver.ResolveAsync(raw, ct))
-                    {
-                        var fannedOut = changeEventFactory.Create(synthetic);
-                        if (fannedOut is not null)
-                        {
-                            appEvents.Add(fannedOut);
-                        }
-                    }
                 }
             }
 
@@ -99,20 +98,15 @@ internal sealed class CdcPipeline(
                     }
                 }
 
-                foreach (var ev in appEvents)
-                {
-                    // Avoid forcing DocumentKey materialization unless a backfill window is recording
-                    // for the same table — the common steady-state hot path.
-                    if (backfill.IsRecording(ev.Metadata.QualifiedTableName))
-                    {
-                        backfill.RecordLiveKey(ev.Metadata.QualifiedTableName, ev.Key);
-                    }
-                }
+                RecordLiveKeys(appEvents);
             }
 
-            if (appEvents.Count > 0)
+            await DispatchChunkedAsync(appEvents, ct);
+
+            // Dependent fan-out: dispatch the first page per binding inline, offload any tail.
+            if (dependentResolver is not null)
             {
-                await DispatchAsync(appEvents, ct);
+                await ResolveAndDispatchFanoutAsync(transaction.Changes, appEvents, ct);
             }
 
             // A high watermark closes the chunk: emit its surviving snapshot rows in stream order.
@@ -136,6 +130,73 @@ internal sealed class CdcPipeline(
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
             }
         }
+    }
+
+    private async Task ResolveAndDispatchFanoutAsync(
+        IReadOnlyList<RawChange> changes, List<ChangeEvent> liveEvents, CancellationToken ct)
+    {
+        var results = await dependentResolver!.ResolveFirstPagesAsync(changes, maxBatchSize, ct);
+        if (results.Count == 0)
+        {
+            return;
+        }
+
+        // A primary row changed live in this transaction already carries the dependent change (the
+        // transform re-reads current state), so skip re-emitting it from the fan-out — live wins.
+        var liveIndex = BuildLiveKeyIndex(liveEvents);
+
+        foreach (var result in results)
+        {
+            var events = new List<ChangeEvent>(result.FirstPage.Count);
+            foreach (var raw in result.FirstPage)
+            {
+                var changeEvent = changeEventFactory.Create(raw);
+                if (changeEvent is null || liveIndex.Contains((changeEvent.Metadata.QualifiedTableName, changeEvent.Key)))
+                {
+                    continue;
+                }
+                events.Add(changeEvent);
+            }
+
+            foreach (var ev in events)
+            {
+                _instr.RecordChange(slotName, ev.Action, backfill: false);
+            }
+            if (backfill is not null)
+            {
+                RecordLiveKeys(events);
+            }
+
+            await DispatchChunkedAsync(events, ct);
+
+            if (result.Continuation is not null && fanoutQueue is not null)
+            {
+                await fanoutQueue.EnqueueAsync(result.Continuation, ct);
+            }
+        }
+    }
+
+    private void RecordLiveKeys(List<ChangeEvent> events)
+    {
+        foreach (var ev in events)
+        {
+            // Avoid forcing DocumentKey materialization unless a backfill window is recording for the
+            // same table — the common steady-state hot path.
+            if (backfill!.IsRecording(ev.Metadata.QualifiedTableName))
+            {
+                backfill.RecordLiveKey(ev.Metadata.QualifiedTableName, ev.Key);
+            }
+        }
+    }
+
+    private static HashSet<(string Table, DocumentKey Key)> BuildLiveKeyIndex(List<ChangeEvent> events)
+    {
+        var index = new HashSet<(string, DocumentKey)>(events.Count);
+        foreach (var ev in events)
+        {
+            index.Add((ev.Metadata.QualifiedTableName, ev.Key));
+        }
+        return index;
     }
 
     private async Task EmitBackfillChunkAsync(PendingWindow window, CancellationToken ct)
@@ -164,14 +225,37 @@ internal sealed class CdcPipeline(
                 _instr.RecordChange(slotName, ev.Action, backfill: true);
             }
 
-            if (events.Count > 0)
-            {
-                await DispatchAsync(events, ct);
-            }
+            await DispatchChunkedAsync(events, ct);
         }
         finally
         {
             window.Completed.TrySetResult();
+        }
+    }
+
+    /// <summary>Route and deliver a set of events, slicing it into batches of at most <c>maxBatchSize</c>.</summary>
+    private async Task DispatchChunkedAsync(IReadOnlyList<ChangeEvent> events, CancellationToken ct)
+    {
+        if (events.Count == 0)
+        {
+            return;
+        }
+
+        if (events.Count <= maxBatchSize)
+        {
+            await DispatchAsync(events, ct);
+            return;
+        }
+
+        for (var start = 0; start < events.Count; start += maxBatchSize)
+        {
+            var count = Math.Min(maxBatchSize, events.Count - start);
+            var slice = new List<ChangeEvent>(count);
+            for (var i = 0; i < count; i++)
+            {
+                slice.Add(events[start + i]);
+            }
+            await DispatchAsync(slice, ct);
         }
     }
 

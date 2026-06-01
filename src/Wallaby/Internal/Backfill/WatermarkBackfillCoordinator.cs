@@ -1,10 +1,8 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
-using Wallaby.Internal.Materialization;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
@@ -16,27 +14,83 @@ namespace Wallaby.Internal.Backfill;
 /// pipeline (which receives those messages through pgoutput as <c>LogicalDecodingMessage</c>) records
 /// concurrent change keys between the watermarks and emits the deduplicated snapshot rows at the high
 /// watermark — guaranteeing no gaps and that live changes always win for overlapping keys.
+/// <para>
+/// The same chunk loop also runs <em>scoped</em> backfills (<see cref="BackfillScopeAsync"/>) that restrict
+/// the snapshot to the rows affected by a dependent fan-out, which is how a wide fan-out's tail is
+/// re-indexed asynchronously without stalling the live stream.
+/// </para>
 /// </summary>
 internal sealed class WatermarkBackfillCoordinator(
     NpgsqlDataSource dataSource, IBackfillStateStore store, ILogger logger, WallabyInstrumentation? instrumentation = null)
 {
+    // Windows awaiting their high watermark. Added by the backfill/fan-out tasks, removed by the pipeline,
+    // so this is the one structure that genuinely crosses threads.
     private readonly ConcurrentDictionary<string, PendingWindow> _byToken = new();
-    private readonly ConcurrentDictionary<string, PendingWindow> _recordingByTable = new();
+
+    // Active recording windows per table. A table can have several at once (a whole-table backfill plus one
+    // or more scoped fan-out backfills), so a live key is fanned into every active window for the table.
+    private readonly Dictionary<string, List<PendingWindow>> _recordingByTable = [];
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     public int ChunkSize { get; init; } = 500;
 
     // ---- backfill task side ----
 
-    /// <summary>Snapshot a table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
+    /// <summary>Snapshot a whole table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
     public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
     {
         var pager = new KeysetPager(dataSource, table);
+        var pkTypes = table.PrimaryKey.Select(c => c.ClrType).ToArray();
         var existing = await store.GetAsync(table.QualifiedName, ct);
-        var cursor = DeserializeCursor(existing?.CursorJson, table);
-        var rowsCopied = existing?.RowsCopied ?? 0;
+        var cursor = KeysetCodec.Deserialize(existing?.CursorJson, pkTypes);
+        var startRows = existing?.RowsCopied ?? 0;
 
         logger.LogInformation("Starting backfill of {Table}.", table.QualifiedName);
+
+        var rowsCopied = await RunChunkLoopAsync(
+            pager, table.QualifiedName, cursor, startRows,
+            (cur, rows, hasMore, token) => store.SaveAsync(
+                new BackfillState(
+                    table.QualifiedName,
+                    hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
+                    transformVersion,
+                    KeysetCodec.Serialize(cur),
+                    rows,
+                    DateTimeOffset.UtcNow),
+                token),
+            ct);
+
+        logger.LogInformation("Backfill of {Table} complete ({Rows} rows).", table.QualifiedName, rowsCopied);
+    }
+
+    /// <summary>
+    /// Snapshot only the rows of <paramref name="spec"/>'s primary table matching its lookup values
+    /// (a dependent fan-out's affected set), resuming from <paramref name="startCursor"/>.
+    /// </summary>
+    public async Task<long> BackfillScopeAsync(
+        ScopedFanoutSpec spec, object?[]? startCursor, long startRows,
+        Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
+    {
+        var filter = KeysetFilter.ForLookup(spec.LookupColumns, spec.LookupValues);
+        var pager = new KeysetPager(dataSource, spec.PrimaryTable, filter);
+
+        logger.LogInformation(
+            "Starting scoped fan-out backfill of {Table} ({Keys} key set(s)).",
+            spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
+
+        var rowsCopied = await RunChunkLoopAsync(pager, spec.PrimaryTable.QualifiedName, startCursor, startRows, saveProgress, ct);
+
+        logger.LogInformation(
+            "Scoped fan-out backfill of {Table} complete ({Rows} rows).", spec.PrimaryTable.QualifiedName, rowsCopied);
+        return rowsCopied;
+    }
+
+    private async Task<long> RunChunkLoopAsync(
+        KeysetPager pager, string qualifiedTable, object?[]? startCursor, long startRows,
+        Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
+    {
+        var cursor = startCursor;
+        var rowsCopied = startRows;
 
         _instr.BackfillStarted();
         try
@@ -50,7 +104,7 @@ internal sealed class WatermarkBackfillCoordinator(
                 var chunkStart = WallabyInstrumentation.StartTimer();
                 var window = new PendingWindow
                 {
-                    QualifiedTable = table.QualifiedName,
+                    QualifiedTable = qualifiedTable,
                     Token = Guid.NewGuid().ToString("N"),
                 };
                 _byToken[window.Token] = window;
@@ -64,13 +118,10 @@ internal sealed class WatermarkBackfillCoordinator(
 
                 rowsCopied += chunk.Rows.Count;
                 cursor = chunk.NextCursor;
-                var status = chunk.HasMore ? BackfillStatus.InProgress : BackfillStatus.Completed;
-                await store.SaveAsync(
-                    new BackfillState(table.QualifiedName, status, transformVersion, SerializeCursor(cursor), rowsCopied, DateTimeOffset.UtcNow),
-                    ct);
+                await saveProgress(cursor, rowsCopied, chunk.HasMore, ct);
 
-                _instr.RecordBackfillRows(table.QualifiedName, chunk.Rows.Count);
-                _instr.RecordBackfillChunkDuration(table.QualifiedName, chunkStart);
+                _instr.RecordBackfillRows(qualifiedTable, chunk.Rows.Count);
+                _instr.RecordBackfillChunkDuration(qualifiedTable, chunkStart);
 
                 if (!chunk.HasMore)
                 {
@@ -83,7 +134,7 @@ internal sealed class WatermarkBackfillCoordinator(
             _instr.BackfillCompleted();
         }
 
-        logger.LogInformation("Backfill of {Table} complete ({Rows} rows).", table.QualifiedName, rowsCopied);
+        return rowsCopied;
     }
 
     // Transactional=true so the message commits with its own auto-commit transaction, preserving
@@ -98,20 +149,30 @@ internal sealed class WatermarkBackfillCoordinator(
 
     public void OnLowWatermark(string token)
     {
-        if (_byToken.TryGetValue(token, out var window))
+        if (!_byToken.TryGetValue(token, out var window))
         {
-            _recordingByTable[window.QualifiedTable] = window;
+            return;
         }
+
+        if (!_recordingByTable.TryGetValue(window.QualifiedTable, out var list))
+        {
+            list = [];
+            _recordingByTable[window.QualifiedTable] = list;
+        }
+        list.Add(window);
     }
 
     public bool IsRecording(string qualifiedTable)
-        => !_recordingByTable.IsEmpty && _recordingByTable.ContainsKey(qualifiedTable);
+        => _recordingByTable.TryGetValue(qualifiedTable, out var list) && list.Count > 0;
 
     public void RecordLiveKey(string qualifiedTable, DocumentKey key)
     {
-        if (_recordingByTable.TryGetValue(qualifiedTable, out var window))
+        if (_recordingByTable.TryGetValue(qualifiedTable, out var list))
         {
-            window.SeenKeys.Add(key);
+            foreach (var window in list)
+            {
+                window.SeenKeys.Add(key);
+            }
         }
     }
 
@@ -119,55 +180,15 @@ internal sealed class WatermarkBackfillCoordinator(
     {
         if (_byToken.TryRemove(token, out var found))
         {
-            _recordingByTable.TryRemove(new KeyValuePair<string, PendingWindow>(found.QualifiedTable, found));
+            if (_recordingByTable.TryGetValue(found.QualifiedTable, out var list))
+            {
+                list.Remove(found);
+            }
             window = found;
             return true;
         }
 
         window = null!;
         return false;
-    }
-
-    // ---- cursor (de)serialization ----
-
-    private static string? SerializeCursor(object?[]? cursor)
-        => cursor is null ? null : JsonSerializer.Serialize(cursor);
-
-    private static object?[]? DeserializeCursor(string? json, CapturedTable table)
-    {
-        if (string.IsNullOrEmpty(json))
-        {
-            return null;
-        }
-
-        var elements = JsonSerializer.Deserialize<JsonElement[]>(json);
-        if (elements is null)
-        {
-            return null;
-        }
-
-        var cursor = new object?[elements.Length];
-        for (var i = 0; i < elements.Length; i++)
-        {
-            cursor[i] = JsonElementToClr(elements[i], table.PrimaryKey[i].ClrType);
-        }
-        return cursor;
-    }
-
-    private static object? JsonElementToClr(JsonElement element, Type target)
-    {
-        var underlying = Nullable.GetUnderlyingType(target) ?? target;
-        return element.ValueKind switch
-        {
-            JsonValueKind.Null => null,
-            JsonValueKind.True or JsonValueKind.False => element.GetBoolean(),
-            JsonValueKind.String => ValueCoercion.ToClr(element.GetString(), target),
-            JsonValueKind.Number when underlying == typeof(long) => element.GetInt64(),
-            JsonValueKind.Number when underlying == typeof(int) || underlying == typeof(short) => element.GetInt32(),
-            JsonValueKind.Number when underlying == typeof(decimal) => element.GetDecimal(),
-            JsonValueKind.Number when underlying == typeof(double) || underlying == typeof(float) => element.GetDouble(),
-            JsonValueKind.Number => element.GetInt64(),
-            _ => ValueCoercion.ToClr(element.GetRawText(), target),
-        };
     }
 }

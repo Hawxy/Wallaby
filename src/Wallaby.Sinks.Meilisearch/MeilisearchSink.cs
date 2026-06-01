@@ -126,7 +126,8 @@ public sealed class MeilisearchSink : ISink
         return ordered;
     }
 
-    private object BuildUpsertDocument(IReadOnlyDictionary<string, object?> document, string id)
+    private IReadOnlyDictionary<string, object?> BuildUpsertDocument(IReadOnlyDictionary<string, object?> document,
+        string id)
     {
         // Documents are field bags. Copy defensively (so a transform-returned dictionary isn't mutated)
         // and stamp the primary key; the Meilisearch client serializes the dictionary as-is.
@@ -135,6 +136,7 @@ public sealed class MeilisearchSink : ISink
         {
             copy[kvp.Key] = kvp.Value;
         }
+
         copy[_options.PrimaryKey] = id;
         return copy;
     }
@@ -155,7 +157,7 @@ public sealed class MeilisearchSink : ISink
     private sealed class IndexGroup(string index)
     {
         public string Index { get; } = index;
-        public List<object> Upserts { get; } = [];
+        public List<IReadOnlyDictionary<string, object?>> Upserts { get; } = [];
         public List<string> Deletions { get; } = [];
     }
 }

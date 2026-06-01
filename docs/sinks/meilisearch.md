@@ -43,7 +43,7 @@ cdc.Map<Product>()
 
 - Your transform's `CdcDocument` fields become the Meilisearch document. Wallaby stamps the configured
   `PrimaryKey` field with the record's document id (derived from the source primary key, or your
-  `KeyedBy(...)` rule) — so you don't include it yourself.
+  `KeyedBy(...)` rule) - so you don't include it yourself.
 - Document ids are sanitized to Meilisearch's allowed set (`[a-zA-Z0-9-_]`); composite-key separators are
   replaced, so composite keys work transparently.
 - A transform that returns `null` for a key (or omits it) issues a **delete** for that id.
@@ -52,7 +52,7 @@ cdc.Map<Product>()
 
 ## Delivery semantics
 
-Network/HTTP/task failures are reported as **retryable** — the dispatcher retries with exponential
+Network/HTTP/task failures are reported as **retryable** - the dispatcher retries with exponential
 backoff. With `WaitForCompletion = true`, a task that finishes `Failed`/`Canceled` also surfaces as a
 failure so the batch isn't acked prematurely. Because Meilisearch upserts are by primary key, redelivery
 after a crash is safe.

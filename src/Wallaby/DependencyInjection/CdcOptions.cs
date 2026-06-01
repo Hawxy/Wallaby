@@ -22,6 +22,14 @@ public sealed class CdcOptions
     /// <summary>Backfill keyset page size.</summary>
     public int ChunkSize { get; set; } = 500;
 
+    /// <summary>
+    /// Maximum number of records handed to a sink (and to a transform) in a single batch. Bounds the
+    /// working set for large live transactions, dependent fan-out, and backfill alike: the pipeline
+    /// slices each dispatch into windows of at most this many records. It also caps the inline portion
+    /// of a dependent fan-out — a wider fan-out's tail is offloaded to a scoped backfill job.
+    /// </summary>
+    public int MaxBatchSize { get; set; } = 1000;
+
     /// <summary>Reconcile an existing publication's table set to match the captured model.</summary>
     public bool ManagePublicationTables { get; set; } = true;
 
