@@ -4,7 +4,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: "Wallaby",
   description: "Postgres CDC Engine for .NET + EFCore",
-  base: '/wallaby/',
+  base: '/Wallaby/',
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
