@@ -10,7 +10,7 @@ namespace Wallaby.Internal.SelfConfig;
 /// </summary>
 internal sealed class ServerValidator(ILogger logger)
 {
-    public async Task ValidateAsync(NpgsqlConnection connection, string slotName, CancellationToken ct)
+    public async Task ValidateAsync(NpgsqlConnection connection, IReadOnlyCollection<string> slotNames, CancellationToken ct)
     {
         var walLevel = await PgExec.ScalarStringAsync(connection, "SHOW wal_level", ct);
         if (!string.Equals(walLevel, "logical", StringComparison.OrdinalIgnoreCase))
@@ -33,14 +33,24 @@ internal sealed class ServerValidator(ILogger logger)
 
         var maxSlots = await PgExec.ScalarLongAsync(connection, "SELECT setting::int FROM pg_settings WHERE name = 'max_replication_slots'", ct);
         var usedSlots = await PgExec.ScalarLongAsync(connection, "SELECT count(*) FROM pg_replication_slots", ct);
-        var slotExists = await PgExec.ScalarLongAsync(
-            connection, "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", ct, ("s", slotName)) > 0;
 
-        if (!slotExists && usedSlots >= maxSlots)
+        // Only slots that don't already exist will consume headroom.
+        var toCreate = 0;
+        foreach (var slotName in slotNames)
+        {
+            var slotExists = await PgExec.ScalarLongAsync(
+                connection, "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", ct, ("s", slotName)) > 0;
+            if (!slotExists)
+            {
+                toCreate++;
+            }
+        }
+
+        if (usedSlots + toCreate > maxSlots)
         {
             throw new CdcConfigurationException(
-                $"No logical replication slot headroom: max_replication_slots={maxSlots}, in use={usedSlots}. " +
-                "Increase max_replication_slots or drop unused slots.");
+                $"No logical replication slot headroom: max_replication_slots={maxSlots}, in use={usedSlots}, " +
+                $"need to create {toCreate} more. Increase max_replication_slots or drop unused slots.");
         }
 
         var maxWalSenders = await PgExec.ScalarLongAsync(connection, "SELECT setting::int FROM pg_settings WHERE name = 'max_wal_senders'", ct);

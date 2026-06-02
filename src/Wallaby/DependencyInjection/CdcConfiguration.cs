@@ -37,6 +37,25 @@ internal sealed class MappingRegistration
     public List<LambdaExpression> DeclaredDependencies { get; } = [];
 }
 
+/// <summary>
+/// A declared external replication slot — an additional pgoutput publication + slot that Wallaby
+/// provisions (and reconciles) for a third-party CDC consumer (e.g. an ELT tool) but never consumes.
+/// Table declarations are resolved to schema-qualified names against the EF Core model at startup.
+/// </summary>
+internal sealed class ExternalSlotRegistration
+{
+    public required string SlotName { get; init; }
+
+    /// <summary>Optional publication name; defaults to <c>"{SlotName}_pub"</c> when unset.</summary>
+    public string? PublicationName { get; set; }
+
+    /// <summary>Tables declared by schema-qualified name.</summary>
+    public List<(string Schema, string Table)> TableNames { get; } = [];
+
+    /// <summary>Tables declared by entity CLR type, resolved against the EF Core model at startup.</summary>
+    public List<Type> EntityTypes { get; } = [];
+}
+
 /// <summary>The immutable result of the fluent builder, consumed by the runtime.</summary>
 internal sealed class CdcConfiguration
 {
@@ -46,6 +65,9 @@ internal sealed class CdcConfiguration
     public List<SinkRegistration> Sinks { get; } = [];
     public Dictionary<Type, MappingRegistration> Mappings { get; } = [];
     public HashSet<Type> RequiresFullReplicaIdentity { get; } = [];
+
+    /// <summary>External pgoutput publication+slot pairs to provision for third-party consumers (e.g. ELT).</summary>
+    public List<ExternalSlotRegistration> ExternalSlots { get; } = [];
 
     /// <summary>Optional factory that builds the enrichment <see cref="DbContext"/> from a row's scope key.</summary>
     public Func<object?, IServiceProvider, DbContext>? ScopedContextFactory { get; set; }

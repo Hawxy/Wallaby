@@ -20,4 +20,11 @@ internal sealed class SelfConfigOptions
     /// failure instead of a warning.
     /// </summary>
     public bool RequireFullReplicaIdentity { get; init; }
+
+    /// <summary>
+    /// Additional pgoutput publication+slot pairs to provision for third-party consumers (e.g. an ELT
+    /// tool). Wallaby creates them, reconciles their table sets, and records them in
+    /// <c>wallaby.slot_registry</c> with <c>kind='external'</c>, but never opens them itself.
+    /// </summary>
+    public IReadOnlyList<ExternalSlotSpec> ExternalSlots { get; init; } = [];
 }

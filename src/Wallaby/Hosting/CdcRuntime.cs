@@ -228,6 +228,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
                 PublicationName = _options.PublicationName,
                 ManagePublicationTables = _options.ManagePublicationTables,
                 RequireFullReplicaIdentity = _options.RequireFullReplicaIdentity,
+                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, model),
             },
             _logger);
         _backfillTables = backfillTables;

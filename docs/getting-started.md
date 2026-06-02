@@ -102,4 +102,5 @@ Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured automa
 - [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
 - [Backfill](/backfill) — initial snapshots and version-triggered reindex.
 - [Multi-tenancy](/multi-tenancy) — per-row scoped contexts and destinations.
+- [External slots](/external-slots) — provision extra publications/slots for an ELT or other CDC consumer.
 - [Observability](/observability) — OpenTelemetry metrics and traces.

@@ -59,6 +59,22 @@ public sealed class CdcBuilder
         return this;
     }
 
+    /// <summary>
+    /// Provision an additional pgoutput publication + logical replication slot for the declared tables.
+    /// Wallaby creates it and reconciles its table set on every startup, but never consumes it — so a
+    /// third-party CDC tool (e.g. an ELT) can read from it independently. Wallaby never drops these slots;
+    /// remove a no-longer-needed slot/publication manually (it pins WAL until then).
+    /// </summary>
+    public CdcBuilder AddExternalSlot(string slotName, Action<ExternalSlotBuilder> configure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slotName);
+        ArgumentNullException.ThrowIfNull(configure);
+        var registration = new ExternalSlotRegistration { SlotName = slotName };
+        configure(new ExternalSlotBuilder(registration));
+        _configuration.ExternalSlots.Add(registration);
+        return this;
+    }
+
     /// <summary>Map an entity to a sink/destination via a transform.</summary>
     public EntityMapBuilder<TEntity> Map<TEntity>() where TEntity : class
     {
@@ -126,6 +142,33 @@ public sealed class CdcBuilder
             if (mapping.DestinationSelector is not null)
             {
                 _configuration.RequiresFullReplicaIdentity.Add(mapping.EntityClrType);
+            }
+        }
+
+        // External slots: names must be non-empty and distinct from the primary slot/publication and from
+        // each other; each must declare at least one table (a pgoutput publication needs tables). The
+        // default publication name here must match ExternalSlotResolver.
+        var slotNames = new HashSet<string>(StringComparer.Ordinal) { options.SlotName };
+        var publicationNames = new HashSet<string>(StringComparer.Ordinal) { options.PublicationName };
+        foreach (var external in _configuration.ExternalSlots)
+        {
+            if (external.TableNames.Count == 0 && external.EntityTypes.Count == 0)
+            {
+                throw new CdcConfigurationException(
+                    $"AddExternalSlot(\"{external.SlotName}\") declares no tables. Add at least one via ForTable(...) or ForEntity<T>().");
+            }
+            if (!slotNames.Add(external.SlotName))
+            {
+                throw new CdcConfigurationException(
+                    $"External slot name '{external.SlotName}' collides with the primary slot or another external slot.");
+            }
+            var publication = string.IsNullOrWhiteSpace(external.PublicationName)
+                ? $"{external.SlotName}_pub"
+                : external.PublicationName;
+            if (!publicationNames.Add(publication))
+            {
+                throw new CdcConfigurationException(
+                    $"External publication name '{publication}' collides with the primary publication or another external slot.");
             }
         }
 

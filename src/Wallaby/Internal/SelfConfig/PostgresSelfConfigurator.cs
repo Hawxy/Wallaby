@@ -22,45 +22,84 @@ internal sealed class PostgresSelfConfigurator(
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
-        await _validator.ValidateAsync(connection, options.SlotName, ct);
+        // Validate headroom for every slot we intend to create (primary + external).
+        var intendedSlots = new List<string>(1 + options.ExternalSlots.Count) { options.SlotName };
+        intendedSlots.AddRange(options.ExternalSlots.Select(s => s.SlotName));
+        await _validator.ValidateAsync(connection, intendedSlots, ct);
+
         await _stateSchema.EnsureAsync(connection, ct);
 
-        var publicationCreated = await EnsurePublicationAsync(connection, model, ct);
-        var (slotCreated, consistentPoint) = await EnsureSlotAsync(connection, ct);
+        var publicationCreated = await EnsurePublicationAsync(
+            connection, options.PublicationName, DesiredTables(model).ToList(), options.ManagePublicationTables, ct);
+        var (slotCreated, consistentPoint) = await EnsureSlotAsync(
+            connection, options.SlotName, options.PublicationName, kind: "primary", ct);
         var warnings = await ValidateReplicaIdentityAsync(connection, model, ct);
+        var externalResults = await EnsureExternalSlotsAsync(connection, ct);
 
         logger.SelfConfigComplete(options.PublicationName, publicationCreated, options.SlotName, slotCreated);
 
         return new SelfConfigResult(
-            options.PublicationName, options.SlotName, publicationCreated, slotCreated, consistentPoint, warnings);
+            options.PublicationName, options.SlotName, publicationCreated, slotCreated, consistentPoint, warnings,
+            externalResults);
     }
 
-    private async Task<bool> EnsurePublicationAsync(NpgsqlConnection connection, CdcModel model, CancellationToken ct)
+    // Provisions each declared external publication+slot. External publications always reconcile to their
+    // declared table set (Wallaby owns it); the slot is created with pgoutput but never opened by Wallaby.
+    private async Task<IReadOnlyList<ExternalSlotResult>> EnsureExternalSlotsAsync(
+        NpgsqlConnection connection, CancellationToken ct)
     {
-        var pub = options.PublicationName;
+        if (options.ExternalSlots.Count == 0)
+        {
+            return [];
+        }
+
+        var results = new List<ExternalSlotResult>(options.ExternalSlots.Count);
+        foreach (var spec in options.ExternalSlots)
+        {
+            var pubCreated = await EnsurePublicationAsync(
+                connection, spec.PublicationName, spec.Tables, reconcile: true, ct);
+            var (slotCreated, _) = await EnsureSlotAsync(
+                connection, spec.SlotName, spec.PublicationName, kind: "external", ct);
+            logger.ExternalSlotConfigured(spec.SlotName, spec.PublicationName);
+            results.Add(new ExternalSlotResult(spec.SlotName, spec.PublicationName, pubCreated, slotCreated));
+        }
+
+        return results;
+    }
+
+    private async Task<bool> EnsurePublicationAsync(
+        NpgsqlConnection connection,
+        string pub,
+        IReadOnlyList<(string Schema, string Table)> desiredTables,
+        bool reconcile,
+        CancellationToken ct)
+    {
         var exists = await PgExec.ScalarLongAsync(
             connection, "SELECT count(*) FROM pg_publication WHERE pubname = @p", ct, ("p", pub)) > 0;
 
         if (!exists)
         {
-            var tableList = string.Join(", ", DesiredTables(model).Select(t => PgExec.QuoteTable(t.Schema, t.Table)));
+            var tableList = string.Join(", ", desiredTables.Select(t => PgExec.QuoteTable(t.Schema, t.Table)));
             await PgExec.ExecuteAsync(
                 connection, $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList}", ct);
-            logger.PublicationCreated(pub, model.Tables.Count);
+            logger.PublicationCreated(pub, desiredTables.Count);
             return true;
         }
 
-        if (options.ManagePublicationTables)
+        if (reconcile)
         {
-            await ReconcilePublicationTablesAsync(connection, model, ct);
+            await ReconcilePublicationTablesAsync(connection, pub, desiredTables, ct);
         }
 
         return false;
     }
 
-    private async Task ReconcilePublicationTablesAsync(NpgsqlConnection connection, CdcModel model, CancellationToken ct)
+    private async Task ReconcilePublicationTablesAsync(
+        NpgsqlConnection connection,
+        string pub,
+        IReadOnlyList<(string Schema, string Table)> desiredTables,
+        CancellationToken ct)
     {
-        var pub = options.PublicationName;
         var current = new HashSet<(string Schema, string Table)>();
 
         await using (var cmd = new NpgsqlCommand(
@@ -74,7 +113,7 @@ internal sealed class PostgresSelfConfigurator(
             }
         }
 
-        var desired = DesiredTables(model).ToHashSet();
+        var desired = desiredTables.ToHashSet();
 
         foreach (var (schema, table) in desired.Where(d => !current.Contains(d)))
         {
@@ -101,35 +140,72 @@ internal sealed class PostgresSelfConfigurator(
         }
     }
 
-    private async Task<(bool Created, string? ConsistentPoint)> EnsureSlotAsync(NpgsqlConnection connection, CancellationToken ct)
+    private async Task<(bool Created, string? ConsistentPoint)> EnsureSlotAsync(
+        NpgsqlConnection connection, string slot, string publication, string kind, CancellationToken ct)
     {
-        var slot = options.SlotName;
-        var exists = await PgExec.ScalarLongAsync(
-            connection, "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", ct, ("s", slot)) > 0;
-
-        if (exists)
+        var existing = await GetSlotAsync(connection, slot, ct);
+        if (existing is not null)
         {
+            var (slotType, plugin) = existing.Value;
+
+            // Adopt a slot we didn't create this run. It must be a pgoutput logical slot — anything else
+            // (a physical slot, or a logical slot on a different output plugin) can't serve this slot's
+            // purpose, so fail fast rather than silently assuming it matches the declaration.
+            if (!string.Equals(slotType, "logical", StringComparison.Ordinal) ||
+                !string.Equals(plugin, "pgoutput", StringComparison.Ordinal))
+            {
+                throw new CdcConfigurationException(
+                    $"Replication slot '{slot}' already exists but is not a pgoutput logical slot " +
+                    $"(slot_type='{slotType}', plugin='{plugin ?? "<none>"}'). Wallaby requires a logical/pgoutput " +
+                    $"slot. Drop it with SELECT pg_drop_replication_slot('{slot}'); or use a different slot name.");
+            }
+
+            // Record the adopted slot so wallaby.slot_registry reflects reality (we don't know its original
+            // consistent point, so keep any value already recorded).
+            await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint: null, kind, ct);
             return (false, null);
         }
 
         var consistentPoint = await PgExec.ScalarStringAsync(
             connection, "SELECT lsn::text FROM pg_create_logical_replication_slot(@s, 'pgoutput')", ct, ("s", slot));
 
-        await PgExec.ExecuteAsync(
-            connection,
-            """
-            INSERT INTO wallaby.slot_registry (slot_name, publication, consistent_point)
-            VALUES (@s, @p, @cp::pg_lsn)
-            ON CONFLICT (slot_name) DO UPDATE
-                SET publication = EXCLUDED.publication,
-                    consistent_point = EXCLUDED.consistent_point
-            """,
-            ct,
-            ("s", slot), ("p", options.PublicationName), ("cp", consistentPoint));
+        await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint, kind, ct);
 
         logger.SlotCreated(slot, consistentPoint);
         return (true, consistentPoint);
     }
+
+    private static async Task<(string SlotType, string? Plugin)?> GetSlotAsync(
+        NpgsqlConnection connection, string slot, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(
+            "SELECT slot_type, plugin FROM pg_replication_slots WHERE slot_name = @s", connection);
+        cmd.Parameters.AddWithValue("s", slot);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        var slotType = reader.GetString(0);
+        var plugin = reader.IsDBNull(1) ? null : reader.GetString(1);
+        return (slotType, plugin);
+    }
+
+    private static Task UpsertSlotRegistryAsync(
+        NpgsqlConnection connection, string slot, string publication, string? consistentPoint, string kind, CancellationToken ct)
+        => PgExec.ExecuteAsync(
+            connection,
+            """
+            INSERT INTO wallaby.slot_registry (slot_name, publication, consistent_point, kind)
+            VALUES (@s, @p, @cp::pg_lsn, @k)
+            ON CONFLICT (slot_name) DO UPDATE
+                SET publication = EXCLUDED.publication,
+                    consistent_point = COALESCE(EXCLUDED.consistent_point, slot_registry.consistent_point),
+                    kind = EXCLUDED.kind
+            """,
+            ct,
+            ("s", slot), ("p", publication), ("cp", consistentPoint), ("k", kind));
 
     private async Task<IReadOnlyList<string>> ValidateReplicaIdentityAsync(
         NpgsqlConnection connection, CdcModel model, CancellationToken ct)
@@ -191,6 +267,9 @@ internal static partial class PostgresSelfConfiguratorLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot '{Slot}' at {ConsistentPoint}.")]
     internal static partial void SlotCreated(this ILogger logger, string slot, string? consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Configured external slot '{Slot}' (publication '{Publication}') for a third-party consumer.")]
+    internal static partial void ExternalSlotConfigured(this ILogger logger, string slot, string publication);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Warning}")]
     internal static partial void ConfigurationWarning(this ILogger logger, string warning);

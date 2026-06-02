@@ -34,6 +34,10 @@ internal sealed class StateSchemaBootstrapper
             created_at       timestamptz NOT NULL DEFAULT now()
         );
 
+        -- Distinguishes Wallaby's own slot ('primary') from slots it provisions for external
+        -- consumers ('external'). Added idempotently for databases bootstrapped before this column.
+        ALTER TABLE wallaby.slot_registry ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'primary';
+
         CREATE TABLE IF NOT EXISTS wallaby.fanout_queue (
             table_qualified text        NOT NULL,
             lookup_hash     text        NOT NULL,

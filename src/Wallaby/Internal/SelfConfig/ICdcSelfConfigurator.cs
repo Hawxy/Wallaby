@@ -9,13 +9,15 @@ namespace Wallaby.Internal.SelfConfig;
 /// <param name="SlotCreated">True if the slot was created during this run.</param>
 /// <param name="ConsistentPoint">The slot's consistent point LSN (text), when the slot was just created.</param>
 /// <param name="Warnings">Non-fatal advisories (e.g. REPLICA IDENTITY recommendations).</param>
+/// <param name="ExternalSlots">Per-external-slot outcomes (empty when none are declared).</param>
 internal sealed record SelfConfigResult(
     string PublicationName,
     string SlotName,
     bool PublicationCreated,
     bool SlotCreated,
     string? ConsistentPoint,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<ExternalSlotResult> ExternalSlots);
 
 /// <summary>
 /// Brings the source Postgres database into a state where CDC can run: validates server settings,
