@@ -76,10 +76,9 @@ replication slot, backfills the mapped tables, then streams live changes. Wallab
 Only entities you **declare** are captured and added to the publication:
 
 - `Map<T>()` declares a table *and* routes it to a sink.
-- `Capture<T>()` declares a table without routing it by itself (useful for [dependent fan-out](/transforms#dependent-tables)).
-- `CaptureAllMappedTables()` opts every mapped entity in (not recommended)
+- `CaptureAllMappedTables()` opts every mapped entity in (not recommended).
 
-Captured tables must have a primary key.
+Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured automatically. Captured tables must have a primary key.
 
 ## Options
 

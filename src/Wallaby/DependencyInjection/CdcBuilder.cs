@@ -23,13 +23,6 @@ public sealed class CdcBuilder
         return this;
     }
 
-    /// <summary>Track changes for a specific entity's table (without routing it anywhere by itself).</summary>
-    public CdcBuilder Capture<TEntity>() where TEntity : class
-    {
-        AddDeclared(typeof(TEntity));
-        return this;
-    }
-
     /// <summary>Track every mapped entity in the model (opt-in; default is explicit declaration).</summary>
     public CdcBuilder CaptureAllMappedTables()
     {

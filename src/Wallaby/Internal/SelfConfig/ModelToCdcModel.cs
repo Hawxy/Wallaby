@@ -32,7 +32,7 @@ internal static class ModelToCdcModel
         if (spec.DeclaredEntities.Count == 0)
         {
             throw new CdcConfigurationException(
-                "No tables were declared for capture. Declare each table with Capture<T>() or Map<T>(), " +
+                "No tables were declared for capture. Map each table with Map<T>(), " +
                 "or opt into CaptureAllMappedTables().");
         }
 
