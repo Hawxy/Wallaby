@@ -34,7 +34,7 @@ internal sealed class FanoutQueueWorker(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Fan-out queue worker pass failed; retrying.");
+                logger.WorkerPassFailed(ex);
                 try { await Task.Delay(PollInterval, ct); }
                 catch (OperationCanceledException) { break; }
             }
@@ -71,9 +71,7 @@ internal sealed class FanoutQueueWorker(
         var table = model.Tables.FirstOrDefault(t => t.QualifiedName == job.TableQualified);
         if (table is null || !TryResolveColumnTypes(table, job.LookupColumns, out var columnTypes))
         {
-            logger.LogWarning(
-                "Fan-out job for {Table} references a table/column not in the current model; completing it.",
-                job.TableQualified);
+            logger.UnknownFanoutTable(job.TableQualified);
             await store.CompleteAsync(job.TableQualified, job.LookupHash, ct);
             return;
         }
@@ -113,4 +111,14 @@ internal sealed class FanoutQueueWorker(
         }
         return true;
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="FanoutQueueWorker"/>.</summary>
+internal static partial class FanoutQueueWorkerLog
+{
+    [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker pass failed; retrying.")]
+    internal static partial void WorkerPassFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Fan-out job for {Table} references a table/column not in the current model; completing it.")]
+    internal static partial void UnknownFanoutTable(this ILogger logger, string table);
 }

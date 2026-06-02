@@ -36,6 +36,6 @@ sink path, so there is only ever one ordered stream.
 
 ## Prior Art
 
-Many concepts this package uses is based on existing patterns within the wider ecosystem:
+Many concepts this package uses are based on existing patterns within the wider ecosystem:
 - The transformation, enrichment and watermarking pipeline is inspired by [Sequin](https://sequinstream.com/)
-- Some aspects of are also based on Netflix's [DBLog](https://netflixtechblog.com/dblog-a-generic-change-data-capture-framework-69351fb9099b)
+- Some general concepts are based on Netflix's [DBLog](https://netflixtechblog.com/dblog-a-generic-change-data-capture-framework-69351fb9099b)

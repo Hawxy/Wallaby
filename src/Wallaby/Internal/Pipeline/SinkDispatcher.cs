@@ -95,6 +95,7 @@ internal sealed class SinkDispatcher
             catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
             {
                 activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+                activity?.AddException(ex);
 
                 if (!_skipFailedBatches)
                 {
@@ -102,8 +103,7 @@ internal sealed class SinkDispatcher
                 }
 
                 _instr.RecordSinkFailure(sinkName, WallabyInstrumentation.DeliveryDeadLetter);
-                _logger.LogWarning(ex, "Dead-lettering {Count} record(s) for sink '{Sink}' (DeadLetterPolicy=Skip).",
-                    records.Count, sinkName);
+                _logger.DeadLettering(ex, records.Count, sinkName);
             }
         }
     }
@@ -130,4 +130,11 @@ internal sealed class SinkDispatcher
             yield return (name, groups[name]);
         }
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="SinkDispatcher"/>.</summary>
+internal static partial class SinkDispatcherLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Dead-lettering {Count} record(s) for sink '{Sink}' (DeadLetterPolicy=Skip).")]
+    internal static partial void DeadLettering(this ILogger logger, Exception ex, int count, string sink);
 }

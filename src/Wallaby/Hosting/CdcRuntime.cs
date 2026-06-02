@@ -75,19 +75,19 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to acquire CDC leadership; retrying.");
+                _logger.LeadershipAcquireFailed(ex);
             }
 
             if (leadership is null)
             {
-                _logger.LogDebug("CDC standby: another node holds leadership for slot '{Slot}'.", _options.SlotName);
+                _logger.Standby(_options.SlotName);
                 await DelaySafeAsync(_options.StandbyRetryInterval, ct);
                 continue;
             }
 
             await using (leadership)
             {
-                _logger.LogInformation("Acquired CDC leadership for slot '{Slot}'.", _options.SlotName);
+                _logger.LeadershipAcquired(_options.SlotName);
                 try
                 {
                     await RunAsLeaderAsync(ct);
@@ -98,7 +98,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "CDC leader session failed; will retry.");
+                    _logger.LeaderSessionFailed(ex);
                     await DelaySafeAsync(_options.LeaderRetryInterval, ct);
                 }
             }
@@ -128,7 +128,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         {
             try { await scheduler.RunDueBackfillsAsync(linked.Token); }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { _logger.LogError(ex, "Backfill scheduler failed."); }
+            catch (Exception ex) { _logger.BackfillSchedulerFailed(ex); }
         }, linked.Token);
 
         // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
@@ -137,7 +137,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             {
                 try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
-                catch (Exception ex) { _logger.LogError(ex, "Fan-out queue worker failed."); }
+                catch (Exception ex) { _logger.FanoutWorkerFailed(ex); }
             }, linked.Token)
             : Task.CompletedTask;
 
@@ -236,4 +236,26 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) { }
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="CdcRuntime{TContext}"/>.</summary>
+internal static partial class CdcRuntimeLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire CDC leadership; retrying.")]
+    internal static partial void LeadershipAcquireFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CDC standby: another node holds leadership for slot '{Slot}'.")]
+    internal static partial void Standby(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Acquired CDC leadership for slot '{Slot}'.")]
+    internal static partial void LeadershipAcquired(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "CDC leader session failed; will retry.")]
+    internal static partial void LeaderSessionFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Backfill scheduler failed.")]
+    internal static partial void BackfillSchedulerFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker failed.")]
+    internal static partial void FanoutWorkerFailed(this ILogger logger, Exception ex);
 }

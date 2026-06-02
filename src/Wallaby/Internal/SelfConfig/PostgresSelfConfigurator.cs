@@ -29,9 +29,7 @@ internal sealed class PostgresSelfConfigurator(
         var (slotCreated, consistentPoint) = await EnsureSlotAsync(connection, ct);
         var warnings = await ValidateReplicaIdentityAsync(connection, model, ct);
 
-        logger.LogInformation(
-            "CDC self-config complete: publication '{Publication}' (created={PubCreated}), slot '{Slot}' (created={SlotCreated}).",
-            options.PublicationName, publicationCreated, options.SlotName, slotCreated);
+        logger.SelfConfigComplete(options.PublicationName, publicationCreated, options.SlotName, slotCreated);
 
         return new SelfConfigResult(
             options.PublicationName, options.SlotName, publicationCreated, slotCreated, consistentPoint, warnings);
@@ -48,7 +46,7 @@ internal sealed class PostgresSelfConfigurator(
             var tableList = string.Join(", ", DesiredTables(model).Select(t => PgExec.QuoteTable(t.Schema, t.Table)));
             await PgExec.ExecuteAsync(
                 connection, $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList}", ct);
-            logger.LogInformation("Created publication '{Publication}' for {TableCount} table(s).", pub, model.Tables.Count);
+            logger.PublicationCreated(pub, model.Tables.Count);
             return true;
         }
 
@@ -83,7 +81,7 @@ internal sealed class PostgresSelfConfigurator(
             await PgExec.ExecuteAsync(
                 connection,
                 $"ALTER PUBLICATION {PgExec.QuoteIdentifier(pub)} ADD TABLE {PgExec.QuoteTable(schema, table)}", ct);
-            logger.LogInformation("Added table {Table} to publication '{Publication}'.", $"{schema}.{table}", pub);
+            logger.TableAddedToPublication($"{schema}.{table}", pub);
         }
 
         foreach (var (schema, table) in current.Where(c => !desired.Contains(c)))
@@ -91,7 +89,7 @@ internal sealed class PostgresSelfConfigurator(
             await PgExec.ExecuteAsync(
                 connection,
                 $"ALTER PUBLICATION {PgExec.QuoteIdentifier(pub)} DROP TABLE {PgExec.QuoteTable(schema, table)}", ct);
-            logger.LogInformation("Dropped table {Table} from publication '{Publication}'.", $"{schema}.{table}", pub);
+            logger.TableDroppedFromPublication($"{schema}.{table}", pub);
         }
     }
 
@@ -129,7 +127,7 @@ internal sealed class PostgresSelfConfigurator(
             ct,
             ("s", slot), ("p", options.PublicationName), ("cp", consistentPoint));
 
-        logger.LogInformation("Created pgoutput replication slot '{Slot}' at {ConsistentPoint}.", slot, consistentPoint);
+        logger.SlotCreated(slot, consistentPoint);
         return (true, consistentPoint);
     }
 
@@ -169,9 +167,31 @@ internal sealed class PostgresSelfConfigurator(
 
         foreach (var warning in warnings)
         {
-            logger.LogWarning("{Warning}", warning);
+            logger.ConfigurationWarning(warning);
         }
 
         return warnings;
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="PostgresSelfConfigurator"/>.</summary>
+internal static partial class PostgresSelfConfiguratorLog
+{
+    [LoggerMessage(Level = LogLevel.Information, Message = "CDC self-config complete: publication '{Publication}' (created={PubCreated}), slot '{Slot}' (created={SlotCreated}).")]
+    internal static partial void SelfConfigComplete(this ILogger logger, string publication, bool pubCreated, string slot, bool slotCreated);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Created publication '{Publication}' for {TableCount} table(s).")]
+    internal static partial void PublicationCreated(this ILogger logger, string publication, int tableCount);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Added table {Table} to publication '{Publication}'.")]
+    internal static partial void TableAddedToPublication(this ILogger logger, string table, string publication);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Dropped table {Table} from publication '{Publication}'.")]
+    internal static partial void TableDroppedFromPublication(this ILogger logger, string table, string publication);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot '{Slot}' at {ConsistentPoint}.")]
+    internal static partial void SlotCreated(this ILogger logger, string slot, string? consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Warning}")]
+    internal static partial void ConfigurationWarning(this ILogger logger, string warning);
 }

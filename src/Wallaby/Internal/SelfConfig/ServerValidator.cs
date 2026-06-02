@@ -50,8 +50,13 @@ internal sealed class ServerValidator(ILogger logger)
                 "max_wal_senders is 0; logical replication needs at least one WAL sender. Increase max_wal_senders and restart.");
         }
 
-        logger.LogInformation(
-            "CDC server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).",
-            maxSlots, usedSlots);
+        logger.ServerValidationPassed(maxSlots, usedSlots);
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="ServerValidator"/>.</summary>
+internal static partial class ServerValidatorLog
+{
+    [LoggerMessage(Level = LogLevel.Information, Message = "CDC server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).")]
+    internal static partial void ServerValidationPassed(this ILogger logger, long maxSlots, long usedSlots);
 }

@@ -45,7 +45,7 @@ internal sealed class WatermarkBackfillCoordinator(
         var cursor = KeysetCodec.Deserialize(existing?.CursorJson, pkTypes);
         var startRows = existing?.RowsCopied ?? 0;
 
-        logger.LogInformation("Starting backfill of {Table}.", table.QualifiedName);
+        logger.BackfillStarting(table.QualifiedName);
 
         var rowsCopied = await RunChunkLoopAsync(
             pager, table.QualifiedName, cursor, startRows,
@@ -60,7 +60,7 @@ internal sealed class WatermarkBackfillCoordinator(
                 token),
             ct);
 
-        logger.LogInformation("Backfill of {Table} complete ({Rows} rows).", table.QualifiedName, rowsCopied);
+        logger.BackfillComplete(table.QualifiedName, rowsCopied);
     }
 
     /// <summary>
@@ -74,14 +74,11 @@ internal sealed class WatermarkBackfillCoordinator(
         var filter = KeysetFilter.ForLookup(spec.LookupColumns, spec.LookupValues);
         var pager = new KeysetPager(dataSource, spec.PrimaryTable, filter);
 
-        logger.LogInformation(
-            "Starting scoped fan-out backfill of {Table} ({Keys} key set(s)).",
-            spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
+        logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
         var rowsCopied = await RunChunkLoopAsync(pager, spec.PrimaryTable.QualifiedName, startCursor, startRows, saveProgress, ct);
 
-        logger.LogInformation(
-            "Scoped fan-out backfill of {Table} complete ({Rows} rows).", spec.PrimaryTable.QualifiedName, rowsCopied);
+        logger.ScopedFanoutComplete(spec.PrimaryTable.QualifiedName, rowsCopied);
         return rowsCopied;
     }
 
@@ -191,4 +188,20 @@ internal sealed class WatermarkBackfillCoordinator(
         window = null!;
         return false;
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="WatermarkBackfillCoordinator"/>.</summary>
+internal static partial class WatermarkBackfillCoordinatorLog
+{
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting backfill of {Table}.")]
+    internal static partial void BackfillStarting(this ILogger logger, string table);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill of {Table} complete ({Rows} rows).")]
+    internal static partial void BackfillComplete(this ILogger logger, string table, long rows);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting scoped fan-out backfill of {Table} ({Keys} key set(s)).")]
+    internal static partial void ScopedFanoutStarting(this ILogger logger, string table, int keys);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Scoped fan-out backfill of {Table} complete ({Rows} rows).")]
+    internal static partial void ScopedFanoutComplete(this ILogger logger, string table, long rows);
 }

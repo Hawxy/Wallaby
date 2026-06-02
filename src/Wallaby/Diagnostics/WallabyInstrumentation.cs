@@ -102,6 +102,9 @@ public sealed class WallabyInstrumentation : IDisposable
     /// <summary>The underlying meter (exposed for tests that attach a <c>MetricCollector</c>).</summary>
     internal Meter Meter => _meter;
 
+    /// <summary>The underlying activity source (exposed so tests can scope an <c>ActivityListener</c> to this instance).</summary>
+    internal ActivitySource ActivitySource => _activitySource;
+
     // ---- timing ----
 
     /// <summary>Capture a start timestamp for a duration measurement (pair with a <c>Record*Duration</c> call).</summary>

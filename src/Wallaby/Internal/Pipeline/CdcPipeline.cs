@@ -48,7 +48,7 @@ internal sealed class CdcPipeline(
 
     public async Task RunAsync(CancellationToken ct)
     {
-        logger.LogInformation("CDC pipeline started for slot '{Slot}'.", slotName);
+        logger.PipelineStarted(slotName);
 
         await foreach (var transaction in stream.ReadAsync(ct))
         {
@@ -269,4 +269,11 @@ internal sealed class CdcPipeline(
             await dispatcher.DispatchAsync(routed, ct);
         }
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="CdcPipeline"/>.</summary>
+internal static partial class CdcPipelineLog
+{
+    [LoggerMessage(Level = LogLevel.Information, Message = "CDC pipeline started for slot '{Slot}'.")]
+    internal static partial void PipelineStarted(this ILogger logger, string slot);
 }

@@ -21,8 +21,15 @@ internal sealed class CdcBackgroundService<TContext>(
         }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "CDC background service terminated unexpectedly.");
+            logger.BackgroundServiceTerminated(ex);
             throw;
         }
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="CdcBackgroundService{TContext}"/>.</summary>
+internal static partial class CdcBackgroundServiceLog
+{
+    [LoggerMessage(Level = LogLevel.Critical, Message = "CDC background service terminated unexpectedly.")]
+    internal static partial void BackgroundServiceTerminated(this ILogger logger, Exception ex);
 }

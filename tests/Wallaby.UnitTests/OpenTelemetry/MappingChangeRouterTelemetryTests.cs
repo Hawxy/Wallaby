@@ -34,7 +34,9 @@ public class MappingChangeRouterTelemetryTests
         Activity? captured = null;
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == WallabyInstrumentation.ActivitySourceName,
+            // Scope to THIS instrumentation's source instance — ActivityListeners are process-global and
+            // match by name, so a name filter would capture transform spans from tests running in parallel.
+            ShouldListenTo = source => ReferenceEquals(source, instr.ActivitySource),
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = activity =>
             {

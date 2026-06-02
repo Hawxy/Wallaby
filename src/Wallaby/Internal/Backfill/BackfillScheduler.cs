@@ -54,7 +54,7 @@ internal sealed class BackfillScheduler(
                     new BackfillState(table.QualifiedName, BackfillStatus.InProgress, version, null, 0, DateTimeOffset.UtcNow), ct);
             }
 
-            logger.LogInformation("Backfill {Action} for {Table} (version {Version}).", action, table.QualifiedName, version);
+            logger.BackfillScheduled(action, table.QualifiedName, version);
             await coordinator.BackfillTableAsync(table, version, ct);
         }
     }
@@ -77,4 +77,11 @@ internal sealed class BackfillScheduler(
             _ => BackfillAction.Skip,
         };
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="BackfillScheduler"/>.</summary>
+internal static partial class BackfillSchedulerLog
+{
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill {Action} for {Table} (version {Version}).")]
+    internal static partial void BackfillScheduled(this ILogger logger, BackfillAction action, string table, string? version);
 }
