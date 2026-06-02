@@ -1,3 +1,5 @@
+using Meilisearch;
+
 namespace Wallaby.Sinks.Meilisearch;
 
 /// <summary>Configuration for a <see cref="MeilisearchSink"/>.</summary>
@@ -38,10 +40,19 @@ public sealed class MeilisearchSinkOptions
     /// Declare an index to ensure exists (created with <see cref="PrimaryKey"/> if missing) and optionally
     /// configure at startup. Fluent; call once per index.
     /// </summary>
-    public MeilisearchSinkOptions ConfigureIndex(string name, Action<MeilisearchIndexConfig>? configure = null)
+    public MeilisearchSinkOptions ConfigureIndex(string name, Action<Settings>? configure = null)
     {
-        var config = new MeilisearchIndexConfig { Name = name };
-        configure?.Invoke(config);
+        Settings? settings = null;
+        if (configure is not null) {
+            settings = new Settings();
+            configure(settings);
+        }
+        
+        var config = new MeilisearchIndexConfig
+        {
+            Name = name,
+            Settings = settings
+        };
         Indexes.Add(config);
         return this;
     }

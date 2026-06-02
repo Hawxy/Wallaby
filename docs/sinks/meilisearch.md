@@ -49,11 +49,11 @@ the sink's `PrimaryKey`) and have their settings applied on startup.
 cdc.AddMeilisearchSink("meili", m =>
 {
     m.Host = "http://localhost:7700";
-    m.ConfigureIndex("products", i => i.Settings = new Settings
+    m.ConfigureIndex("products", s =>
     {
-        SearchableAttributes = ["name", "description"],
-        FilterableAttributes = ["category", "tenantId"],
-        SortableAttributes   = ["price"],
+        s.SearchableAttributes = ["name", "description"];
+        s.FilterableAttributes = ["category", "tenantId"];
+        s.SortableAttributes   = ["price"];
     });
 });
 ```
@@ -61,8 +61,12 @@ cdc.AddMeilisearchSink("meili", m =>
 `Settings` is Meilisearch's own settings type, so you have full control (ranking rules, stop words,
 synonyms, faceting, …). Setup is idempotent and re-applied on each leadership acquisition.
 
-Indexes created at runtime — per-tenant indexes from [`ScopedDestination`](/multi-tenancy) — are **not**
-declared here; they auto-create on first write with the sink's `PrimaryKey` and use Meilisearch defaults.
+::: tip
+Per-tenant indexes from [`ScopedDestination`](/multi-tenancy) are not supported at the moment. 
+They're auto-created on first write with the sink's `PrimaryKey` and use Meilisearch defaults.
+
+If a way to customize this would be useful, open an issue.
+:::
 
 ## How documents are written
 

@@ -120,11 +120,11 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
         var index = harness.Names.Named("products_cfg");
 
         var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
-        options.ConfigureIndex(index, i => i.Settings = new Settings
+        options.ConfigureIndex(index,s =>
         {
-            SearchableAttributes = ["name"],
-            FilterableAttributes = ["category"],
-            SortableAttributes = ["price"],
+            s.SearchableAttributes = ["name"];
+            s.FilterableAttributes = ["category"];
+            s.SortableAttributes = ["price"];
         });
         harness.AddSink(new MeilisearchSink("meili", options))
             .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name });
