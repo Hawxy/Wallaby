@@ -4,7 +4,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.Sinks.Meilisearch</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>Meilisearch destination/sink for EFCore.CDC: keep a Meilisearch index in sync with Postgres changes.</Description>
+    <Description>Meilisearch destination/sink for Wallaby: keep a Meilisearch index in sync with Postgres changes.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,4 +19,5 @@
     <PackageReference Include="Meilisearch" />
   </ItemGroup>
 
+  <Import Project="../../Package.Build.props" />
 </Project>

@@ -14,6 +14,11 @@ public sealed class MeilisearchSink : ISink
     private readonly MeilisearchSinkOptions _options;
     private readonly MeilisearchClient _client;
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="name"></param>
+    /// <param name="options"></param>
     public MeilisearchSink(string name, MeilisearchSinkOptions options)
     {
         Name = name;

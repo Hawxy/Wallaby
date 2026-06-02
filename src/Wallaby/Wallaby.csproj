@@ -26,4 +26,6 @@
     <PackageReference Include="Polly.Core" />
   </ItemGroup>
 
+  <Import Project="../../Package.Build.props" />
+
 </Project>
