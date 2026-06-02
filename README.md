@@ -3,20 +3,18 @@
 Postgres Change Data Capture for .NET, driven by your **EF Core model**.
 
 EFCore.CDC streams row changes from Postgres logical replication, materializes them into your mapped
-EF Core entities, lets you **transform/enrich** them with a single interface (project from the row, or
-join/flatten an aggregate via EF Core LINQ or raw SQL), and routes the resulting documents to pluggable
+EF Core entities, lets you **transform/enrich** them, and routes the resulting documents to pluggable
 **destinations** (sinks). It **self-configures** the publication and replication slot from your model,
-supports **backfill** (initial snapshot) coordinated with the live stream so there are no gaps or
-duplicates, and is **cluster-safe** via leader election.
+supports **backfill** operations, and is **cluster-safe** via leader election.
 
 The first shipped sink is **Meilisearch** — keep a search index continuously in sync with your tables.
 
 ## Packages
 
-| Project | Purpose |
-| --- | --- |
-| `EFCore.CDC` | Core: self-config, logical replication, transforms, routing, backfill, leader election, the in-process `DelegateSink`. Depends only on Npgsql + EF Core + `Microsoft.Extensions.*` + Polly. |
-| `EFCore.CDC.Meilisearch` | Meilisearch destination sink. |
+| Project                      | Purpose                       |
+|------------------------------|-------------------------------|
+| `Wallably`                   | Core package.                 |
+| `Wallably.Sinks.Meilisearch` | Meilisearch destination sink. |
 
 ## Quick start
 
@@ -47,80 +45,6 @@ On startup the library validates the server (`wal_level=logical`, replication ro
 creates the `wallaby` state schema, the publication, and the replication slot, backfills the mapped tables,
 then streams live changes — all on a single elected leader.
 
-### Transforms
-
-All enrichment/transformation goes through one interface:
-
-```csharp
-public interface ICdcTransform<TEntity> where TEntity : class
-{
-    Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> TransformAsync(
-        DbContext db, IReadOnlyList<ChangeEvent<TEntity>> changes, CancellationToken ct);
-}
-```
-
-A document is a `CdcDocument` — a field bag (`new CdcDocument { ["name"] = ... }`, a
-`Dictionary<string, object?>` subclass). Implement the interface as a class
-(`.UsingTransform<MyTransform>()`, DI-constructed) or inline (`.UsingTransform((db, changes, ct) => ...)`).
-Inside, project from `change.Entity`, or query `db` (EF Core LINQ with `Include`, or
-`db.Database.SqlQuery<T>(...)`) to flatten an aggregate. Return one document per source key; omit a key
-(or map it to `null`) to delete it from the sink. Deletes are handled by the engine — a transform never
-sees them.
-
-### Backfill
-
-- New mapped tables are backfilled automatically on first run.
-- Bumping a mapping's `backfillVersion` re-backfills that entity.
-- Trigger a manual backfill at runtime: resolve `ICdcBackfillManager` and call
-  `RequestBackfillAsync<Product>()`. Requests are persisted and executed by the current leader.
-
-Backfill uses the DBLog/Sequin watermark pattern (keyset pagination + low/high watermarks emitted via
-`pg_logical_emit_message` and decoded from pgoutput as generic WAL messages) so the snapshot merges
-with the live stream with no gaps and live always wins.
-
-### Per-row scoping (multi-tenancy)
-
-When the enrichment `DbContext` — or the destination — must be derived from the changed row's own data
-(e.g. a `TenantId`), declare a scope key and supply a scoped context factory:
-
-```csharp
-cdc.UseScopedContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)))  // tenant conn or query-filter
-   .Map<Order>()
-       .ScopedBy(o => o.TenantId)                     // scope key from the change
-       .UsingTransform<OrderTransform>()              // transform receives the tenant-scoped db
-       .ScopedDestination(key => $"orders_{key}");    // per-tenant index (optional)
-```
-
-The engine sub-groups each transaction's changes by scope key and invokes the transform once per tenant
-with a context built for that tenant (one context per tenant per batch). `ScopedDestination` also routes
-each document — and deletes — to the tenant's destination; because deletes must resolve the key, that
-table is marked to require `REPLICA IDENTITY FULL`. With neither, behavior is unchanged (one shared context).
-
-## Running locally
-
-```bash
-docker compose -f samples/docker-compose.yml up -d        # Postgres (wal_level=logical) + Meilisearch
-dotnet run --project samples/Sample.WorkerApp             # self-configures, backfills, then streams
-```
-
-Insert/update/delete rows in the `products` table and watch the Meilisearch `products` index stay in sync
-(`curl http://localhost:7700/indexes/products/search -H "Authorization: Bearer masterKey"`).
-
-## Observability
-
-Wallaby emits OpenTelemetry **metrics and traces** through the built-in .NET `Meter`/`ActivitySource`
-(no OpenTelemetry SDK dependency). Observe it by adding its meter and source to your pipeline:
-
-```csharp
-services.AddOpenTelemetry()
-    .WithMetrics(m => m.AddMeter("Wallaby"))
-    .WithTracing(t => t.AddSource("Wallaby"));
-```
-
-You get replication lag, throughput, transform/sink/backfill latencies and outcomes, and a span per
-transaction → transform → sink delivery. See [docs/observability.md](docs/observability.md) for the full
-metric and span catalog.
-
 ## Tests
 
 - Unit tests (no Docker): `dotnet run --project tests/EFCore.CDC.UnitTests`
@@ -130,10 +54,3 @@ metric and span catalog.
 All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Postgres container) live in
 `tests/EFCore.CDC.TestInfrastructure`.
 
-## Notes & limitations (v1)
-
-- Captured tables must have a primary key (pgoutput requirement).
-- One leader owns the slot at a time; standby nodes take over on failure (Postgres advisory lock).
-- Tables needing old values / unchanged-TOAST columns on UPDATE should use `REPLICA IDENTITY FULL`
-  (the library warns with the exact DDL); transforms can also re-query via `DbContext`.
-- The server must already have `wal_level=logical`; the library never edits `postgresql.conf`.

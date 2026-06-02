@@ -1,4 +1,10 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="Package.Build.props" />
+    <File Path="README.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
@@ -13,4 +19,5 @@
   <Folder Name="/samples/">
     <Project Path="samples/Sample.WorkerApp/Sample.WorkerApp.csproj" />
   </Folder>
+  <Project Path="build/_build.csproj" />
 </Solution>
