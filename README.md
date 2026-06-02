@@ -2,12 +2,12 @@
 
 Postgres Change Data Capture for .NET, driven by your **EF Core model**.
 
-EFCore.CDC streams row changes from Postgres logical replication, materializes them into your mapped
+Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
 EF Core entities, lets you **transform/enrich** them, and routes the resulting documents to pluggable
 **destinations** (sinks). It **self-configures** the publication and replication slot from your model,
 supports **backfill** operations, and is **cluster-safe** via leader election.
 
-The first shipped sink is **Meilisearch** — keep a search index continuously in sync with your tables.
+A **Meilisearch** sink is supported out of the box. Contributions for additional sinks is welcome.
 
 ## Packages
 
@@ -41,16 +41,10 @@ builder.Services.AddWallaby<AppDbContext>(cdc =>
 });
 ```
 
-On startup the library validates the server (`wal_level=logical`, replication role, slot headroom),
-creates the `wallaby` state schema, the publication, and the replication slot, backfills the mapped tables,
-then streams live changes — all on a single elected leader.
-
 ## Tests
 
-- Unit tests (no Docker): `dotnet run --project tests/EFCore.CDC.UnitTests`
-- Core integration tests (Testcontainers Postgres — needs Docker): `dotnet run --project tests/EFCore.CDC.IntegrationTests`
-- Meilisearch integration tests (Testcontainers Postgres + Meilisearch): `dotnet run --project tests/EFCore.CDC.Meilisearch.IntegrationTests`
+The test suite requires docker to run and can be executed via `.\build.ps1 Test`
 
 All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Postgres container) live in
-`tests/EFCore.CDC.TestInfrastructure`.
+`tests/Wallaby.TestInfrastructure`.
 
