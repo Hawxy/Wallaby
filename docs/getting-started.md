@@ -15,7 +15,7 @@ dotnet add package Wallaby
 dotnet add package Wallaby.Sinks.Meilisearch   # optionally add a pre-built sink
 ```
 
-Wallaby requires .NET 10+
+Wallaby requires .NET 10+.
 
 ## Server prerequisites
 

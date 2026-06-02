@@ -3,13 +3,18 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: "Wallaby",
-  description: "Postgres CDC for .NET & EFCore",
+  description: "Postgres CDC Engine for .NET + EFCore",
+  base: '/wallaby/',
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Docs', link: '/getting-started' }
     ],
+
+    search: {
+      provider: 'local'
+    },
 
     sidebar: [
       {
@@ -19,7 +24,8 @@ export default defineConfig({
           { text: 'How it works', link: '/how-it-works' },
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
-          { text: 'Multi-tenancy', link: '/multi-tenancy' }
+          { text: 'Multi-tenancy', link: '/multi-tenancy' },
+          { text: 'Observability', link: '/observability' }
         ]
       },
       {
@@ -29,12 +35,6 @@ export default defineConfig({
           { text: 'Custom', link: '/sinks/custom' },
         ]
       },
-      {
-        text: 'Operations',
-        items: [
-          { text: 'Observability', link: '/observability' }
-        ]
-      }
     ],
 
     socialLinks: [
