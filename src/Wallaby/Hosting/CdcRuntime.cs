@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -63,9 +64,17 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _logger = logger;
     }
 
+    // A leader session lasting at least this long before failing is treated as transient (resets backoff);
+    // a faster failure (e.g. self-config erroring) grows the backoff so it doesn't hot-loop.
+    private static readonly TimeSpan HealthyLeaderSession = TimeSpan.FromMinutes(1);
+
     public async Task RunAsync(CancellationToken ct)
     {
         BuildComponents();
+
+        // Grows the retry delay (with jitter, capped) when leadership acquisition or a leader session keeps
+        // failing, so a persistent error backs off instead of spamming at a fixed interval.
+        var backoff = new RetryBackoff(_options.LeaderRetryInterval);
 
         while (!ct.IsCancellationRequested)
         {
@@ -77,10 +86,14 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             catch (Exception ex)
             {
                 _logger.LeadershipAcquireFailed(ex);
+                await DelaySafeAsync(backoff.Next(), ct);
+                continue;
             }
 
             if (leadership is null)
             {
+                // The lock is reachable and held by another node — a healthy standby, not an error.
+                backoff.Reset();
                 _logger.Standby(_options.SlotName);
                 await DelaySafeAsync(_options.StandbyRetryInterval, ct);
                 continue;
@@ -89,9 +102,16 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             await using (leadership)
             {
                 _logger.LeadershipAcquired(_options.SlotName);
+                var sessionStart = Stopwatch.GetTimestamp();
                 try
                 {
-                    await RunAsLeaderAsync(ct);
+                    var lostLeadership = await RunAsLeaderAsync(leadership, ct);
+                    backoff.Reset();
+                    if (lostLeadership)
+                    {
+                        // We stepped down because the lock dropped (not an error); re-elect immediately.
+                        _logger.LeadershipLost(_options.SlotName);
+                    }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -100,13 +120,22 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
                 catch (Exception ex)
                 {
                     _logger.LeaderSessionFailed(ex);
-                    await DelaySafeAsync(_options.LeaderRetryInterval, ct);
+                    if (Stopwatch.GetElapsedTime(sessionStart) >= HealthyLeaderSession)
+                    {
+                        backoff.Reset();
+                    }
+                    await DelaySafeAsync(backoff.Next(), ct);
                 }
             }
         }
     }
 
-    private async Task RunAsLeaderAsync(CancellationToken ct)
+    /// <summary>
+    /// Run the leader workload (self-config, sinks, pipeline, backfill/fan-out) for the lifetime of
+    /// leadership. Returns true if it ended because the cluster lock was lost (so the caller re-elects
+    /// without treating it as a fault); a real fault propagates, and shutdown re-throws cancellation.
+    /// </summary>
+    private async Task<bool> RunAsLeaderAsync(IClusterLockHandle leadership, CancellationToken ct)
     {
         await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
         await InitializeSinksAsync(ct);
@@ -118,7 +147,10 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             stream, changeEventFactory, _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
             _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, _instrumentation);
 
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
+        // connection dropped) — so a standby that can take over isn't left waiting while we stream on with
+        // a stale lock.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
         var scheduler = new BackfillScheduler(
             _backfillTables, new PostgresBackfillStore(_dataSource.Source), _coordinator,
             new BackfillSchedulerOptions
@@ -149,12 +181,19 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         {
             await pipeline.RunAsync(linked.Token);
         }
+        catch (OperationCanceledException)
+        {
+            // Either shutdown (ct) or the lost-lock cancellation — distinguished below.
+        }
         finally
         {
             await linked.CancelAsync();
             try { await backfillTask; } catch { /* already logged */ }
             try { await fanoutTask; } catch { /* already logged */ }
         }
+
+        ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks
+        return leadership.Lost.IsCancellationRequested; // otherwise: did we step down because the lock dropped?
     }
 
     private void BuildComponents()
@@ -270,6 +309,9 @@ internal static partial class CdcRuntimeLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Acquired CDC leadership for slot '{Slot}'.")]
     internal static partial void LeadershipAcquired(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Lost CDC leadership for slot '{Slot}' (lock connection dropped); stepping down and re-electing.")]
+    internal static partial void LeadershipLost(this ILogger logger, string slot);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "CDC leader session failed; will retry.")]
     internal static partial void LeaderSessionFailed(this ILogger logger, Exception ex);

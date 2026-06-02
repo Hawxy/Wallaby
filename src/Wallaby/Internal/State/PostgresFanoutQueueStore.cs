@@ -95,6 +95,17 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
             ct,
             ("t", tableQualified), ("h", lookupHash));
 
+    public Task DeferAsync(string tableQualified, string lookupHash, CancellationToken ct)
+        => PgExec.ExecuteAsync(
+            dataSource,
+            """
+            UPDATE wallaby.fanout_queue
+            SET requested_at = now(), updated_at = now()
+            WHERE table_qualified = @t AND lookup_hash = @h
+            """,
+            ct,
+            ("t", tableQualified), ("h", lookupHash));
+
     public async Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);

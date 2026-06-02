@@ -23,6 +23,13 @@ internal interface IFanoutQueueStore
     /// <summary>Mark a job <c>Completed</c>, but only if it is still <c>InProgress</c> (so a concurrent re-arm survives).</summary>
     Task CompleteAsync(string tableQualified, string lookupHash, CancellationToken ct);
 
+    /// <summary>
+    /// Postpone a job by moving it to the back of the queue (bump <c>requested_at</c>), leaving its status
+    /// unchanged. Used when the job can't run yet — e.g. its table/columns aren't in the current model
+    /// (a transient deploy-time divergence) — so it is retried later without dropping it or starving others.
+    /// </summary>
+    Task DeferAsync(string tableQualified, string lookupHash, CancellationToken ct);
+
     /// <summary>All queued jobs (for diagnostics/tests).</summary>
     Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct);
 }

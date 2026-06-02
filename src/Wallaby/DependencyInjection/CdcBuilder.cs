@@ -115,6 +115,10 @@ public sealed class CdcBuilder
         {
             throw new CdcConfigurationException("KeepaliveInterval must be greater than zero.");
         }
+        if (options.LeaderHeartbeatInterval <= TimeSpan.Zero)
+        {
+            throw new CdcConfigurationException("LeaderHeartbeatInterval must be greater than zero.");
+        }
         if (_configuration.Sinks.Count == 0)
         {
             throw new CdcConfigurationException("At least one sink must be registered (e.g. AddMeilisearchSink/AddDelegateSink).");

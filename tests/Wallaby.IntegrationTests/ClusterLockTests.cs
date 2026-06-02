@@ -31,6 +31,28 @@ public class ClusterLockTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task Lost_does_not_fire_while_the_lock_is_held()
+    {
+        var key = $"slot_{Guid.NewGuid():N}";
+        var locker = new PostgresAdvisoryLock(pg.DataSource, TimeSpan.FromMilliseconds(50));
+
+        var handle = await locker.TryAcquireAsync(key, CancellationToken.None);
+        await Assert.That(handle).IsNotNull();
+        try
+        {
+            // Several heartbeat probes elapse; a healthy connection must not be reported as lost.
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+            await Assert.That(handle!.Lost.IsCancellationRequested).IsFalse();
+            await Assert.That(handle.IsHeld).IsTrue();
+        }
+        finally
+        {
+            await handle!.DisposeAsync();
+        }
+    }
+
+    [Test]
     public async Task Different_keys_do_not_contend()
     {
         var locker = new PostgresAdvisoryLock(pg.DataSource);

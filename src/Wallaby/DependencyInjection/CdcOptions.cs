@@ -49,6 +49,13 @@ public sealed class CdcOptions
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// How often the leader verifies it still holds the cluster lock while streaming. If the lock's
+    /// connection has dropped (so Postgres auto-released it), the leader steps down within roughly this
+    /// interval and re-elects, instead of running on with a stale lock.
+    /// </summary>
+    public TimeSpan LeaderHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// How often, while a single transaction is being processed, Wallaby sends a replication status
     /// update to keep the connection alive — covering slow transforms/sinks when the consumer isn't
     /// reading the stream (so Npgsql can't answer the server's keepalives). Keep it well under the

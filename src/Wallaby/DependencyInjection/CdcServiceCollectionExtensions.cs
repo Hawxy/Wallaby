@@ -37,7 +37,8 @@ public static class CdcServiceCollectionExtensions
         services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));
 
         services.AddSingleton<IClusterLock>(sp =>
-            new Internal.Cluster.PostgresAdvisoryLock(sp.GetRequiredService<CdcDataSource>().Source));
+            new Internal.Cluster.PostgresAdvisoryLock(
+                sp.GetRequiredService<CdcDataSource>().Source, configuration.Options.LeaderHeartbeatInterval));
 
         services.AddSingleton<ICdcBackfillManager>(sp =>
         {

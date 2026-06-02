@@ -16,6 +16,9 @@ internal sealed class FanoutQueueWorker(
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
+    // Job keys already warned about as model-divergent, so a deferred (retrying) job logs only once.
+    private readonly HashSet<string> _warnedDivergent = [];
+
     public async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -41,7 +44,7 @@ internal sealed class FanoutQueueWorker(
         }
     }
 
-    /// <summary>Process every currently-due job exactly once; returns how many were run.</summary>
+    /// <summary>Process every currently-due job exactly once; returns how many actually ran (deferred jobs don't count).</summary>
     public async Task<int> DrainOnceAsync(CancellationToken ct)
     {
         var processed = new HashSet<string>();
@@ -54,26 +57,36 @@ internal sealed class FanoutQueueWorker(
                 break;
             }
 
-            // A job re-armed during this pass would otherwise spin the loop; defer it to the next pass.
+            // A job re-armed (or deferred) during this pass would otherwise spin the loop; once we've seen
+            // it, stop — the next pass picks it up again.
             if (!processed.Add($"{job.TableQualified}|{job.LookupHash}"))
             {
                 break;
             }
 
-            await RunJobAsync(job, ct);
-            count++;
+            if (await RunJobAsync(job, ct))
+            {
+                count++;
+            }
         }
         return count;
     }
 
-    private async Task RunJobAsync(FanoutJobRow job, CancellationToken ct)
+    // Returns true if the job actually ran; false if it was deferred (so callers don't treat a deferred
+    // job as progress and hot-loop on it).
+    private async Task<bool> RunJobAsync(FanoutJobRow job, CancellationToken ct)
     {
         var table = model.Tables.FirstOrDefault(t => t.QualifiedName == job.TableQualified);
         if (table is null || !TryResolveColumnTypes(table, job.LookupColumns, out var columnTypes))
         {
-            logger.UnknownFanoutTable(job.TableQualified);
-            await store.CompleteAsync(job.TableQualified, job.LookupHash, ct);
-            return;
+            // The model doesn't (yet) include this table/columns — likely a transient deploy-time
+            // divergence. Defer rather than drop, so the job survives until the model converges; warn once.
+            if (_warnedDivergent.Add($"{job.TableQualified}|{job.LookupHash}"))
+            {
+                logger.UnknownFanoutTable(job.TableQualified);
+            }
+            await store.DeferAsync(job.TableQualified, job.LookupHash, ct);
+            return false;
         }
 
         var values = KeysetCodec.DeserializeTuples(job.LookupValuesJson, columnTypes);
@@ -94,6 +107,7 @@ internal sealed class FanoutQueueWorker(
             ct);
 
         await store.CompleteAsync(job.TableQualified, job.LookupHash, ct);
+        return true;
     }
 
     private static bool TryResolveColumnTypes(CapturedTable table, IReadOnlyList<string> columns, out Type[] types)
@@ -119,6 +133,6 @@ internal static partial class FanoutQueueWorkerLog
     [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker pass failed; retrying.")]
     internal static partial void WorkerPassFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Fan-out job for {Table} references a table/column not in the current model; completing it.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Fan-out job for {Table} references a table/column not in the current model; deferring it (it will retry once the model includes it — if a binding was removed, clear it from wallaby.fanout_queue).")]
     internal static partial void UnknownFanoutTable(this ILogger logger, string table);
 }
