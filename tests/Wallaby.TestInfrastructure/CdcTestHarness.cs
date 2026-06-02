@@ -209,7 +209,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     }
 
     /// <summary>Start the live pipeline (and backfill coordinator) in the background.</summary>
-    public Task StartAsync(CancellationToken ct = default)
+    public async Task StartAsync(CancellationToken ct = default)
     {
         EnsureModel();
         if (_pipelineTask is not null)
@@ -239,8 +239,16 @@ public sealed class CdcTestHarness : IAsyncDisposable
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
 
+        // Mirror the production lifecycle: run one-time sink setup before streaming begins.
+        foreach (var sink in _sinks.Values)
+        {
+            if (sink is ISinkInitializer initializer)
+            {
+                await initializer.InitializeAsync(_cts.Token);
+            }
+        }
+
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
-        return Task.CompletedTask;
     }
 
     /// <summary>

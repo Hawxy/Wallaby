@@ -26,4 +26,23 @@ public sealed class MeilisearchSinkOptions
 
     /// <summary>Polling interval while waiting for a task.</summary>
     public int WaitIntervalMs { get; set; } = 50;
+
+    /// <summary>
+    /// Indexes to ensure exist and configure when the sink initializes (before streaming begins). Indexes
+    /// reached only at runtime (e.g. per-tenant <c>ScopedDestination</c> indexes) are not listed here; they
+    /// auto-create on first write with <see cref="PrimaryKey"/> and receive no custom settings.
+    /// </summary>
+    public IList<MeilisearchIndexConfig> Indexes { get; } = [];
+
+    /// <summary>
+    /// Declare an index to ensure exists (created with <see cref="PrimaryKey"/> if missing) and optionally
+    /// configure at startup. Fluent; call once per index.
+    /// </summary>
+    public MeilisearchSinkOptions ConfigureIndex(string name, Action<MeilisearchIndexConfig>? configure = null)
+    {
+        var config = new MeilisearchIndexConfig { Name = name };
+        configure?.Invoke(config);
+        Indexes.Add(config);
+        return this;
+    }
 }

@@ -36,6 +36,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private EntityMaterializer _materializer = null!;
     private MappingChangeRouter _router = null!;
     private SinkDispatcher _dispatcher = null!;
+    private IReadOnlyDictionary<string, ISink> _sinks = null!;
     private WatermarkBackfillCoordinator _coordinator = null!;
     private PostgresSelfConfigurator _selfConfigurator = null!;
     private PostgresCheckpointStore _checkpoints = null!;
@@ -108,6 +109,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private async Task RunAsLeaderAsync(CancellationToken ct)
     {
         await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
+        await InitializeSinksAsync(ct);
 
         await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
         var pipeline = new CdcPipeline(
@@ -203,14 +205,14 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             backfillTables.Add((captured, registration.BackfillVersion));
         }
 
-        var sinks = _config.Sinks.ToDictionary(s => s.Name, s => s.Factory(_services));
+        _sinks = _config.Sinks.ToDictionary(s => s.Name, s => s.Factory(_services));
 
         IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
             : new DefaultEnrichmentContextProvider(() => _dbContextFactory.CreateDbContext());
         _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
         _dispatcher = new SinkDispatcher(
-            sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
+            _sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
         _dependentResolver = _cdcModel.DependentBindings.Count > 0
@@ -229,6 +231,20 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             },
             _logger);
         _backfillTables = backfillTables;
+    }
+
+    // Runs each sink's optional one-time setup on the leader, before streaming. Idempotent, so it is safe
+    // to re-run on every leadership acquisition; a failure bubbles to the leader retry loop in RunAsync.
+    private async Task InitializeSinksAsync(CancellationToken ct)
+    {
+        foreach (var sink in _sinks.Values)
+        {
+            if (sink is ISinkInitializer initializer)
+            {
+                await initializer.InitializeAsync(ct);
+                _logger.SinkInitialized(sink.Name);
+            }
+        }
     }
 
     private async Task DelaySafeAsync(TimeSpan delay, CancellationToken ct)
@@ -258,4 +274,7 @@ internal static partial class CdcRuntimeLog
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker failed.")]
     internal static partial void FanoutWorkerFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink '{Sink}'.")]
+    internal static partial void SinkInitialized(this ILogger logger, string sink);
 }

@@ -39,6 +39,31 @@ cdc.Map<Product>()
 | `WaitTimeoutMs` | `60000` | Max wait per task when `WaitForCompletion`. |
 | `WaitIntervalMs` | `50` | Poll interval while waiting. |
 
+## Index configuration
+
+By default Meilisearch auto-creates an index on first write (inferring its primary key). To create and
+configure an index up front instead, declare it with `ConfigureIndex`. Declared indexes are created (with
+the sink's `PrimaryKey`) and have their settings applied on startup.
+
+```csharp
+cdc.AddMeilisearchSink("meili", m =>
+{
+    m.Host = "http://localhost:7700";
+    m.ConfigureIndex("products", i => i.Settings = new Settings
+    {
+        SearchableAttributes = ["name", "description"],
+        FilterableAttributes = ["category", "tenantId"],
+        SortableAttributes   = ["price"],
+    });
+});
+```
+
+`Settings` is Meilisearch's own settings type, so you have full control (ranking rules, stop words,
+synonyms, faceting, …). Setup is idempotent and re-applied on each leadership acquisition.
+
+Indexes created at runtime — per-tenant indexes from [`ScopedDestination`](/multi-tenancy) — are **not**
+declared here; they auto-create on first write with the sink's `PrimaryKey` and use Meilisearch defaults.
+
 ## How documents are written
 
 - Your transform's `CdcDocument` fields become the Meilisearch document. Wallaby stamps the configured

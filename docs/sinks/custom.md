@@ -63,6 +63,10 @@ public sealed class MySink : ISink, ISinkInitializer
 }
 ```
 
+`InitializeAsync` runs **on the leader, once, after self-config and before streaming begins** and again
+whenever a standby takes over leadership. Make it idempotent. If it throws, the leader session is retried
+(the pipeline won't stream into an unconfigured sink).
+
 ## Registering
 
 ```csharp

@@ -9,7 +9,7 @@ namespace Wallaby.Sinks.Meilisearch;
 /// idempotent), and deletions remove by that same id. Records are routed to the index named by
 /// <see cref="SinkRecord.Destination"/> (falling back to <see cref="MeilisearchSinkOptions.DefaultIndex"/>).
 /// </summary>
-public sealed class MeilisearchSink : ISink
+public sealed class MeilisearchSink : ISink, ISinkInitializer
 {
     private readonly MeilisearchSinkOptions _options;
     private readonly MeilisearchClient _client;
@@ -28,6 +28,40 @@ public sealed class MeilisearchSink : ISink
 
     /// <inheritdoc />
     public string Name { get; }
+
+    /// <inheritdoc />
+    public async Task InitializeAsync(CancellationToken ct)
+    {
+        foreach (var config in _options.Indexes)
+        {
+            var index = _client.Index(config.Name);
+
+            if (!await IndexExistsAsync(config.Name, ct))
+            {
+                var created = await _client.CreateIndexAsync(config.Name, _options.PrimaryKey, ct);
+                await WaitAsync(index, created, ct, force: true);
+            }
+
+            if (config.Settings is not null)
+            {
+                var updated = await index.UpdateSettingsAsync(config.Settings, ct);
+                await WaitAsync(index, updated, ct, force: true);
+            }
+        }
+    }
+
+    private async Task<bool> IndexExistsAsync(string name, CancellationToken ct)
+    {
+        try
+        {
+            await _client.GetIndexAsync(name, ct);
+            return true;
+        }
+        catch (MeilisearchApiError)
+        {
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     public async Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct)
@@ -84,9 +118,11 @@ public sealed class MeilisearchSink : ISink
         }
     }
 
-    private async Task WaitAsync(global::Meilisearch.Index index, TaskInfo info, CancellationToken ct)
+    private async Task WaitAsync(global::Meilisearch.Index index, TaskInfo info, CancellationToken ct, bool force = false)
     {
-        if (!_options.WaitForCompletion)
+        // Index setup (force=true) always waits so the index is ready before streaming; delivery waits
+        // only when WaitForCompletion is set.
+        if (!force && !_options.WaitForCompletion)
         {
             return;
         }

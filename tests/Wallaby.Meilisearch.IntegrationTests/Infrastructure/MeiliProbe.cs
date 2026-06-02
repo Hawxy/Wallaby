@@ -27,6 +27,36 @@ public sealed class MeiliProbe(string host, string apiKey)
     public async Task<string?> NameAsync(string index, int id)
         => (await GetAsync(index, id.ToString()))?["name"]?.GetValue<string>();
 
+    /// <summary>True when the index exists.</summary>
+    public async Task<bool> IndexExistsAsync(string index)
+    {
+        try
+        {
+            await _client.GetIndexAsync(index);
+            return true;
+        }
+        catch (MeilisearchApiError)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The configured primary key of the index, or null if unset/absent.</summary>
+    public async Task<string?> PrimaryKeyAsync(string index)
+    {
+        try
+        {
+            return await _client.Index(index).FetchPrimaryKey();
+        }
+        catch (MeilisearchApiError)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The index's current settings.</summary>
+    public Task<Settings> SettingsAsync(string index) => _client.Index(index).GetSettingsAsync();
+
     /// <summary>Delete the index and wait for the task to finish (used to prove a re-backfill repopulates it).</summary>
     public async Task DropAsync(string index)
     {
