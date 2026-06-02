@@ -2,7 +2,7 @@
 
 Postgres Change Data Capture for .NET, driven by your **EF Core model**.
 
-EFCore.CDC streams row changes from Postgres logical replication, materializes them into your mapped
+Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
 EF Core entities, lets you **transform/enrich** them, and routes the resulting documents to pluggable
 **destinations** (sinks). It **self-configures** the publication and replication slot from your model,
 supports **backfill** operations, and is **cluster-safe** via leader election.
