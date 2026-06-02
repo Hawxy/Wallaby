@@ -23,7 +23,7 @@ cdc.Map<Product>()
    });
 ```
 
-For anything with dependencies, implement `ICdcTransform<TEntity>` as a class and let the container build:
+For more complex transforms, or anything with dependencies, implement `ICdcTransform<TEntity>` as a class:
 
 ```csharp
 public sealed class ProductSearchTransform(IPricingService pricing) : ICdcTransform<Product>
@@ -39,7 +39,9 @@ public sealed class ProductSearchTransform(IPricingService pricing) : ICdcTransf
 }
 
 // register:
-cdc.Map<Product>().ToSink("meili", "products").UsingTransform<ProductSearchTransform>();
+cdc.Map<Product>()
+    .ToSink("meili", "products")
+    .UsingTransform<ProductSearchTransform>();
 ```
 
 ## Internals

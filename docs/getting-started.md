@@ -52,7 +52,7 @@ builder.Services.AddWallaby<AppDbContext>(cdc =>
        })
        .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
 
-       // A mapping is routing only; the transform shapes the document.
+       // specify mapping and then configure the transform and destination
        .Map<Product>()
             .ToSink("meili", destination: "products")
             .WithBackfillVersion("v1")
