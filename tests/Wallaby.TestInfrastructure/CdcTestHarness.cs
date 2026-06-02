@@ -81,6 +81,9 @@ public sealed class CdcTestHarness : IAsyncDisposable
     /// <summary>Maximum records per dispatched batch and per inline fan-out page (set before <see cref="StartAsync"/>).</summary>
     public int MaxBatchSize { get; set; } = 1000;
 
+    /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
+    public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>Number of rows currently in the scoped fan-out queue (for coalescing/offload assertions).</summary>
     public async Task<int> PendingFanoutJobCountAsync()
         => _fanoutQueue is null ? 0 : (await _fanoutQueue.ListAsync(_cts?.Token ?? CancellationToken.None)).Count;
@@ -237,7 +240,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
         _pipeline = new CdcPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, instrumentation: Instrumentation),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
-            MaxBatchSize, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
+            MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
 
         // Mirror the production lifecycle: run one-time sink setup before streaming begins.
         foreach (var sink in _sinks.Values)

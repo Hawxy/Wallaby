@@ -48,6 +48,14 @@ public sealed class CdcOptions
     /// <summary>How long to wait before retrying after a failed leader session.</summary>
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// How often, while a single transaction is being processed, Wallaby sends a replication status
+    /// update to keep the connection alive — covering slow transforms/sinks when the consumer isn't
+    /// reading the stream (so Npgsql can't answer the server's keepalives). Keep it well under the
+    /// server's <c>wal_sender_timeout</c> (default 60s).
+    /// </summary>
+    public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>Postgres connection string. Set via <see cref="CdcBuilder.UseConnectionString"/>.</summary>
     public string ConnectionString { get; internal set; } = string.Empty;
 

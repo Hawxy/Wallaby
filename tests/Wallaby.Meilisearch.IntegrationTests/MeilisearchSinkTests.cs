@@ -95,7 +95,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
                 var docs = new Dictionary<DocumentKey, CdcDocument?>();
                 foreach (var row in rows)
                 {
-                    docs[new DocumentKey(new object?[] { row.Id })] =
+                    docs[new DocumentKey([row.Id])] =
                         row.Name == "skip" ? null : new CdcDocument { ["name"] = row.Name };
                 }
                 return docs;

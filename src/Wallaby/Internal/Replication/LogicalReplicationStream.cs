@@ -23,6 +23,8 @@ internal sealed class LogicalReplicationStream(
 {
     private readonly LogicalReplicationConnection _connection = new(connectionString);
     private readonly PgOutputReplicationSlot _slot = new(slotName);
+    // Serializes all status-update writes (acks + keepalives) so they never overlap on the connection.
+    private readonly SemaphoreSlim _statusLock = new(1, 1);
     // Binary mode so Npgsql decodes values to proper CLR types (e.g. DateTime, decimal) rather than text.
     // messages: true asks pgoutput to forward generic WAL messages from pg_logical_emit_message — the
     // transport for backfill low/high watermarks.
@@ -52,9 +54,88 @@ internal sealed class LogicalReplicationStream(
     /// </summary>
     public async Task AcknowledgeAsync(ulong lsn, CancellationToken ct)
     {
-        _connection.SetReplicationStatus(new NpgsqlLogSequenceNumber(lsn));
-        await _connection.SendStatusUpdate(ct);
+        await _statusLock.WaitAsync(ct);
+        try
+        {
+            _connection.SetReplicationStatus(new NpgsqlLogSequenceNumber(lsn));
+            await _connection.SendStatusUpdate(ct);
+        }
+        finally
+        {
+            _statusLock.Release();
+        }
     }
 
-    public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
+    /// <summary>
+    /// Begin sending periodic status updates so the connection stays alive while a transaction is being
+    /// processed — i.e. while the consumer isn't pulling from the stream, so Npgsql can't answer the
+    /// server's keepalives. Scope it to one transaction's processing: the replication enumerator is
+    /// suspended then (no concurrent socket read), so sending is safe; dispose it before reading resumes.
+    /// The update reports the last <see cref="AcknowledgeAsync"/> position (it never calls
+    /// <c>SetReplicationStatus</c>), so <c>confirmed_flush_lsn</c> is not advanced past durable delivery.
+    /// </summary>
+    public IAsyncDisposable StartKeepalive(TimeSpan interval, CancellationToken ct) => new Keepalive(this, interval, ct);
+
+    private async Task SendKeepaliveAsync()
+    {
+        await _statusLock.WaitAsync();
+        try
+        {
+            await _connection.SendStatusUpdate(CancellationToken.None);
+        }
+        finally
+        {
+            _statusLock.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _connection.DisposeAsync();
+        _statusLock.Dispose();
+    }
+
+    private sealed class Keepalive : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _cts;
+        private readonly Task _loop;
+
+        public Keepalive(LogicalReplicationStream stream, TimeSpan interval, CancellationToken ct)
+        {
+            _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _loop = RunAsync(stream, interval, _cts.Token);
+        }
+
+        private static async Task RunAsync(LogicalReplicationStream stream, TimeSpan interval, CancellationToken ct)
+        {
+            try
+            {
+                using var timer = new PeriodicTimer(interval);
+                while (await timer.WaitForNextTickAsync(ct))
+                {
+                    // The actual send is not cancellable so it can't be torn mid-write; cancellation only
+                    // stops the wait between ticks.
+                    await stream.SendKeepaliveAsync();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Stopped between ticks.
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _cts.CancelAsync();
+            try
+            {
+                await _loop; // ensure no keepalive send is in flight before reading resumes
+            }
+            catch
+            {
+                // The loop swallows cancellation; ignore anything else during teardown.
+            }
+            _cts.Dispose();
+        }
+    }
 }

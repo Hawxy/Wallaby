@@ -36,6 +36,7 @@ internal sealed class CdcPipeline(
     string slotName,
     ILogger logger,
     int maxBatchSize,
+    TimeSpan keepaliveInterval,
     WatermarkBackfillCoordinator? backfill = null,
     DependentChangeResolver? dependentResolver = null,
     IFanoutQueueStore? fanoutQueue = null,
@@ -52,6 +53,10 @@ internal sealed class CdcPipeline(
 
         await foreach (var transaction in stream.ReadAsync(ct))
         {
+            // Keep the connection alive while we process this transaction (the stream isn't being read,
+            // so Npgsql can't answer the server's keepalives). Disposed before the next read resumes.
+            await using var keepalive = stream.StartKeepalive(keepaliveInterval, ct);
+
             var lagSeconds = transaction.CommitTimestamp is { } commitTs
                 ? Math.Max(0, (DateTimeOffset.UtcNow - commitTs).TotalSeconds)
                 : -1;

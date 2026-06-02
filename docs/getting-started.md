@@ -94,7 +94,8 @@ Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured automa
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
 | `StandbyRetryInterval` / `LeaderRetryInterval` | `5s` | Leader-election retry cadence. |
-| `DeadLetterPolicy` | `Halt` | `Halt` stops on a permanent sink failure; `Skip` logs and drops the batch. |
+| `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
+| `DeadLetterPolicy` | `Halt` | What to do when a batch can't be processed — a permanent **sink** failure, a **transform** exception, or a **materialization** failure. `Halt` stops the pipeline (retried after the leader restarts); `Skip` logs, counts (`wallaby.dead_letter`), and drops the batch, then continues. |
 
 ## Next steps
 

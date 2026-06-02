@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 
@@ -15,9 +17,12 @@ namespace Wallaby.Internal.Pipeline;
 internal sealed class MappingChangeRouter(
     IReadOnlyDictionary<Type, EntityMapping> mappings,
     IEnrichmentContextProvider contextProvider,
-    WallabyInstrumentation? instrumentation = null) : IChangeRouter
+    WallabyInstrumentation? instrumentation = null,
+    bool skipFailedBatches = false,
+    ILogger? logger = null) : IChangeRouter
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
     private static readonly object NullScopeKey = new();
     private static readonly object SharedContextKey = new();
 
@@ -35,28 +40,31 @@ internal sealed class MappingChangeRouter(
                     continue; // entity not mapped to any sink
                 }
 
-                var groupChanges = group.ToList();
+                // Collapse to the last change per key in commit order. A key inserted/updated and then
+                // deleted (or deleted and then re-inserted) within the same batch must resolve to its
+                // FINAL action — exactly one routed record, never both an upsert and a deletion. (GroupBy
+                // yields each group's elements in source order, and the batch is in commit order.)
+                var lastByKey = new Dictionary<DocumentKey, ChangeEvent>();
+                foreach (var change in group)
+                {
+                    lastByKey[change.Key] = change;
+                }
 
-                // Deletes: routed by key without the transform, but scoped destination still needs the key.
-                foreach (var deletion in groupChanges.Where(c => c.Action == ChangeAction.Delete))
+                // Keys whose final action is a delete: routed by key without the transform (the row is
+                // gone), but a scoped destination still needs the key resolved from the old row.
+                foreach (var deletion in lastByKey.Values.Where(c => c.Action == ChangeAction.Delete))
                 {
                     var scopeKey = mapping.GetScopeKey(deletion);
                     routed.Add(Deletion(mapping, deletion, mapping.ResolveDestination(scopeKey)));
                 }
 
-                // De-duplicate non-delete changes by key (last wins within the batch).
-                var byKey = new Dictionary<DocumentKey, ChangeEvent>();
-                foreach (var change in groupChanges.Where(c => c.Action != ChangeAction.Delete))
-                {
-                    byKey[change.Key] = change;
-                }
-
-                if (byKey.Count == 0)
+                var upserts = lastByKey.Values.Where(c => c.Action != ChangeAction.Delete).ToList();
+                if (upserts.Count == 0)
                 {
                     continue;
                 }
 
-                foreach (var scopeGroup in byKey.Values.GroupBy(mapping.GetScopeKey))
+                foreach (var scopeGroup in upserts.GroupBy(mapping.GetScopeKey))
                 {
                     var scopeKey = scopeGroup.Key;
                     var subset = scopeGroup.ToList();
@@ -72,7 +80,24 @@ internal sealed class MappingChangeRouter(
                     }
 
                     var transformStart = WallabyInstrumentation.StartTimer();
-                    var documents = await mapping.Transform.InvokeAsync(db, subset, ct);
+                    IReadOnlyDictionary<DocumentKey, CdcDocument?> documents;
+                    try
+                    {
+                        documents = await mapping.Transform.InvokeAsync(db, subset, ct);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // Poison batch: under Halt the exception stops the pipeline (retried from the last
+                        // ack); under Skip it is logged, counted, and the scope group dropped so one bad
+                        // batch can't wedge the stream.
+                        if (!skipFailedBatches)
+                        {
+                            throw;
+                        }
+                        _instr.RecordDeadLetter(WallabyInstrumentation.StageTransform);
+                        _logger.TransformDeadLettered(ex, subset.Count, entityName);
+                        continue;
+                    }
                     _instr.RecordTransformDuration(entityName, transformStart);
 
                     foreach (var change in subset)
@@ -121,4 +146,11 @@ internal sealed class MappingChangeRouter(
     private static RoutedDocument Deletion(EntityMapping mapping, ChangeEvent change, string? destination)
         => new(mapping.SinkName, new SinkRecord(
             destination, mapping.GetDocumentId(change), Document: null, IsDeletion: true, change.Metadata));
+}
+
+/// <summary>Source-generated log messages for <see cref="MappingChangeRouter"/>.</summary>
+internal static partial class MappingChangeRouterLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Dead-lettering {Count} change(s) for entity '{Entity}': transform failed (DeadLetterPolicy=Skip).")]
+    internal static partial void TransformDeadLettered(this ILogger logger, Exception ex, int count, string entity);
 }

@@ -112,9 +112,11 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         await InitializeSinksAsync(ct);
 
         await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
+        var changeEventFactory = new ChangeEventFactory(
+            _materializer, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
         var pipeline = new CdcPipeline(
-            stream, new ChangeEventFactory(_materializer), _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
-            _options.MaxBatchSize, _coordinator, _dependentResolver, _fanoutQueue, _instrumentation);
+            stream, changeEventFactory, _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
+            _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, _instrumentation);
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var scheduler = new BackfillScheduler(
@@ -210,7 +212,9 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
             : new DefaultEnrichmentContextProvider(() => _dbContextFactory.CreateDbContext());
-        _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
+        _router = new MappingChangeRouter(
+            mappings, contextProvider, _instrumentation,
+            skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger);
         _dispatcher = new SinkDispatcher(
             _sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(

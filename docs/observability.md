@@ -34,6 +34,7 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.backfill.rows` | Counter | `wallaby.table` | Rows copied during backfill. |
 | `wallaby.backfill.active` | UpDownCounter | — | Tables currently being backfilled. |
 | `wallaby.backfill.chunk.duration` | Histogram (s) | `wallaby.table` | Time to read and emit one backfill chunk. |
+| `wallaby.dead_letter` | Counter | `wallaby.stage` | Changes dropped by `DeadLetterPolicy.Skip` after a `transform` or `materialization` failure. |
 
 The main questions you'll want to ask are:
 

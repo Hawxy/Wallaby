@@ -111,6 +111,10 @@ public sealed class CdcBuilder
         {
             throw new CdcConfigurationException("MaxBatchSize must be greater than zero.");
         }
+        if (options.KeepaliveInterval <= TimeSpan.Zero)
+        {
+            throw new CdcConfigurationException("KeepaliveInterval must be greater than zero.");
+        }
         if (_configuration.Sinks.Count == 0)
         {
             throw new CdcConfigurationException("At least one sink must be registered (e.g. AddMeilisearchSink/AddDelegateSink).");
