@@ -131,6 +131,7 @@ public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
         var last = products[^1].Id;
 
         await harness.SelfConfigureAsync();
+        await harness.ClearFanoutQueueAsync(); // isolate this test's queue count from the shared schema
         await harness.StartAsync();
 
         var probe = new MeiliProbe(meili);

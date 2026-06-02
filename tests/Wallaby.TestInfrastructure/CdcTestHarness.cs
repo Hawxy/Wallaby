@@ -85,6 +85,18 @@ public sealed class CdcTestHarness : IAsyncDisposable
     public async Task<int> PendingFanoutJobCountAsync()
         => _fanoutQueue is null ? 0 : (await _fanoutQueue.ListAsync(_cts?.Token ?? CancellationToken.None)).Count;
 
+    /// <summary>
+    /// Empty the shared <c>wallaby.fanout_queue</c> so a test's offload/coalescing assertions are isolated
+    /// from rows other tests left in the same database. Call after <see cref="SelfConfigureAsync"/> (which
+    /// creates the table) and before any fan-out is triggered.
+    /// </summary>
+    public async Task ClearFanoutQueueAsync()
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand("DELETE FROM wallaby.fanout_queue", connection);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     /// <summary>The highest LSN acknowledged to the server by the running pipeline.</summary>
     public ulong LastAcknowledgedLsn => _pipeline?.LastAcknowledgedLsn ?? 0;
 

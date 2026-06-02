@@ -12,10 +12,10 @@ Wallaby streams row changes from Postgres logical replication, materializes them
 
 ```bash
 dotnet add package Wallaby
-dotnet add package Wallaby.Sinks.Meilisearch   # optional
+dotnet add package Wallaby.Sinks.Meilisearch   # optionally add a pre-built sink
 ```
 
-Both target **.NET 10**.
+Wallaby requires .NET 10+
 
 ## Server prerequisites
 

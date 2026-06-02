@@ -139,9 +139,13 @@ public class FanoutScalabilityTests(PostgresFixture pg)
         harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
-        await harness.SelfConfigureAsync();
+        // Seed before self-config so the inserts are not streamed; only the renames below fan out.
         var cat = await harness.Db.AddCategoryAsync("Cat");
         await harness.Db.AddProductsAsync(cat, Enumerable.Range(0, 12).Select(i => $"p{i}").ToArray());
+
+        await harness.SelfConfigureAsync();
+        // The wallaby.fanout_queue is shared across tests in this session; isolate this test's count.
+        await harness.ClearFanoutQueueAsync();
 
         using var synthetic = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.dependent.synthetic");
 
