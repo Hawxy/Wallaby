@@ -1,7 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Internal.SelfConfig;
@@ -87,13 +86,6 @@ internal sealed class CdcConfiguration
     /// <c>AddDbContext</c> registration. Set by <see cref="CdcBuilder.UseContext{TContext}"/>.
     /// </summary>
     public Func<IServiceProvider, EnrichmentContextLease>? ContextLease { get; set; }
-
-    /// <summary>
-    /// Registers the capture runtime (<c>CdcRuntime&lt;TContext&gt;</c>, its hosted service, and the backfill
-    /// manager) for the declared context. Set by <see cref="CdcBuilder.UseContext{TContext}"/> so the generic
-    /// type stays confined to this delegate; invoked by <c>AddWallaby</c> only when <see cref="CaptureIntended"/>.
-    /// </summary>
-    public Action<IServiceCollection>? RegisterCaptureRuntime { get; set; }
 
     /// <summary>
     /// True when the consumer declared anything that requires the streaming pipeline (a sink, a mapping, or

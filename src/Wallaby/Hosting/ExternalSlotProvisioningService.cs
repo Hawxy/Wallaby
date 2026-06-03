@@ -13,7 +13,7 @@ namespace Wallaby.Hosting;
 /// mappings), this creates/reconciles the declared pgoutput publications + slots and then completes. There
 /// is no primary slot and no streaming. Runs under the cluster lock so only one node provisions at a time,
 /// and is idempotent. A failure faults the host (which restarts and retries), matching
-/// <see cref="CdcBackgroundService{TContext}"/> and the hand-rolled initializer it replaces.
+/// <see cref="CdcBackgroundService"/> and the hand-rolled initializer it replaces.
 /// </summary>
 internal sealed class ExternalSlotProvisioningService(
     CdcConfiguration config,

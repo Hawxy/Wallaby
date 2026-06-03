@@ -48,8 +48,8 @@ public static class CdcServiceCollectionExtensions
 
         if (configuration.CaptureIntended)
         {
-            // Registers the generic capture runtime for the context declared via UseContext<TContext>().
-            configuration.RegisterCaptureRuntime!(services);
+            // Capture: the model + enrichment come from the delegates set by UseContext<TContext>().
+            RegisterCaptureRuntime(services);
         }
         else
         {
@@ -61,11 +61,11 @@ public static class CdcServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the capture runtime (backfill manager, <see cref="CdcRuntime{TContext}"/>, and its hosted
-    /// service) for <typeparamref name="TContext"/>. Invoked through the delegate captured by
-    /// <see cref="CdcBuilder.UseContext{TContext}"/>, so the generic type stays out of the public entry point.
+    /// Registers the capture runtime — the shared <see cref="CapturedModel"/>, the backfill manager,
+    /// <see cref="CdcRuntime"/>, and its hosted service. Called by <c>AddWallaby</c> when capture is intended; the
+    /// context-specific model + enrichment come from the delegates set by <see cref="CdcBuilder.UseContext{TContext}"/>.
     /// </summary>
-    internal static void RegisterCaptureRuntime<TContext>(IServiceCollection services) where TContext : DbContext
+    internal static void RegisterCaptureRuntime(IServiceCollection services)
     {
         // Resolve the capture model once; both the runtime and the backfill manager share this instance. The
         // model is read via the consumer's context (factory or DI scope) — no IDbContextFactory required.
@@ -82,7 +82,7 @@ public static class CdcServiceCollectionExtensions
                 sp.GetRequiredService<CapturedModel>().Cdc,
                 new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source)));
 
-        services.AddSingleton<CdcRuntime<TContext>>();
-        services.AddSingleton<IHostedService, CdcBackgroundService<TContext>>();
+        services.AddSingleton<CdcRuntime>();
+        services.AddSingleton<IHostedService, CdcBackgroundService>();
     }
 }

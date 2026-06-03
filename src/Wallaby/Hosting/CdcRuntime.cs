@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
@@ -20,7 +19,7 @@ namespace Wallaby.Hosting;
 /// Owns the end-to-end CDC lifecycle for a context: elect leadership (cluster lock), self-configure,
 /// then run the live pipeline and backfill scheduler. Standby nodes wait and take over on failover.
 /// </summary>
-internal sealed class CdcRuntime<TContext> where TContext : DbContext
+internal sealed class CdcRuntime
 {
     private readonly CapturedModel _capturedModel;
     private readonly CdcConfiguration _config;
@@ -31,7 +30,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private readonly IServiceProvider _services;
     private readonly WallabyInstrumentation _instrumentation;
     private readonly CdcStatus _status;
-    private readonly ILogger<CdcRuntime<TContext>> _logger;
+    private readonly ILogger<CdcRuntime> _logger;
 
     // Built once.
     private CdcModel _cdcModel = null!;
@@ -54,7 +53,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         IServiceProvider services,
         WallabyInstrumentation instrumentation,
         CdcStatus status,
-        ILogger<CdcRuntime<TContext>> logger)
+        ILogger<CdcRuntime> logger)
     {
         _capturedModel = capturedModel;
         _config = config;
@@ -289,7 +288,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 }
 
-/// <summary>Source-generated log messages for <see cref="CdcRuntime{TContext}"/>.</summary>
+/// <summary>Source-generated log messages for <see cref="CdcRuntime"/>.</summary>
 internal static partial class CdcRuntimeLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire CDC leadership; retrying.")]

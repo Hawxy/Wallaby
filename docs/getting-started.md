@@ -23,15 +23,15 @@ Your Postgres server must already have:
 
 - **`wal_level = logical`** set in `postgresql.conf`  required for logical replication.
 - A role with the **`REPLICATION`** attribute (or superuser) for the connection string you give Wallaby.
-- Headroom in `max_replication_slots` and `max_wal_senders` (one slot/sender per Wallaby cluster).
+- Headroom in `max_replication_slots` and `max_wal_senders` (at least one slot/sender per Wallaby cluster).
 
 Wallaby validates these on startup and fails fast with an actionable error if something is missing.
 
 ## Register
 
-Call `AddWallaby` to started and chain in your `DbContext` via `UseContext<TContext>()`. Wallably will resolve your context if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
+Call `AddWallaby` to started and chain in your `DbContext` via `UseContext<TContext>()`. Wallably will resolve your context regardless of if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
 
-You must also supply a connection string via `UseConnectionString(...)`.
+You must also supply a connection string via `UseConnectionString(...)` so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 
 ::: tip
 Wallaby also supports running in provision-only mode, where slots are provisioned but not consumed and EF Core can be omitted.
@@ -85,6 +85,10 @@ Only entities you **declare** are captured and added to the publication:
 - `CaptureAllMappedTables()` opts every mapped entity in (not recommended).
 
 Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured automatically. Captured tables must have a primary key.
+
+## Deployment
+
+It's highly recommended to deploy Wallaby as a seperate service, not as an integrated part of your main application. This allows you to scale CDC operations independently as the need arises. 
 
 ## Options
 

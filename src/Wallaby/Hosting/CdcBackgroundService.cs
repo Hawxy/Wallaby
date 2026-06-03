@@ -1,14 +1,12 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Wallaby.Diagnostics;
 
 namespace Wallaby.Hosting;
 
-/// <summary>Hosts the <see cref="CdcRuntime{TContext}"/> as a long-running background service.</summary>
-internal sealed class CdcBackgroundService<TContext>(
-    CdcRuntime<TContext> runtime, CdcStatus status, ILogger<CdcBackgroundService<TContext>> logger) : BackgroundService
-    where TContext : DbContext
+/// <summary>Hosts the <see cref="CdcRuntime"/> as a long-running background service.</summary>
+internal sealed class CdcBackgroundService(
+    CdcRuntime runtime, CdcStatus status, ILogger<CdcBackgroundService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -31,7 +29,7 @@ internal sealed class CdcBackgroundService<TContext>(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="CdcBackgroundService{TContext}"/>.</summary>
+/// <summary>Source-generated log messages for <see cref="CdcBackgroundService"/>.</summary>
 internal static partial class CdcBackgroundServiceLog
 {
     [LoggerMessage(Level = LogLevel.Critical, Message = "CDC background service terminated unexpectedly.")]

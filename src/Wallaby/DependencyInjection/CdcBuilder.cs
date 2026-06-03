@@ -37,8 +37,6 @@ public sealed class CdcBuilder
     {
         _configuration.ModelAccessor = DbContextResolver.ReadModel<TContext>;
         _configuration.ContextLease = DbContextResolver.Lease<TContext>;
-        _configuration.RegisterCaptureRuntime =
-            services => CdcServiceCollectionExtensions.RegisterCaptureRuntime<TContext>(services);
         return this;
     }
 

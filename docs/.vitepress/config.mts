@@ -38,8 +38,8 @@ export default defineConfig({
       {
         text: 'Operations',
         items: [
-          { text: 'Observability', link: '/observability' },
-          { text: 'Health checks', link: '/health-checks' }
+          { text: 'Observability', link: '/operations/observability' },
+          { text: 'Health checks', link: '/operations/health-checks' }
         ]
       }
     ],
