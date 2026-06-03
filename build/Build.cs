@@ -76,6 +76,7 @@ class Build : NukeBuild
         {
             var wallaby = Solution.AllProjects.Single(x=> x.Name == "Wallaby");
             var wallabySink = Solution.AllProjects.Single(x=> x.Name == "Wallaby.Sinks.Meilisearch");
+            var wallabyHealthChecks = Solution.AllProjects.Single(x=> x.Name == "Wallaby.AspNetCore.HealthChecks");
             
             DotNetPack(_ => _
                 .SetProject(wallaby)
@@ -85,6 +86,12 @@ class Build : NukeBuild
 
             DotNetPack(_ => _
                 .SetProject(wallabySink)
+                .SetConfiguration("Release")
+                .EnableContinuousIntegrationBuild()
+                .SetOutputDirectory(ArtifactsDirectory));
+            
+            DotNetPack(_ => _
+                .SetProject(wallabyHealthChecks)
                 .SetConfiguration("Release")
                 .EnableContinuousIntegrationBuild()
                 .SetOutputDirectory(ArtifactsDirectory));
