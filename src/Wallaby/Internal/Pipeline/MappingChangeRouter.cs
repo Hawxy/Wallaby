@@ -50,16 +50,24 @@ internal sealed class MappingChangeRouter(
                     lastByKey[change.Key] = change;
                 }
 
-                // Keys whose final action is a delete: routed by key without the transform (the row is
-                // gone), but a scoped destination still needs the key resolved from the old row.
-                foreach (var deletion in lastByKey.Values.Where(c => c.Action == ChangeAction.Delete))
+                // Single pass over the collapsed changes: a key whose final action is a delete is routed
+                // directly by key without the transform (the row is gone — a scoped destination still
+                // resolves the key from the old row); everything else is collected for transform routing.
+                List<ChangeEvent>? upserts = null;
+                foreach (var change in lastByKey.Values)
                 {
-                    var scopeKey = mapping.GetScopeKey(deletion);
-                    routed.Add(Deletion(mapping, deletion, mapping.ResolveDestination(scopeKey)));
+                    if (change.Action == ChangeAction.Delete)
+                    {
+                        var scopeKey = mapping.GetScopeKey(change);
+                        routed.Add(Deletion(mapping, change, mapping.ResolveDestination(scopeKey)));
+                    }
+                    else
+                    {
+                        (upserts ??= []).Add(change);
+                    }
                 }
 
-                var upserts = lastByKey.Values.Where(c => c.Action != ChangeAction.Delete).ToList();
-                if (upserts.Count == 0)
+                if (upserts is null)
                 {
                     continue;
                 }

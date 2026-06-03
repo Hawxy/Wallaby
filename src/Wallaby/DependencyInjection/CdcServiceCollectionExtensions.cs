@@ -71,7 +71,7 @@ public static class CdcServiceCollectionExtensions
         {
             var factory = sp.GetRequiredService<IDbContextFactory<TContext>>();
             using var context = factory.CreateDbContext();
-            var model = ModelToCdcModel.Build(context.Model, ToCaptureSpec(sp.GetRequiredService<CdcConfiguration>()));
+            var model = ModelToCdcModel.Build(context.Model, sp.GetRequiredService<CdcConfiguration>().ToCaptureSpec());
             return new DefaultBackfillManager(
                 model, new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source));
         });
@@ -79,11 +79,4 @@ public static class CdcServiceCollectionExtensions
         services.AddSingleton<CdcRuntime<TContext>>();
         services.AddSingleton<IHostedService, CdcBackgroundService<TContext>>();
     }
-
-    private static CaptureSpec ToCaptureSpec(CdcConfiguration configuration) => new()
-    {
-        CaptureAllMapped = configuration.CaptureAllMapped,
-        DeclaredEntities = configuration.DeclaredEntities,
-        RequiresFullReplicaIdentity = configuration.RequiresFullReplicaIdentity,
-    };
 }

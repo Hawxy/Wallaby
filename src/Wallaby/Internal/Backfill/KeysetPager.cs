@@ -69,7 +69,6 @@ internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> 
 /// </summary>
 internal sealed class KeysetPager
 {
-    private readonly NpgsqlDataSource _dataSource;
     private readonly CapturedTable _table;
     private readonly KeysetFilter? _filter;
     private readonly string[] _columnNames;
@@ -77,9 +76,8 @@ internal sealed class KeysetPager
     private readonly string _firstPageSqlPrefix;
     private readonly string _nextPageSqlPrefix;
 
-    public KeysetPager(NpgsqlDataSource dataSource, CapturedTable table, KeysetFilter? filter = null)
+    public KeysetPager(CapturedTable table, KeysetFilter? filter = null)
     {
-        _dataSource = dataSource;
         _table = table;
         _filter = filter;
         _columnNames = table.Columns.Select(c => c.ColumnName).ToArray();
@@ -113,11 +111,10 @@ internal sealed class KeysetPager
         _nextPageSqlPrefix = $"SELECT {columns} {fromOrderBy}{nextWhere}ORDER BY {orderBy} LIMIT ";
     }
 
-    public async Task<BackfillChunk> ReadChunkAsync(object?[]? cursor, int limit, CancellationToken ct)
+    public async Task<BackfillChunk> ReadChunkAsync(NpgsqlConnection connection, object?[]? cursor, int limit, CancellationToken ct)
     {
         var sql = (cursor is null ? _firstPageSqlPrefix : _nextPageSqlPrefix) + limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        await using var connection = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, connection);
         if (_filter is not null)
         {

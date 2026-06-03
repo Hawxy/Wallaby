@@ -39,7 +39,7 @@ internal sealed class WatermarkBackfillCoordinator(
     /// <summary>Snapshot a whole table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
     public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
     {
-        var pager = new KeysetPager(dataSource, table);
+        var pager = new KeysetPager(table);
         var pkTypes = table.PrimaryKey.Select(c => c.ClrType).ToArray();
         var existing = await store.GetAsync(table.QualifiedName, ct);
         var cursor = KeysetCodec.Deserialize(existing?.CursorJson, pkTypes);
@@ -72,7 +72,7 @@ internal sealed class WatermarkBackfillCoordinator(
         Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
     {
         var filter = KeysetFilter.ForLookup(spec.LookupColumns, spec.LookupValues);
-        var pager = new KeysetPager(dataSource, spec.PrimaryTable, filter);
+        var pager = new KeysetPager(spec.PrimaryTable, filter);
 
         logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
@@ -107,7 +107,7 @@ internal sealed class WatermarkBackfillCoordinator(
                 _byToken[window.Token] = window;
 
                 await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
-                var chunk = await pager.ReadChunkAsync(cursor, ChunkSize, ct);
+                var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
                 window.Buffer = chunk.Rows;
                 await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
 

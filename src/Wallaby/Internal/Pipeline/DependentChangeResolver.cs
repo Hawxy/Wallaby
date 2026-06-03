@@ -85,12 +85,15 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcMo
         using var activity = _instr.StartDependentResolve();
         var totalSynthetic = 0;
 
+        // One connection shared across every binding's first-page read for this transaction.
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+
         foreach (var (binding, acc) in perBinding)
         {
             var columns = binding.Lookup.Select(l => l.PrimaryColumn).ToArray();
             var filter = KeysetFilter.ForLookup(columns, acc.Tuples);
-            var pager = new KeysetPager(dataSource, binding.PrimaryTable, filter);
-            var chunk = await pager.ReadChunkAsync(cursor: null, pageSize, ct);
+            var pager = new KeysetPager(binding.PrimaryTable, filter);
+            var chunk = await pager.ReadChunkAsync(connection, cursor: null, pageSize, ct);
 
             var page = ToSyntheticUpdates(chunk.Rows, acc.Representative);
             totalSynthetic += page.Count;

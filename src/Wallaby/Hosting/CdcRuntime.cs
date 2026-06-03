@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
@@ -26,6 +25,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private readonly IDbContextFactory<TContext> _dbContextFactory;
     private readonly CdcConfiguration _config;
     private readonly CdcOptions _options;
+    private readonly bool _skipFailedBatches;
     private readonly CdcDataSource _dataSource;
     private readonly IClusterLock _clusterLock;
     private readonly IServiceProvider _services;
@@ -59,6 +59,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _dbContextFactory = dbContextFactory;
         _config = config;
         _options = config.Options;
+        _skipFailedBatches = config.Options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip;
         _dataSource = dataSource;
         _clusterLock = clusterLock;
         _services = services;
@@ -152,7 +153,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
         await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
         var changeEventFactory = new ChangeEventFactory(
-            _materializer, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
+            _materializer, skipFailedBatches: _skipFailedBatches, _logger, _instrumentation);
         var pipeline = new CdcPipeline(
             stream, changeEventFactory, _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
             _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue,
@@ -209,22 +210,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
     private void BuildComponents()
     {
-        var declaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
-        foreach (var mapping in _config.Mappings.Values)
-        {
-            if (mapping.DeclaredDependencies.Count > 0)
-            {
-                declaredDependencies[mapping.EntityClrType] = mapping.DeclaredDependencies;
-            }
-        }
-
-        var captureSpec = new CaptureSpec
-        {
-            CaptureAllMapped = _config.CaptureAllMapped,
-            DeclaredEntities = _config.DeclaredEntities,
-            RequiresFullReplicaIdentity = _config.RequiresFullReplicaIdentity,
-            DeclaredDependencies = declaredDependencies,
-        };
+        var captureSpec = _config.ToCaptureSpec();
 
         IModel model;
         using (var context = _dbContextFactory.CreateDbContext())
@@ -264,9 +250,9 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             : new DefaultEnrichmentContextProvider(() => _dbContextFactory.CreateDbContext());
         _router = new MappingChangeRouter(
             mappings, contextProvider, _instrumentation,
-            skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger);
+            skipFailedBatches: _skipFailedBatches, _logger);
         _dispatcher = new SinkDispatcher(
-            _sinks, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
+            _sinks, skipFailedBatches: _skipFailedBatches, _logger, _instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
         _dependentResolver = _cdcModel.DependentBindings.Count > 0

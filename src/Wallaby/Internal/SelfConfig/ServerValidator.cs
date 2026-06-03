@@ -34,17 +34,11 @@ internal sealed class ServerValidator(ILogger logger)
         var maxSlots = await PgExec.ScalarLongAsync(connection, "SELECT setting::int FROM pg_settings WHERE name = 'max_replication_slots'", ct);
         var usedSlots = await PgExec.ScalarLongAsync(connection, "SELECT count(*) FROM pg_replication_slots", ct);
 
-        // Only slots that don't already exist will consume headroom.
-        var toCreate = 0;
-        foreach (var slotName in slotNames)
-        {
-            var slotExists = await PgExec.ScalarLongAsync(
-                connection, "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", ct, ("s", slotName)) > 0;
-            if (!slotExists)
-            {
-                toCreate++;
-            }
-        }
+        // Only slots that don't already exist will consume headroom
+        var alreadyExisting = await PgExec.ScalarLongAsync(
+            connection, "SELECT count(*) FROM pg_replication_slots WHERE slot_name = ANY(@names)", ct,
+            ("names", slotNames.ToArray()));
+        var toCreate = slotNames.Count - alreadyExisting;
 
         if (usedSlots + toCreate > maxSlots)
         {

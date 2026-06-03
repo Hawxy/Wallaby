@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
+using Wallaby.Internal.SelfConfig;
 
 namespace Wallaby.DependencyInjection;
 
@@ -94,4 +95,29 @@ internal sealed class CdcConfiguration
     /// declared external slots and never opens a primary slot or streams.
     /// </summary>
     public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0 || CaptureAllMapped;
+
+    /// <summary>
+    /// Build the <see cref="CaptureSpec"/> the model resolver consumes, including each mapping's
+    /// <c>DependsOn(...)</c> navigations. Shared by the runtime and the backfill-manager registration so both
+    /// derive the same <see cref="Wallaby.Model.CdcModel"/> (dependent tables/bindings included).
+    /// </summary>
+    public CaptureSpec ToCaptureSpec()
+    {
+        var declaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
+        foreach (var mapping in Mappings.Values)
+        {
+            if (mapping.DeclaredDependencies.Count > 0)
+            {
+                declaredDependencies[mapping.EntityClrType] = mapping.DeclaredDependencies;
+            }
+        }
+
+        return new CaptureSpec
+        {
+            CaptureAllMapped = CaptureAllMapped,
+            DeclaredEntities = DeclaredEntities,
+            RequiresFullReplicaIdentity = RequiresFullReplicaIdentity,
+            DeclaredDependencies = declaredDependencies,
+        };
+    }
 }
