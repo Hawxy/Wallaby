@@ -67,14 +67,19 @@ public static class CdcServiceCollectionExtensions
     /// </summary>
     internal static void RegisterCaptureRuntime<TContext>(IServiceCollection services) where TContext : DbContext
     {
-        services.AddSingleton<ICdcBackfillManager>(sp =>
+        // Resolve the capture model once; both the runtime and the backfill manager share this instance.
+        services.AddSingleton(sp =>
         {
-            var factory = sp.GetRequiredService<IDbContextFactory<TContext>>();
-            using var context = factory.CreateDbContext();
-            var model = ModelToCdcModel.Build(context.Model, sp.GetRequiredService<CdcConfiguration>().ToCaptureSpec());
-            return new DefaultBackfillManager(
-                model, new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source));
+            using var context = sp.GetRequiredService<IDbContextFactory<TContext>>().CreateDbContext();
+            var efModel = context.Model;
+            var cdc = ModelToCdcModel.Build(efModel, sp.GetRequiredService<CdcConfiguration>().ToCaptureSpec());
+            return new CapturedModel(efModel, cdc);
         });
+
+        services.AddSingleton<ICdcBackfillManager>(sp =>
+            new DefaultBackfillManager(
+                sp.GetRequiredService<CapturedModel>().Cdc,
+                new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source)));
 
         services.AddSingleton<CdcRuntime<TContext>>();
         services.AddSingleton<IHostedService, CdcBackgroundService<TContext>>();

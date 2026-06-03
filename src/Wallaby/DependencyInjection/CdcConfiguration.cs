@@ -64,7 +64,6 @@ internal sealed class CdcConfiguration
 {
     public required CdcOptions Options { get; init; }
     public bool CaptureAllMapped { get; set; }
-    public List<Type> DeclaredEntities { get; } = [];
     public List<SinkRegistration> Sinks { get; } = [];
     public Dictionary<Type, MappingRegistration> Mappings { get; } = [];
     public HashSet<Type> RequiresFullReplicaIdentity { get; } = [];
@@ -115,7 +114,7 @@ internal sealed class CdcConfiguration
         return new CaptureSpec
         {
             CaptureAllMapped = CaptureAllMapped,
-            DeclaredEntities = DeclaredEntities,
+            DeclaredEntities = [.. Mappings.Keys],
             RequiresFullReplicaIdentity = RequiresFullReplicaIdentity,
             DeclaredDependencies = declaredDependencies,
         };

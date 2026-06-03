@@ -23,6 +23,7 @@ namespace Wallaby.Hosting;
 internal sealed class CdcRuntime<TContext> where TContext : DbContext
 {
     private readonly IDbContextFactory<TContext> _dbContextFactory;
+    private readonly CapturedModel _capturedModel;
     private readonly CdcConfiguration _config;
     private readonly CdcOptions _options;
     private readonly bool _skipFailedBatches;
@@ -48,6 +49,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
     public CdcRuntime(
         IDbContextFactory<TContext> dbContextFactory,
+        CapturedModel capturedModel,
         CdcConfiguration config,
         CdcDataSource dataSource,
         IClusterLock clusterLock,
@@ -57,6 +59,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         ILogger<CdcRuntime<TContext>> logger)
     {
         _dbContextFactory = dbContextFactory;
+        _capturedModel = capturedModel;
         _config = config;
         _options = config.Options;
         _skipFailedBatches = config.Options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip;
@@ -160,7 +163,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             _instrumentation, _status);
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
-        // connection dropped) — so a standby that can take over isn't left waiting while we stream on with
+        // connection dropped) so a standby that can take over isn't left waiting while we stream on with
         // a stale lock.
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
         var scheduler = new BackfillScheduler(
@@ -210,16 +213,8 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
     private void BuildComponents()
     {
-        var captureSpec = _config.ToCaptureSpec();
-
-        IModel model;
-        using (var context = _dbContextFactory.CreateDbContext())
-        {
-            model = context.Model;
-        }
-
-        _cdcModel = ModelToCdcModel.Build(model, captureSpec);
-        _materializer = new EntityMaterializer(model);
+        _cdcModel = _capturedModel.Cdc;
+        _materializer = new EntityMaterializer(_capturedModel.EfModel);
 
         var mappings = new Dictionary<Type, EntityMapping>();
         var backfillTables = new List<(CapturedTable, string?)>();
@@ -268,7 +263,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
                 PublicationName = _options.PublicationName,
                 ManagePublicationTables = _options.ManagePublicationTables,
                 RequireFullReplicaIdentity = _options.RequireFullReplicaIdentity,
-                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, model),
+                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, _capturedModel.EfModel),
             },
             _logger);
         _backfillTables = backfillTables;

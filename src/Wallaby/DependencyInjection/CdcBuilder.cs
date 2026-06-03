@@ -100,16 +100,7 @@ public sealed class CdcBuilder
     {
         var registration = new MappingRegistration { EntityClrType = typeof(TEntity) };
         _configuration.Mappings[typeof(TEntity)] = registration;
-        AddDeclared(typeof(TEntity));
         return new EntityMapBuilder<TEntity>(registration);
-    }
-
-    private void AddDeclared(Type type)
-    {
-        if (!_configuration.DeclaredEntities.Contains(type))
-        {
-            _configuration.DeclaredEntities.Add(type);
-        }
     }
 
     internal CdcConfiguration Build()
