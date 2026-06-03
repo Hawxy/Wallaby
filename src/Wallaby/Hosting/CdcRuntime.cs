@@ -22,7 +22,6 @@ namespace Wallaby.Hosting;
 /// </summary>
 internal sealed class CdcRuntime<TContext> where TContext : DbContext
 {
-    private readonly IDbContextFactory<TContext> _dbContextFactory;
     private readonly CapturedModel _capturedModel;
     private readonly CdcConfiguration _config;
     private readonly CdcOptions _options;
@@ -48,7 +47,6 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private IReadOnlyList<(CapturedTable Table, string? Version)> _backfillTables = [];
 
     public CdcRuntime(
-        IDbContextFactory<TContext> dbContextFactory,
         CapturedModel capturedModel,
         CdcConfiguration config,
         CdcDataSource dataSource,
@@ -58,7 +56,6 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         CdcStatus status,
         ILogger<CdcRuntime<TContext>> logger)
     {
-        _dbContextFactory = dbContextFactory;
         _capturedModel = capturedModel;
         _config = config;
         _options = config.Options;
@@ -242,7 +239,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
 
         IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
-            : new DefaultEnrichmentContextProvider(() => _dbContextFactory.CreateDbContext());
+            : new DefaultEnrichmentContextProvider(() => _config.ContextLease!(_services));
         _router = new MappingChangeRouter(
             mappings, contextProvider, _instrumentation,
             skipFailedBatches: _skipFailedBatches, _logger);

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
+using Wallaby.Internal.Pipeline;
 using Wallaby.Sinks;
 
 namespace Wallaby.DependencyInjection;
@@ -27,17 +28,15 @@ public sealed class CdcBuilder
     /// <summary>
     /// Declare the EF Core <see cref="DbContext"/> that drives capture. Required whenever Wallaby streams
     /// (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) and to resolve
-    /// <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations. The consumer must also register an
-    /// <see cref="IDbContextFactory{TContext}"/> (e.g. via <c>AddDbContextFactory&lt;TContext&gt;</c>). Omit it
+    /// <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations. The consumer registers the context as
+    /// usual — a scoped <c>AddDbContext&lt;TContext&gt;()</c> is sufficient (Wallaby uses an
+    /// <see cref="IDbContextFactory{TContext}"/> if one is registered, otherwise a DI scope). Omit it entirely
     /// for a provision-only worker that declares external slots by table name only.
     /// </summary>
     public CdcBuilder UseContext<TContext>() where TContext : DbContext
     {
-        _configuration.ModelAccessor = sp =>
-        {
-            using var context = sp.GetRequiredService<IDbContextFactory<TContext>>().CreateDbContext();
-            return context.Model;
-        };
+        _configuration.ModelAccessor = DbContextResolver.ReadModel<TContext>;
+        _configuration.ContextLease = DbContextResolver.Lease<TContext>;
         _configuration.RegisterCaptureRuntime =
             services => CdcServiceCollectionExtensions.RegisterCaptureRuntime<TContext>(services);
         return this;

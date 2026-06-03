@@ -20,7 +20,9 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
+        // Scoped AddDbContext (no factory) — exercises Wallaby's scope fallback end-to-end: the model read and
+        // per-batch enrichment contexts are resolved from a DI scope, with no IDbContextFactory registered.
+        services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
         services.AddWallaby(cdc =>
         {
             cdc.UseContext<AppDbContext>()

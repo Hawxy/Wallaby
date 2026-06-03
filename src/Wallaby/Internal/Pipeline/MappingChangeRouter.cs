@@ -30,7 +30,7 @@ internal sealed class MappingChangeRouter(
         IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var routed = new List<RoutedDocument>();
-        var contexts = new Dictionary<object, DbContext>();
+        var contexts = new Dictionary<object, EnrichmentContextLease>();
         try
         {
             foreach (var group in changes.GroupBy(c => c.EntityClrType))
@@ -125,25 +125,25 @@ internal sealed class MappingChangeRouter(
         }
         finally
         {
-            foreach (var db in contexts.Values)
+            foreach (var lease in contexts.Values)
             {
-                await db.DisposeAsync();
+                await lease.DisposeAsync();
             }
         }
 
         return routed;
     }
 
-    private DbContext GetOrCreateContext(Dictionary<object, DbContext> cache, object? scopeKey)
+    private DbContext GetOrCreateContext(Dictionary<object, EnrichmentContextLease> cache, object? scopeKey)
     {
         // Unscoped providers share one context per batch; scoped providers cache one per distinct key.
         var cacheKey = contextProvider.IsScoped ? scopeKey ?? NullScopeKey : SharedContextKey;
-        if (!cache.TryGetValue(cacheKey, out var db))
+        if (!cache.TryGetValue(cacheKey, out var lease))
         {
-            db = contextProvider.Create(scopeKey);
-            cache[cacheKey] = db;
+            lease = contextProvider.Create(scopeKey);
+            cache[cacheKey] = lease;
         }
-        return db;
+        return lease.Context;
     }
 
     private static RoutedDocument Upsert(

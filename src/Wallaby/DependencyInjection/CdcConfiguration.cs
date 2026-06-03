@@ -82,6 +82,13 @@ internal sealed class CdcConfiguration
     public Func<IServiceProvider, IModel>? ModelAccessor { get; set; }
 
     /// <summary>
+    /// Leases an enrichment <see cref="DbContext"/> for the runtime, using a registered
+    /// <see cref="IDbContextFactory{TContext}"/> when present and otherwise a DI scope over the consumer's
+    /// <c>AddDbContext</c> registration. Set by <see cref="CdcBuilder.UseContext{TContext}"/>.
+    /// </summary>
+    public Func<IServiceProvider, EnrichmentContextLease>? ContextLease { get; set; }
+
+    /// <summary>
     /// Registers the capture runtime (<c>CdcRuntime&lt;TContext&gt;</c>, its hosted service, and the backfill
     /// manager) for the declared context. Set by <see cref="CdcBuilder.UseContext{TContext}"/> so the generic
     /// type stays confined to this delegate; invoked by <c>AddWallaby</c> only when <see cref="CaptureIntended"/>.

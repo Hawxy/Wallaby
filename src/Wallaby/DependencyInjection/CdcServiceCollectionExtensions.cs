@@ -67,12 +67,13 @@ public static class CdcServiceCollectionExtensions
     /// </summary>
     internal static void RegisterCaptureRuntime<TContext>(IServiceCollection services) where TContext : DbContext
     {
-        // Resolve the capture model once; both the runtime and the backfill manager share this instance.
+        // Resolve the capture model once; both the runtime and the backfill manager share this instance. The
+        // model is read via the consumer's context (factory or DI scope) — no IDbContextFactory required.
         services.AddSingleton(sp =>
         {
-            using var context = sp.GetRequiredService<IDbContextFactory<TContext>>().CreateDbContext();
-            var efModel = context.Model;
-            var cdc = ModelToCdcModel.Build(efModel, sp.GetRequiredService<CdcConfiguration>().ToCaptureSpec());
+            var config = sp.GetRequiredService<CdcConfiguration>();
+            var efModel = config.ModelAccessor!(sp);
+            var cdc = ModelToCdcModel.Build(efModel, config.ToCaptureSpec());
             return new CapturedModel(efModel, cdc);
         });
 

@@ -29,9 +29,9 @@ Wallaby validates these on startup and fails fast with an actionable error if so
 
 ## Register
 
-`AddWallaby` is driven by your existing `DbContext`, declared with `UseContext<TContext>()`. You must also
-register an `IDbContextFactory<TContext>` and supply a
-connection string via `UseConnectionString(...)`. 
+`AddWallaby` is driven by your existing `DbContext`, declared with `UseContext<TContext>()`. Register the
+context as usual — a scoped `AddDbContext<TContext>()` is enough (Wallaby uses an `IDbContextFactory<TContext>`
+if one is registered, otherwise a DI scope) — and supply a connection string via `UseConnectionString(...)`.
 
 ::: tip
 Wallaby also supports running in provision-only mode, where slots are provisioned but not consumed and EF Core can be omitted.
@@ -45,11 +45,12 @@ using Wallaby.Sinks.Meilisearch;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(conn));
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
 
-builder.Services.AddWallaby<AppDbContext>(cdc =>
+builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseConnectionString(conn)
+    cdc.UseContext<AppDbContext>()
+       .UseConnectionString(conn)
        .ConfigureOptions(o =>
        {
            o.SlotName = "app_cdc";
