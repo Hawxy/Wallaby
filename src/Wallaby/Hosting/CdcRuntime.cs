@@ -30,6 +30,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
     private readonly IClusterLock _clusterLock;
     private readonly IServiceProvider _services;
     private readonly WallabyInstrumentation _instrumentation;
+    private readonly CdcStatus _status;
     private readonly ILogger<CdcRuntime<TContext>> _logger;
 
     // Built once.
@@ -52,6 +53,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         IClusterLock clusterLock,
         IServiceProvider services,
         WallabyInstrumentation instrumentation,
+        CdcStatus status,
         ILogger<CdcRuntime<TContext>> logger)
     {
         _dbContextFactory = dbContextFactory;
@@ -61,6 +63,7 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         _clusterLock = clusterLock;
         _services = services;
         _instrumentation = instrumentation;
+        _status = status;
         _logger = logger;
     }
 
@@ -94,6 +97,8 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             {
                 // The lock is reachable and held by another node — a healthy standby, not an error.
                 backoff.Reset();
+                _status.EnterStandby();
+                _status.ResetLeaderFailures();
                 _logger.Standby(_options.SlotName);
                 await DelaySafeAsync(_options.StandbyRetryInterval, ct);
                 continue;
@@ -102,11 +107,13 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             await using (leadership)
             {
                 _logger.LeadershipAcquired(_options.SlotName);
+                _status.EnterLeader(DateTimeOffset.UtcNow);
                 var sessionStart = Stopwatch.GetTimestamp();
                 try
                 {
                     var lostLeadership = await RunAsLeaderAsync(leadership, ct);
                     backoff.Reset();
+                    _status.ResetLeaderFailures();
                     if (lostLeadership)
                     {
                         // We stepped down because the lock dropped (not an error); re-elect immediately.
@@ -120,9 +127,12 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
                 catch (Exception ex)
                 {
                     _logger.LeaderSessionFailed(ex);
+                    _status.RecordLeaderFailure(Describe(ex));
                     if (Stopwatch.GetElapsedTime(sessionStart) >= HealthyLeaderSession)
                     {
+                        // A long, healthy session that then dropped is transient — don't accumulate failures.
                         backoff.Reset();
+                        _status.ResetLeaderFailures();
                     }
                     await DelaySafeAsync(backoff.Next(), ct);
                 }
@@ -145,7 +155,8 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
             _materializer, skipFailedBatches: _options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip, _logger, _instrumentation);
         var pipeline = new CdcPipeline(
             stream, changeEventFactory, _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
-            _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, _instrumentation);
+            _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue,
+            _instrumentation, _status);
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
         // connection dropped) — so a standby that can take over isn't left waiting while we stream on with
@@ -296,6 +307,8 @@ internal sealed class CdcRuntime<TContext> where TContext : DbContext
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) { }
     }
+
+    private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 }
 
 /// <summary>Source-generated log messages for <see cref="CdcRuntime{TContext}"/>.</summary>

@@ -40,9 +40,11 @@ internal sealed class CdcPipeline(
     WatermarkBackfillCoordinator? backfill = null,
     DependentChangeResolver? dependentResolver = null,
     IFanoutQueueStore? fanoutQueue = null,
-    WallabyInstrumentation? instrumentation = null)
+    WallabyInstrumentation? instrumentation = null,
+    CdcStatus? status = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
+    private readonly CdcStatus? _status = status;
 
     /// <summary>The highest LSN acknowledged to the server. Useful for observing progress.</summary>
     public ulong LastAcknowledgedLsn { get; private set; }
@@ -133,6 +135,7 @@ internal sealed class CdcPipeline(
                 await stream.AcknowledgeAsync(transaction.EndLsn, ct);
                 LastAcknowledgedLsn = transaction.EndLsn;
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
+                _status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
             }
         }
     }

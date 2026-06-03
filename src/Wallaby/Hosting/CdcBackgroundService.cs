@@ -1,12 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Wallaby.Diagnostics;
 
 namespace Wallaby.Hosting;
 
 /// <summary>Hosts the <see cref="CdcRuntime{TContext}"/> as a long-running background service.</summary>
 internal sealed class CdcBackgroundService<TContext>(
-    CdcRuntime<TContext> runtime, ILogger<CdcBackgroundService<TContext>> logger) : BackgroundService
+    CdcRuntime<TContext> runtime, CdcStatus status, ILogger<CdcBackgroundService<TContext>> logger) : BackgroundService
     where TContext : DbContext
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -14,13 +15,16 @@ internal sealed class CdcBackgroundService<TContext>(
         try
         {
             await runtime.RunAsync(stoppingToken);
+            status.MarkStopped();
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Normal shutdown.
+            status.MarkStopped(); // graceful shutdown
         }
         catch (Exception ex)
         {
+            // The only reliable "CDC died" signal — BackgroundService exposes no queryable terminated flag.
+            status.MarkFaulted($"{ex.GetType().Name}: {ex.Message}");
             logger.BackgroundServiceTerminated(ex);
             throw;
         }

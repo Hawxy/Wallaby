@@ -36,6 +36,10 @@ public static class CdcServiceCollectionExtensions
         services.AddMetrics();
         services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));
 
+        // Live node status surface (role, progress, faults) — read by diagnostics and health checks.
+        services.AddSingleton(_ => new CdcStatus(configuration.Options.SlotName, TimeProvider.System));
+        services.AddSingleton<ICdcStatus>(sp => sp.GetRequiredService<CdcStatus>());
+
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(
                 sp.GetRequiredService<CdcDataSource>().Source, configuration.Options.LeaderHeartbeatInterval));

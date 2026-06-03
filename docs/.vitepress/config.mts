@@ -25,8 +25,7 @@ export default defineConfig({
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
           { text: 'Multi-tenancy', link: '/multi-tenancy' },
-          { text: 'External slots', link: '/external-slots' },
-          { text: 'Observability', link: '/observability' }
+          { text: 'External slots', link: '/external-slots' },        
         ]
       },
       {
@@ -36,6 +35,13 @@ export default defineConfig({
           { text: 'Custom', link: '/sinks/custom' },
         ]
       },
+      {
+        text: 'Operations',
+        items: [
+          { text: 'Observability', link: '/observability' },
+          { text: 'Health checks', link: '/health-checks' }
+        ]
+      }
     ],
 
     socialLinks: [
