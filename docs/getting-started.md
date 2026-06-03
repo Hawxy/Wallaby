@@ -114,4 +114,4 @@ It's highly recommended to deploy Wallaby as a seperate service, not as an integ
 - [Backfill](/backfill) — initial snapshots and version-triggered reindex.
 - [Multi-tenancy](/multi-tenancy) — per-row scoped contexts and destinations.
 - [External slots](/external-slots) — provision extra publications/slots for an ELT or other CDC consumer.
-- [Observability](/observability) — OpenTelemetry metrics and traces.
+- [Observability](/operations/observability) — OpenTelemetry metrics and traces.

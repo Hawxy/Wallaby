@@ -46,5 +46,5 @@ you can resolve `ICdcStatus` and read `Current` to surface CDC status in your ow
 
 ::: tip Readiness
 A richer **readiness** check (graded on replication lag / retained WAL) may be added later. Lag is best watched through
-[metrics](/observability) (`wallaby.ingestion.lag`).
+[metrics](/operations/observability) (`wallaby.ingestion.lag`).
 :::
