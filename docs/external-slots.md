@@ -16,9 +16,10 @@ it just manages it for you.
 ## Declare a slot
 
 ```csharp
-builder.Services.AddWallaby<AppDbContext>(cdc =>
+builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseConnectionString(conn)
+    cdc.UseContext<AppDbContext>()
+       .UseConnectionString(conn)
        .AddMeilisearchSink("meili", m => { /* ... */ })
        .Map<Product>().ToSink("meili", "products").UsingTransform(/* ... */)
 
@@ -71,9 +72,29 @@ distinct from Wallaby's own slot/publication and from each other.
 - **Bookkeeping.** Each provisioned slot is recorded in `wallaby.slot_registry`; external slots are marked
   `kind = 'external'` (Wallaby's own slot is `'primary'`).
 
-::: warning Inactive until consumed
+::: warning
 An external slot is created inactive and **pins WAL** the moment it exists. If nothing consumes it, WAL
 accumulates on the server. Only declare slots an external tool will actually read.
+:::
+
+## Provision-only mode
+
+A worker can use Wallaby **purely to provision external slots** - no sinks, no mappings, no primary slot,
+no streaming. To do so, omit `UseContext<T>()` and declare only external slots. Wallaby will scaffold the slot and then idle:
+
+```csharp
+// Only provisions the ELT publication + slot, nothing is captured or streamed.
+builder.Services.AddWallaby(cdc => cdc
+    .UseConnectionString(conn)
+    .AddExternalSlot("elt", s => s
+        .WithPublication("elt_pub")
+        .ForTable("orders")
+        .ForTable("customers")));
+```
+
+::: tip
+Adding a sink or a `Map<T>()` later switches Wallaby into full capture mode; at that point
+you must also declare `UseContext<T>()` (and register the context factory).
 :::
 
 ## Scope

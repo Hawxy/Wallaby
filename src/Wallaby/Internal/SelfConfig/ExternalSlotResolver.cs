@@ -13,7 +13,7 @@ namespace Wallaby.Internal.SelfConfig;
 internal static class ExternalSlotResolver
 {
     public static IReadOnlyList<ExternalSlotSpec> Resolve(
-        IReadOnlyCollection<ExternalSlotRegistration> registrations, IModel model)
+        IReadOnlyCollection<ExternalSlotRegistration> registrations, IModel? model)
     {
         if (registrations.Count == 0)
         {
@@ -41,6 +41,13 @@ internal static class ExternalSlotResolver
 
             foreach (var entityClrType in registration.EntityTypes)
             {
+                if (model is null)
+                {
+                    throw new CdcConfigurationException(
+                        $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>() requires a " +
+                        "DbContext to resolve the table. Declare one with UseContext<TContext>() or use ForTable(...).");
+                }
+
                 var entityType = model.FindEntityType(entityClrType)
                     ?? throw new CdcConfigurationException(
                         $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>(): " +

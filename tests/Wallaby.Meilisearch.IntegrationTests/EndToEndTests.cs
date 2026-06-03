@@ -21,9 +21,10 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
-        services.AddWallaby<AppDbContext>(cdc =>
+        services.AddWallaby(cdc =>
         {
-            cdc.UseConnectionString(pg.ConnectionString)
+            cdc.UseContext<AppDbContext>()
+               .UseConnectionString(pg.ConnectionString)
                .ConfigureOptions(o =>
                {
                    o.SlotName = names.Slot;

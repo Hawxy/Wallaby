@@ -143,6 +143,63 @@ public class SelfConfigTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task Provision_only_creates_external_slot_without_a_primary()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        // Primary names are supplied but must be IGNORED by the provision-only path (proves no primary slot).
+        var primarySlot = $"cdc_primary_{suffix}";
+        var primaryPub = $"cdc_primary_pub_{suffix}";
+        var extSlot = $"elt_slot_{suffix}";
+        var extPub = $"elt_pub_{suffix}";
+
+        var configurator = new PostgresSelfConfigurator(
+            pg.DataSource,
+            new SelfConfigOptions
+            {
+                SlotName = primarySlot,
+                PublicationName = primaryPub,
+                ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products"), ("public", "customers")])],
+            },
+            NullLogger.Instance);
+
+        try
+        {
+            var first = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
+            await Assert.That(first.Count).IsEqualTo(1);
+            await Assert.That(first[0].SlotCreated).IsTrue();
+            await Assert.That(first[0].PublicationCreated).IsTrue();
+
+            await using var conn = new NpgsqlConnection(pg.ConnectionString);
+            await conn.OpenAsync();
+
+            // External publication + slot exist; the slot is pgoutput and unconsumed; registry marks it external.
+            await Assert.That(await PgExec.ScalarLongAsync(conn,
+                "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p", default, ("p", extPub))).IsEqualTo(2L);
+            await Assert.That(await PgExec.ScalarStringAsync(conn,
+                "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).IsEqualTo("pgoutput");
+            await Assert.That(await PgExec.ScalarBoolAsync(conn,
+                "SELECT active FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).IsFalse();
+            await Assert.That(await PgExec.ScalarStringAsync(conn,
+                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).IsEqualTo("external");
+
+            // The primary slot/publication were NOT created — provision-only never touches them.
+            await Assert.That(await PgExec.ScalarLongAsync(conn,
+                "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", default, ("s", primarySlot))).IsEqualTo(0L);
+            await Assert.That(await PgExec.ScalarLongAsync(conn,
+                "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", primaryPub))).IsEqualTo(0L);
+
+            // Idempotent re-run.
+            var second = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
+            await Assert.That(second[0].SlotCreated).IsFalse();
+            await Assert.That(second[0].PublicationCreated).IsFalse();
+        }
+        finally
+        {
+            await DropSlotsAndPublicationsAsync(primarySlot, primaryPub, extSlot, extPub);
+        }
+    }
+
+    [Test]
     public async Task External_slot_is_idempotent_and_reconciles_tables()
     {
         var suffix = Guid.NewGuid().ToString("N");

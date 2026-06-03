@@ -16,13 +16,14 @@ namespace Wallaby.DependencyInjection;
 public static class CdcServiceCollectionExtensions
 {
     /// <summary>
-    /// Add Postgres CDC driven by <typeparamref name="TContext"/>. The consumer must also register
-    /// an <see cref="IDbContextFactory{TContext}"/> (e.g. via <c>AddDbContextFactory&lt;TContext&gt;</c>)
-    /// and supply a connection string via <c>cdc.UseConnectionString(...)</c>. CDC owns a pooled
-    /// <c>NpgsqlDataSource</c> built from that connection string for all of its non-replication work.
+    /// Add Postgres CDC. Supply a connection string via <c>cdc.UseConnectionString(...)</c>. For capture
+    /// (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) also declare the driving
+    /// <c>DbContext</c> with <c>cdc.UseContext&lt;TContext&gt;()</c> and register an
+    /// <see cref="IDbContextFactory{TContext}"/>. If only external slots are declared (no capture), Wallaby
+    /// runs provision-only: it creates/reconciles those slots and never opens a primary slot or streams.
+    /// CDC owns a pooled <c>NpgsqlDataSource</c> built from the connection string for all non-replication work.
     /// </summary>
-    public static IServiceCollection AddWallaby<TContext>(this IServiceCollection services, Action<CdcBuilder> configure)
-        where TContext : DbContext
+    public static IServiceCollection AddWallaby(this IServiceCollection services, Action<CdcBuilder> configure)
     {
         var builder = new CdcBuilder();
         configure(builder);
@@ -32,31 +33,51 @@ public static class CdcServiceCollectionExtensions
         services.AddSingleton(configuration.Options);
 
         services.AddSingleton(_ => new CdcDataSource(configuration.Options.ConnectionString));
-        
+
         services.AddMetrics();
         services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));
 
         // Live node status surface (role, progress, faults) — read by diagnostics and health checks.
-        services.AddSingleton(_ => new CdcStatus(configuration.Options.SlotName, TimeProvider.System));
+        services.AddSingleton(_ => new CdcStatus(
+            configuration.CaptureIntended ? configuration.Options.SlotName : "", TimeProvider.System));
         services.AddSingleton<ICdcStatus>(sp => sp.GetRequiredService<CdcStatus>());
 
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(
                 sp.GetRequiredService<CdcDataSource>().Source, configuration.Options.LeaderHeartbeatInterval));
 
+        if (configuration.CaptureIntended)
+        {
+            // Registers the generic capture runtime for the context declared via UseContext<TContext>().
+            configuration.RegisterCaptureRuntime!(services);
+        }
+        else
+        {
+            // Provision-only: create the declared external slots (if any) and idle — no primary slot/stream.
+            services.AddSingleton<IHostedService, ExternalSlotProvisioningService>();
+        }
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the capture runtime (backfill manager, <see cref="CdcRuntime{TContext}"/>, and its hosted
+    /// service) for <typeparamref name="TContext"/>. Invoked through the delegate captured by
+    /// <see cref="CdcBuilder.UseContext{TContext}"/>, so the generic type stays out of the public entry point.
+    /// </summary>
+    internal static void RegisterCaptureRuntime<TContext>(IServiceCollection services) where TContext : DbContext
+    {
         services.AddSingleton<ICdcBackfillManager>(sp =>
         {
             var factory = sp.GetRequiredService<IDbContextFactory<TContext>>();
             using var context = factory.CreateDbContext();
-            var model = ModelToCdcModel.Build(context.Model, ToCaptureSpec(configuration));
+            var model = ModelToCdcModel.Build(context.Model, ToCaptureSpec(sp.GetRequiredService<CdcConfiguration>()));
             return new DefaultBackfillManager(
                 model, new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source));
         });
 
         services.AddSingleton<CdcRuntime<TContext>>();
         services.AddSingleton<IHostedService, CdcBackgroundService<TContext>>();
-
-        return services;
     }
 
     private static CaptureSpec ToCaptureSpec(CdcConfiguration configuration) => new()

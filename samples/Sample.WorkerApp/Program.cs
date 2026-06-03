@@ -17,9 +17,10 @@ builder.Services.AddDbContextFactory<SampleDbContext>(o => o.UseNpgsql(postgres)
 // Create the sample schema on startup (demo convenience).
 builder.Services.AddHostedService<SchemaInitializer>();
 
-builder.Services.AddWallaby<SampleDbContext>(cdc =>
+builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseConnectionString(postgres)
+    cdc.UseContext<SampleDbContext>()
+       .UseConnectionString(postgres)
        .ConfigureOptions(o =>
        {
            o.SlotName = "sample_cdc_slot";

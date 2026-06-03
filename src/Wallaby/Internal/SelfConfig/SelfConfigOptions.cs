@@ -3,11 +3,14 @@ namespace Wallaby.Internal.SelfConfig;
 /// <summary>Inputs to self-configuration. Populated from the consumer's CDC options at startup.</summary>
 internal sealed class SelfConfigOptions
 {
-    /// <summary>The logical replication slot name to create/reuse.</summary>
-    public required string SlotName { get; init; }
+    /// <summary>
+    /// The primary logical replication slot name to create/reuse. Unused in provision-only mode
+    /// (<see cref="ExternalSlots"/> only, via <c>EnsureExternalSlotsOnlyAsync</c>), so it defaults to empty.
+    /// </summary>
+    public string SlotName { get; init; } = "";
 
-    /// <summary>The publication name to create/reuse.</summary>
-    public required string PublicationName { get; init; }
+    /// <summary>The primary publication name to create/reuse. Unused in provision-only mode (defaults to empty).</summary>
+    public string PublicationName { get; init; } = "";
 
     /// <summary>
     /// When true, an existing publication's table set is reconciled to match the captured model

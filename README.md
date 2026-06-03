@@ -21,9 +21,10 @@ A **Meilisearch** sink is supported out of the box. Contributions for additional
 ```csharp
 builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(conn));
 
-builder.Services.AddWallaby<AppDbContext>(cdc =>
+builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseConnectionString(conn)
+    cdc.UseContext<AppDbContext>()
+       .UseConnectionString(conn)
        .ConfigureOptions(o => { o.SlotName = "app_cdc"; o.PublicationName = "app_cdc_pub"; })
        .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
 

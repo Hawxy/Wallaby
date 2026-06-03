@@ -1,5 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
 
@@ -71,4 +73,25 @@ internal sealed class CdcConfiguration
 
     /// <summary>Optional factory that builds the enrichment <see cref="DbContext"/> from a row's scope key.</summary>
     public Func<object?, IServiceProvider, DbContext>? ScopedContextFactory { get; set; }
+
+    /// <summary>
+    /// Reads the EF Core <see cref="IModel"/> from the declared capture context. Set by
+    /// <see cref="CdcBuilder.UseContext{TContext}"/>; null when no context is declared (provision-only).
+    /// Used to resolve <c>ForEntity&lt;T&gt;()</c> external-slot table declarations.
+    /// </summary>
+    public Func<IServiceProvider, IModel>? ModelAccessor { get; set; }
+
+    /// <summary>
+    /// Registers the capture runtime (<c>CdcRuntime&lt;TContext&gt;</c>, its hosted service, and the backfill
+    /// manager) for the declared context. Set by <see cref="CdcBuilder.UseContext{TContext}"/> so the generic
+    /// type stays confined to this delegate; invoked by <c>AddWallaby</c> only when <see cref="CaptureIntended"/>.
+    /// </summary>
+    public Action<IServiceCollection>? RegisterCaptureRuntime { get; set; }
+
+    /// <summary>
+    /// True when the consumer declared anything that requires the streaming pipeline (a sink, a mapping, or
+    /// <c>CaptureAllMappedTables()</c>). When false, Wallaby runs in provision-only mode: it only creates the
+    /// declared external slots and never opens a primary slot or streams.
+    /// </summary>
+    public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0 || CaptureAllMapped;
 }

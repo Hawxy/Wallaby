@@ -43,6 +43,24 @@ internal sealed class PostgresSelfConfigurator(
             externalResults);
     }
 
+    /// <summary>
+    /// Provision-only entry point: validate the server and ensure the declared external slots/publications
+    /// without creating a primary slot or publication. Used by the provision-only hosted service when the
+    /// consumer declares external slots but no capture (no sink/mappings). Leader-only and idempotent.
+    /// </summary>
+    public async Task<IReadOnlyList<ExternalSlotResult>> EnsureExternalSlotsOnlyAsync(CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+
+        // Only the external slots are created here, so only they consume slot headroom.
+        var slotNames = options.ExternalSlots.Select(s => s.SlotName).ToList();
+        await _validator.ValidateAsync(connection, slotNames, ct);
+
+        await _stateSchema.EnsureAsync(connection, ct);
+
+        return await EnsureExternalSlotsAsync(connection, ct);
+    }
+
     // Provisions each declared external publication+slot. External publications always reconcile to their
     // declared table set (Wallaby owns it); the slot is created with pgoutput but never opened by Wallaby.
     private async Task<IReadOnlyList<ExternalSlotResult>> EnsureExternalSlotsAsync(

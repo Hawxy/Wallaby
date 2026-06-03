@@ -5,7 +5,7 @@ outline: deep
 # Health Checks
 
 Wallaby runs as a hosted background service on each node of a cluster. The
-`Wallaby.AspNetCore.HealthChecks` package exposes a ASP.NET Core health check so you can
+`Wallaby.AspNetCore.HealthChecks` package exposes a health check so you can
 wire a liveness probe to a Wallaby worker.
 
 ## Install & register
@@ -19,7 +19,7 @@ builder.Services.AddHealthChecks().AddWallaby();
 ```
 
 The package only depends on `Microsoft.Extensions.Diagnostics.HealthChecks`, so it also works in a plain
-generic host
+generic host if required.
 
 ## The `wallaby` check
 

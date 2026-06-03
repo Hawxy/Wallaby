@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Sinks;
 
@@ -20,6 +21,25 @@ public sealed class CdcBuilder
     public CdcBuilder UseConnectionString(string connectionString)
     {
         _configuration.Options.ConnectionString = connectionString;
+        return this;
+    }
+
+    /// <summary>
+    /// Declare the EF Core <see cref="DbContext"/> that drives capture. Required whenever Wallaby streams
+    /// (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) and to resolve
+    /// <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations. The consumer must also register an
+    /// <see cref="IDbContextFactory{TContext}"/> (e.g. via <c>AddDbContextFactory&lt;TContext&gt;</c>). Omit it
+    /// for a provision-only worker that declares external slots by table name only.
+    /// </summary>
+    public CdcBuilder UseContext<TContext>() where TContext : DbContext
+    {
+        _configuration.ModelAccessor = sp =>
+        {
+            using var context = sp.GetRequiredService<IDbContextFactory<TContext>>().CreateDbContext();
+            return context.Model;
+        };
+        _configuration.RegisterCaptureRuntime =
+            services => CdcServiceCollectionExtensions.RegisterCaptureRuntime<TContext>(services);
         return this;
     }
 
@@ -119,9 +139,22 @@ public sealed class CdcBuilder
         {
             throw new CdcConfigurationException("LeaderHeartbeatInterval must be greater than zero.");
         }
-        if (_configuration.Sinks.Count == 0)
+
+        // Capturing (any sink, Map<>(), or CaptureAllMappedTables()) requires a context + a sink. Without
+        // any of these, Wallaby runs in provision-only mode: it just provisions the declared external slots
+        // (no primary slot, no streaming), so neither a context nor a sink is required.
+        if (_configuration.CaptureIntended)
         {
-            throw new CdcConfigurationException("At least one sink must be registered (e.g. AddMeilisearchSink/AddDelegateSink).");
+            if (_configuration.ModelAccessor is null)
+            {
+                throw new CdcConfigurationException(
+                    "Capturing requires a DbContext. Declare it with UseContext<TContext>().");
+            }
+            if (_configuration.Sinks.Count == 0)
+            {
+                throw new CdcConfigurationException(
+                    "At least one sink must be registered when capturing (e.g. AddMeilisearchSink/AddDelegateSink).");
+            }
         }
 
         foreach (var mapping in _configuration.Mappings.Values)
@@ -153,11 +186,26 @@ public sealed class CdcBuilder
             }
         }
 
-        // External slots: names must be non-empty and distinct from the primary slot/publication and from
-        // each other; each must declare at least one table (a pgoutput publication needs tables). The
-        // default publication name here must match ExternalSlotResolver.
-        var slotNames = new HashSet<string>(StringComparer.Ordinal) { options.SlotName };
-        var publicationNames = new HashSet<string>(StringComparer.Ordinal) { options.PublicationName };
+        // ForEntity<T>() resolves against the EF model, so it needs a declared context. ForTable(...) does not.
+        if (_configuration.ModelAccessor is null &&
+            _configuration.ExternalSlots.Any(e => e.EntityTypes.Count > 0))
+        {
+            throw new CdcConfigurationException(
+                "AddExternalSlot(...).ForEntity<T>() requires a DbContext to resolve the table. " +
+                "Declare one with UseContext<TContext>() or declare the table by name via ForTable(...).");
+        }
+
+        // External slots: names must be non-empty and distinct from each other (and from the primary
+        // slot/publication when capturing — provision-only has no primary); each must declare at least one
+        // table (a pgoutput publication needs tables). The default publication name here must match
+        // ExternalSlotResolver.
+        var slotNames = new HashSet<string>(StringComparer.Ordinal);
+        var publicationNames = new HashSet<string>(StringComparer.Ordinal);
+        if (_configuration.CaptureIntended)
+        {
+            slotNames.Add(options.SlotName);
+            publicationNames.Add(options.PublicationName);
+        }
         foreach (var external in _configuration.ExternalSlots)
         {
             if (external.TableNames.Count == 0 && external.EntityTypes.Count == 0)
