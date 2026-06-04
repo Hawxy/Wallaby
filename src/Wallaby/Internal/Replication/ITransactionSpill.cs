@@ -1,0 +1,45 @@
+using Npgsql;
+using Wallaby.Model;
+
+namespace Wallaby.Abstractions;
+
+/// <summary>
+/// Buffers an in-progress <b>streamed</b> (large) transaction's changes out of process memory until its commit,
+/// so a single huge transaction doesn't exhaust the heap. Changes are appended per xid as they stream and read
+/// back in append order at <c>StreamCommit</c>; an aborted or already-consumed xid is discarded. A streamed
+/// transaction that never commits (a crash) is re-streamed from the slot, so the spill need not survive a
+/// restart — <see cref="ClearAsync"/> drops any leftovers on startup. Implementations are used only from the
+/// single-threaded replication loop (no concurrent calls for the same xid).
+/// <para>
+/// This is a pluggable extension point: Wallaby ships a disk backend (<c>SpillToDisk</c>) and a source-database
+/// backend (<c>SpillToDatabase</c>, the default), and a custom backend can be supplied via
+/// <c>UseTransactionSpill(...)</c>. An implementation owns its own serialization of <see cref="RawChange"/> —
+/// the abstraction deals purely in changes. Only a store that spills to durable/external storage actually bounds
+/// memory; an in-RAM store would merely relocate it.
+/// </para>
+/// </summary>
+public interface ITransactionSpill : IAsyncDisposable
+{
+    /// <summary>Append one change to the buffer for <paramref name="xid"/> (preserving stream order).</summary>
+    ValueTask AppendAsync(uint xid, RawChange change, CancellationToken ct);
+
+    /// <summary>Read back, in append order, every change buffered for <paramref name="xid"/>.</summary>
+    IAsyncEnumerable<RawChange> ReadAsync(uint xid, CancellationToken ct);
+
+    /// <summary>Drop the buffer for <paramref name="xid"/> (after its commit is consumed, or on abort).</summary>
+    ValueTask DiscardAsync(uint xid, CancellationToken ct);
+
+    /// <summary>Drop all buffered data for this slot (startup cleanup; the slot re-streams anything un-acked).</summary>
+    ValueTask ClearAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// What a <see cref="ITransactionSpill"/> factory is handed when the runtime builds the spill for a leader session
+/// (see <c>UseTransactionSpill</c>). Carries the things a backend commonly needs: the pooled source
+/// <see cref="DataSource"/> (for a Postgres-backed spill), the <see cref="SlotName"/> to namespace buffered data,
+/// and the application <see cref="Services"/> (to resolve a custom backend's own dependencies, e.g. a cache client).
+/// </summary>
+/// <param name="DataSource">The pooled connection source for the configured Postgres database.</param>
+/// <param name="SlotName">The replication slot name — use it to namespace this spill's buffered data.</param>
+/// <param name="Services">The application service provider, for resolving a custom backend's dependencies.</param>
+public readonly record struct SpillContext(NpgsqlDataSource DataSource, string SlotName, IServiceProvider Services);

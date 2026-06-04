@@ -30,6 +30,15 @@ public sealed class CdcOptions
     /// </summary>
     public int MaxBatchSize { get; set; } = 1000;
 
+    /// <summary>
+    /// Safety ceiling on how many changes a single transaction may buffer in memory before processing.
+    /// With pgoutput v2 streaming, transactions larger than the server's <c>logical_decoding_work_mem</c> are
+    /// streamed and buffered until their commit; this caps that buffer so a pathological transaction fails fast
+    /// with an actionable error instead of exhausting memory. (A future disk/DB spill removes this ceiling for
+    /// arbitrarily large transactions.) Must be greater than zero.
+    /// </summary>
+    public int MaxBufferedChangesPerTransaction { get; set; } = 1_000_000;
+
     /// <summary>Reconcile an existing publication's table set to match the captured model.</summary>
     public bool ManagePublicationTables { get; set; } = true;
 

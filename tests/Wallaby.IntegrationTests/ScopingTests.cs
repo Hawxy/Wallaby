@@ -3,7 +3,7 @@ using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 
-namespace EFCore.CDC.IntegrationTests;
+namespace Wallaby.IntegrationTests;
 
 [NotInParallel]
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]

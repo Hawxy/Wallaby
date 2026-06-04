@@ -1,7 +1,7 @@
 using EFCore.CDC.TestInfrastructure;
 using Wallaby.Internal.Cluster;
 
-namespace EFCore.CDC.IntegrationTests;
+namespace Wallaby.IntegrationTests;
 
 [NotInParallel]
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]

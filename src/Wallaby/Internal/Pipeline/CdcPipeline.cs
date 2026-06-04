@@ -69,7 +69,7 @@ internal sealed class CdcPipeline(
                 activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
                 activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
                 activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-                activity.SetTag("wallaby.txn.size", transaction.Changes.Count);
+                activity.SetTag("wallaby.txn.size", transaction.IsStreamed ? -1 : transaction.Changes.Count);
                 if (lagSeconds >= 0)
                 {
                     activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
@@ -78,54 +78,15 @@ internal sealed class CdcPipeline(
 
             _instr.RecordIngestionLag(slotName, lagSeconds);
 
-            // Materialize the live changes (no inline fan-out; that is resolved separately below).
-            var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
-            foreach (var raw in transaction.Changes)
+            // A streamed (large) transaction's changes live in the spill, not in memory — process them in
+            // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
+            if (transaction.IsStreamed)
             {
-                var changeEvent = changeEventFactory.Create(raw);
-                if (changeEvent is not null)
-                {
-                    appEvents.Add(changeEvent);
-                }
+                await ProcessStreamedAsync(transaction, ct);
             }
-
-            foreach (var ev in appEvents)
+            else
             {
-                _instr.RecordChange(slotName, ev.Action, backfill: false);
-            }
-
-            // A low watermark opens recording for its table before subsequent live changes are seen.
-            if (backfill is not null)
-            {
-                foreach (var wm in transaction.Watermarks)
-                {
-                    if (wm.Prefix == CdcSchema.WatermarkLowPrefix)
-                    {
-                        backfill.OnLowWatermark(wm.Token);
-                    }
-                }
-
-                RecordLiveKeys(appEvents);
-            }
-
-            await DispatchChunkedAsync(appEvents, ct);
-
-            // Dependent fan-out: dispatch the first page per binding inline, offload any tail.
-            if (dependentResolver is not null)
-            {
-                await ResolveAndDispatchFanoutAsync(transaction.Changes, appEvents, ct);
-            }
-
-            // A high watermark closes the chunk: emit its surviving snapshot rows in stream order.
-            if (backfill is not null)
-            {
-                foreach (var wm in transaction.Watermarks)
-                {
-                    if (wm.Prefix == CdcSchema.WatermarkHighPrefix && backfill.TryTakeHighWindow(wm.Token, out var window))
-                    {
-                        await EmitBackfillChunkAsync(window, ct);
-                    }
-                }
+                await ProcessInMemoryAsync(transaction, ct);
             }
 
             using (var ackActivity = _instr.StartAck())
@@ -140,18 +101,135 @@ internal sealed class CdcPipeline(
         }
     }
 
+    // Normal transaction: materialize the in-memory changes, dispatch them (with watermark/backfill handling),
+    // and resolve dependent fan-out. Unchanged from the pre-streaming behaviour.
+    private async Task ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
+    {
+        var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
+        foreach (var raw in transaction.Changes)
+        {
+            var changeEvent = changeEventFactory.Create(raw);
+            if (changeEvent is not null)
+            {
+                appEvents.Add(changeEvent);
+            }
+        }
+
+        foreach (var ev in appEvents)
+        {
+            _instr.RecordChange(slotName, ev.Action, backfill: false);
+        }
+
+        // A low watermark opens recording for its table before subsequent live changes are seen.
+        if (backfill is not null)
+        {
+            foreach (var wm in transaction.Watermarks)
+            {
+                if (wm.Prefix == CdcSchema.WatermarkLowPrefix)
+                {
+                    backfill.OnLowWatermark(wm.Token);
+                }
+            }
+
+            RecordLiveKeys(appEvents);
+        }
+
+        await DispatchChunkedAsync(appEvents, ct);
+
+        // Dependent fan-out: dispatch the first page per binding inline, offload any tail.
+        if (dependentResolver is not null)
+        {
+            await ResolveAndDispatchFanoutAsync(ToAsync(transaction.Changes, ct), BuildLiveKeyIndex(appEvents), ct);
+        }
+
+        // A high watermark closes the chunk: emit its surviving snapshot rows in stream order.
+        if (backfill is not null)
+        {
+            foreach (var wm in transaction.Watermarks)
+            {
+                if (wm.Prefix == CdcSchema.WatermarkHighPrefix && backfill.TryTakeHighWindow(wm.Token, out var window))
+                {
+                    await EmitBackfillChunkAsync(window, ct);
+                }
+            }
+        }
+    }
+
+    // Streamed (large) transaction: read the spilled changes back in append order in bounded pages — never
+    // materializing the whole transaction — stamping each with the commit metadata, then resolve fan-out and
+    // discard the spill. Streamed transactions carry no watermarks (those are tiny, never-streamed transactions).
+    private async Task ProcessStreamedAsync(CommittedTransaction transaction, CancellationToken ct)
+    {
+        var page = new List<ChangeEvent>(maxBatchSize);
+        var idx = 0;
+        await foreach (var raw in transaction.Spill!.ReadAsync(transaction.StreamXid, ct))
+        {
+            raw.CommitLsn = transaction.CommitLsn;
+            raw.CommitTimestamp = transaction.CommitTimestamp;
+            raw.CommitIdx = idx++;
+
+            var changeEvent = changeEventFactory.Create(raw);
+            if (changeEvent is null)
+            {
+                continue;
+            }
+            _instr.RecordChange(slotName, changeEvent.Action, backfill: false);
+            page.Add(changeEvent);
+
+            if (page.Count >= maxBatchSize)
+            {
+                await DispatchPageAsync(page, ct);
+                page = new List<ChangeEvent>(maxBatchSize);
+            }
+        }
+        if (page.Count > 0)
+        {
+            await DispatchPageAsync(page, ct);
+        }
+
+        // Fan-out over the same streamed changes (re-read from the spill, bounded by distinct lookup keys).
+        // Same-transaction live-key exclusion is skipped (it would need the whole txn's keys in memory); a
+        // rare resulting duplicate converges via the idempotent upsert-by-id sink contract.
+        if (dependentResolver is not null)
+        {
+            await ResolveAndDispatchFanoutAsync(transaction.Spill!.ReadAsync(transaction.StreamXid, ct), EmptyKeys, ct);
+        }
+
+        await transaction.Spill!.DiscardAsync(transaction.StreamXid, ct);
+    }
+
+    private async Task DispatchPageAsync(List<ChangeEvent> page, CancellationToken ct)
+    {
+        if (backfill is not null)
+        {
+            RecordLiveKeys(page);
+        }
+        await DispatchAsync(page, ct);
+    }
+
+    private static readonly IReadOnlySet<(string, DocumentKey)> EmptyKeys = new HashSet<(string, DocumentKey)>();
+
+    // Adapt an in-memory change list to the async stream the fan-out resolver consumes (so the same resolver
+    // path serves both the in-memory and the spill-backed source).
+    private static async IAsyncEnumerable<RawChange> ToAsync(
+        IReadOnlyList<RawChange> changes, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var change in changes)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return change;
+        }
+        await Task.CompletedTask;
+    }
+
     private async Task ResolveAndDispatchFanoutAsync(
-        IReadOnlyList<RawChange> changes, List<ChangeEvent> liveEvents, CancellationToken ct)
+        IAsyncEnumerable<RawChange> changes, IReadOnlySet<(string, DocumentKey)> liveIndex, CancellationToken ct)
     {
         var results = await dependentResolver!.ResolveFirstPagesAsync(changes, maxBatchSize, ct);
         if (results.Count == 0)
         {
             return;
         }
-
-        // A primary row changed live in this transaction already carries the dependent change (the
-        // transform re-reads current state), so skip re-emitting it from the fan-out — live wins.
-        var liveIndex = BuildLiveKeyIndex(liveEvents);
 
         foreach (var result in results)
         {

@@ -6,7 +6,7 @@ using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
 
-namespace EFCore.CDC.IntegrationTests;
+namespace Wallaby.IntegrationTests;
 
 [NotInParallel]
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
@@ -64,7 +64,8 @@ public class ReplicationDecoderTests(PostgresFixture pg)
         // 3) Stream and collect the product changes.
         var collected = new List<RawChange>();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var stream = new LogicalReplicationStream(pg.ConnectionString, slot, pub);
+        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, slot);
+        await using var stream = new LogicalReplicationStream(pg.ConnectionString, slot, pub, spill);
         try
         {
             await foreach (var txn in stream.ReadAsync(cts.Token))

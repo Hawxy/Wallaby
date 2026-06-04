@@ -49,6 +49,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private EntityMaterializer? _materializer;
 
     private CancellationTokenSource? _cts;
+    private ITransactionSpill? _spill;
     private LogicalReplicationStream? _stream;
     private CdcPipeline? _pipeline;
     private WatermarkBackfillCoordinator? _coordinator;
@@ -221,7 +222,8 @@ public sealed class CdcTestHarness : IAsyncDisposable
         }
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _stream = new LogicalReplicationStream(_connectionString, Names.Slot, Names.Publication);
+        _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot);
+        _stream = new LogicalReplicationStream(_connectionString, Names.Slot, Names.Publication, _spill);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
 
@@ -331,10 +333,16 @@ public sealed class CdcTestHarness : IAsyncDisposable
             await _stream.DisposeAsync();
         }
 
+        if (_spill is not null)
+        {
+            await _spill.DisposeAsync();
+        }
+
         _cts?.Dispose();
         _cts = null;
         _pipelineTask = null;
         _stream = null;
+        _spill = null;
         _pipeline = null;
         _coordinator = null;
         _dependentResolver = null;

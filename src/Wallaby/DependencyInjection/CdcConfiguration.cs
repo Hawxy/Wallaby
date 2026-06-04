@@ -74,6 +74,13 @@ internal sealed class CdcConfiguration
     public Func<object?, IServiceProvider, DbContext>? ScopedContextFactory { get; set; }
 
     /// <summary>
+    /// Builds the <see cref="ITransactionSpill"/> that buffers a pgoutput v2 streamed (large) transaction until
+    /// commit. Set by <c>SpillToDisk</c>/<c>SpillToDatabase</c>/<c>UseTransactionSpill</c>; null selects the
+    /// default database-backed spill. Invoked once per leader session with the runtime's <see cref="SpillContext"/>.
+    /// </summary>
+    public Func<SpillContext, ITransactionSpill>? SpillFactory { get; set; }
+
+    /// <summary>
     /// Reads the EF Core <see cref="IModel"/> from the declared capture context. Set by
     /// <see cref="CdcBuilder.UseContext{TContext}"/>; null when no context is declared (provision-only).
     /// Used to resolve <c>ForEntity&lt;T&gt;()</c> external-slot table declarations.

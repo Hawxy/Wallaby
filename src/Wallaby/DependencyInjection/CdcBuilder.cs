@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
+using Wallaby.Internal.Replication;
 using Wallaby.Sinks;
 
 namespace Wallaby.DependencyInjection;
@@ -92,6 +93,40 @@ public sealed class CdcBuilder
         return this;
     }
 
+    /// <summary>
+    /// Spill pgoutput v2 streamed (large) transactions to local disk instead of the default database backend.
+    /// Lowest source-DB impact and the truest memory bound, but needs a writable <paramref name="directory"/> —
+    /// defaults to a per-slot folder under the OS temp path; mount a writable volume when the container's root
+    /// filesystem is read-only.
+    /// </summary>
+    public CdcBuilder SpillToDisk(string? directory = null)
+        => UseTransactionSpill(ctx => new FileTransactionSpill(
+            directory ?? Path.Combine(Path.GetTempPath(), "wallaby", ctx.SlotName)));
+
+    /// <summary>
+    /// Spill pgoutput v2 streamed (large) transactions to a <c>wallaby.stream_buffer</c> UNLOGGED table on the
+    /// source database. This is the default — disk-free and zero-config (works wherever Wallaby connects), at the
+    /// cost of extra source-DB I/O during a huge transaction. Use <see cref="SpillToDisk"/> to avoid that I/O when
+    /// a writable path is available.
+    /// </summary>
+    public CdcBuilder SpillToDatabase()
+        => UseTransactionSpill(ctx => new PostgresUnloggedTableSpill(ctx.DataSource, ctx.SlotName));
+
+    /// <summary>
+    /// Supply a custom <see cref="ITransactionSpill"/> backend for pgoutput v2 streamed (large) transactions —
+    /// e.g. an object store or cache. The <paramref name="factory"/> is invoked once per leader session with a
+    /// <see cref="SpillContext"/> (the source data source, slot name, and service provider), so it may resolve
+    /// its own dependencies and should return a fresh instance each call (the runtime disposes it at session end).
+    /// Note that only a backend spilling to durable/external storage actually bounds memory; an in-RAM store just
+    /// relocates it. Overrides <see cref="SpillToDisk"/>/<see cref="SpillToDatabase"/>; the default is the database.
+    /// </summary>
+    public CdcBuilder UseTransactionSpill(Func<SpillContext, ITransactionSpill> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        _configuration.SpillFactory = factory;
+        return this;
+    }
+
     /// <summary>Map an entity to a sink/destination via a transform.</summary>
     public EntityMapBuilder<TEntity> Map<TEntity>() where TEntity : class
     {
@@ -118,6 +153,10 @@ public sealed class CdcBuilder
         if (options.MaxBatchSize <= 0)
         {
             throw new CdcConfigurationException("MaxBatchSize must be greater than zero.");
+        }
+        if (options.MaxBufferedChangesPerTransaction <= 0)
+        {
+            throw new CdcConfigurationException("MaxBufferedChangesPerTransaction must be greater than zero.");
         }
         if (options.KeepaliveInterval <= TimeSpan.Zero)
         {

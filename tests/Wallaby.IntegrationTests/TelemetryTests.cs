@@ -6,7 +6,7 @@ using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 
-namespace EFCore.CDC.IntegrationTests;
+namespace Wallaby.IntegrationTests;
 
 [NotInParallel]
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]

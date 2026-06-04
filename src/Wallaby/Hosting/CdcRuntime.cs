@@ -150,7 +150,14 @@ internal sealed class CdcRuntime
         await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
         await InitializeSinksAsync(ct);
 
-        await using var stream = new LogicalReplicationStream(_dataSource.ConnectionString, _options.SlotName, _options.PublicationName);
+        // Spill target for pgoutput v2 streamed (large) transactions. Clear any leftovers from a prior crash —
+        // an un-acked streamed transaction is re-streamed from the slot, so stale spill data is never needed.
+        await using var spill = CreateSpill();
+        await spill.ClearAsync(ct);
+
+        await using var stream = new LogicalReplicationStream(
+            _dataSource.ConnectionString, _options.SlotName, _options.PublicationName, spill,
+            _options.MaxBufferedChangesPerTransaction);
         var changeEventFactory = new ChangeEventFactory(
             _materializer, skipFailedBatches: _skipFailedBatches, _logger, _instrumentation);
         var pipeline = new CdcPipeline(
@@ -284,6 +291,16 @@ internal sealed class CdcRuntime
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) { }
     }
+
+    // The configured spill factory builds the backend for this leader session; default = the database-backed spill.
+    private ITransactionSpill CreateSpill()
+    {
+        var factory = _config.SpillFactory ?? DefaultSpill;
+        return factory(new SpillContext(_dataSource.Source, _options.SlotName, _services));
+    }
+
+    private static ITransactionSpill DefaultSpill(SpillContext ctx)
+        => new PostgresUnloggedTableSpill(ctx.DataSource, ctx.SlotName);
 
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 }

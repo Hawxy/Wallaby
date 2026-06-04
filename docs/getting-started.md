@@ -90,28 +90,12 @@ Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured automa
 
 It's highly recommended to deploy Wallaby as a seperate service, not as an integrated part of your main application. This allows you to scale CDC operations independently as the need arises. 
 
-## Options
-
-`ConfigureOptions(o => ...)` exposes:
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `SlotName` / `PublicationName` | `efcore_cdc_slot` / `efcore_cdc_pub` | Names Wallaby creates/uses. |
-| `ChunkSize` | `500` | Backfill keyset page size. |
-| `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/transforms#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill. |
-| `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |
-| `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
-| `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
-| `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
-| `StandbyRetryInterval` / `LeaderRetryInterval` | `5s` | Leader-election retry cadence. |
-| `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
-| `DeadLetterPolicy` | `Halt` | What to do when a batch can't be processed — a permanent **sink** failure, a **transform** exception, or a **materialization** failure. `Halt` stops the pipeline (retried after the leader restarts); `Skip` logs, counts (`wallaby.dead_letter`), and drops the batch, then continues. |
-
 ## Next steps
 
-- [Transforms](/transforms) — shaping and enriching documents.
+- [Configuration](/configuration) - All configuration options
+- [Transforms](/transforms) - shaping and enriching documents.
 - [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
-- [Backfill](/backfill) — initial snapshots and version-triggered reindex.
-- [Multi-tenancy](/multi-tenancy) — per-row scoped contexts and destinations.
-- [External slots](/external-slots) — provision extra publications/slots for an ELT or other CDC consumer.
-- [Observability](/operations/observability) — OpenTelemetry metrics and traces.
+- [Backfill](/backfill) - initial snapshots and version-triggered reindex.
+- [Multi-tenancy](/multi-tenancy) - per-row scoped contexts and destinations.
+- [External slots](/external-slots) - provision extra publications/slots for an ELT or other CDC consumer.
+- [Observability](/operations/observability) - OpenTelemetry metrics and traces.

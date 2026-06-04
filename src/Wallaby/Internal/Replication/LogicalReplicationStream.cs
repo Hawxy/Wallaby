@@ -3,6 +3,7 @@ using Npgsql;
 using Npgsql.Replication;
 using Npgsql.Replication.PgOutput;
 using NpgsqlTypes;
+using Wallaby.Abstractions;
 
 namespace Wallaby.Internal.Replication;
 
@@ -19,23 +20,27 @@ namespace Wallaby.Internal.Replication;
 /// password from <c>NpgsqlDataSource.ConnectionString</c> so we can't reuse it for auth.
 /// </remarks>
 internal sealed class LogicalReplicationStream(
-    string connectionString, string slotName, string publicationName) : IAsyncDisposable
+    string connectionString, string slotName, string publicationName, ITransactionSpill spill,
+    int maxBufferedChangesPerTransaction = int.MaxValue) : IAsyncDisposable
 {
     private readonly LogicalReplicationConnection _connection = new(connectionString);
     private readonly PgOutputReplicationSlot _slot = new(slotName);
     // Serializes all status-update writes (acks + keepalives) so they never overlap on the connection.
     private readonly SemaphoreSlim _statusLock = new(1, 1);
+    // Protocol v2 with streaming: the server streams a transaction larger than its logical_decoding_work_mem
+    // before commit (StreamStart/Stop/Commit/Abort), so the assembler can buffer it incrementally rather than
+    // the server holding the whole transaction. Requires PG14+ (already our floor via the messages option).
     // Binary mode so Npgsql decodes values to proper CLR types (e.g. DateTime, decimal) rather than text.
     // messages: true asks pgoutput to forward generic WAL messages from pg_logical_emit_message — the
     // transport for backfill low/high watermarks.
     private readonly PgOutputReplicationOptions _options =
-        new(publicationName, PgOutputProtocolVersion.V1, binary: true, streamingMode: null, messages: true);
+        new(publicationName, PgOutputProtocolVersion.V2, binary: true, streamingMode: PgOutputStreamingMode.On, messages: true);
 
     /// <summary>Stream committed transactions until cancelled.</summary>
     public async IAsyncEnumerable<CommittedTransaction> ReadAsync([EnumeratorCancellation] CancellationToken ct)
     {
         await _connection.Open(ct);
-        var assembler = new TransactionAssembler();
+        var assembler = new TransactionAssembler(spill, maxBufferedChangesPerTransaction);
 
         await foreach (var message in _connection.StartReplication(_slot, _options, ct))
         {

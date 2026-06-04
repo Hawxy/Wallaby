@@ -31,12 +31,9 @@ internal sealed class StateSchemaBootstrapper
             slot_name        text        PRIMARY KEY,
             publication      text        NOT NULL,
             consistent_point pg_lsn      NULL,
+            kind             text        NOT NULL DEFAULT 'primary',
             created_at       timestamptz NOT NULL DEFAULT now()
         );
-
-        -- Distinguishes Wallaby's own slot ('primary') from slots it provisions for external
-        -- consumers ('external'). Added idempotently for databases bootstrapped before this column.
-        ALTER TABLE wallaby.slot_registry ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'primary';
 
         CREATE TABLE IF NOT EXISTS wallaby.fanout_queue (
             table_qualified text        NOT NULL,
@@ -49,6 +46,16 @@ internal sealed class StateSchemaBootstrapper
             requested_at    timestamptz NOT NULL DEFAULT now(),
             updated_at      timestamptz NOT NULL DEFAULT now(),
             PRIMARY KEY (table_qualified, lookup_hash)
+        );
+
+        -- Disk-free spill for pgoutput v2 streamed transactions buffered until commit. 
+        -- Used only by the database spill backend (PostgresUnloggedTableSpill);
+        CREATE UNLOGGED TABLE IF NOT EXISTS wallaby.stream_buffer (
+            slot_name text   NOT NULL,
+            xid       bigint NOT NULL,
+            seq       bigint NOT NULL,
+            payload   bytea  NOT NULL,
+            PRIMARY KEY (slot_name, xid, seq)
         );
         """;
 

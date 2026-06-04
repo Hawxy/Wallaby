@@ -10,7 +10,7 @@ using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
-namespace EFCore.CDC.IntegrationTests;
+namespace Wallaby.IntegrationTests;
 
 [NotInParallel]
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]

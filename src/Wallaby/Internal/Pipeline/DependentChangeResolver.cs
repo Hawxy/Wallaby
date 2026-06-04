@@ -27,7 +27,7 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcMo
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     public async Task<IReadOnlyList<FanoutResult>> ResolveFirstPagesAsync(
-        IReadOnlyList<RawChange> changes, int pageSize, CancellationToken ct)
+        IAsyncEnumerable<RawChange> changes, int pageSize, CancellationToken ct)
     {
         if (model.DependentBindings.Count == 0)
         {
@@ -35,10 +35,12 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcMo
         }
 
         // Group distinct lookup tuples per binding across the whole transaction so each binding resolves
-        // with one consolidated query instead of one query per triggering change.
+        // with one consolidated query instead of one query per triggering change. Consuming the changes as a
+        // stream keeps this bounded by the number of DISTINCT lookup keys (not the change count), so it works
+        // for a spilled (streamed) transaction without materializing it.
         Dictionary<DependentBinding, BindingAccumulator>? perBinding = null;
 
-        foreach (var change in changes)
+        await foreach (var change in changes.WithCancellation(ct))
         {
             var bindings = model.FindBindingsForDependent(change.Schema, change.TableName);
             if (bindings.Count == 0)

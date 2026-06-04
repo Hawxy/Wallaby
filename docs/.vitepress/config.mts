@@ -22,6 +22,7 @@ export default defineConfig({
         items: [
           { text: 'Getting Started', link: '/getting-started' },
           { text: 'How it works', link: '/how-it-works' },
+          { text: 'Configuration', link: '/configuration' },
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
           { text: 'Multi-tenancy', link: '/multi-tenancy' },
