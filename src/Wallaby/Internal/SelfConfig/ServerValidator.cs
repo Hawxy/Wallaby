@@ -19,16 +19,23 @@ internal sealed class ServerValidator(ILogger logger)
                 $"Postgres 'wal_level' is '{walLevel}', but logical replication requires 'logical'. " +
                 "Set wal_level=logical (in postgresql.conf or your managed-instance parameter group) and restart the server.");
         }
-
         var hasReplication = await PgExec.ScalarBoolAsync(
             connection,
-            "SELECT rolreplication OR rolsuper FROM pg_roles WHERE rolname = current_user",
+            """
+            SELECT bool_or(ok) FROM (
+                SELECT rolreplication OR rolsuper AS ok
+                FROM pg_roles WHERE rolname = current_user
+                UNION ALL
+                SELECT pg_has_role(current_user, oid, 'MEMBER')
+                FROM pg_roles
+                WHERE rolname IN ('rds_replication', 'rds_superuser', 'azure_pg_admin', 'cloudsqlsuperuser', 'cloudsqlreplica')
+            ) s
+            """,
             ct);
         if (!hasReplication)
         {
-            throw new CdcConfigurationException(
-                "The current Postgres role lacks the REPLICATION attribute and is not a superuser. " +
-                "Grant it with: ALTER ROLE <role> WITH REPLICATION;");
+            var role = await PgExec.ScalarStringAsync(connection, "SELECT current_user", ct);
+            logger.ReplicationPrivilegeUnverified(role);
         }
 
         var maxSlots = await PgExec.ScalarLongAsync(connection, "SELECT setting::int FROM pg_settings WHERE name = 'max_replication_slots'", ct);
@@ -63,4 +70,7 @@ internal static partial class ServerValidatorLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "CDC server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).")]
     internal static partial void ServerValidationPassed(this ILogger logger, long maxSlots, long usedSlots);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not verify the REPLICATION privilege for role '{Role}'; logical replication will fail to start without it. Grant it with 'ALTER ROLE ... WITH REPLICATION' or 'GRANT rds_replication TO ...' ")]
+    internal static partial void ReplicationPrivilegeUnverified(this ILogger logger, string? role);
 }
