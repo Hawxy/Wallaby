@@ -53,8 +53,20 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     }
 
     /// <summary>
+    /// Derive a per-row scope key from the raw <see cref="ChangeEvent"/>. Use this overload when the key is not
+    /// a property of the entity itself but lives in another captured column, for example a shadow property such
+    /// as a multi-tenancy <c>tenant_id</c> (read it via <c>c.Record["TenantId"]</c>). 
+    /// </summary>
+    public EntityMapBuilder<TEntity> ScopedBy(Func<ChangeEvent, object?> keySelector)
+    {
+        ArgumentNullException.ThrowIfNull(keySelector);
+        _registration.ScopeKeySelector = keySelector;
+        return this;
+    }
+
+    /// <summary>
     /// Route documents to a destination computed from the scope key (e.g. an index per tenant). Requires
-    /// <see cref="ScopedBy"/>; because deletes must also resolve the destination, the table is marked to need
+    /// a <c>ScopedBy(...)</c>; because deletes must also resolve the destination, the table is marked to need
     /// <c>REPLICA IDENTITY FULL</c> so the scope key is present on delete.
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedDestination(Func<object?, string?> destinationByScopeKey)
