@@ -1,4 +1,3 @@
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,6 +6,7 @@ using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 

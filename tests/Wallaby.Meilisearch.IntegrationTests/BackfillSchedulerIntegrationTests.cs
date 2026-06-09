@@ -1,8 +1,8 @@
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 

@@ -1,4 +1,3 @@
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -6,6 +5,7 @@ using Testcontainers.PostgreSql;
 using Wallaby.Internal;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

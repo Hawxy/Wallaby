@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
@@ -9,6 +8,7 @@ using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

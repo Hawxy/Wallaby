@@ -25,7 +25,7 @@ You have a number of choices as to where streamed transactions spill:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `SlotName` / `PublicationName` | `efcore_cdc_slot` / `efcore_cdc_pub` | Names Wallaby creates/uses. |
+| `SlotName` / `PublicationName` | `wallaby_cdc_slot` / `wallaby_cdc_pub` | Names Wallaby creates/uses. |
 | `ChunkSize` | `500` | Backfill keyset page size. |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/transforms#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill. |
 | `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |

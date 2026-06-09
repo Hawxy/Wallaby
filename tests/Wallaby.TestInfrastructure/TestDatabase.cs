@@ -1,7 +1,7 @@
 using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 
-namespace EFCore.CDC.TestInfrastructure;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>Convenience seed/mutation helpers for the <see cref="AppDbContext"/> test model, bound to a connection.</summary>
 public sealed class TestDatabase(string connectionString)

@@ -1,6 +1,6 @@
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

@@ -1,7 +1,7 @@
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

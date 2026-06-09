@@ -3,7 +3,7 @@ using Npgsql;
 using Testcontainers.PostgreSql;
 using TUnit.Core.Interfaces;
 
-namespace EFCore.CDC.TestInfrastructure;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>
 /// A shared Postgres container started with <c>wal_level=logical</c> so the library can create a

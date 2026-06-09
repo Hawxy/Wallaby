@@ -1,6 +1,6 @@
 using Wallaby.Abstractions;
 
-namespace EFCore.CDC.TestInfrastructure;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>
 /// An <see cref="ISink"/> that records every delivered record for assertions. Thread-safe; supports

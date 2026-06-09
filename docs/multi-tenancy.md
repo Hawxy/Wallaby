@@ -19,9 +19,12 @@ cdc.UseScopedContext((scopeKey, services) => new AppDbContext(OptionsForTenant(s
        .ScopedDestination(key => $"orders_{key}"); // per-tenant destination (optional)
 ```
 
-- **`ScopedBy(o => o.TenantId)`** extracts a scope key from each change.
+- **`ScopedBy(o => o.TenantId)`** extracts a scope key from each change's entity. When the key isn't a CLR
+  property of the entity, e.g. a shadow `tenant_id` column added by a multi-tenancy library, use the
+  `ChangeEvent` overload instead: `ScopedBy(c => c.Record["TenantId"])`.
 - **`UseScopedContext((key, services) => ...)`** builds the enrichment `DbContext` for a scope key - point
-  it at a tenant connection string, or hand the context the tenant so a global query filter applies.
+  it at a tenant connection string, or hand the context the tenant so a global query filter applies. `services`
+  is a DI scope that disposes together with the returned context, so scoped services are safe to resolve.
 - **`ScopedDestination(key => ...)`** computes the destination per scope key. Without it, the scope only
   affects the enrichment context and the fixed `ToSink(...)` destination is used.
 

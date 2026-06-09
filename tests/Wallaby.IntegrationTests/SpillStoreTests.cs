@@ -1,8 +1,8 @@
-using EFCore.CDC.TestInfrastructure;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.State;
 using Wallaby.Model;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

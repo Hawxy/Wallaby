@@ -1,4 +1,4 @@
-namespace EFCore.CDC.TestInfrastructure;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>Polls an asynchronous condition until it holds or a timeout elapses.</summary>
 public static class Polling

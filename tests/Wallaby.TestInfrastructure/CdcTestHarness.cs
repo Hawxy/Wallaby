@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
@@ -14,7 +15,7 @@ using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
-namespace EFCore.CDC.TestInfrastructure;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>
 /// Drives a CDC pipeline against a real Postgres for integration tests, removing the per-test boilerplate
@@ -390,10 +391,13 @@ public sealed class CdcTestHarness : IAsyncDisposable
         });
         _materializer = new EntityMaterializer(_model);
     }
-
-    private sealed class NullServiceProvider : IServiceProvider
+    
+    private sealed class NullServiceProvider : IServiceProvider, IServiceScopeFactory, IServiceScope
     {
         public static readonly NullServiceProvider Instance = new();
-        public object? GetService(Type serviceType) => null;
+        public object? GetService(Type serviceType) => serviceType == typeof(IServiceScopeFactory) ? this : null;
+        public IServiceScope CreateScope() => this;
+        public IServiceProvider ServiceProvider => this;
+        public void Dispose() { }
     }
 }

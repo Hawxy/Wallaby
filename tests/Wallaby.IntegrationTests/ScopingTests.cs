@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

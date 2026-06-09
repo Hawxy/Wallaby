@@ -1,5 +1,5 @@
-using EFCore.CDC.TestInfrastructure;
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

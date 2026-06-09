@@ -1,4 +1,4 @@
-namespace EFCore.CDC.TestInfrastructure;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>Unique slot/publication (and a reusable suffix for index/table names) for an isolated test.</summary>
 public sealed record CdcNames(string Suffix, string Slot, string Publication)

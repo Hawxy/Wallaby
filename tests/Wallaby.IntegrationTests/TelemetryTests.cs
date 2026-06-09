@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

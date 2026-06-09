@@ -1,5 +1,5 @@
-using EFCore.CDC.TestInfrastructure;
 using Wallaby.Internal.Cluster;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

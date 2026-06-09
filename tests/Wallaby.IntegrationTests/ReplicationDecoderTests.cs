@@ -1,10 +1,10 @@
-using EFCore.CDC.TestInfrastructure;
 using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.IntegrationTests;
 

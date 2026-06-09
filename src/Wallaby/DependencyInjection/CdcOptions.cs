@@ -14,10 +14,10 @@ public enum CdcDeadLetterPolicy
 public sealed class CdcOptions
 {
     /// <summary>Logical replication slot name.</summary>
-    public string SlotName { get; set; } = "efcore_cdc_slot";
+    public string SlotName { get; set; } = "wallaby_cdc_slot";
 
     /// <summary>Publication name.</summary>
-    public string PublicationName { get; set; } = "efcore_cdc_pub";
+    public string PublicationName { get; set; } = "wallaby_cdc_pub";
 
     /// <summary>Backfill keyset page size.</summary>
     public int ChunkSize { get; set; } = 500;

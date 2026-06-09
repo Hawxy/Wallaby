@@ -60,7 +60,7 @@ distinct from Wallaby's own slot/publication and from each other.
   if that slot isn't a pgoutput *logical* slot (e.g. a physical slot or one on a different output plugin),
   so a name clash with an unrelated slot surfaces as a clear startup error rather than a silent mismatch.
 - **Never auto-dropped.** Removing an `AddExternalSlot(...)` declaration does **not** drop the slot or
-  publication. A retired slot must be removedyourself:
+  publication. A retired slot must be removed yourself:
 
   ```sql
   SELECT pg_drop_replication_slot('elt');

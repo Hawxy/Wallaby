@@ -4,16 +4,24 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
-/// A leased enrichment <see cref="DbContext"/>. When the context was resolved from a DI scope (the consumer
-/// registered <c>AddDbContext</c> rather than a factory), disposing the lease disposes the owning scope — which
-/// in turn disposes the context. When it came from an <c>IDbContextFactory</c> or a consumer-supplied factory,
-/// there is no scope and the context is disposed directly.
+/// A leased enrichment <see cref="DbContext"/>, optionally with an owning DI scope. Disposing the lease disposes
+/// the context and then the scope (when present) in the same lifetime, so any scoped services the context or a
+/// consumer factory resolved are released with it. Disposing the context first is safe even when the scope also
+/// owns it — <see cref="DbContext.DisposeAsync"/> is idempotent. When there is no scope (an
+/// <c>IDbContextFactory</c> or a plain factory), only the context is disposed.
 /// </summary>
 internal readonly struct EnrichmentContextLease(DbContext context, AsyncServiceScope? scope) : IAsyncDisposable
 {
     public DbContext Context => context;
 
-    public ValueTask DisposeAsync() => scope is { } owned ? owned.DisposeAsync() : context.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await context.DisposeAsync();
+        if (scope is { } owned)
+        {
+            await owned.DisposeAsync();
+        }
+    }
 }
 
 /// <summary>
@@ -41,10 +49,29 @@ internal sealed class DefaultEnrichmentContextProvider(Func<EnrichmentContextLea
     public EnrichmentContextLease Create(object? scopeKey) => lease();
 }
 
-/// <summary>Scoped provider: builds a context from the scope key via a consumer-supplied factory (consumer-owned, no scope).</summary>
+/// <summary>
+/// Scoped provider: builds a context from the scope key via a consumer-supplied factory. Each call opens a fresh
+/// DI scope and hands the factory that scope's <see cref="IServiceProvider"/> (so it may resolve scoped services
+/// such as <c>DbContextOptions</c>); the scope is owned by the returned lease and disposed together with the
+/// context. The router caches one lease per distinct scope key per batch, so one scope is opened per key per batch.
+/// </summary>
 internal sealed class ScopedEnrichmentContextProvider(
     Func<object?, IServiceProvider, DbContext> factory, IServiceProvider services) : IEnrichmentContextProvider
 {
     public bool IsScoped => true;
-    public EnrichmentContextLease Create(object? scopeKey) => new(factory(scopeKey, services), scope: null);
+
+    public EnrichmentContextLease Create(object? scopeKey)
+    {
+        var scope = services.CreateAsyncScope();
+        try
+        {
+            return new EnrichmentContextLease(factory(scopeKey, scope.ServiceProvider), scope);
+        }
+        catch
+        {
+            // The factory threw before a lease could take ownership of the scope — don't leak it.
+            scope.Dispose();
+            throw;
+        }
+    }
 }
