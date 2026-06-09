@@ -80,14 +80,9 @@ internal sealed class CdcPipeline(
 
             // A streamed (large) transaction's changes live in the spill, not in memory — process them in
             // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
-            if (transaction.IsStreamed)
-            {
-                await ProcessStreamedAsync(transaction, ct);
-            }
-            else
-            {
-                await ProcessInMemoryAsync(transaction, ct);
-            }
+            var processed = transaction.IsStreamed
+                ? await ProcessStreamedAsync(transaction, ct)
+                : await ProcessInMemoryAsync(transaction, ct);
 
             using (var ackActivity = _instr.StartAck())
             {
@@ -98,12 +93,15 @@ internal sealed class CdcPipeline(
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
                 _status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
             }
+
+            // The committed transaction (batch) is fully delivered to sinks and acknowledged to the server.
+            logger.BatchProcessed(slotName, processed, transaction.EndLsn);
         }
     }
 
     // Normal transaction: materialize the in-memory changes, dispatch them (with watermark/backfill handling),
     // and resolve dependent fan-out. Unchanged from the pre-streaming behaviour.
-    private async Task ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
+    private async Task<int> ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
     {
         var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
         foreach (var raw in transaction.Changes)
@@ -153,12 +151,14 @@ internal sealed class CdcPipeline(
                 }
             }
         }
+
+        return transaction.Changes.Count;
     }
 
     // Streamed (large) transaction: read the spilled changes back in append order in bounded pages — never
     // materializing the whole transaction — stamping each with the commit metadata, then resolve fan-out and
     // discard the spill. Streamed transactions carry no watermarks (those are tiny, never-streamed transactions).
-    private async Task ProcessStreamedAsync(CommittedTransaction transaction, CancellationToken ct)
+    private async Task<int> ProcessStreamedAsync(CommittedTransaction transaction, CancellationToken ct)
     {
         var page = new List<ChangeEvent>(maxBatchSize);
         var idx = 0;
@@ -196,6 +196,7 @@ internal sealed class CdcPipeline(
         }
 
         await transaction.Spill!.DiscardAsync(transaction.StreamXid, ct);
+        return idx;
     }
 
     private async Task DispatchPageAsync(List<ChangeEvent> page, CancellationToken ct)
@@ -362,4 +363,7 @@ internal static partial class CdcPipelineLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "CDC pipeline started for slot '{Slot}'.")]
     internal static partial void PipelineStarted(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Processed batch for slot '{Slot}' ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
+    internal static partial void BatchProcessed(this ILogger logger, string slot, int changes, ulong endLsn);
 }
