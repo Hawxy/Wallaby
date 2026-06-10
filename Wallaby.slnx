@@ -8,6 +8,7 @@
   <Folder Name="/src/">
     <Project Path="src/Wallaby.AspNetCore.HealthChecks/Wallaby.AspNetCore.HealthChecks.csproj" />
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
+    <Project Path="src/Wallaby.Testing/Wallaby.Testing.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
   </Folder>
   <Folder Name="/tests/">

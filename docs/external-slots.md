@@ -79,8 +79,8 @@ accumulates on the server. Only declare slots an external tool will actually rea
 
 ## Provision-only mode
 
-A worker can use Wallaby **purely to provision external slots** - no sinks, no mappings, no primary slot,
-no streaming. To do so, omit `UseContext<T>()` and declare only external slots. Wallaby will scaffold the slot and then idle:
+A worker can use Wallaby **purely to provision external slots**.
+To do so, omit `UseContext<T>()` and declare only external slots. Wallaby will scaffold the slot and then idle:
 
 ```csharp
 // Only provisions the ELT publication + slot, nothing is captured or streamed.
@@ -93,7 +93,7 @@ builder.Services.AddWallaby(cdc => cdc
 ```
 
 ::: tip
-Adding a sink or a `Map<T>()` later switches Wallaby into full capture mode; at that point
+Adding a sink or a `Map<T>()` later switches Wallaby into full capture mode, at that point
 you must also declare `UseContext<T>()` (and register the context factory).
 :::
 

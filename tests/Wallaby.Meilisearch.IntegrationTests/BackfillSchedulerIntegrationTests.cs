@@ -1,4 +1,5 @@
 using EFCore.CDC.TestModel;
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
@@ -23,6 +24,10 @@ public class BackfillSchedulerIntegrationTests(PostgresFixture pg, MeilisearchFi
         var ids = await harness.Db.AddProductsAsync(categoryId, Enumerable.Range(0, 6).Select(i => $"s{i}").ToArray());
 
         await harness.SelfConfigureAsync();
+
+        using var rows = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.backfill.rows");
+        using var active = new MetricCollector<int>(harness.Instrumentation.Meter, "wallaby.backfill.active");
+
         await harness.StartAsync();
 
         var probe = new MeiliProbe(meili);
@@ -39,6 +44,10 @@ public class BackfillSchedulerIntegrationTests(PostgresFixture pg, MeilisearchFi
         // Pass 1 (v1): a new table auto-backfills.
         await harness.RunBackfillAsync("v1");
         await AllIndexed();
+
+        // The pass recorded the copied rows and moved the active-backfill gauge.
+        await Assert.That(rows.GetMeasurementSnapshot().Sum(m => m.Value)).IsGreaterThanOrEqualTo(6L);
+        await Assert.That(active.GetMeasurementSnapshot().Any(m => m.Value == 1)).IsTrue();
 
         // Version change (v2) re-backfills.
         await probe.DropAsync(index);

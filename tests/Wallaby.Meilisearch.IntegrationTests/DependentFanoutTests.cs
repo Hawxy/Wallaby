@@ -117,48 +117,8 @@ public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
             TimeSpan.FromSeconds(60));
     }
 
-    [Test]
-    public async Task Wide_fanout_indexes_the_first_page_inline_then_offloads_the_tail()
-    {
-        await using var harness = NewHarness(out var index);
-        harness.MaxBatchSize = 5;
-        harness.ChunkSize = 5;
-
-        var categoryId = await harness.Db.AddCategoryAsync("OriginalCat");
-        // Seed before self-config so the inserts are not streamed; only the rename below is captured.
-        var products = await harness.Db.AddProductsAsync(categoryId, Enumerable.Range(0, 12).Select(i => $"wp{i}").ToArray());
-        var first = products[0].Id;
-        var last = products[^1].Id;
-
-        await harness.SelfConfigureAsync();
-        await harness.ClearFanoutQueueAsync(); // isolate this test's queue count from the shared schema
-        await harness.StartAsync();
-
-        var probe = new MeiliProbe(meili);
-
-        // Rename the category alone. The first page (5 lowest-id products) re-indexes inline; the rest is offloaded.
-        await harness.Db.SetCategoryNameAsync(categoryId, "RenamedCat");
-        await harness.WaitUntilAsync(async () =>
-                (await probe.GetAsync(index, first.ToString()))?["category"]?.GetValue<string>() == "RenamedCat",
-            TimeSpan.FromSeconds(60));
-
-        // The trigger transaction is acknowledged (slot advanced) while the tail is still queued, not indexed.
-        await harness.WaitUntilAsync(() => harness.LastAcknowledgedLsn > 0, TimeSpan.FromSeconds(10));
-        await Assert.That(await probe.GetAsync(index, last.ToString())).IsNull();
-        await Assert.That(await harness.PendingFanoutJobCountAsync()).IsEqualTo(1);
-
-        // Draining the offloaded job re-indexes every remaining product with the new category.
-        await harness.DrainFanoutAsync();
-        await harness.WaitUntilAsync(async () =>
-                (await probe.GetAsync(index, last.ToString()))?["category"]?.GetValue<string>() == "RenamedCat",
-            TimeSpan.FromSeconds(60));
-
-        foreach (var (id, _) in products)
-        {
-            await Assert.That((await probe.GetAsync(index, id.ToString()))?["category"]?.GetValue<string>())
-                .IsEqualTo("RenamedCat");
-        }
-    }
+    // Wide fan-out (inline first page, offloaded tail, coalescing, drain) is covered sink-agnostically by
+    // FanoutScalabilityTests.Wide_fanout_offloads_the_tail_coalesces_repeat_triggers_and_drains.
 
     private static IReadOnlyList<string>? IndexedLabels(System.Text.Json.Nodes.JsonObject? document)
         => document?["labels"]?.AsArray().Select(n => n!.GetValue<string>()).ToList();

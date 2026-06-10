@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby.Testing</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Test helpers for Wallaby consumers: capture sink, sink replacement, and streaming-readiness gates for end-to-end CDC tests against a real Postgres.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby\Wallaby.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNet.ReproducibleBuilds">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <Import Project="../../Package.Build.props" />
+</Project>

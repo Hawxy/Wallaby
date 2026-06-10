@@ -1,0 +1,80 @@
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
+using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
+
+namespace Wallaby.Testing;
+
+/// <summary>
+/// Readiness gates for end-to-end CDC tests. Rows written before the replication slot exists are never
+/// captured, so a test must wait for the pipeline to be actually streaming before it seeds data.
+/// </summary>
+public static class WallabyReadiness
+{
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Wait until the Wallaby pipeline in <paramref name="services"/> is capturing changes: the node has
+    /// become the leader (<see cref="ICdcStatus"/>) and the configured replication slot exists with an
+    /// attached walsender (<c>pg_replication_slots.active</c>). Throws if the background service faults.
+    /// </summary>
+    /// <param name="services">The host's service provider (e.g. <c>WebApplicationFactory.Services</c>).</param>
+    /// <param name="timeout">How long to wait before giving up; defaults to 30 seconds.</param>
+    /// <param name="ct">Cancels the wait.</param>
+    /// <exception cref="InvalidOperationException">The CDC background service faulted while waiting.</exception>
+    /// <exception cref="TimeoutException">The pipeline did not become ready in time.</exception>
+    public static async Task WaitForStreamingAsync(
+        IServiceProvider services, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var status = services.GetRequiredService<ICdcStatus>();
+        var options = services.GetRequiredService<CdcOptions>();
+
+        var effectiveTimeout = timeout ?? DefaultTimeout;
+        var deadline = DateTime.UtcNow + effectiveTimeout;
+
+        // Phase 1: leadership. The leader runs self-config (publication + slot) before streaming.
+        while (status.Current.Role != CdcNodeRole.Leader)
+        {
+            ThrowIfFaulted(status.Current);
+            await DelayOrTimeout(deadline, effectiveTimeout, $"role to become Leader (current: {status.Current.Role})", ct);
+        }
+
+        // Phase 2: the slot exists and a walsender is attached — changes from here on are captured.
+        await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
+        while (true)
+        {
+            ThrowIfFaulted(status.Current);
+
+            await using (var command = dataSource.CreateCommand(
+                "SELECT active FROM pg_replication_slots WHERE slot_name = $1"))
+            {
+                command.Parameters.AddWithValue(options.SlotName);
+                if (await command.ExecuteScalarAsync(ct) is true)
+                {
+                    return;
+                }
+            }
+
+            await DelayOrTimeout(deadline, effectiveTimeout, $"replication slot '{options.SlotName}' to become active", ct);
+        }
+    }
+
+    private static void ThrowIfFaulted(CdcStatusSnapshot snapshot)
+    {
+        if (snapshot.Faulted)
+        {
+            throw new InvalidOperationException(
+                $"The CDC background service faulted while waiting for streaming to start: {snapshot.LastError ?? "(no error recorded)"}");
+        }
+    }
+
+    private static async Task DelayOrTimeout(DateTime deadline, TimeSpan timeout, string waitingFor, CancellationToken ct)
+    {
+        if (DateTime.UtcNow >= deadline)
+        {
+            throw new TimeoutException($"Timed out after {timeout} waiting for {waitingFor}.");
+        }
+        await Task.Delay(PollInterval, ct);
+    }
+}

@@ -1,5 +1,6 @@
 using Wallaby.Abstractions;
 using Wallaby.TestInfrastructure;
+using Wallaby.Testing;
 
 namespace Wallaby.IntegrationTests;
 

@@ -10,6 +10,7 @@ using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Materialization;
 using Wallaby.Internal.Pipeline;
+using Wallaby.Testing;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;

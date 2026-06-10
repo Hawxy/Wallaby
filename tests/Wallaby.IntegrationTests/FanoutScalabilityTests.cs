@@ -9,6 +9,7 @@ using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 using Wallaby.TestInfrastructure;
+using Wallaby.Testing;
 
 namespace Wallaby.IntegrationTests;
 
@@ -131,11 +132,11 @@ public class FanoutScalabilityTests(PostgresFixture pg)
     }
 
     [Test]
-    public async Task Wide_fanout_offloads_the_tail_and_repeat_triggers_coalesce()
+    public async Task Wide_fanout_offloads_the_tail_coalesces_repeat_triggers_and_drains()
     {
         await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
         harness.MaxBatchSize = 5;
-        harness.AddCaptureSink();
+        var capture = harness.AddCaptureSink();
         harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
@@ -161,6 +162,16 @@ public class FanoutScalabilityTests(PostgresFixture pg)
             await harness.WaitUntilAsync(() => synthetic.GetMeasurementSnapshot().Sum(m => m.Value) >= 10, Timeout);
 
             await Assert.That(await harness.PendingFanoutJobCountAsync()).IsEqualTo(1);
+
+            // The trigger transactions are acknowledged (slot advances) while the tail is still queued:
+            // both renames re-emitted the same inline first page, so only 5 distinct products are delivered.
+            await harness.WaitUntilAsync(() => harness.LastAcknowledgedLsn > 0, Timeout);
+            await Assert.That(capture.For("products").Select(r => r.DocumentId).Distinct().Count()).IsEqualTo(5);
+
+            // Draining the offloaded job re-emits the remaining 7, completing the fan-out.
+            await Assert.That(await harness.DrainFanoutAsync()).IsEqualTo(1);
+            await harness.WaitUntilAsync(
+                () => capture.For("products").Select(r => r.DocumentId).Distinct().Count() >= 12, Timeout);
         }
         finally
         {

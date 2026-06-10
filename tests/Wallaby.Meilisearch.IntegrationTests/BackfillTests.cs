@@ -23,27 +23,8 @@ public class BackfillTests(PostgresFixture pg, MeilisearchFixture meili)
         return harness;
     }
 
-    [Test]
-    public async Task Backfills_existing_rows_into_the_sink()
-    {
-        await using var harness = NewHarness(out var index);
-
-        // Seed BEFORE the slot exists, so these rows arrive only via backfill (not the live stream).
-        var categoryId = await harness.Db.AddCategoryAsync();
-        var ids = await harness.Db.AddProductsAsync(categoryId, Enumerable.Range(0, 8).Select(i => $"seed{i}").ToArray());
-
-        await harness.SelfConfigureAsync();
-        await harness.StartAsync();
-        await harness.RunBackfillAsync();
-
-        var probe = new MeiliProbe(meili);
-        await harness.WaitUntilAsync(async () => await AllIndexedAsync(probe, index, ids), TimeSpan.FromSeconds(90));
-
-        foreach (var (id, name) in ids)
-        {
-            await Assert.That(await probe.NameAsync(index, id)).IsEqualTo(name);
-        }
-    }
+    // The plain "seed before the slot exists, backfill indexes everything" path is covered by the
+    // first pass of BackfillSchedulerIntegrationTests.Scheduler_re_backfills_on_version_change_and_on_manual_request.
 
     [Test]
     public async Task Backfill_with_concurrent_writes_converges_to_final_table_state()
@@ -89,14 +70,5 @@ public class BackfillTests(PostgresFixture pg, MeilisearchFixture meili)
         {
             await Assert.That(await probe.NameAsync(index, id)).IsEqualTo(name);
         }
-    }
-
-    private static async Task<bool> AllIndexedAsync(MeiliProbe probe, string index, IReadOnlyList<(int Id, string Name)> ids)
-    {
-        foreach (var (id, name) in ids)
-        {
-            if (await probe.NameAsync(index, id) != name) return false;
-        }
-        return true;
     }
 }

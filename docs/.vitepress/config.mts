@@ -26,7 +26,8 @@ export default defineConfig({
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
           { text: 'Multi-tenancy', link: '/multi-tenancy' },
-          { text: 'External slots', link: '/external-slots' },        
+          { text: 'External slots', link: '/external-slots' },
+          { text: 'Testing', link: '/testing' },
         ]
       },
       {
