@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
@@ -49,9 +50,17 @@ internal sealed class CdcPipeline(
     /// <summary>The highest LSN acknowledged to the server. Useful for observing progress.</summary>
     public ulong LastAcknowledgedLsn { get; private set; }
 
+    // Steady-state throughput is summarized in one rollup line at most this often (per-transaction
+    // detail stays at Debug). The loop only ticks on traffic, so an idle slot logs nothing.
+    private static readonly TimeSpan RollupInterval = TimeSpan.FromSeconds(30);
+
     public async Task RunAsync(CancellationToken ct)
     {
         logger.PipelineStarted(slotName);
+
+        var rollupStart = Stopwatch.GetTimestamp();
+        var rollupTransactions = 0L;
+        var rollupChanges = 0L;
 
         await foreach (var transaction in stream.ReadAsync(ct))
         {
@@ -96,6 +105,17 @@ internal sealed class CdcPipeline(
 
             // The committed transaction (batch) is fully delivered to sinks and acknowledged to the server.
             logger.BatchProcessed(slotName, processed, transaction.EndLsn);
+
+            rollupTransactions++;
+            rollupChanges += processed;
+            if (Stopwatch.GetElapsedTime(rollupStart) is var window && window >= RollupInterval)
+            {
+                logger.ProcessedRollup(
+                    slotName, rollupTransactions, rollupChanges, (long)window.TotalSeconds, transaction.EndLsn);
+                rollupTransactions = 0;
+                rollupChanges = 0;
+                rollupStart = Stopwatch.GetTimestamp();
+            }
         }
     }
 
@@ -372,6 +392,9 @@ internal static partial class CdcPipelineLog
     [LoggerMessage(Level = LogLevel.Information, Message = "CDC pipeline started for slot '{Slot}'.")]
     internal static partial void PipelineStarted(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Processed batch for slot '{Slot}' ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed batch for slot '{Slot}' ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
     internal static partial void BatchProcessed(this ILogger logger, string slot, int changes, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Slot '{Slot}' processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
+    internal static partial void ProcessedRollup(this ILogger logger, string slot, long transactions, long changes, long seconds, ulong endLsn);
 }

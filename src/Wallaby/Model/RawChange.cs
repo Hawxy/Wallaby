@@ -8,8 +8,6 @@ namespace Wallaby.Model;
 /// </summary>
 public sealed record RawChange
 {
-    private string? _qualifiedName;
-
     /// <summary>The pgoutput relation id (table OID) this change belongs to.</summary>
     public required uint RelationId { get; init; }
 
@@ -41,5 +39,5 @@ public sealed record RawChange
     public int CommitIdx { get; internal set; }
 
     /// <summary>The schema-qualified table name, e.g. <c>public.orders</c>.</summary>
-    public string QualifiedName => _qualifiedName ??= $"{Schema}.{TableName}";
+    public string QualifiedName => field ??= $"{Schema}.{TableName}";
 }

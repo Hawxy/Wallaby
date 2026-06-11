@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Wallaby.Abstractions;
@@ -33,6 +34,9 @@ internal sealed class WatermarkBackfillCoordinator(
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     public int ChunkSize { get; init; } = 500;
+
+    // A long backfill reports progress at most this often (its start/completion are always logged).
+    private static readonly TimeSpan ProgressLogInterval = TimeSpan.FromSeconds(30);
 
     // ---- backfill task side ----
 
@@ -88,6 +92,9 @@ internal sealed class WatermarkBackfillCoordinator(
     {
         var cursor = startCursor;
         var rowsCopied = startRows;
+        var sessionStart = Stopwatch.GetTimestamp();
+        var sessionRows = 0L;
+        var lastProgressLog = sessionStart;
 
         _instr.BackfillStarted();
         try
@@ -114,11 +121,19 @@ internal sealed class WatermarkBackfillCoordinator(
                 await window.Completed.Task.WaitAsync(ct);
 
                 rowsCopied += chunk.Rows.Count;
+                sessionRows += chunk.Rows.Count;
                 cursor = chunk.NextCursor;
                 await saveProgress(cursor, rowsCopied, chunk.HasMore, ct);
 
                 _instr.RecordBackfillRows(qualifiedTable, chunk.Rows.Count);
                 _instr.RecordBackfillChunkDuration(qualifiedTable, chunkStart);
+
+                if (Stopwatch.GetElapsedTime(lastProgressLog) >= ProgressLogInterval)
+                {
+                    var rate = (long)(sessionRows / Stopwatch.GetElapsedTime(sessionStart).TotalSeconds);
+                    logger.BackfillProgress(qualifiedTable, rowsCopied, rate);
+                    lastProgressLog = Stopwatch.GetTimestamp();
+                }
 
                 if (!chunk.HasMore)
                 {
@@ -198,6 +213,9 @@ internal static partial class WatermarkBackfillCoordinatorLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill of {Table} complete ({Rows} rows).")]
     internal static partial void BackfillComplete(this ILogger logger, string table, long rows);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill of {Table} in progress: {Rows} row(s) copied so far ({Rate} rows/s).")]
+    internal static partial void BackfillProgress(this ILogger logger, string table, long rows, long rate);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting scoped fan-out backfill of {Table} ({Keys} key set(s)).")]
     internal static partial void ScopedFanoutStarting(this ILogger logger, string table, int keys);
