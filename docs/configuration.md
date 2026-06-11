@@ -25,6 +25,7 @@ You have a number of choices as to where streamed transactions spill:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
+| `ConnectionString` | *(required)* | Postgres connection string for replication, state, locks, and backfill reads. `UseConnectionString(...)` is shorthand for setting it. |
 | `SlotName` / `PublicationName` | `wallaby_cdc_slot` / `wallaby_cdc_pub` | Names Wallaby creates/uses. |
 | `ChunkSize` | `500` | Backfill keyset page size. |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/transforms#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill. |
@@ -36,3 +37,18 @@ You have a number of choices as to where streamed transactions spill:
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
 | `DeadLetterPolicy` | `Halt` | What to do when a batch can't be processed — a permanent **sink** failure, a **transform** exception, or a **materialization** failure. `Halt` stops the pipeline (retried after the leader restarts); `Skip` logs, counts (`wallaby.dead_letter`), and drops the batch, then continues. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
+
+## The Options pattern
+
+`CdcOptions` participates in the standard [options pipeline](https://learn.microsoft.com/dotnet/core/extensions/options),
+so the usual mechanisms compose with the builder's `ConfigureOptions(...)`:
+
+```csharp
+// Bind from configuration (appsettings.json: { "Wallaby": { "ChunkSize": 250 } }):
+builder.Services.Configure<CdcOptions>(builder.Configuration.GetSection("Wallaby"));
+
+builder.Services.AddWallaby(cdc => /* ... */);
+
+// PostConfigure always runs last — handy for test hosts:
+builder.Services.PostConfigure<CdcOptions>(o => o.SlotName = "tests_slot");
+```

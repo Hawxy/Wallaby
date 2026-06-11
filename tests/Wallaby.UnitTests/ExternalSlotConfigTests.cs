@@ -100,24 +100,42 @@ public class ExternalSlotConfigTests
         await Assert.That(() => builder.Build()).Throws<CdcConfigurationException>();
     }
 
+    // Collisions with the PRIMARY slot/publication involve option values, which are not final until the
+    // options pipeline runs — so they surface on first CdcOptions resolution rather than at Build().
     [Test]
-    public async Task External_slot_name_colliding_with_primary_fails_fast()
+    public async Task External_slot_name_colliding_with_primary_fails_on_options_resolution()
     {
-        var builder = MinimalBuilder();
-        builder.ConfigureOptions(o => o.SlotName = "dup");
-        builder.AddExternalSlot("dup", s => s.ForTable("orders"));
+        var config = MinimalBuilder()
+            .ConfigureOptions(o => o.SlotName = "dup")
+            .AddExternalSlot("dup", s => s.ForTable("orders"))
+            .Build();
 
-        await Assert.That(() => builder.Build()).Throws<CdcConfigurationException>();
+        await Assert.That(() => ValidatedOptions(config)).Throws<CdcConfigurationException>();
     }
 
     [Test]
-    public async Task External_publication_colliding_with_primary_fails_fast()
+    public async Task External_publication_colliding_with_primary_fails_on_options_resolution()
     {
-        var builder = MinimalBuilder();
-        builder.ConfigureOptions(o => o.PublicationName = "shared_pub");
-        builder.AddExternalSlot("elt", s => s.ForTable("orders").WithPublication("shared_pub"));
+        var config = MinimalBuilder()
+            .ConfigureOptions(o => o.PublicationName = "shared_pub")
+            .AddExternalSlot("elt", s => s.ForTable("orders").WithPublication("shared_pub"))
+            .Build();
 
-        await Assert.That(() => builder.Build()).Throws<CdcConfigurationException>();
+        await Assert.That(() => ValidatedOptions(config)).Throws<CdcConfigurationException>();
+    }
+
+    /// <summary>Materialize CdcOptions the way AddWallaby does: builder actions applied, then validated.</summary>
+    private static CdcOptions ValidatedOptions(CdcConfiguration config)
+    {
+        var options = new CdcOptions();
+        foreach (var apply in config.OptionsActions)
+        {
+            apply(options);
+        }
+        var result = new CdcOptionsValidator(config).Validate(null, options);
+        return result.Failed
+            ? throw new CdcConfigurationException(string.Join(" ", result.Failures ?? []))
+            : options;
     }
 
     [Test]

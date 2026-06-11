@@ -10,19 +10,30 @@ namespace Wallaby.DependencyInjection;
 /// <summary>Fluent configuration for a CDC instance.</summary>
 public sealed class CdcBuilder
 {
-    private readonly CdcConfiguration _configuration = new() { Options = new CdcOptions() };
+    private readonly CdcConfiguration _configuration = new();
 
-    /// <summary>Configure options (slot/publication names, chunk size, auto-backfill, etc.).</summary>
+    /// <summary>
+    /// Configure options (slot/publication names, chunk size, auto-backfill, etc.). The action joins the
+    /// standard options pipeline at the <c>AddWallaby</c> registration position, so it composes with
+    /// <c>services.Configure&lt;CdcOptions&gt;()</c>/<c>PostConfigure</c> calls: earlier <c>Configure</c>
+    /// registrations run before it, later ones and <c>PostConfigure</c> override it.
+    /// </summary>
     public CdcBuilder ConfigureOptions(Action<CdcOptions> configure)
     {
-        configure(_configuration.Options);
+        ArgumentNullException.ThrowIfNull(configure);
+        _configuration.OptionsActions.Add(configure);
         return this;
     }
 
-    /// <summary>Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill reads.</summary>
+    /// <summary>
+    /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill reads.
+    /// Shorthand for <c>ConfigureOptions(o =&gt; o.ConnectionString = ...)</c> — like any option value it can
+    /// also be supplied (or overridden) through <c>Configure&lt;CdcOptions&gt;</c>, configuration binding, or
+    /// <c>PostConfigure</c>, and is validated as non-empty on first resolution.
+    /// </summary>
     public CdcBuilder UseConnectionString(string connectionString)
     {
-        _configuration.Options.ConnectionString = connectionString;
+        _configuration.OptionsActions.Add(options => options.ConnectionString = connectionString);
         return this;
     }
 
@@ -137,35 +148,10 @@ public sealed class CdcBuilder
 
     internal CdcConfiguration Build()
     {
-        var options = _configuration.Options;
-        if (string.IsNullOrWhiteSpace(options.ConnectionString))
-        {
-            throw new CdcConfigurationException("A connection string must be supplied via UseConnectionString(...).");
-        }
-        if (string.IsNullOrWhiteSpace(options.SlotName) || string.IsNullOrWhiteSpace(options.PublicationName))
-        {
-            throw new CdcConfigurationException("SlotName and PublicationName must be non-empty.");
-        }
-        if (options.ChunkSize <= 0)
-        {
-            throw new CdcConfigurationException("ChunkSize must be greater than zero.");
-        }
-        if (options.MaxBatchSize <= 0)
-        {
-            throw new CdcConfigurationException("MaxBatchSize must be greater than zero.");
-        }
-        if (options.MaxBufferedChangesPerTransaction <= 0)
-        {
-            throw new CdcConfigurationException("MaxBufferedChangesPerTransaction must be greater than zero.");
-        }
-        if (options.KeepaliveInterval <= TimeSpan.Zero)
-        {
-            throw new CdcConfigurationException("KeepaliveInterval must be greater than zero.");
-        }
-        if (options.LeaderHeartbeatInterval <= TimeSpan.Zero)
-        {
-            throw new CdcConfigurationException("LeaderHeartbeatInterval must be greater than zero.");
-        }
+        // Structural validation only — option VALUES (the connection string, slot/publication names, sizes,
+        // intervals) are not final until the options pipeline runs (Configure/binding/PostConfigure may still
+        // supply or change them), so those checks live in CdcOptionsValidator and surface on first CdcOptions
+        // resolution.
 
         // Capturing (any sink, Map<>(), or CaptureAllMappedTables()) requires a context + a sink. Without
         // any of these, Wallaby runs in provision-only mode: it just provisions the declared external slots
@@ -222,17 +208,12 @@ public sealed class CdcBuilder
                 "Declare one with UseContext<TContext>() or declare the table by name via ForTable(...).");
         }
 
-        // External slots: names must be non-empty and distinct from each other (and from the primary
-        // slot/publication when capturing — provision-only has no primary); each must declare at least one
-        // table (a pgoutput publication needs tables). The default publication name here must match
-        // ExternalSlotResolver.
+        // External slots: names must be distinct from each other, and each must declare at least one table
+        // (a pgoutput publication needs tables). Collisions with the PRIMARY slot/publication are checked by
+        // CdcOptionsValidator, since those names are not final until the options pipeline runs. The default
+        // publication name here must match ExternalSlotResolver.
         var slotNames = new HashSet<string>(StringComparer.Ordinal);
         var publicationNames = new HashSet<string>(StringComparer.Ordinal);
-        if (_configuration.CaptureIntended)
-        {
-            slotNames.Add(options.SlotName);
-            publicationNames.Add(options.PublicationName);
-        }
         foreach (var external in _configuration.ExternalSlots)
         {
             if (external.TableNames.Count == 0 && external.EntityTypes.Count == 0)
@@ -243,15 +224,12 @@ public sealed class CdcBuilder
             if (!slotNames.Add(external.SlotName))
             {
                 throw new CdcConfigurationException(
-                    $"External slot name '{external.SlotName}' collides with the primary slot or another external slot.");
+                    $"External slot name '{external.SlotName}' collides with another external slot.");
             }
-            var publication = string.IsNullOrWhiteSpace(external.PublicationName)
-                ? $"{external.SlotName}_pub"
-                : external.PublicationName;
-            if (!publicationNames.Add(publication))
+            if (!publicationNames.Add(external.ResolvedPublicationName))
             {
                 throw new CdcConfigurationException(
-                    $"External publication name '{publication}' collides with the primary publication or another external slot.");
+                    $"External publication name '{external.ResolvedPublicationName}' collides with another external slot.");
             }
         }
 

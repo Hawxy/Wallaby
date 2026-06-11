@@ -72,8 +72,13 @@ public sealed class CdcOptions
     /// </summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
 
-    /// <summary>Postgres connection string. Set via <see cref="CdcBuilder.UseConnectionString"/>.</summary>
-    public string ConnectionString { get; internal set; } = string.Empty;
+    /// <summary>
+    /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill
+    /// reads. Supply it via <see cref="CdcBuilder.UseConnectionString"/> or through the options pipeline
+    /// (<c>Configure&lt;CdcOptions&gt;</c>, configuration binding, or <c>PostConfigure</c> — the standard
+    /// ordering applies). Validated as non-empty on first resolution.
+    /// </summary>
+    public string ConnectionString { get; set; } = string.Empty;
 
     /// <summary>What to do when a sink permanently fails (or exhausts retries) for a batch.</summary>
     public CdcDeadLetterPolicy DeadLetterPolicy { get; set; } = CdcDeadLetterPolicy.Halt;

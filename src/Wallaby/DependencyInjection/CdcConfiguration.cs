@@ -51,6 +51,9 @@ internal sealed class ExternalSlotRegistration
     /// <summary>Optional publication name; defaults to <c>"{SlotName}_pub"</c> when unset.</summary>
     public string? PublicationName { get; set; }
 
+    /// <summary>The effective publication name: <see cref="PublicationName"/>, or <c>"{SlotName}_pub"</c> when unset (matching <c>ExternalSlotResolver</c>).</summary>
+    public string ResolvedPublicationName => string.IsNullOrWhiteSpace(PublicationName) ? $"{SlotName}_pub" : PublicationName;
+
     /// <summary>Tables declared by schema-qualified name.</summary>
     public List<(string Schema, string Table)> TableNames { get; } = [];
 
@@ -61,7 +64,14 @@ internal sealed class ExternalSlotRegistration
 /// <summary>The immutable result of the fluent builder, consumed by the runtime.</summary>
 internal sealed class CdcConfiguration
 {
-    public required CdcOptions Options { get; init; }
+    /// <summary>
+    /// Option mutations queued by <see cref="CdcBuilder.ConfigureOptions"/> and
+    /// <see cref="CdcBuilder.UseConnectionString"/>. Applied to the <see cref="CdcOptions"/> being built by
+    /// the options pipeline at the <c>AddWallaby</c> registration position, so they compose with the standard
+    /// <c>Configure&lt;CdcOptions&gt;</c>/<c>PostConfigure</c> calls in registration order.
+    /// </summary>
+    public List<Action<CdcOptions>> OptionsActions { get; } = [];
+
     public bool CaptureAllMapped { get; set; }
     public List<SinkRegistration> Sinks { get; } = [];
     public Dictionary<Type, MappingRegistration> Mappings { get; } = [];

@@ -102,13 +102,9 @@ running, so no connection to the real destination is ever attempted. Unknown nam
 registered sinks.
 
 Both extensions are designed for `WebApplicationFactory.ConfigureTestServices`, which runs after the
-app's `ConfigureServices`, but they work on any `IServiceCollection` you may provide.
-
-::: warning Connection string
-The connection string is not overridable here as it's set by `UseConnectionString(...)` in your app code.
-Point the application at the test database through its normal configuration (for example an environment
-variable like `ConnectionStrings__App`) before the host is built.
-:::
+app's `ConfigureServices`, but they work on any `IServiceCollection` you may provide. Since `CdcOptions`
+participates in the standard options pattern, `ConfigureWallabyOptions` is equivalent to
+`services.PostConfigure<CdcOptions>(...)`, use whichever reads better in your test host.
 
 ## Waiting for streaming
 

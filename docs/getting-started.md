@@ -31,7 +31,7 @@ Wallaby validates these on startup and fails fast with an actionable error if so
 
 Call `AddWallaby` to started and chain in your `DbContext` via `UseContext<TContext>()`. Wallably will resolve your context regardless of if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
 
-You must also supply a connection string via `UseConnectionString(...)` so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
+You must also supply a connection string — via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#the-options-pattern) such as configuration binding — so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 
 ::: tip
 Wallaby also supports running in provision-only mode, where slots are provisioned but not consumed and EF Core can be omitted.
@@ -76,6 +76,30 @@ await builder.Build().RunAsync();
 
 On startup Wallaby validates the server, creates the `wallaby` state schema, the publication, and the
 replication slot, backfills the mapped tables, then streams live changes. Wallably holds a distributed lock so these operations will only run on a single node within a HA environment.
+
+### Reading configuration at startup
+
+When the builder needs services use the provider-included overload of `AddWallaby`:
+
+```csharp
+builder.Services.AddWallaby((sp, cdc) =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+
+    cdc.UseContext<AppDbContext>()
+       .UseConnectionString(config.GetConnectionString("App")!)
+       // ... sinks and mappings as usual ...
+});
+```
+
+The callback runs once, when the host first resolves Wallaby's services. Two consequences of the deferred timing: the
+callback receives the **root** provider (scoped services are unavailable), and configuration errors surface
+at host start instead of at registration.
+
+::: tip
+`CdcOptions` also participates in the standard options pattern, see
+[Configuration](/configuration#the-options-pattern).
+:::
 
 ## What gets tracked
 

@@ -48,6 +48,7 @@ internal sealed class CdcRuntime
     public CdcRuntime(
         CapturedModel capturedModel,
         CdcConfiguration config,
+        CdcOptions options,
         CdcDataSource dataSource,
         IClusterLock clusterLock,
         IServiceProvider services,
@@ -57,8 +58,8 @@ internal sealed class CdcRuntime
     {
         _capturedModel = capturedModel;
         _config = config;
-        _options = config.Options;
-        _skipFailedBatches = config.Options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip;
+        _options = options;
+        _skipFailedBatches = options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip;
         _dataSource = dataSource;
         _clusterLock = clusterLock;
         _services = services;
