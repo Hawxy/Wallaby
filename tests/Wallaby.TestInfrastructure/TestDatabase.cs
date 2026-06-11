@@ -37,6 +37,24 @@ public sealed class TestDatabase(string connectionString)
         await ctx.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Rename a category and insert many products (into <paramref name="productsCategoryId"/>) in a single
+    /// transaction — a large CDC batch that carries a dependent change, e.g. to force the server to stream it.
+    /// </summary>
+    public async Task RenameCategoryAndAddProductsAsync(
+        int categoryId, string categoryName, int productsCategoryId, params string[] names)
+    {
+        await using var ctx = NewContext();
+        var category = await ctx.Categories.FindAsync(categoryId);
+        category!.Name = categoryName;
+        ctx.Products.AddRange(names.Select(n => new Product
+        {
+            Name = n, Price = 1m, Sku = n, Status = ProductStatus.Active, Tags = [], Description = "",
+            CategoryId = productsCategoryId,
+        }));
+        await ctx.SaveChangesAsync();
+    }
+
     /// <summary>Rename a category and one of its products in the same transaction (dependent + primary in one batch).</summary>
     public async Task RenameCategoryAndProductAsync(int categoryId, string categoryName, int productId, string productName)
     {

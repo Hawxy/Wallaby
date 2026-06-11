@@ -15,10 +15,12 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
     private readonly MeilisearchClient _client;
 
     /// <summary>
-    /// 
+    /// Creates a sink that delivers to the Meilisearch instance described by <paramref name="options"/>.
+    /// The underlying client (and its HTTP connection pool) is created once and reused for the
+    /// lifetime of the sink.
     /// </summary>
-    /// <param name="name"></param>
-    /// <param name="options"></param>
+    /// <param name="name">The sink's registration name; mappings route to it via <c>ToSink(name, ...)</c>.</param>
+    /// <param name="options">Connection, index, and delivery-behaviour settings.</param>
     public MeilisearchSink(string name, MeilisearchSinkOptions options)
     {
         Name = name;

@@ -162,11 +162,19 @@ internal sealed class CdcPipeline(
     {
         var page = new List<ChangeEvent>(maxBatchSize);
         var idx = 0;
+        var sawDependentChange = false;
         await foreach (var raw in transaction.Spill!.ReadAsync(transaction.StreamXid, ct))
         {
             raw.CommitLsn = transaction.CommitLsn;
             raw.CommitTimestamp = transaction.CommitTimestamp;
             raw.CommitIdx = idx++;
+
+            // Note while passing whether any change can trigger fan-out, so the fan-out's second
+            // spill read below is skipped entirely for transactions that touched no dependent table.
+            if (!sawDependentChange && dependentResolver is not null && dependentResolver.HasBindingFor(raw.Schema, raw.TableName))
+            {
+                sawDependentChange = true;
+            }
 
             var changeEvent = changeEventFactory.Create(raw);
             if (changeEvent is null)
@@ -190,7 +198,7 @@ internal sealed class CdcPipeline(
         // Fan-out over the same streamed changes (re-read from the spill, bounded by distinct lookup keys).
         // Same-transaction live-key exclusion is skipped (it would need the whole txn's keys in memory); a
         // rare resulting duplicate converges via the idempotent upsert-by-id sink contract.
-        if (dependentResolver is not null)
+        if (sawDependentChange)
         {
             await ResolveAndDispatchFanoutAsync(transaction.Spill!.ReadAsync(transaction.StreamXid, ct), EmptyKeys, ct);
         }

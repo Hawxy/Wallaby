@@ -31,11 +31,11 @@ public sealed class CdcOptions
     public int MaxBatchSize { get; set; } = 1000;
 
     /// <summary>
-    /// Safety ceiling on how many changes a single transaction may buffer in memory before processing.
-    /// With pgoutput v2 streaming, transactions larger than the server's <c>logical_decoding_work_mem</c> are
-    /// streamed and buffered until their commit; this caps that buffer so a pathological transaction fails fast
-    /// with an actionable error instead of exhausting memory. (A future disk/DB spill removes this ceiling for
-    /// arbitrarily large transactions.) Must be greater than zero.
+    /// Safety ceiling on how many changes a single <em>non-streamed</em> transaction may buffer in memory
+    /// before processing. Transactions larger than the server's <c>logical_decoding_work_mem</c> are
+    /// streamed and spilled out of memory (see <see cref="CdcBuilder.SpillToDatabase"/> and friends), so
+    /// they never hit this ceiling; it exists so a pathological transaction the server did not stream
+    /// fails fast with an actionable error instead of exhausting memory. Must be greater than zero.
     /// </summary>
     public int MaxBufferedChangesPerTransaction { get; set; } = 1_000_000;
 

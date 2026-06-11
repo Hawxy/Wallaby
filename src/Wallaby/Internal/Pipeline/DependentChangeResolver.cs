@@ -26,6 +26,10 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcMo
 
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
+    /// <summary>Whether a change to the given table can trigger any dependent fan-out.</summary>
+    public bool HasBindingFor(string schema, string tableName)
+        => model.FindBindingsForDependent(schema, tableName).Count > 0;
+
     public async Task<IReadOnlyList<FanoutResult>> ResolveFirstPagesAsync(
         IAsyncEnumerable<RawChange> changes, int pageSize, CancellationToken ct)
     {

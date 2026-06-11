@@ -24,8 +24,17 @@ internal sealed class TransformInvoker<TEntity>(ICdcTransform<TEntity> transform
         var typed = new List<ChangeEvent<TEntity>>(changes.Count);
         foreach (var change in changes)
         {
+            if (change.Entity is not null && change.Entity is not TEntity)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot invoke the transform for '{typeof(TEntity).Name}': the change for " +
+                    $"'{change.Metadata.QualifiedTableName}' carries an entity of type " +
+                    $"'{change.Entity.GetType().Name}'. Changes must be routed to the mapping of their " +
+                    "own entity type.");
+            }
+
             typed.Add(new ChangeEvent<TEntity>(
-                change.Action, change.Metadata, change.Entity as TEntity,
+                change.Action, change.Metadata, (TEntity?)change.Entity,
                 change.Record, change.Changes, change.PrimaryKey)
             {
                 Key = change.Key,
