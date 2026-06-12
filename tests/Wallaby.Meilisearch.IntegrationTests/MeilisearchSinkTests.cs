@@ -114,6 +114,51 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     }
 
     [Test]
+    public async Task Document_missing_a_configured_attribute_fails_permanently()
+    {
+        // Validation is on by default.
+        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        options.ConfigureIndex("products_validated", s =>
+        {
+            s.SearchableAttributes = ["name"];
+            s.FilterableAttributes = ["category"];
+        });
+        var sink = new MeilisearchSink("meili", options);
+
+        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+        // The document carries "name" but not the configured filterable "category".
+        var record = new SinkRecord("products_validated", "1", new CdcDocument { ["name"] = "alpha" }, IsDeletion: false, meta);
+
+        var result = await sink.DeliverAsync(new SinkBatch("meili", [record]), CancellationToken.None);
+
+        // A configured-but-absent attribute is not retryable — it must fail permanently (before any network call).
+        await Assert.That(result.Status).IsEqualTo(DeliveryStatus.PermanentFailure);
+        await Assert.That(result.Error).Contains("category");
+    }
+
+    [Test]
+    public async Task Document_with_all_configured_attributes_passes_validation_and_indexes()
+    {
+        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        var index = harness.Names.Named("products_validated_ok");
+
+        // Validation is on by default; the projection emits every configured attribute.
+        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        options.ConfigureIndex(index, s => s.FilterableAttributes = ["category"]);
+        harness.AddSink(new MeilisearchSink("meili", options))
+            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name, ["category"] = p.CategoryId });
+        await harness.SelfConfigureAsync();
+
+        var probe = new MeiliProbe(meili);
+        var categoryId = await harness.Db.AddCategoryAsync();
+        var id = await harness.Db.AddProductAsync(categoryId, "alpha");
+
+        await harness.RunUntilAsync(async () => await probe.NameAsync(index, id) == "alpha");
+
+        await Assert.That(await probe.NameAsync(index, id)).IsEqualTo("alpha");
+    }
+
+    [Test]
     public async Task Declared_index_is_created_and_configured_on_start()
     {
         await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);

@@ -30,6 +30,14 @@ public sealed class MeilisearchSinkOptions
     public int WaitIntervalMs { get; set; } = 50;
 
     /// <summary>
+    /// When true (the default), every upsert document is checked against its index's configured attributes
+    /// (searchable/filterable/sortable from <see cref="ConfigureIndex"/>): if a configured attribute is not a
+    /// key on the document, delivery fails permanently rather than silently indexing a document Meilisearch
+    /// cannot filter or sort on.
+    /// </summary>
+    public bool ValidateConfiguredAttributes { get; set; } = true;
+
+    /// <summary>
     /// Indexes to ensure exist and configure when the sink initializes (before streaming begins). Indexes
     /// reached only at runtime (e.g. per-tenant <c>ScopedDestination</c> indexes) are not listed here; they
     /// auto-create on first write with <see cref="PrimaryKey"/> and receive no custom settings.

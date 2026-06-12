@@ -14,6 +14,10 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
     private readonly MeilisearchSinkOptions _options;
     private readonly MeilisearchClient _client;
 
+    // Per configured index, the attribute keys every document must carry (empty unless
+    // ValidateConfiguredAttributes is on). Indexes not declared via ConfigureIndex are absent and unchecked.
+    private readonly IReadOnlyDictionary<string, IReadOnlyCollection<string>> _requiredAttributes;
+
     /// <summary>
     /// Creates a sink that delivers to the Meilisearch instance described by <paramref name="options"/>.
     /// The underlying client (and its HTTP connection pool) is created once and reused for the
@@ -26,6 +30,55 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
         Name = name;
         _options = options;
         _client = new MeilisearchClient(options.Host, options.ApiKey);
+        _requiredAttributes = BuildRequiredAttributes(options);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyCollection<string>> BuildRequiredAttributes(
+        MeilisearchSinkOptions options)
+    {
+        var map = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+        if (!options.ValidateConfiguredAttributes)
+        {
+            return map;
+        }
+
+        foreach (var config in options.Indexes)
+        {
+            if (config.Settings is null)
+            {
+                continue;
+            }
+
+            var required = new HashSet<string>(StringComparer.Ordinal);
+            AddAttributes(required, config.Settings.SearchableAttributes);
+            AddAttributes(required, config.Settings.FilterableAttributes);
+            AddAttributes(required, config.Settings.SortableAttributes);
+
+            // "*" is Meilisearch's "all attributes" wildcard, not a field name; the primary key is stamped on
+            // every document by the sink, so neither needs to come from the transform.
+            required.Remove("*");
+            required.Remove(options.PrimaryKey);
+
+            if (required.Count > 0)
+            {
+                map[config.Name] = required;
+            }
+        }
+
+        return map;
+
+        static void AddAttributes(HashSet<string> set, IEnumerable<string>? attributes)
+        {
+            if (attributes is null)
+            {
+                return;
+            }
+
+            foreach (var attribute in attributes)
+            {
+                set.Add(attribute);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -96,6 +149,12 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
         {
             throw;
         }
+        catch (MeilisearchDocumentValidationException ex)
+        {
+            // A configured attribute is absent from the document — a configuration/transform bug. Retrying
+            // would never succeed, so fail permanently (the dispatcher halts or dead-letters per policy).
+            return DeliveryResult.Permanent(ex.Message, ex);
+        }
         catch (Exception ex)
         {
             // Network/HTTP/Meili task failures are treated as retryable; the dispatcher backs off.
@@ -162,11 +221,40 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
             }
             else
             {
+                ValidateConfiguredAttributes(indexName, record.DocumentId, record.Document!);
                 group.Upserts.Add(BuildUpsertDocument(record.Document!, id));
             }
         }
 
         return ordered;
+    }
+
+    /// <summary>
+    /// When attribute validation is enabled, ensures the document carries a key for every attribute the index
+    /// was configured with. Throws <see cref="MeilisearchDocumentValidationException"/> (a permanent failure)
+    /// otherwise. A key with a null value counts as present — only an absent key is a problem.
+    /// </summary>
+    private void ValidateConfiguredAttributes(string indexName, string documentId,
+        IReadOnlyDictionary<string, object?> document)
+    {
+        if (!_requiredAttributes.TryGetValue(indexName, out var required))
+        {
+            return;
+        }
+
+        List<string>? missing = null;
+        foreach (var attribute in required)
+        {
+            if (!document.ContainsKey(attribute))
+            {
+                (missing ??= []).Add(attribute);
+            }
+        }
+
+        if (missing is not null)
+        {
+            throw new MeilisearchDocumentValidationException(indexName, documentId, missing);
+        }
     }
 
     private IReadOnlyDictionary<string, object?> BuildUpsertDocument(IReadOnlyDictionary<string, object?> document,
