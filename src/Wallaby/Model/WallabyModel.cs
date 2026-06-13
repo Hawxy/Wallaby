@@ -5,20 +5,20 @@ namespace Wallaby.Model;
 /// startup and used for self-configuration, decoding, and materialization. Includes both the directly
 /// mapped (primary) tables and any tables captured only to drive dependent fan-out.
 /// </summary>
-public sealed class CdcModel
+public sealed class WallabyModel
 {
     private readonly Dictionary<(string Schema, string Table), CapturedTable> _byQualifiedName;
     private readonly Dictionary<Type, CapturedTable> _byClrType;
     private readonly Dictionary<(string Schema, string Table), List<DependentBinding>> _bindingsByDependentTable;
 
     /// <summary>Create a model with no dependent fan-out bindings.</summary>
-    public CdcModel(IReadOnlyList<CapturedTable> tables)
+    public WallabyModel(IReadOnlyList<CapturedTable> tables)
         : this(tables, Array.Empty<DependentBinding>())
     {
     }
 
     /// <summary>Create a model from captured tables and the dependent fan-out bindings between them.</summary>
-    public CdcModel(IReadOnlyList<CapturedTable> tables, IReadOnlyList<DependentBinding> dependentBindings)
+    public WallabyModel(IReadOnlyList<CapturedTable> tables, IReadOnlyList<DependentBinding> dependentBindings)
     {
         Tables = tables ?? throw new ArgumentNullException(nameof(tables));
         DependentBindings = dependentBindings ?? throw new ArgumentNullException(nameof(dependentBindings));

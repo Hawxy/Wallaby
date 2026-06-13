@@ -4,7 +4,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.Testing</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>Test helpers for Wallaby consumers: capture sink, sink replacement, and streaming-readiness gates for end-to-end CDC tests against a real Postgres.</Description>
+    <Description>Test helpers for Wallaby consumers: capture sink, sink replacement, and streaming-readiness gates for end-to-end Wallaby tests against a real Postgres.</Description>
   </PropertyGroup>
 
   <ItemGroup>

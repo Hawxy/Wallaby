@@ -16,7 +16,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
 {
     private TestDatabase Db => new(pg.ConnectionString);
 
-    private ServiceProvider BuildNode(CdcNames names, string index)
+    private ServiceProvider BuildNode(WallabyNames names, string index)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -40,12 +40,12 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
                    .WithBackfillVersion(Guid.NewGuid().ToString("N")) // unique => isolates this test's backfill state
                    .UsingTransform((_, changes, _) =>
                    {
-                       var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                        foreach (var c in changes)
                        {
-                           docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
+                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
                    });
         });
         return services.BuildServiceProvider();
@@ -71,7 +71,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task AddWallaby_indexes_changes_end_to_end()
     {
-        var names = CdcNames.Unique();
+        var names = WallabyNames.Unique();
         var index = names.Named("products");
         var probe = new MeiliProbe(meili);
 
@@ -94,7 +94,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task Cluster_keeps_serving_when_a_node_stops()
     {
-        var names = CdcNames.Unique();
+        var names = WallabyNames.Unique();
         var index = names.Named("products");
         var probe = new MeiliProbe(meili);
 

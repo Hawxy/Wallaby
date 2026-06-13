@@ -4,12 +4,12 @@ namespace Wallaby.Testing;
 
 /// <summary>
 /// An <see cref="ISink"/> that records every delivered record for assertions. Thread-safe; supports
-/// waiting for expected records to arrive (CDC delivery is asynchronous), filtering by source table,
+/// waiting for expected records to arrive (Wallaby delivery is asynchronous), filtering by source table,
 /// and clearing between test phases.
 /// </summary>
 /// <param name="name">
 /// The sink's own name. Note that batch routing is keyed by the <em>registration</em> name (the name
-/// passed to <c>CdcBuilder.AddSink</c> or <see cref="WallabyTestingServiceCollectionExtensions.ReplaceWallabySink"/>),
+/// passed to <c>WallabyBuilder.AddSink</c> or <see cref="WallabyTestingServiceCollectionExtensions.ReplaceWallabySink"/>),
 /// so this value is informational unless the sink is registered via <c>AddSink(ISink)</c>.
 /// </param>
 public sealed class CaptureSink(string name = "capture") : ISink
@@ -49,7 +49,7 @@ public sealed class CaptureSink(string name = "capture") : ISink
 
     /// <summary>
     /// Poll until <paramref name="predicate"/> passes over the records delivered so far, then return that
-    /// snapshot. Use this instead of asserting immediately — CDC delivery is asynchronous, so records arrive
+    /// snapshot. Use this instead of asserting immediately — Wallaby delivery is asynchronous, so records arrive
     /// some time after the triggering commit.
     /// </summary>
     /// <param name="predicate">Evaluated against a snapshot of all recorded records on each poll.</param>

@@ -45,7 +45,6 @@ internal sealed class CdcPipeline(
     CdcStatus? status = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
-    private readonly CdcStatus? _status = status;
 
     /// <summary>The highest LSN acknowledged to the server. Useful for observing progress.</summary>
     public ulong LastAcknowledgedLsn { get; private set; }
@@ -100,7 +99,7 @@ internal sealed class CdcPipeline(
                 await stream.AcknowledgeAsync(transaction.EndLsn, ct);
                 LastAcknowledgedLsn = transaction.EndLsn;
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
-                _status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
+                status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
             }
 
             // The committed transaction (batch) is fully delivered to sinks and acknowledged to the server.
@@ -389,7 +388,7 @@ internal sealed class CdcPipeline(
 /// <summary>Source-generated log messages for <see cref="CdcPipeline"/>.</summary>
 internal static partial class CdcPipelineLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "CDC pipeline started for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot '{Slot}'.")]
     internal static partial void PipelineStarted(this ILogger logger, string slot);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Processed batch for slot '{Slot}' ({Changes} change(s)); acknowledged LSN {EndLsn}.")]

@@ -34,10 +34,10 @@ builder.Services.AddWallaby(cdc =>
             .WithBackfillVersion("v1")           // bump to force a reindex/backfill
             .UsingTransform((db, changes, ct) =>
             {
-                var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                 foreach (var c in changes)
-                    docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                    docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
             });
 });
 ```

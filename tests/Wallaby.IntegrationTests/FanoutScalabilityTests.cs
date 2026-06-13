@@ -22,10 +22,10 @@ public class FanoutScalabilityTests(PostgresFixture pg)
     [Test]
     public async Task Large_transaction_is_dispatched_in_bounded_batches()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         harness.MaxBatchSize = 5;
         var capture = harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
 
         var spans = new ConcurrentBag<string>();
         using var listener = new ActivityListener
@@ -60,9 +60,9 @@ public class FanoutScalabilityTests(PostgresFixture pg)
     [Test]
     public async Task Multiple_dependent_changes_in_one_transaction_fan_out_each_primary_once()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var capture = harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
         // Seed before self-config so these inserts are not streamed — only the rename below is.
@@ -100,9 +100,9 @@ public class FanoutScalabilityTests(PostgresFixture pg)
     [Test]
     public async Task Primary_changed_with_its_dependent_in_one_transaction_is_emitted_once()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var capture = harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
         // Seed before self-config so these inserts are not streamed — only the combined rename below is.
@@ -134,10 +134,10 @@ public class FanoutScalabilityTests(PostgresFixture pg)
     [Test]
     public async Task Wide_fanout_offloads_the_tail_coalesces_repeat_triggers_and_drains()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         harness.MaxBatchSize = 5;
         var capture = harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
         // Seed before self-config so the inserts are not streamed; only the renames below fan out.

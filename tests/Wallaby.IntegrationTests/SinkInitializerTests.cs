@@ -27,10 +27,10 @@ public class SinkInitializerTests(PostgresFixture pg)
     [Test]
     public async Task Sink_initializer_runs_once_on_start()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var sink = new InitCountingSink();
         harness.AddSink(sink)
-            .Project<Product>("init-stub", destination: null, p => new CdcDocument { ["name"] = p.Name });
+            .Project<Product>("init-stub", destination: null, p => new WallabyDocument { ["name"] = p.Name });
 
         await harness.SelfConfigureAsync();
         await harness.StartAsync(); // awaits ISinkInitializer.InitializeAsync before streaming

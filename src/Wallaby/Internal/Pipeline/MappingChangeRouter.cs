@@ -88,7 +88,7 @@ internal sealed class MappingChangeRouter(
                     }
 
                     var transformStart = WallabyInstrumentation.StartTimer();
-                    IReadOnlyDictionary<DocumentKey, CdcDocument?> documents;
+                    IReadOnlyDictionary<DocumentKey, WallabyDocument?> documents;
                     try
                     {
                         documents = await mapping.Transform.InvokeAsync(db, subset, ct);

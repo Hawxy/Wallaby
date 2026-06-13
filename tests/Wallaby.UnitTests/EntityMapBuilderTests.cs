@@ -22,7 +22,7 @@ public class EntityMapBuilderTests
     [Test]
     public void ScopedBy_change_overload_reads_the_scope_key_from_the_record()
     {
-        var builder = new CdcBuilder();
+        var builder = new WallabyBuilder();
         builder.UseContext<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
@@ -32,7 +32,7 @@ public class EntityMapBuilderTests
         builder.Map<Product>()
             .ToSink("sink", "products")
             .UsingTransform((_, _, _) =>
-                Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(new Dictionary<DocumentKey, CdcDocument?>()))
+                Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(new Dictionary<DocumentKey, WallabyDocument?>()))
             .ScopedBy(c => c.Record.GetValueOrDefault("TenantId"));
 
         var config = builder.Build();

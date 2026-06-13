@@ -9,7 +9,7 @@ namespace Wallaby.Internal.Pipeline;
 /// <see cref="IDbContextFactory{TContext}"/>: it uses a registered factory when present (the recommended setup
 /// for background services), and otherwise creates a DI scope and resolves the scoped context registered by the
 /// ubiquitous <c>AddDbContext&lt;TContext&gt;()</c>. The generic methods are captured by
-/// <c>CdcBuilder.UseContext&lt;TContext&gt;()</c> as the model accessor and the enrichment-context lease.
+/// <c>WallabyBuilder.UseContext&lt;TContext&gt;()</c> as the model accessor and the enrichment-context lease.
 /// </summary>
 internal static class DbContextResolver
 {

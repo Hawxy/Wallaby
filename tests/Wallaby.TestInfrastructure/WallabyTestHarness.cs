@@ -25,7 +25,7 @@ namespace Wallaby.TestInfrastructure;
 /// <remarks>
 /// Typical one-shot use:
 /// <code>
-/// await using var harness = CdcTestHarness.ForTestModel(conn)
+/// await using var harness = WallabyTestHarness.ForTestModel(conn)
 ///     .AddSink(sink)
 ///     .Project&lt;Product&gt;("sink", index, p => new Dictionary&lt;string, object?&gt; { ["name"] = p.Name });
 /// await harness.SelfConfigureAsync();
@@ -34,7 +34,7 @@ namespace Wallaby.TestInfrastructure;
 /// For backfill or multi-phase tests, use <see cref="StartAsync"/> + <see cref="RunBackfillAsync"/> +
 /// <see cref="WaitUntilAsync(Func{Task{bool}}, TimeSpan?)"/> and let <c>await using</c> dispose/stop.
 /// </remarks>
-public sealed class CdcTestHarness : IAsyncDisposable
+public sealed class WallabyTestHarness : IAsyncDisposable
 {
     private readonly string _connectionString;
     private readonly NpgsqlDataSource _dataSource;
@@ -47,7 +47,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private Func<object?, DbContext>? _scopedContextFactory;
 
     private IModel? _model;
-    private CdcModel? _cdcModel;
+    private WallabyModel? _cdcModel;
     private EntityMaterializer? _materializer;
 
     private CancellationTokenSource? _cts;
@@ -59,20 +59,20 @@ public sealed class CdcTestHarness : IAsyncDisposable
     private IFanoutQueueStore? _fanoutQueue;
     private Task? _pipelineTask;
 
-    public CdcTestHarness(string connectionString, Func<DbContext> contextFactory, CdcNames? names = null)
+    public WallabyTestHarness(string connectionString, Func<DbContext> contextFactory, WallabyNames? names = null)
     {
         _connectionString = connectionString;
         _dataSource = NpgsqlDataSource.Create(connectionString);
         _newContext = contextFactory;
-        Names = names ?? CdcNames.Unique();
+        Names = names ?? WallabyNames.Unique();
         Db = new TestDatabase(connectionString);
     }
 
     /// <summary>Create a harness wired to the shared <see cref="AppDbContext"/> test model.</summary>
-    public static CdcTestHarness ForTestModel(string connectionString, CdcNames? names = null)
+    public static WallabyTestHarness ForTestModel(string connectionString, WallabyNames? names = null)
         => new(connectionString, () => new AppDbContext(TestModelFactory.CreateOptions(connectionString)), names);
 
-    public CdcNames Names { get; }
+    public WallabyNames Names { get; }
     public TestDatabase Db { get; }
 
     /// <summary>Telemetry holder threaded through the pipeline; attach a <c>MetricCollector</c>/<c>ActivityListener</c> for assertions.</summary>
@@ -107,14 +107,14 @@ public sealed class CdcTestHarness : IAsyncDisposable
     public ulong LastAcknowledgedLsn => _pipeline?.LastAcknowledgedLsn ?? 0;
 
     /// <summary>A backfill manager bound to this harness's database (for manual <c>RequestBackfillAsync</c>).</summary>
-    public ICdcBackfillManager BackfillManager
+    public IWallabyBackfillManager BackfillManager
     {
         get { EnsureModel(); return new DefaultBackfillManager(_cdcModel!, new PostgresBackfillStore(_dataSource)); }
     }
 
     // ---- configuration ----
 
-    public CdcTestHarness AddSink(ISink sink)
+    public WallabyTestHarness AddSink(ISink sink)
     {
         _sinks[sink.Name] = sink;
         return this;
@@ -129,17 +129,17 @@ public sealed class CdcTestHarness : IAsyncDisposable
     }
 
     /// <summary>Route every change to every registered sink (the <see cref="ChangeEvent"/> is the document).</summary>
-    public CdcTestHarness Broadcast()
+    public WallabyTestHarness Broadcast()
     {
         _broadcast = true;
         return this;
     }
 
     /// <summary>Map an entity to a sink/destination via a full transform (with <see cref="DbContext"/> access).</summary>
-    public CdcTestHarness Map<TEntity>(
+    public WallabyTestHarness Map<TEntity>(
         string sink,
         string? destination,
-        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>>> transform,
+        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> transform,
         bool backfill = false,
         string? backfillVersion = null,
         Func<TEntity, object?>? scopeKey = null,
@@ -164,22 +164,22 @@ public sealed class CdcTestHarness : IAsyncDisposable
     }
 
     /// <summary>Map an entity to a sink/destination via a simple per-row projection.</summary>
-    public CdcTestHarness Project<TEntity>(
-        string sink, string? destination, Func<TEntity, CdcDocument?> document, bool backfill = false, string? backfillVersion = null,
+    public WallabyTestHarness Project<TEntity>(
+        string sink, string? destination, Func<TEntity, WallabyDocument?> document, bool backfill = false, string? backfillVersion = null,
         Func<TEntity, object?>? scopeKey = null, Func<object?, string?>? scopedDestination = null)
         where TEntity : class
         => Map<TEntity>(sink, destination, (_, changes, _) =>
         {
-            var documents = new Dictionary<DocumentKey, CdcDocument?>();
+            var documents = new Dictionary<DocumentKey, WallabyDocument?>();
             foreach (var change in changes)
             {
                 documents[change.Key] = document(change.Entity!);
             }
-            return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(documents);
+            return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
         }, backfill, backfillVersion, scopeKey, scopedDestination);
 
     /// <summary>Build the enrichment <see cref="DbContext"/> from a row's scope key (for tenant tests).</summary>
-    public CdcTestHarness UseScopedContext(Func<object?, DbContext> factory)
+    public WallabyTestHarness UseScopedContext(Func<object?, DbContext> factory)
     {
         _scopedContextFactory = factory;
         return this;
@@ -190,7 +190,7 @@ public sealed class CdcTestHarness : IAsyncDisposable
     /// and re-emit <typeparamref name="TPrimary"/>. Mirrors the production
     /// <c>EntityMapBuilder.DependsOn(...)</c> API.
     /// </summary>
-    public CdcTestHarness DependsOn<TPrimary, TNav>(Expression<Func<TPrimary, TNav>> navigation)
+    public WallabyTestHarness DependsOn<TPrimary, TNav>(Expression<Func<TPrimary, TNav>> navigation)
     {
         if (!_declaredDependencies.TryGetValue(typeof(TPrimary), out var list))
         {

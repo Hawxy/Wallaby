@@ -11,7 +11,7 @@ using Wallaby.TestModel;
 namespace Wallaby.UnitTests;
 
 /// <summary>
-/// Registration-level coverage of the two AddWallaby overloads and the CdcOptions options-pipeline
+/// Registration-level coverage of the two AddWallaby overloads and the WallabyOptions options-pipeline
 /// integration. Everything here runs offline: building the EF model and creating an NpgsqlDataSource
 /// never open a connection.
 /// </summary>
@@ -19,7 +19,7 @@ public class AddWallabyRegistrationTests
 {
     private const string ConnectionString = "Host=localhost;Database=db;Username=u;Password=p";
 
-    private static void AddCaptureConfig(CdcBuilder cdc, string connectionString)
+    private static void AddCaptureConfig(WallabyBuilder cdc, string connectionString)
     {
         cdc.UseContext<AppDbContext>()
            .UseConnectionString(connectionString)
@@ -28,12 +28,12 @@ public class AddWallabyRegistrationTests
                .ToSink("sink")
                .UsingTransform((_, changes, _) =>
                {
-                   var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                   var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                    foreach (var c in changes)
                    {
-                       docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
+                       docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                    }
-                   return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                   return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
                });
     }
 
@@ -59,7 +59,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<CdcOptions>().ConnectionString.ShouldBe(ConnectionString);
+        provider.GetRequiredService<WallabyOptions>().ConnectionString.ShouldBe(ConnectionString);
     }
 
     [Test]
@@ -67,18 +67,18 @@ public class AddWallabyRegistrationTests
     {
         var services = NewServices();
         // Before AddWallaby: the builder overrides these.
-        services.Configure<CdcOptions>(o => { o.SlotName = "before"; o.MaxBatchSize = 123; });
+        services.Configure<WallabyOptions>(o => { o.SlotName = "before"; o.MaxBatchSize = 123; });
         services.AddWallaby(cdc =>
         {
             AddCaptureConfig(cdc, ConnectionString);
             cdc.ConfigureOptions(o => { o.SlotName = "builder_slot"; o.MaxBatchSize = 456; });
         });
         // After AddWallaby: overrides the builder. PostConfigure always runs last.
-        services.Configure<CdcOptions>(o => o.SlotName = "after");
-        services.PostConfigure<CdcOptions>(o => o.PublicationName = "post_pub");
+        services.Configure<WallabyOptions>(o => o.SlotName = "after");
+        services.PostConfigure<WallabyOptions>(o => o.PublicationName = "post_pub");
 
         await using var provider = services.BuildServiceProvider();
-        var options = provider.GetRequiredService<CdcOptions>();
+        var options = provider.GetRequiredService<WallabyOptions>();
 
         options.SlotName.ShouldBe("after");
         options.MaxBatchSize.ShouldBe(456); // builder overrode the earlier Configure
@@ -100,10 +100,10 @@ public class AddWallabyRegistrationTests
 
         var services = NewServices();
         services.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString));
-        services.Configure<CdcOptions>(configuration.GetSection("Wallaby")); // after AddWallaby → overrides the builder
+        services.Configure<WallabyOptions>(configuration.GetSection("Wallaby")); // after AddWallaby → overrides the builder
 
         await using var provider = services.BuildServiceProvider();
-        var options = provider.GetRequiredService<CdcOptions>();
+        var options = provider.GetRequiredService<WallabyOptions>();
 
         options.ChunkSize.ShouldBe(42);
         options.ConnectionString.ShouldBe(boundConnectionString);
@@ -117,8 +117,8 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        var viaOptions = provider.GetRequiredService<IOptions<CdcOptions>>().Value;
-        var plain = provider.GetRequiredService<CdcOptions>();
+        var viaOptions = provider.GetRequiredService<IOptions<WallabyOptions>>().Value;
+        var plain = provider.GetRequiredService<WallabyOptions>();
         ReferenceEquals(viaOptions, plain).ShouldBeTrue();
     }
 
@@ -134,7 +134,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<CdcOptions>());
+        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<WallabyOptions>());
     }
 
     [Test]
@@ -144,11 +144,11 @@ public class AddWallabyRegistrationTests
         services.AddWallaby(cdc => cdc
             .UseContext<AppDbContext>()
             .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))); // no UseConnectionString
-        services.PostConfigure<CdcOptions>(o => o.ConnectionString = ConnectionString);
+        services.PostConfigure<WallabyOptions>(o => o.ConnectionString = ConnectionString);
 
         await using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<CdcOptions>().ConnectionString.ShouldBe(ConnectionString);
+        provider.GetRequiredService<WallabyOptions>().ConnectionString.ShouldBe(ConnectionString);
     }
 
     [Test]
@@ -163,7 +163,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider(); // registration itself is fine
 
-        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<CdcConfiguration>());
+        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<CdcConfiguration>());
     }
 
     [Test]
@@ -171,11 +171,11 @@ public class AddWallabyRegistrationTests
     {
         var services = NewServices();
         services.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString));
-        services.PostConfigure<CdcOptions>(o => o.ChunkSize = 0);
+        services.PostConfigure<WallabyOptions>(o => o.ChunkSize = 0);
 
         await using var provider = services.BuildServiceProvider();
 
-        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<CdcOptions>());
+        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<WallabyOptions>());
     }
 
     [Test]
@@ -208,7 +208,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<ICdcBackfillManager>());
+        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<IWallabyBackfillManager>());
     }
 
     [Test]
@@ -224,8 +224,8 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
         _ = provider.GetRequiredService<CdcConfiguration>();
-        _ = provider.GetRequiredService<CdcOptions>();
-        _ = provider.GetRequiredService<ICdcStatus>();
+        _ = provider.GetRequiredService<WallabyOptions>();
+        _ = provider.GetRequiredService<IWallabyStatus>();
         _ = provider.GetRequiredService<IHostedService>();
 
         calls.ShouldBe(1);

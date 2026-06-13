@@ -14,11 +14,11 @@ public class BackfillSchedulerIntegrationTests(PostgresFixture pg, MeilisearchFi
     [Test]
     public async Task Scheduler_re_backfills_on_version_change_and_on_manual_request()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         harness.ChunkSize = 2;
         var index = harness.Names.Named("products");
         harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
-            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name }, backfill: true);
+            .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name }, backfill: true);
 
         var categoryId = await harness.Db.AddCategoryAsync();
         var ids = await harness.Db.AddProductsAsync(categoryId, Enumerable.Range(0, 6).Select(i => $"s{i}").ToArray());

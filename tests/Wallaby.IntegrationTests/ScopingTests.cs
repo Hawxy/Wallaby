@@ -16,7 +16,7 @@ public class ScopingTests(PostgresFixture pg)
         var contextScopeKeys = new ConcurrentBag<object?>();
         var perInvocationTenantCounts = new ConcurrentBag<int>();
 
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var capture = harness.AddCaptureSink();
         harness
             .UseScopedContext(scopeKey =>
@@ -32,8 +32,8 @@ public class ScopingTests(PostgresFixture pg)
 
                 var docs = changes.ToDictionary(
                     c => c.Key,
-                    c => (CdcDocument?)new CdcDocument { ["tenant"] = ((Product)c.Entity!).TenantId });
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                    c => (WallabyDocument?)new WallabyDocument { ["tenant"] = ((Product)c.Entity!).TenantId });
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
             }, scopeKey: p => p.TenantId);
 
         await harness.SelfConfigureAsync();

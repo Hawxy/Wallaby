@@ -18,7 +18,7 @@ internal sealed record FanoutResult(IReadOnlyList<RawChange> FirstPage, ScopedFa
 /// remainder is handed back as a <see cref="ScopedFanoutSpec"/> so the pipeline can offload it to a
 /// scoped backfill — keeping the trigger transaction's synchronous work (and its acknowledgement) bounded.
 /// </summary>
-internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, CdcModel model, WallabyInstrumentation? instrumentation = null)
+internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, WallabyModel model, WallabyInstrumentation? instrumentation = null)
 {
     // Separator used to build an in-memory dedup key from a lookup tuple. The unit-separator control
     // char is extremely unlikely to collide with a primary-key value's textual form.

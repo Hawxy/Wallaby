@@ -12,7 +12,7 @@ namespace Wallaby.Internal.Backfill;
 /// not lost (it re-runs on the next pass).
 /// </summary>
 internal sealed class FanoutQueueWorker(
-    IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, CdcModel model, ILogger logger)
+    IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger)
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 

@@ -102,9 +102,9 @@ running, so no connection to the real destination is ever attempted. Unknown nam
 registered sinks.
 
 Both extensions are designed for `WebApplicationFactory.ConfigureTestServices`, which runs after the
-app's `ConfigureServices`, but they work on any `IServiceCollection` you may provide. Since `CdcOptions`
+app's `ConfigureServices`, but they work on any `IServiceCollection` you may provide. Since `WallabyOptions`
 participates in the standard options pattern, `ConfigureWallabyOptions` is equivalent to
-`services.PostConfigure<CdcOptions>(...)`, use whichever reads better in your test host.
+`services.PostConfigure<WallabyOptions>(...)`, use whichever reads better in your test host.
 
 ## Waiting for streaming
 

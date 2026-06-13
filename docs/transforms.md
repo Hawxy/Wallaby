@@ -16,24 +16,24 @@ cdc.Map<Product>()
    .ToSink("meili", "products")
    .UsingTransform((_, changes, _) =>
    {
-       var docs = new Dictionary<DocumentKey, CdcDocument?>(changes.Count);
+       var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
        foreach (var c in changes)
-           docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
-       return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
+       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
    });
 ```
 
-For more complex transforms, or anything with dependencies, implement `ICdcTransform<TEntity>` as a class:
+For more complex transforms, or anything with dependencies, implement `IWallabyTransform<TEntity>` as a class:
 
 ```csharp
-public sealed class ProductSearchTransform(IPricingService pricing) : ICdcTransform<Product>
+public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyTransform<Product>
 {
-    public async Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> TransformAsync(
+    public async Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> TransformAsync(
         DbContext db, IReadOnlyList<ChangeEvent<Product>> changes, CancellationToken ct)
     {
-        var docs = new Dictionary<DocumentKey, CdcDocument?>(changes.Count);
+        var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
         foreach (var c in changes)
-            docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name, ["rrp"] = await pricing.RrpAsync(c.Entity!.Id, ct) };
+            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name, ["rrp"] = await pricing.RrpAsync(c.Entity!.Id, ct) };
         return docs;
     }
 }
@@ -57,13 +57,13 @@ the mapping's id rule. Your transform only sees inserts, updates, and backfill r
 
 ## Documents
 
-A document is a `CdcDocument` - a field bag keyed by destination field name. It derives from
+A document is a `WallabyDocument` - a field bag keyed by destination field name. It derives from
 `Dictionary<string, object?>`, so it supports the usual initializer syntax:
 
 ```csharp
-var doc = new CdcDocument { ["name"] = product.Name, ["price"] = product.Price };
+var doc = new WallabyDocument { ["name"] = product.Name, ["price"] = product.Price };
 // or fluent:
-var doc2 = new CdcDocument().Set("name", product.Name).Set("price", product.Price);
+var doc2 = new WallabyDocument().Set("name", product.Name).Set("price", product.Price);
 ```
 
 Sinks consume the document as an `IReadOnlyDictionary<string, object?>`.
@@ -96,9 +96,9 @@ cdc.Map<Order>()
            .Include(o => o.Lines)
            .ToListAsync(ct);
 
-       var docs = new Dictionary<DocumentKey, CdcDocument?>(orders.Count);
+       var docs = new Dictionary<DocumentKey, WallabyDocument?>(orders.Count);
        foreach (var o in orders)
-           docs[new DocumentKey(o.Id)] = new CdcDocument
+           docs[new DocumentKey(o.Id)] = new WallabyDocument
            {
                ["customer"] = o.Customer?.Name,
                ["lineCount"] = o.Lines.Count,

@@ -1,7 +1,7 @@
 namespace Wallaby.Abstractions;
 
-/// <summary>The role a node is currently playing in the CDC cluster.</summary>
-public enum CdcNodeRole
+/// <summary>The role a node is currently playing in the Wallaby cluster.</summary>
+public enum WallabyNodeRole
 {
     /// <summary>Starting up; leadership not yet decided.</summary>
     Starting,
@@ -12,26 +12,26 @@ public enum CdcNodeRole
     /// <summary>Another node is the leader; this node is idle and ready to take over.</summary>
     Standby,
 
-    /// <summary>The CDC background service has stopped (graceful shutdown or fatal fault).</summary>
+    /// <summary>The Wallaby background service has stopped (graceful shutdown or fatal fault).</summary>
     Stopped,
 }
 
-/// <summary>An immutable point-in-time view of a node's CDC status.</summary>
-public sealed record CdcStatusSnapshot
+/// <summary>An immutable point-in-time view of a node's Wallaby status.</summary>
+public sealed record WallabyStatusSnapshot
 {
     /// <summary>The node's current role.</summary>
-    public required CdcNodeRole Role { get; init; }
+    public required WallabyNodeRole Role { get; init; }
 
-    /// <summary>True when the CDC background service terminated with a fatal error.</summary>
+    /// <summary>True when the Wallaby background service terminated with a fatal error.</summary>
     public bool Faulted { get; init; }
 
     /// <summary>The most recent error (exception type + message), if any.</summary>
     public string? LastError { get; init; }
 
-    /// <summary>When this node's CDC runtime started.</summary>
+    /// <summary>When this node's Wallaby runtime started.</summary>
     public required DateTimeOffset StartedAt { get; init; }
 
-    /// <summary>When this node acquired leadership; null unless <see cref="Role"/> is <see cref="CdcNodeRole.Leader"/>.</summary>
+    /// <summary>When this node acquired leadership; null unless <see cref="Role"/> is <see cref="WallabyNodeRole.Leader"/>.</summary>
     public DateTimeOffset? LeaderSince { get; init; }
 
     /// <summary>The highest commit LSN acknowledged to Postgres.</summary>
@@ -51,11 +51,11 @@ public sealed record CdcStatusSnapshot
 }
 
 /// <summary>
-/// A read-only view of this node's CDC status, for diagnostics and health checks. Registered as a singleton
+/// A read-only view of this node's Wallaby status, for diagnostics and health checks. Registered as a singleton
 /// by <c>AddWallaby</c>; the runtime, pipeline, and background service update it at lifecycle points.
 /// </summary>
-public interface ICdcStatus
+public interface IWallabyStatus
 {
     /// <summary>The latest status snapshot (lock-free, tear-free read).</summary>
-    CdcStatusSnapshot Current { get; }
+    WallabyStatusSnapshot Current { get; }
 }

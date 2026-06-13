@@ -4,21 +4,21 @@ using Wallaby.Abstractions;
 namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
-/// Non-generic adapter that lets the router invoke a strongly-typed <see cref="ICdcTransform{TEntity}"/>
+/// Non-generic adapter that lets the router invoke a strongly-typed <see cref="IWallabyTransform{TEntity}"/>
 /// over a batch of change events without knowing the entity type.
 /// </summary>
 internal interface ITransformInvoker
 {
-    Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> InvokeAsync(
+    Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
         DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct);
 }
 
-/// <summary>Wraps an <see cref="ICdcTransform{TEntity}"/> as an <see cref="ITransformInvoker"/>.</summary>
-internal sealed class TransformInvoker<TEntity>(ICdcTransform<TEntity> transform)
+/// <summary>Wraps an <see cref="IWallabyTransform{TEntity}"/> as an <see cref="ITransformInvoker"/>.</summary>
+internal sealed class TransformInvoker<TEntity>(IWallabyTransform<TEntity> transform)
     : ITransformInvoker
     where TEntity : class
 {
-    public Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> InvokeAsync(
+    public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
         DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var typed = new List<ChangeEvent<TEntity>>(changes.Count);

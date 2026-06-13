@@ -76,7 +76,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     }
 
     /// <summary>Use a transform instance.</summary>
-    public EntityMapBuilder<TEntity> UsingTransform(ICdcTransform<TEntity> transform)
+    public EntityMapBuilder<TEntity> UsingTransform(IWallabyTransform<TEntity> transform)
     {
         _registration.TransformFactory = _ => new TransformInvoker<TEntity>(transform);
         return this;
@@ -84,7 +84,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>Use a transform type resolved (or constructed) from the container.</summary>
     public EntityMapBuilder<TEntity> UsingTransform<TTransform>()
-        where TTransform : class, ICdcTransform<TEntity>
+        where TTransform : class, IWallabyTransform<TEntity>
     {
         _registration.TransformFactory = sp =>
             new TransformInvoker<TEntity>(ActivatorUtilities.GetServiceOrCreateInstance<TTransform>(sp));
@@ -93,7 +93,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>Use an inline transform lambda (the trivial, no-class case).</summary>
     public EntityMapBuilder<TEntity> UsingTransform(
-        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>>> handler)
+        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> handler)
     {
         _registration.TransformFactory = _ =>
             new TransformInvoker<TEntity>(new DelegateTransform<TEntity>(handler));

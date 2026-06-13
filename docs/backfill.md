@@ -25,10 +25,10 @@ live stream.
 
 ## Manual backfill
 
-Resolve `ICdcBackfillManager` and request a backfill at runtime (e.g. from an admin endpoint):
+Resolve `IWallabyBackfillManager` and request a backfill at runtime (e.g. from an admin endpoint):
 
 ```csharp
-public sealed class AdminController(ICdcBackfillManager backfill)
+public sealed class AdminController(IWallabyBackfillManager backfill)
 {
     public Task Reindex() => backfill.RequestBackfillAsync<Product>();
 }

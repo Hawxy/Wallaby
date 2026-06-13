@@ -5,7 +5,7 @@ namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
 /// Validates that the Postgres server is configured for logical replication. Throws
-/// <see cref="CdcConfigurationException"/> with actionable guidance when it is not. Never edits server
+/// <see cref="WallabyConfigurationException"/> with actionable guidance when it is not. Never edits server
 /// configuration.
 /// </summary>
 internal sealed class ServerValidator(ILogger logger)
@@ -15,7 +15,7 @@ internal sealed class ServerValidator(ILogger logger)
         var walLevel = await PgExec.ScalarStringAsync(connection, "SHOW wal_level", ct);
         if (!string.Equals(walLevel, "logical", StringComparison.OrdinalIgnoreCase))
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 $"Postgres 'wal_level' is '{walLevel}', but logical replication requires 'logical'. " +
                 "Set wal_level=logical (in postgresql.conf or your managed-instance parameter group) and restart the server.");
         }
@@ -49,7 +49,7 @@ internal sealed class ServerValidator(ILogger logger)
 
         if (usedSlots + toCreate > maxSlots)
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 $"No logical replication slot headroom: max_replication_slots={maxSlots}, in use={usedSlots}, " +
                 $"need to create {toCreate} more. Increase max_replication_slots or drop unused slots.");
         }
@@ -57,7 +57,7 @@ internal sealed class ServerValidator(ILogger logger)
         var maxWalSenders = await PgExec.ScalarLongAsync(connection, "SELECT setting::int FROM pg_settings WHERE name = 'max_wal_senders'", ct);
         if (maxWalSenders <= 0)
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 "max_wal_senders is 0; logical replication needs at least one WAL sender. Increase max_wal_senders and restart.");
         }
 
@@ -68,7 +68,7 @@ internal sealed class ServerValidator(ILogger logger)
 /// <summary>Source-generated log messages for <see cref="ServerValidator"/>.</summary>
 internal static partial class ServerValidatorLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "CDC server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).")]
     internal static partial void ServerValidationPassed(this ILogger logger, long maxSlots, long usedSlots);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not verify the REPLICATION privilege for role '{Role}'; logical replication will fail to start without it. Grant it with 'ALTER ROLE ... WITH REPLICATION' or 'GRANT rds_replication TO ...' ")]

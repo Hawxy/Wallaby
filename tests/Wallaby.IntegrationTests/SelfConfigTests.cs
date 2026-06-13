@@ -13,7 +13,7 @@ namespace Wallaby.IntegrationTests;
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
 public class SelfConfigTests(PostgresFixture pg)
 {
-    private static CdcModel BuildAllMappedModel()
+    private static WallabyModel BuildAllMappedModel()
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
         return ModelToCdcModel.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
@@ -332,7 +332,7 @@ public class SelfConfigTests(PostgresFixture pg)
                 },
                 NullLogger.Instance);
 
-            await Should.ThrowAsync<CdcConfigurationException>(
+            await Should.ThrowAsync<WallabyConfigurationException>(
                 async () => await configurator.EnsureConfiguredAsync(model, CancellationToken.None));
         }
         finally
@@ -378,7 +378,7 @@ public class SelfConfigTests(PostgresFixture pg)
                 new SelfConfigOptions { SlotName = "x", PublicationName = "y" },
                 NullLogger.Instance);
 
-            await Should.ThrowAsync<CdcConfigurationException>(
+            await Should.ThrowAsync<WallabyConfigurationException>(
                 async () => await configurator.EnsureConfiguredAsync(BuildAllMappedModel(), CancellationToken.None));
         }
         finally

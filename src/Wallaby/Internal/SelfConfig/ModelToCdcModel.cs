@@ -5,7 +5,7 @@ using Wallaby.Model;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
-/// Resolves a <see cref="CdcModel"/> from an EF Core <see cref="IModel"/> and a <see cref="CaptureSpec"/>.
+/// Resolves a <see cref="WallabyModel"/> from an EF Core <see cref="IModel"/> and a <see cref="CaptureSpec"/>.
 /// Declared entities fail fast on problems (no PK, owned, view); the "all mapped" mode silently skips
 /// entities that can't be captured (owned, keyless, or not table-backed). Per-mapping
 /// <c>DependsOn(...)</c> navigation expressions are resolved through <see cref="DependencyAnalyzer"/>
@@ -14,7 +14,7 @@ namespace Wallaby.Internal.SelfConfig;
 /// </summary>
 internal static class ModelToCdcModel
 {
-    public static CdcModel Build(IModel model, CaptureSpec spec)
+    public static WallabyModel Build(IModel model, CaptureSpec spec)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(spec);
@@ -24,14 +24,14 @@ internal static class ModelToCdcModel
             : BuildPrimariesFromDeclared(model, spec);
 
         var (allTables, bindings) = AttachDependents(model, primaries, spec);
-        return new CdcModel(allTables, bindings);
+        return new WallabyModel(allTables, bindings);
     }
 
     private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromDeclared(IModel model, CaptureSpec spec)
     {
         if (spec.DeclaredEntities.Count == 0)
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 "No tables were declared for capture. Map each table with Map<T>(), " +
                 "or opt into CaptureAllMappedTables().");
         }
@@ -40,24 +40,24 @@ internal static class ModelToCdcModel
         foreach (var clrType in spec.DeclaredEntities.Distinct())
         {
             var entityType = model.FindEntityType(clrType)
-                ?? throw new CdcConfigurationException(
+                ?? throw new WallabyConfigurationException(
                     $"Entity '{clrType.FullName}' was declared for capture but is not part of the DbContext model.");
 
             if (entityType.IsOwned())
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Entity '{clrType.FullName}' is an owned type and cannot be captured directly; capture its owner instead.");
             }
 
             if (entityType.GetTableName() is null)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Entity '{clrType.FullName}' is not mapped to a table (it may be a view or keyless type) and cannot be captured.");
             }
 
             if (entityType.FindPrimaryKey() is null)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Entity '{clrType.FullName}' has no primary key. pgoutput logical replication requires a primary key to capture changes.");
             }
 
@@ -127,7 +127,7 @@ internal static class ModelToCdcModel
     {
         var schema = dependentEntityType.GetSchema() ?? "public";
         var tableName = dependentEntityType.GetTableName()
-            ?? throw new CdcConfigurationException(
+            ?? throw new WallabyConfigurationException(
                 $"Dependency target '{dependentEntityType.ClrType.FullName}' has no table — it must be a table-backed entity.");
 
         if (byQualifiedName.TryGetValue((schema, tableName), out var existing))
@@ -147,7 +147,7 @@ internal static class ModelToCdcModel
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         var primaryKey = entityType.FindPrimaryKey()
-            ?? throw new CdcConfigurationException(
+            ?? throw new WallabyConfigurationException(
                 $"Entity '{entityType.ClrType.FullName}' has no primary key. pgoutput logical replication requires a primary key.");
         var pkPropertyNames = primaryKey.Properties.Select(p => p.Name).ToHashSet();
 

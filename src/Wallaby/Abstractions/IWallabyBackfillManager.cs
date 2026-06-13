@@ -5,7 +5,7 @@ namespace Wallaby.Abstractions;
 /// endpoint). Requests are persisted, so they survive restarts and are executed by whichever
 /// node currently holds leadership.
 /// </summary>
-public interface ICdcBackfillManager
+public interface IWallabyBackfillManager
 {
     /// <summary>Request a (re)backfill of <typeparamref name="TEntity"/>.</summary>
     Task RequestBackfillAsync<TEntity>(CancellationToken ct = default) where TEntity : class;

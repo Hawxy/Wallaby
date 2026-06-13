@@ -13,11 +13,11 @@ public class TenantDestinationTests(PostgresFixture pg, MeilisearchFixture meili
     [Test]
     public async Task Documents_route_to_a_per_tenant_index_including_deletes()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var prefix = harness.Names.Named("products"); // unique per test run
         harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
             .Project<Product>("meili", destination: null,
-                document: p => new CdcDocument { ["name"] = p.Name },
+                document: p => new WallabyDocument { ["name"] = p.Name },
                 scopeKey: p => p.TenantId,
                 scopedDestination: key => $"{prefix}_{key}");
 

@@ -34,7 +34,7 @@ public class StreamingTests
             await ctx.Database.EnsureCreatedAsync();
         }
 
-        await using var harness = CdcTestHarness.ForTestModel(connectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(connectionString).Broadcast();
         var capture = harness.AddCaptureSink();
         await harness.SelfConfigureAsync();
 
@@ -75,9 +75,9 @@ public class StreamingTests
             await ctx.Database.EnsureCreatedAsync();
         }
 
-        await using var harness = CdcTestHarness.ForTestModel(connectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(connectionString);
         var capture = harness.AddCaptureSink();
-        harness.Project<Product>("capture", destination: null, p => new CdcDocument { ["name"] = p.Name });
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
         harness.DependsOn<Product, Category?>(p => p.Category);
 
         // Seeded before self-config, so this product can only reach the sink via the fan-out

@@ -33,7 +33,7 @@ internal static class DependencyAnalyzer
             return ResolveSkip(primary, skip);
         }
 
-        throw new CdcConfigurationException(
+        throw new WallabyConfigurationException(
             $"'{primary.ClrType.FullName}.{memberName}' is not an EF Core navigation. " +
             $"DependsOn must point at a reference, collection, or skip-navigation property.");
     }
@@ -49,7 +49,7 @@ internal static class DependencyAnalyzer
 
         if (body is not MemberExpression member)
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 $"DependsOn expression on '{primaryClrType.FullName}' must be a single navigation property access " +
                 $"(e.g. p => p.Category), got: {expression}.");
         }
@@ -109,7 +109,7 @@ internal static class DependencyAnalyzer
     {
         if (dependentCols.Count != primaryCols.Count)
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 $"Foreign key for '{primary.ClrType.Name}.{navigationName}' has mismatched column counts; cannot fan out.");
         }
 
@@ -128,7 +128,7 @@ internal static class DependencyAnalyzer
     {
         var storeObject = StoreObjectIdentifier.Table(entityType.GetTableName()!, entityType.GetSchema());
         return property.GetColumnName(storeObject)
-               ?? throw new CdcConfigurationException(
+               ?? throw new WallabyConfigurationException(
                    $"Property '{entityType.ClrType.Name}.{property.Name}' has no column on table " +
                    $"'{entityType.GetSchema()}.{entityType.GetTableName()}'.");
     }

@@ -19,10 +19,10 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task Product_projection_syncs_insert_update_and_delete()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products");
         harness.AddSink(Sink())
-            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name });
+            .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name });
         await harness.SelfConfigureAsync();
 
         var probe = new MeiliProbe(meili);
@@ -43,7 +43,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task Order_aggregate_is_flattened_via_ef_joins()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("orders");
         harness.AddSink(Sink())
             .Map<Order>("meili", index, async (db, changes, ct) =>
@@ -55,11 +55,11 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
                     .Include(o => o.Lines)
                     .ToListAsync(ct);
 
-                var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                 foreach (var o in orders)
                 {
                     docs[new DocumentKey(new object?[] { o.Id })] =
-                        new CdcDocument { ["customer"] = o.Customer?.Name, ["lineCount"] = o.Lines.Count };
+                        new WallabyDocument { ["customer"] = o.Customer?.Name, ["lineCount"] = o.Lines.Count };
                 }
                 return docs;
             });
@@ -82,7 +82,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task RawSql_transform_indexes_and_null_document_deletes()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products");
         harness.AddSink(Sink())
             .Map<Product>("meili", index, async (db, changes, ct) =>
@@ -92,11 +92,11 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
                     .SqlQuery<ProductRow>($"SELECT \"Id\" AS \"Id\", \"Name\" AS \"Name\" FROM products WHERE \"Id\" = ANY({ids})")
                     .ToListAsync(ct);
 
-                var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                 foreach (var row in rows)
                 {
                     docs[new DocumentKey([row.Id])] =
-                        row.Name == "skip" ? null : new CdcDocument { ["name"] = row.Name };
+                        row.Name == "skip" ? null : new WallabyDocument { ["name"] = row.Name };
                 }
                 return docs;
             });
@@ -127,7 +127,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
 
         var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
         // The document carries "name" but not the configured filterable "category".
-        var record = new SinkRecord("products_validated", "1", new CdcDocument { ["name"] = "alpha" }, IsDeletion: false, meta);
+        var record = new SinkRecord("products_validated", "1", new WallabyDocument { ["name"] = "alpha" }, IsDeletion: false, meta);
 
         var result = await sink.DeliverAsync(new SinkBatch("meili", [record]), CancellationToken.None);
 
@@ -139,14 +139,14 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task Document_with_all_configured_attributes_passes_validation_and_indexes()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products_validated_ok");
 
         // Validation is on by default; the projection emits every configured attribute.
         var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex(index, s => s.FilterableAttributes = ["category"]);
         harness.AddSink(new MeilisearchSink("meili", options))
-            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name, ["category"] = p.CategoryId });
+            .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name, ["category"] = p.CategoryId });
         await harness.SelfConfigureAsync();
 
         var probe = new MeiliProbe(meili);
@@ -161,7 +161,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     [Test]
     public async Task Declared_index_is_created_and_configured_on_start()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products_cfg");
 
         var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
@@ -172,7 +172,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
             s.SortableAttributes = ["price"];
         });
         harness.AddSink(new MeilisearchSink("meili", options))
-            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name });
+            .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name });
 
         await harness.SelfConfigureAsync();
         // ISinkInitializer runs during StartAsync, before any change is streamed — so the index is

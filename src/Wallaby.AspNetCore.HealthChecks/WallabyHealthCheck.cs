@@ -6,7 +6,7 @@ namespace Wallaby.AspNetCore.HealthChecks;
 /// <summary>
 /// Wallaby liveness health check
 /// </summary>
-public sealed class WallabyHealthCheck(ICdcStatus status) : IHealthCheck
+public sealed class WallabyHealthCheck(IWallabyStatus status) : IHealthCheck
 {
     /// <inheritdoc />
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
@@ -15,13 +15,13 @@ public sealed class WallabyHealthCheck(ICdcStatus status) : IHealthCheck
         var data = Describe(snapshot);
 
         var result = snapshot.Faulted
-            ? HealthCheckResult.Unhealthy("CDC background service terminated.", exception: null, data)
-            : HealthCheckResult.Healthy("CDC subsystem alive.", data);
+            ? HealthCheckResult.Unhealthy("Wallaby background service terminated.", exception: null, data)
+            : HealthCheckResult.Healthy("Wallaby subsystem alive.", data);
 
         return Task.FromResult(result);
     }
 
-    private static Dictionary<string, object> Describe(CdcStatusSnapshot s)
+    private static Dictionary<string, object> Describe(WallabyStatusSnapshot s)
     {
         var data = new Dictionary<string, object>
         {

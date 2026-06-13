@@ -3,15 +3,15 @@ using Microsoft.Extensions.Options;
 namespace Wallaby.DependencyInjection;
 
 /// <summary>
-/// Validates the final <see cref="CdcOptions"/> produced by the options pipeline (the builder's
+/// Validates the final <see cref="WallabyOptions"/> produced by the options pipeline (the builder's
 /// <c>ConfigureOptions</c>/<c>UseConnectionString</c> actions composed with any
-/// <c>Configure&lt;CdcOptions&gt;</c>/<c>PostConfigure</c> registrations and configuration binding).
-/// Runs on first resolution; failures surface as a <see cref="CdcConfigurationException"/> from the
-/// <see cref="CdcOptions"/> singleton registration.
+/// <c>Configure&lt;WallabyOptions&gt;</c>/<c>PostConfigure</c> registrations and configuration binding).
+/// Runs on first resolution; failures surface as a <see cref="WallabyConfigurationException"/> from the
+/// <see cref="WallabyOptions"/> singleton registration.
 /// </summary>
-internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IValidateOptions<CdcOptions>
+internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IValidateOptions<WallabyOptions>
 {
-    public ValidateOptionsResult Validate(string? name, CdcOptions options)
+    public ValidateOptionsResult Validate(string? name, WallabyOptions options)
     {
         if (name is not null && name != Options.DefaultName)
         {
@@ -23,7 +23,7 @@ internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IVal
         {
             failures.Add(
                 "A connection string must be supplied — via UseConnectionString(...), " +
-                "Configure<CdcOptions>, or configuration binding.");
+                "Configure<WallabyOptions>, or configuration binding.");
         }
         if (string.IsNullOrWhiteSpace(options.SlotName) || string.IsNullOrWhiteSpace(options.PublicationName))
         {
@@ -51,7 +51,7 @@ internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IVal
         }
 
         // External slots must not collide with the primary slot/publication (which only exists when
-        // capturing). External-vs-external collisions are caught structurally in CdcBuilder.Build().
+        // capturing). External-vs-external collisions are caught structurally in WallabyBuilder.Build().
         if (configuration.CaptureIntended)
         {
             foreach (var external in configuration.ExternalSlots)

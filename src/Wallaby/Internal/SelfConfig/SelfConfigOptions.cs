@@ -1,6 +1,6 @@
 namespace Wallaby.Internal.SelfConfig;
 
-/// <summary>Inputs to self-configuration. Populated from the consumer's CDC options at startup.</summary>
+/// <summary>Inputs to self-configuration. Populated from the consumer's Wallaby options at startup.</summary>
 internal sealed class SelfConfigOptions
 {
     /// <summary>

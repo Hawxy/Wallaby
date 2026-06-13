@@ -62,7 +62,7 @@ public class DependencyAnalyzerTests
     [Test]
     public void Non_navigation_property_is_rejected()
     {
-        Should.Throw<CdcConfigurationException>(() => DependencyAnalyzer.Analyze(
+        Should.Throw<WallabyConfigurationException>(() => DependencyAnalyzer.Analyze(
             EntityType<Product>(),
             (Expression<Func<Product, string>>)(p => p.Name)));
     }

@@ -10,15 +10,15 @@ namespace Wallaby.Meilisearch.IntegrationTests;
 [ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
 public class BackfillTests(PostgresFixture pg, MeilisearchFixture meili)
 {
-    private CdcTestHarness NewHarness(out string index, int chunkSize = 3)
+    private WallabyTestHarness NewHarness(out string index, int chunkSize = 3)
     {
-        var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         harness.ChunkSize = chunkSize;
         index = harness.Names.Named("products");
         // A unique backfill version isolates this test from the shared wallaby.backfill_state for public.products
         // (otherwise the scheduler would skip an already-"Completed" table from a prior test).
         harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
-            .Project<Product>("meili", index, p => new CdcDocument { ["name"] = p.Name },
+            .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name },
                 backfill: true, backfillVersion: harness.Names.Suffix);
         return harness;
     }

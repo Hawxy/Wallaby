@@ -43,17 +43,17 @@ internal static class ExternalSlotResolver
             {
                 if (model is null)
                 {
-                    throw new CdcConfigurationException(
+                    throw new WallabyConfigurationException(
                         $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>() requires a " +
                         "DbContext to resolve the table. Declare one with UseContext<TContext>() or use ForTable(...).");
                 }
 
                 var entityType = model.FindEntityType(entityClrType)
-                    ?? throw new CdcConfigurationException(
+                    ?? throw new WallabyConfigurationException(
                         $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>(): " +
                         $"'{entityClrType.FullName}' is not part of the EF Core model.");
                 var tableName = entityType.GetTableName()
-                    ?? throw new CdcConfigurationException(
+                    ?? throw new WallabyConfigurationException(
                         $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>(): " +
                         $"'{entityClrType.FullName}' is not mapped to a table.");
                 Add(entityType.GetSchema() ?? "public", tableName);

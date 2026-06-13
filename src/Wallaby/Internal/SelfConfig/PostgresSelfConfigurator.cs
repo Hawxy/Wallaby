@@ -18,7 +18,7 @@ internal sealed class PostgresSelfConfigurator(
     private readonly ServerValidator _validator = new(logger);
     private readonly StateSchemaBootstrapper _stateSchema = new();
 
-    public async Task<SelfConfigResult> EnsureConfiguredAsync(CdcModel model, CancellationToken ct)
+    public async Task<SelfConfigResult> EnsureConfiguredAsync(WallabyModel model, CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
@@ -150,7 +150,7 @@ internal sealed class PostgresSelfConfigurator(
         }
     }
 
-    private static IEnumerable<(string Schema, string Table)> DesiredTables(CdcModel model)
+    private static IEnumerable<(string Schema, string Table)> DesiredTables(WallabyModel model)
     {
         foreach (var table in model.Tables)
         {
@@ -172,7 +172,7 @@ internal sealed class PostgresSelfConfigurator(
             if (!string.Equals(slotType, "logical", StringComparison.Ordinal) ||
                 !string.Equals(plugin, "pgoutput", StringComparison.Ordinal))
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Replication slot '{slot}' already exists but is not a pgoutput logical slot " +
                     $"(slot_type='{slotType}', plugin='{plugin ?? "<none>"}'). Wallaby requires a logical/pgoutput " +
                     $"slot. Drop it with SELECT pg_drop_replication_slot('{slot}'); or use a different slot name.");
@@ -226,7 +226,7 @@ internal sealed class PostgresSelfConfigurator(
             ("s", slot), ("p", publication), ("cp", consistentPoint), ("k", kind));
 
     private async Task<IReadOnlyList<string>> ValidateReplicaIdentityAsync(
-        NpgsqlConnection connection, CdcModel model, CancellationToken ct)
+        NpgsqlConnection connection, WallabyModel model, CancellationToken ct)
     {
         var warnings = new List<string>();
 
@@ -249,7 +249,7 @@ internal sealed class PostgresSelfConfigurator(
                 var ddl = $"ALTER TABLE {PgExec.QuoteTable(table.Schema, table.TableName)} REPLICA IDENTITY FULL;";
                 if (options.RequireFullReplicaIdentity)
                 {
-                    throw new CdcConfigurationException(
+                    throw new WallabyConfigurationException(
                         $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform but has '{relReplIdent}'. Run: {ddl}");
                 }
 
@@ -271,7 +271,7 @@ internal sealed class PostgresSelfConfigurator(
 /// <summary>Source-generated log messages for <see cref="PostgresSelfConfigurator"/>.</summary>
 internal static partial class PostgresSelfConfiguratorLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "CDC self-config complete: publication '{Publication}' (created={PubCreated}), slot '{Slot}' (created={SlotCreated}).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby self-config complete: publication '{Publication}' (created={PubCreated}), slot '{Slot}' (created={SlotCreated}).")]
     internal static partial void SelfConfigComplete(this ILogger logger, string publication, bool pubCreated, string slot, bool slotCreated);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created publication '{Publication}' for {TableCount} table(s).")]

@@ -13,7 +13,7 @@ public class TelemetryTests(PostgresFixture pg)
     [Test]
     public async Task Pipeline_emits_metrics_and_spans_for_live_changes()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
         var capture = harness.AddCaptureSink();
 
         using var changes = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.changes.received");

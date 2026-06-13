@@ -12,7 +12,7 @@ namespace Wallaby.IntegrationTests;
 [ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
 public class ReplicationDecoderTests(PostgresFixture pg)
 {
-    private static CdcModel BuildAllMappedModel()
+    private static WallabyModel BuildAllMappedModel()
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
         return ModelToCdcModel.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });

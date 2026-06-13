@@ -13,15 +13,15 @@ public class MappingChangeRouterTelemetryTests
     /// <summary>A transform that emits one document per change without touching the DbContext.</summary>
     private sealed class StubTransform : ITransformInvoker
     {
-        public Task<IReadOnlyDictionary<DocumentKey, CdcDocument?>> InvokeAsync(
+        public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
             DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
         {
-            var documents = new Dictionary<DocumentKey, CdcDocument?>();
+            var documents = new Dictionary<DocumentKey, WallabyDocument?>();
             foreach (var change in changes)
             {
-                documents[change.Key] = new CdcDocument { ["key"] = change.Key.ToString() };
+                documents[change.Key] = new WallabyDocument { ["key"] = change.Key.ToString() };
             }
-            return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(documents);
+            return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
         }
     }
 

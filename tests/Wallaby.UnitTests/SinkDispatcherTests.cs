@@ -9,7 +9,7 @@ public class SinkDispatcherTests
     private static readonly ChangeMetadata Meta = new("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
 
     private static IReadOnlyList<RoutedDocument> OneRecord() =>
-        [new RoutedDocument("sink", new SinkRecord(Destination: null, "1", Document: new CdcDocument { ["x"] = 1 }, IsDeletion: false, Meta))];
+        [new RoutedDocument("sink", new SinkRecord(Destination: null, "1", Document: new WallabyDocument { ["x"] = 1 }, IsDeletion: false, Meta))];
 
     private static Dictionary<string, ISink> FailingSink() => new()
     {

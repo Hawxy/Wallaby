@@ -20,10 +20,10 @@ internal sealed record SelfConfigResult(
     IReadOnlyList<ExternalSlotResult> ExternalSlots);
 
 /// <summary>
-/// Brings the source Postgres database into a state where CDC can run: validates server settings,
+/// Brings the source Postgres database into a state where Wallaby can run: validates server settings,
 /// ensures the <c>wallaby</c> state schema, and creates/reconciles the publication and replication slot.
 /// </summary>
 internal interface ICdcSelfConfigurator
 {
-    Task<SelfConfigResult> EnsureConfiguredAsync(CdcModel model, CancellationToken ct);
+    Task<SelfConfigResult> EnsureConfiguredAsync(WallabyModel model, CancellationToken ct);
 }

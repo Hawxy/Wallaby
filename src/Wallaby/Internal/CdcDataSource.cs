@@ -1,11 +1,12 @@
 using Npgsql;
+using Wallaby.DependencyInjection;
 
 namespace Wallaby.Internal;
 
 /// <summary>
-/// Owns the single <see cref="NpgsqlDataSource"/> CDC uses for all pooled work (checkpoints, advisory
+/// Owns the single <see cref="NpgsqlDataSource"/> Wallaby uses for all pooled work (checkpoints, advisory
 /// locks, backfill reads, dependent-key lookups). Built from the connection string supplied via
-/// <see cref="DependencyInjection.CdcBuilder.UseConnectionString"/>; lifetime is tied to the DI container.
+/// <see cref="WallabyBuilder.UseConnectionString"/>; lifetime is tied to the DI container.
 /// </summary>
 internal sealed class CdcDataSource : IAsyncDisposable
 {
@@ -15,7 +16,7 @@ internal sealed class CdcDataSource : IAsyncDisposable
         Source = NpgsqlDataSource.Create(connectionString);
     }
 
-    /// <summary>The pooled data source CDC opens normal connections from.</summary>
+    /// <summary>The pooled data source Wallaby opens normal connections from.</summary>
     public NpgsqlDataSource Source { get; }
 
     /// <summary>

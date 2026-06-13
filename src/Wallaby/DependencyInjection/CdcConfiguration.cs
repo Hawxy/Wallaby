@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Internal.SelfConfig;
+using Wallaby.Model;
 
 namespace Wallaby.DependencyInjection;
 
@@ -65,12 +66,12 @@ internal sealed class ExternalSlotRegistration
 internal sealed class CdcConfiguration
 {
     /// <summary>
-    /// Option mutations queued by <see cref="CdcBuilder.ConfigureOptions"/> and
-    /// <see cref="CdcBuilder.UseConnectionString"/>. Applied to the <see cref="CdcOptions"/> being built by
+    /// Option mutations queued by <see cref="WallabyBuilder.ConfigureOptions"/> and
+    /// <see cref="WallabyBuilder.UseConnectionString"/>. Applied to the <see cref="WallabyOptions"/> being built by
     /// the options pipeline at the <c>AddWallaby</c> registration position, so they compose with the standard
-    /// <c>Configure&lt;CdcOptions&gt;</c>/<c>PostConfigure</c> calls in registration order.
+    /// <c>Configure&lt;WallabyOptions&gt;</c>/<c>PostConfigure</c> calls in registration order.
     /// </summary>
-    public List<Action<CdcOptions>> OptionsActions { get; } = [];
+    public List<Action<WallabyOptions>> OptionsActions { get; } = [];
 
     public bool CaptureAllMapped { get; set; }
     public List<SinkRegistration> Sinks { get; } = [];
@@ -92,7 +93,7 @@ internal sealed class CdcConfiguration
 
     /// <summary>
     /// Reads the EF Core <see cref="IModel"/> from the declared capture context. Set by
-    /// <see cref="CdcBuilder.UseContext{TContext}"/>; null when no context is declared (provision-only).
+    /// <see cref="WallabyBuilder.UseContext{TContext}"/>; null when no context is declared (provision-only).
     /// Used to resolve <c>ForEntity&lt;T&gt;()</c> external-slot table declarations.
     /// </summary>
     public Func<IServiceProvider, IModel>? ModelAccessor { get; set; }
@@ -100,7 +101,7 @@ internal sealed class CdcConfiguration
     /// <summary>
     /// Leases an enrichment <see cref="DbContext"/> for the runtime, using a registered
     /// <see cref="IDbContextFactory{TContext}"/> when present and otherwise a DI scope over the consumer's
-    /// <c>AddDbContext</c> registration. Set by <see cref="CdcBuilder.UseContext{TContext}"/>.
+    /// <c>AddDbContext</c> registration. Set by <see cref="WallabyBuilder.UseContext{TContext}"/>.
     /// </summary>
     public Func<IServiceProvider, EnrichmentContextLease>? ContextLease { get; set; }
 
@@ -114,7 +115,7 @@ internal sealed class CdcConfiguration
     /// <summary>
     /// Build the <see cref="CaptureSpec"/> the model resolver consumes, including each mapping's
     /// <c>DependsOn(...)</c> navigations. Shared by the runtime and the backfill-manager registration so both
-    /// derive the same <see cref="Wallaby.Model.CdcModel"/> (dependent tables/bindings included).
+    /// derive the same <see cref="WallabyModel"/> (dependent tables/bindings included).
     /// </summary>
     public CaptureSpec ToCaptureSpec()
     {

@@ -43,7 +43,7 @@ public class FanoutQueueWorkerTests
         // The coordinator/store are never invoked on the divergent path, so a never-opened data source is fine.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
         var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
-        var worker = new FanoutQueueWorker(queue, coordinator, new CdcModel([]), NullLogger.Instance);
+        var worker = new FanoutQueueWorker(queue, coordinator, new WallabyModel([]), NullLogger.Instance);
 
         var ran = await worker.DrainOnceAsync(CancellationToken.None);
 

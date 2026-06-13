@@ -40,15 +40,15 @@ You have a number of choices as to where streamed transactions spill:
 
 ## The Options pattern
 
-`CdcOptions` participates in the standard [options pipeline](https://learn.microsoft.com/dotnet/core/extensions/options),
+`WallabyOptions` participates in the standard [options pipeline](https://learn.microsoft.com/dotnet/core/extensions/options),
 so the usual mechanisms compose with the builder's `ConfigureOptions(...)`:
 
 ```csharp
 // Bind from configuration (appsettings.json: { "Wallaby": { "ChunkSize": 250 } }):
-builder.Services.Configure<CdcOptions>(builder.Configuration.GetSection("Wallaby"));
+builder.Services.Configure<WallabyOptions>(builder.Configuration.GetSection("Wallaby"));
 
 builder.Services.AddWallaby(cdc => /* ... */);
 
 // PostConfigure always runs last — handy for test hosts:
-builder.Services.PostConfigure<CdcOptions>(o => o.SlotName = "tests_slot");
+builder.Services.PostConfigure<WallabyOptions>(o => o.SlotName = "tests_slot");
 ```

@@ -103,7 +103,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        Should.Throw<CdcConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared()); });
+        Should.Throw<WallabyConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared()); });
     }
 
     [Test]
@@ -111,7 +111,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        Should.Throw<CdcConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); });
+        Should.Throw<WallabyConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); });
     }
 
     [Test]

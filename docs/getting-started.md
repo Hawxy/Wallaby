@@ -64,10 +64,10 @@ builder.Services.AddWallaby(cdc =>
             .WithBackfillVersion("v1")
             .UsingTransform((_, changes, _) =>
             {
-                var docs = new Dictionary<DocumentKey, CdcDocument?>(changes.Count);
+                var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
                 foreach (var c in changes)
-                    docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name, ["price"] = c.Entity!.Price };
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                    docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name, ["price"] = c.Entity!.Price };
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
             });
 });
 
@@ -97,7 +97,7 @@ callback receives the **root** provider (scoped services are unavailable), and c
 at host start instead of at registration.
 
 ::: tip
-`CdcOptions` also participates in the standard options pattern, see
+`WallabyOptions` also participates in the standard options pattern, see
 [Configuration](/configuration#the-options-pattern).
 :::
 

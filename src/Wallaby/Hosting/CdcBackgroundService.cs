@@ -21,7 +21,7 @@ internal sealed class CdcBackgroundService(
         }
         catch (Exception ex)
         {
-            // The only reliable "CDC died" signal — BackgroundService exposes no queryable terminated flag.
+            // The only reliable "Wallaby died" signal — BackgroundService exposes no queryable terminated flag.
             status.MarkFaulted($"{ex.GetType().Name}: {ex.Message}");
             logger.BackgroundServiceTerminated(ex);
             throw;
@@ -32,6 +32,6 @@ internal sealed class CdcBackgroundService(
 /// <summary>Source-generated log messages for <see cref="CdcBackgroundService"/>.</summary>
 internal static partial class CdcBackgroundServiceLog
 {
-    [LoggerMessage(Level = LogLevel.Critical, Message = "CDC background service terminated unexpectedly.")]
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Wallaby background service terminated unexpectedly.")]
     internal static partial void BackgroundServiceTerminated(this ILogger logger, Exception ex);
 }

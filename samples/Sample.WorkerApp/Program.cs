@@ -37,18 +37,18 @@ builder.Services.AddWallaby(cdc =>
             .WithBackfillVersion("v1")
             .UsingTransform((_, changes, _) =>
             {
-                var documents = new Dictionary<DocumentKey, CdcDocument?>();
+                var documents = new Dictionary<DocumentKey, WallabyDocument?>();
                 foreach (var change in changes)
                 {
                     var product = change.Entity!;
-                    documents[change.Key] = new CdcDocument
+                    documents[change.Key] = new WallabyDocument
                     {
                         ["name"] = product.Name,
                         ["price"] = product.Price,
                         ["category"] = product.Category,
                     };
                 }
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(documents);
+                return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
             });
 });
 

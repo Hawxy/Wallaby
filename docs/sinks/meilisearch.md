@@ -70,7 +70,7 @@ If a way to customize this would be useful, open an issue.
 
 ## How documents are written
 
-- Your transform's `CdcDocument` fields become the Meilisearch document. Wallaby stamps the configured
+- Your transform's `WallabyDocument` fields become the Meilisearch document. Wallaby stamps the configured
   `PrimaryKey` field with the record's document id (derived from the source primary key, or your
   `KeyedBy(...)` rule) - so you don't include it yourself.
 - Document ids are sanitized to Meilisearch's allowed set (`[a-zA-Z0-9-_]`); composite-key separators are

@@ -11,9 +11,9 @@ namespace Wallaby.Meilisearch.IntegrationTests;
 [ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
 public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
 {
-    private CdcTestHarness NewHarness(out string index)
+    private WallabyTestHarness NewHarness(out string index)
     {
-        var harness = CdcTestHarness.ForTestModel(pg.ConnectionString);
+        var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         index = harness.Names.Named("products_fanout");
 
         harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }));
@@ -26,10 +26,10 @@ public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
                 .Where(p => ids.Contains(p.Id))
                 .ToListAsync(ct);
 
-            var documents = new Dictionary<DocumentKey, CdcDocument?>();
+            var documents = new Dictionary<DocumentKey, WallabyDocument?>();
             foreach (var product in products)
             {
-                documents[new DocumentKey(product.Id)] = new CdcDocument
+                documents[new DocumentKey(product.Id)] = new WallabyDocument
                 {
                     ["name"] = product.Name,
                     ["category"] = product.Category?.Name,

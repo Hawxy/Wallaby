@@ -7,18 +7,18 @@ using Wallaby.Sinks;
 
 namespace Wallaby.DependencyInjection;
 
-/// <summary>Fluent configuration for a CDC instance.</summary>
-public sealed class CdcBuilder
+/// <summary>Fluent configuration for a Wallaby instance.</summary>
+public sealed class WallabyBuilder
 {
     private readonly CdcConfiguration _configuration = new();
 
     /// <summary>
     /// Configure options (slot/publication names, chunk size, auto-backfill, etc.). The action joins the
     /// standard options pipeline at the <c>AddWallaby</c> registration position, so it composes with
-    /// <c>services.Configure&lt;CdcOptions&gt;()</c>/<c>PostConfigure</c> calls: earlier <c>Configure</c>
+    /// <c>services.Configure&lt;WallabyOptions&gt;()</c>/<c>PostConfigure</c> calls: earlier <c>Configure</c>
     /// registrations run before it, later ones and <c>PostConfigure</c> override it.
     /// </summary>
-    public CdcBuilder ConfigureOptions(Action<CdcOptions> configure)
+    public WallabyBuilder ConfigureOptions(Action<WallabyOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
         _configuration.OptionsActions.Add(configure);
@@ -28,10 +28,10 @@ public sealed class CdcBuilder
     /// <summary>
     /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill reads.
     /// Shorthand for <c>ConfigureOptions(o =&gt; o.ConnectionString = ...)</c> — like any option value it can
-    /// also be supplied (or overridden) through <c>Configure&lt;CdcOptions&gt;</c>, configuration binding, or
+    /// also be supplied (or overridden) through <c>Configure&lt;WallabyOptions&gt;</c>, configuration binding, or
     /// <c>PostConfigure</c>, and is validated as non-empty on first resolution.
     /// </summary>
-    public CdcBuilder UseConnectionString(string connectionString)
+    public WallabyBuilder UseConnectionString(string connectionString)
     {
         _configuration.OptionsActions.Add(options => options.ConnectionString = connectionString);
         return this;
@@ -45,7 +45,7 @@ public sealed class CdcBuilder
     /// <see cref="IDbContextFactory{TContext}"/> if one is registered, otherwise a DI scope). Omit it entirely
     /// for a provision-only worker that declares external slots by table name only.
     /// </summary>
-    public CdcBuilder UseContext<TContext>() where TContext : DbContext
+    public WallabyBuilder UseContext<TContext>() where TContext : DbContext
     {
         _configuration.ModelAccessor = DbContextResolver.ReadModel<TContext>;
         _configuration.ContextLease = DbContextResolver.Lease<TContext>;
@@ -53,28 +53,28 @@ public sealed class CdcBuilder
     }
 
     /// <summary>Track every mapped entity in the model (opt-in; default is explicit declaration).</summary>
-    public CdcBuilder CaptureAllMappedTables()
+    public WallabyBuilder CaptureAllMappedTables()
     {
         _configuration.CaptureAllMapped = true;
         return this;
     }
 
     /// <summary>Register a sink instance (keyed by its <see cref="ISink.Name"/>).</summary>
-    public CdcBuilder AddSink(ISink sink)
+    public WallabyBuilder AddSink(ISink sink)
     {
         _configuration.Sinks.Add(new SinkRegistration { Name = sink.Name, Factory = _ => sink });
         return this;
     }
 
     /// <summary>Register a sink resolved from the container.</summary>
-    public CdcBuilder AddSink(string name, Func<IServiceProvider, ISink> factory)
+    public WallabyBuilder AddSink(string name, Func<IServiceProvider, ISink> factory)
     {
         _configuration.Sinks.Add(new SinkRegistration { Name = name, Factory = factory });
         return this;
     }
 
     /// <summary>Register an in-process delegate sink.</summary>
-    public CdcBuilder AddDelegateSink(string name, Func<SinkBatch, CancellationToken, Task<DeliveryResult>> handler)
+    public WallabyBuilder AddDelegateSink(string name, Func<SinkBatch, CancellationToken, Task<DeliveryResult>> handler)
         => AddSink(new DelegateSink(name, handler));
 
     /// <summary>
@@ -82,7 +82,7 @@ public sealed class CdcBuilder
     /// e.g. by selecting a tenant connection string or a context carrying the tenant for global query filters.
     /// Used by mappings that declare <c>ScopedBy(...)</c>.
     /// </summary>
-    public CdcBuilder UseScopedContext(Func<object?, IServiceProvider, DbContext> factory)
+    public WallabyBuilder UseScopedContext(Func<object?, IServiceProvider, DbContext> factory)
     {
         _configuration.ScopedContextFactory = factory;
         return this;
@@ -94,7 +94,7 @@ public sealed class CdcBuilder
     /// third-party CDC tool (e.g. an ELT) can read from it independently. Wallaby never drops these slots;
     /// remove a no-longer-needed slot/publication manually (it pins WAL until then).
     /// </summary>
-    public CdcBuilder AddExternalSlot(string slotName, Action<ExternalSlotBuilder> configure)
+    public WallabyBuilder AddExternalSlot(string slotName, Action<ExternalSlotBuilder> configure)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(slotName);
         ArgumentNullException.ThrowIfNull(configure);
@@ -110,7 +110,7 @@ public sealed class CdcBuilder
     /// defaults to a per-slot folder under the OS temp path; mount a writable volume when the container's root
     /// filesystem is read-only.
     /// </summary>
-    public CdcBuilder SpillToDisk(string? directory = null)
+    public WallabyBuilder SpillToDisk(string? directory = null)
         => UseTransactionSpill(ctx => new FileTransactionSpill(
             directory ?? Path.Combine(Path.GetTempPath(), "wallaby", ctx.SlotName)));
 
@@ -120,7 +120,7 @@ public sealed class CdcBuilder
     /// cost of extra source-DB I/O during a huge transaction. Use <see cref="SpillToDisk"/> to avoid that I/O when
     /// a writable path is available.
     /// </summary>
-    public CdcBuilder SpillToDatabase()
+    public WallabyBuilder SpillToDatabase()
         => UseTransactionSpill(ctx => new PostgresUnloggedTableSpill(ctx.DataSource, ctx.SlotName));
 
     /// <summary>
@@ -131,7 +131,7 @@ public sealed class CdcBuilder
     /// Note that only a backend spilling to durable/external storage actually bounds memory; an in-RAM store just
     /// relocates it. Overrides <see cref="SpillToDisk"/>/<see cref="SpillToDatabase"/>; the default is the database.
     /// </summary>
-    public CdcBuilder UseTransactionSpill(Func<SpillContext, ITransactionSpill> factory)
+    public WallabyBuilder UseTransactionSpill(Func<SpillContext, ITransactionSpill> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
         _configuration.SpillFactory = factory;
@@ -150,7 +150,7 @@ public sealed class CdcBuilder
     {
         // Structural validation only — option VALUES (the connection string, slot/publication names, sizes,
         // intervals) are not final until the options pipeline runs (Configure/binding/PostConfigure may still
-        // supply or change them), so those checks live in CdcOptionsValidator and surface on first CdcOptions
+        // supply or change them), so those checks live in CdcOptionsValidator and surface on first WallabyOptions
         // resolution.
 
         // Capturing (any sink, Map<>(), or CaptureAllMappedTables()) requires a context + a sink. Without
@@ -160,12 +160,12 @@ public sealed class CdcBuilder
         {
             if (_configuration.ModelAccessor is null)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     "Capturing requires a DbContext. Declare it with UseContext<TContext>().");
             }
             if (_configuration.Sinks.Count == 0)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     "At least one sink must be registered when capturing (e.g. AddMeilisearchSink/AddDelegateSink).");
             }
         }
@@ -174,22 +174,22 @@ public sealed class CdcBuilder
         {
             if (string.IsNullOrEmpty(mapping.SinkName))
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>() is missing a sink. Call .ToSink(\"<name>\", ...).");
             }
             if (mapping.TransformFactory is null)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>() is missing a transform. Call .UsingTransform(...).");
             }
             if (mapping.DestinationSelector is not null && mapping.ScopeKeySelector is null)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>().ScopedDestination(...) requires .ScopedBy(...) to provide the scope key.");
             }
             if (mapping.ScopeKeySelector is not null && mapping.DestinationSelector is null && _configuration.ScopedContextFactory is null)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register UseScopedContext(...).");
             }
             // Scoped destinations must resolve the scope key on deletes too, which needs full old-row values.
@@ -203,7 +203,7 @@ public sealed class CdcBuilder
         if (_configuration.ModelAccessor is null &&
             _configuration.ExternalSlots.Any(e => e.EntityTypes.Count > 0))
         {
-            throw new CdcConfigurationException(
+            throw new WallabyConfigurationException(
                 "AddExternalSlot(...).ForEntity<T>() requires a DbContext to resolve the table. " +
                 "Declare one with UseContext<TContext>() or declare the table by name via ForTable(...).");
         }
@@ -218,17 +218,17 @@ public sealed class CdcBuilder
         {
             if (external.TableNames.Count == 0 && external.EntityTypes.Count == 0)
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"AddExternalSlot(\"{external.SlotName}\") declares no tables. Add at least one via ForTable(...) or ForEntity<T>().");
             }
             if (!slotNames.Add(external.SlotName))
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"External slot name '{external.SlotName}' collides with another external slot.");
             }
             if (!publicationNames.Add(external.ResolvedPublicationName))
             {
-                throw new CdcConfigurationException(
+                throw new WallabyConfigurationException(
                     $"External publication name '{external.ResolvedPublicationName}' collides with another external slot.");
             }
         }

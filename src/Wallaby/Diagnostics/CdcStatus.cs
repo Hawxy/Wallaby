@@ -3,30 +3,30 @@ using Wallaby.Abstractions;
 namespace Wallaby.Diagnostics;
 
 /// <summary>
-/// Mutable, thread-safe implementation of <see cref="ICdcStatus"/>. The runtime, pipeline, and background
+/// Mutable, thread-safe implementation of <see cref="IWallabyStatus"/>. The runtime, pipeline, and background
 /// service update it at lifecycle points; reads (from health-check probe threads) are lock-free via an
 /// atomically-swapped immutable snapshot.
 /// </summary>
-internal sealed class CdcStatus : ICdcStatus
+internal sealed class CdcStatus : IWallabyStatus
 {
     private readonly Lock _gate = new();
-    private CdcStatusSnapshot _snapshot;
+    private WallabyStatusSnapshot _snapshot;
 
     public CdcStatus(string slotName = "", TimeProvider? clock = null)
     {
-        _snapshot = new CdcStatusSnapshot
+        _snapshot = new WallabyStatusSnapshot
         {
-            Role = CdcNodeRole.Starting,
+            Role = WallabyNodeRole.Starting,
             StartedAt = (clock ?? TimeProvider.System).GetUtcNow(),
             SlotName = slotName,
         };
     }
 
-    public CdcStatusSnapshot Current => Volatile.Read(ref _snapshot);
+    public WallabyStatusSnapshot Current => Volatile.Read(ref _snapshot);
 
     // Mutations are rare (role transitions, once per committed transaction) so a lock is fine; readers stay
     // lock-free via Volatile.Read of the swapped immutable snapshot.
-    private void Update(Func<CdcStatusSnapshot, CdcStatusSnapshot> mutate)
+    private void Update(Func<WallabyStatusSnapshot, WallabyStatusSnapshot> mutate)
     {
         lock (_gate)
         {
@@ -35,10 +35,10 @@ internal sealed class CdcStatus : ICdcStatus
     }
 
     internal void EnterLeader(DateTimeOffset since) =>
-        Update(s => s with { Role = CdcNodeRole.Leader, LeaderSince = since, Faulted = false });
+        Update(s => s with { Role = WallabyNodeRole.Leader, LeaderSince = since, Faulted = false });
 
     internal void EnterStandby() =>
-        Update(s => s with { Role = CdcNodeRole.Standby, LeaderSince = null });
+        Update(s => s with { Role = WallabyNodeRole.Standby, LeaderSince = null });
 
     internal void RecordLeaderFailure(string error) =>
         Update(s => s with { ConsecutiveLeaderFailures = s.ConsecutiveLeaderFailures + 1, LastError = error });
@@ -56,8 +56,8 @@ internal sealed class CdcStatus : ICdcStatus
         });
 
     internal void MarkFaulted(string error) =>
-        Update(s => s with { Role = CdcNodeRole.Stopped, Faulted = true, LastError = error });
+        Update(s => s with { Role = WallabyNodeRole.Stopped, Faulted = true, LastError = error });
 
     internal void MarkStopped() =>
-        Update(s => s with { Role = CdcNodeRole.Stopped });
+        Update(s => s with { Role = WallabyNodeRole.Stopped });
 }

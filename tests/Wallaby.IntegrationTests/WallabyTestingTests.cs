@@ -25,7 +25,7 @@ public class WallabyTestingTests(PostgresFixture pg)
     [Test]
     public async Task Replaced_sink_captures_changes_end_to_end()
     {
-        var names = CdcNames.Unique();
+        var names = WallabyNames.Unique();
         var capture = new CaptureSink();
 
         var services = new ServiceCollection();
@@ -41,12 +41,12 @@ public class WallabyTestingTests(PostgresFixture pg)
                    .ToSink("meili", destination: "products")
                    .UsingTransform((_, changes, _) =>
                    {
-                       var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                        foreach (var c in changes)
                        {
-                           docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
+                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
                    });
         });
 
@@ -93,7 +93,7 @@ public class WallabyTestingTests(PostgresFixture pg)
     [Test]
     public async Task Deferred_overload_reads_configuration_and_streams_to_the_replaced_sink()
     {
-        var names = CdcNames.Unique();
+        var names = WallabyNames.Unique();
         var capture = new CaptureSink();
 
         // The connection string travels through IConfiguration and is only read when the provider exists —
@@ -115,12 +115,12 @@ public class WallabyTestingTests(PostgresFixture pg)
                    .ToSink("meili", destination: "products")
                    .UsingTransform((_, changes, _) =>
                    {
-                       var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                        foreach (var c in changes)
                        {
-                           docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
+                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
                    });
         });
 
@@ -188,7 +188,7 @@ public class WallabyTestingExtensionTests
         services.ConfigureWallabyOptions(o => o.SlotName = "overridden_slot");
 
         await using var provider = services.BuildServiceProvider();
-        provider.GetRequiredService<CdcOptions>().SlotName.ShouldBe("overridden_slot");
+        provider.GetRequiredService<WallabyOptions>().SlotName.ShouldBe("overridden_slot");
     }
 
     [Test]
@@ -203,7 +203,7 @@ public class WallabyTestingExtensionTests
 
         await using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<CdcOptions>().SlotName.ShouldBe("second");
+        provider.GetRequiredService<WallabyOptions>().SlotName.ShouldBe("second");
         var sinks = provider.GetRequiredService<CdcConfiguration>().Sinks;
         sinks.Count.ShouldBe(1);
         ReferenceEquals(sinks[0].Factory(provider), capture).ShouldBeTrue();
@@ -234,7 +234,7 @@ public class WallabyTestingExtensionTests
         }
         return services;
 
-        static void Configure(CdcBuilder cdc) => cdc
+        static void Configure(WallabyBuilder cdc) => cdc
             .UseContext<AppDbContext>()
             .UseConnectionString("Host=localhost;Database=unused")
             .AddDelegateSink("real", (_, _) => Task.FromResult(DeliveryResult.Success))
@@ -242,12 +242,12 @@ public class WallabyTestingExtensionTests
                 .ToSink("real")
                 .UsingTransform((_, changes, _) =>
                 {
-                    var docs = new Dictionary<DocumentKey, CdcDocument?>();
+                    var docs = new Dictionary<DocumentKey, WallabyDocument?>();
                     foreach (var c in changes)
                     {
-                        docs[c.Key] = new CdcDocument { ["name"] = c.Entity!.Name };
+                        docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                     }
-                    return Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(docs);
+                    return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
                 });
     }
 }

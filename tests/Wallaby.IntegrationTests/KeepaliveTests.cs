@@ -25,7 +25,7 @@ public class KeepaliveTests(PostgresFixture pg)
     [Test]
     public async Task Keepalives_during_slow_processing_do_not_break_streaming()
     {
-        await using var harness = CdcTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
         var sink = new SlowSink("slow", TimeSpan.FromMilliseconds(400));
         harness.AddSink(sink);
         // Fire keepalives well within the slow delivery so the in-flight status-update path is exercised

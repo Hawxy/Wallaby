@@ -10,7 +10,7 @@ public class CdcStatusTests
     {
         var status = new CdcStatus();
 
-        status.Current.Role.ShouldBe(CdcNodeRole.Starting);
+        status.Current.Role.ShouldBe(WallabyNodeRole.Starting);
         status.Current.LastIngestionLagSeconds.ShouldBe(-1d);
     }
 
@@ -24,7 +24,7 @@ public class CdcStatusTests
         status.RecordProgress(lsn: 42, lagSeconds: 3.5, at: since.AddSeconds(1));
 
         var snapshot = status.Current;
-        snapshot.Role.ShouldBe(CdcNodeRole.Leader);
+        snapshot.Role.ShouldBe(WallabyNodeRole.Leader);
         snapshot.LeaderSince.ShouldBe(since);
         snapshot.LastAcknowledgedLsn.ShouldBe(42UL);
         snapshot.LastIngestionLagSeconds.ShouldBe(3.5);
@@ -51,7 +51,7 @@ public class CdcStatusTests
         status.MarkFaulted("Boom: bad");
 
         status.Current.Faulted.ShouldBeTrue();
-        status.Current.Role.ShouldBe(CdcNodeRole.Stopped);
+        status.Current.Role.ShouldBe(WallabyNodeRole.Stopped);
         status.Current.LastError.ShouldBe("Boom: bad");
     }
 
@@ -76,7 +76,7 @@ public class CdcStatusTests
 
         status.EnterStandby();
 
-        status.Current.Role.ShouldBe(CdcNodeRole.Standby);
+        status.Current.Role.ShouldBe(WallabyNodeRole.Standby);
         status.Current.LeaderSince.ShouldBeNull();
     }
 }

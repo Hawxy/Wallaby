@@ -7,11 +7,11 @@ namespace Wallaby.Testing;
 
 /// <summary>
 /// Post-registration overrides for test hosts: swap a production sink for a test double or adjust
-/// <see cref="CdcOptions"/> after the application's own <c>AddWallaby</c> call has run. Designed for
+/// <see cref="WallabyOptions"/> after the application's own <c>AddWallaby</c> call has run. Designed for
 /// <c>WebApplicationFactory.ConfigureTestServices</c> (which executes after the app's
 /// <c>ConfigureServices</c>) but works with any <see cref="IServiceCollection"/>. Both extensions support
-/// the eager <c>AddWallaby(Action&lt;CdcBuilder&gt;)</c> overload and the deferred provider-aware
-/// <c>AddWallaby(Action&lt;IServiceProvider, CdcBuilder&gt;)</c> overload; with the deferred overload the
+/// the eager <c>AddWallaby(Action&lt;WallabyBuilder&gt;)</c> overload and the deferred provider-aware
+/// <c>AddWallaby(Action&lt;IServiceProvider, WallabyBuilder&gt;)</c> overload; with the deferred overload the
 /// overrides apply when the configuration first materializes (host start), so configuration errors —
 /// including an unknown sink name — surface there rather than at registration.
 /// </summary>
@@ -51,16 +51,16 @@ public static class WallabyTestingServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Override <see cref="CdcOptions"/> for a test host — e.g. to point a test run at its own replication
+    /// Override <see cref="WallabyOptions"/> for a test host — e.g. to point a test run at its own replication
     /// slot and publication so it cannot collide with other environments. Equivalent to
     /// <c>services.PostConfigure(configure)</c>: it runs after the application's own option configuration
-    /// (the <c>AddWallaby</c> builder and any <c>Configure&lt;CdcOptions&gt;</c> calls), and repeated calls
+    /// (the <c>AddWallaby</c> builder and any <c>Configure&lt;WallabyOptions&gt;</c> calls), and repeated calls
     /// compose in call order.
     /// </summary>
     /// <param name="services">The service collection <c>AddWallaby</c> was called on.</param>
     /// <param name="configure">Applied when the options first materialize.</param>
     /// <exception cref="InvalidOperationException"><c>AddWallaby</c> has not been called on <paramref name="services"/>.</exception>
-    public static IServiceCollection ConfigureWallabyOptions(this IServiceCollection services, Action<CdcOptions> configure)
+    public static IServiceCollection ConfigureWallabyOptions(this IServiceCollection services, Action<WallabyOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
         EnsureWallabyRegistered(services, nameof(ConfigureWallabyOptions));

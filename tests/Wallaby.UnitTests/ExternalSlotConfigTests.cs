@@ -9,9 +9,9 @@ public class ExternalSlotConfigTests
 {
     // A capturing builder: a sink + a declared context, so the external-slot validation runs alongside a
     // primary slot/publication (exercises the collision-with-primary checks).
-    private static CdcBuilder MinimalBuilder()
+    private static WallabyBuilder MinimalBuilder()
     {
-        var builder = new CdcBuilder();
+        var builder = new WallabyBuilder();
         builder.UseContext<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
@@ -19,9 +19,9 @@ public class ExternalSlotConfigTests
     }
 
     // A provision-only builder: a connection string + external slots, no context and no sink.
-    private static CdcBuilder ProvisionOnlyBuilder()
+    private static WallabyBuilder ProvisionOnlyBuilder()
     {
-        var builder = new CdcBuilder();
+        var builder = new WallabyBuilder();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         return builder;
     }
@@ -51,11 +51,11 @@ public class ExternalSlotConfigTests
     [Test]
     public void Capturing_without_a_context_fails_fast()
     {
-        var builder = new CdcBuilder();
+        var builder = new WallabyBuilder();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)); // => CaptureIntended
 
-        Should.Throw<CdcConfigurationException>(() => builder.Build());
+        Should.Throw<WallabyConfigurationException>(() => builder.Build());
     }
 
     [Test]
@@ -64,7 +64,7 @@ public class ExternalSlotConfigTests
         var builder = ProvisionOnlyBuilder();
         builder.AddExternalSlot("elt", s => s.ForEntity<Product>());
 
-        Should.Throw<CdcConfigurationException>(() => builder.Build());
+        Should.Throw<WallabyConfigurationException>(() => builder.Build());
     }
 
     [Test]
@@ -74,7 +74,7 @@ public class ExternalSlotConfigTests
         builder.AddExternalSlot("a", s => s.ForTable("orders").WithPublication("shared"));
         builder.AddExternalSlot("b", s => s.ForTable("customers").WithPublication("shared"));
 
-        Should.Throw<CdcConfigurationException>(() => builder.Build());
+        Should.Throw<WallabyConfigurationException>(() => builder.Build());
     }
 
     [Test]
@@ -96,11 +96,11 @@ public class ExternalSlotConfigTests
         var builder = MinimalBuilder();
         builder.AddExternalSlot("elt", _ => { });
 
-        Should.Throw<CdcConfigurationException>(() => builder.Build());
+        Should.Throw<WallabyConfigurationException>(() => builder.Build());
     }
 
     // Collisions with the PRIMARY slot/publication involve option values, which are not final until the
-    // options pipeline runs — so they surface on first CdcOptions resolution rather than at Build().
+    // options pipeline runs — so they surface on first WallabyOptions resolution rather than at Build().
     [Test]
     public void External_slot_name_colliding_with_primary_fails_on_options_resolution()
     {
@@ -109,7 +109,7 @@ public class ExternalSlotConfigTests
             .AddExternalSlot("dup", s => s.ForTable("orders"))
             .Build();
 
-        Should.Throw<CdcConfigurationException>(() => ValidatedOptions(config));
+        Should.Throw<WallabyConfigurationException>(() => ValidatedOptions(config));
     }
 
     [Test]
@@ -120,20 +120,20 @@ public class ExternalSlotConfigTests
             .AddExternalSlot("elt", s => s.ForTable("orders").WithPublication("shared_pub"))
             .Build();
 
-        Should.Throw<CdcConfigurationException>(() => ValidatedOptions(config));
+        Should.Throw<WallabyConfigurationException>(() => ValidatedOptions(config));
     }
 
-    /// <summary>Materialize CdcOptions the way AddWallaby does: builder actions applied, then validated.</summary>
-    private static CdcOptions ValidatedOptions(CdcConfiguration config)
+    /// <summary>Materialize WallabyOptions the way AddWallaby does: builder actions applied, then validated.</summary>
+    private static WallabyOptions ValidatedOptions(CdcConfiguration config)
     {
-        var options = new CdcOptions();
+        var options = new WallabyOptions();
         foreach (var apply in config.OptionsActions)
         {
             apply(options);
         }
         var result = new CdcOptionsValidator(config).Validate(null, options);
         return result.Failed
-            ? throw new CdcConfigurationException(string.Join(" ", result.Failures ?? []))
+            ? throw new WallabyConfigurationException(string.Join(" ", result.Failures ?? []))
             : options;
     }
 
@@ -144,7 +144,7 @@ public class ExternalSlotConfigTests
         builder.AddExternalSlot("elt", s => s.ForTable("orders"));
         builder.AddExternalSlot("elt", s => s.ForTable("customers"));
 
-        Should.Throw<CdcConfigurationException>(() => builder.Build());
+        Should.Throw<WallabyConfigurationException>(() => builder.Build());
     }
 
     [Test]
@@ -186,7 +186,7 @@ public class ExternalSlotConfigTests
         var registration = new ExternalSlotRegistration { SlotName = "elt" };
         registration.EntityTypes.Add(typeof(ExternalSlotConfigTests)); // not in the EF model
 
-        Should.Throw<CdcConfigurationException>(() => ExternalSlotResolver.Resolve(new[] { registration }, ctx.Model));
+        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve(new[] { registration }, ctx.Model));
     }
 
     [Test]
@@ -210,6 +210,6 @@ public class ExternalSlotConfigTests
         var registration = new ExternalSlotRegistration { SlotName = "elt" };
         registration.EntityTypes.Add(typeof(Product));
 
-        Should.Throw<CdcConfigurationException>(() => ExternalSlotResolver.Resolve(new[] { registration }, model: null));
+        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve(new[] { registration }, model: null));
     }
 }

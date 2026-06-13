@@ -16,14 +16,14 @@ using Wallaby.Model;
 namespace Wallaby.Hosting;
 
 /// <summary>
-/// Owns the end-to-end CDC lifecycle for a context: elect leadership (cluster lock), self-configure,
+/// Owns the end-to-end Wallaby lifecycle for a context: elect leadership (cluster lock), self-configure,
 /// then run the live pipeline and backfill scheduler. Standby nodes wait and take over on failover.
 /// </summary>
 internal sealed class CdcRuntime
 {
     private readonly CapturedModel _capturedModel;
     private readonly CdcConfiguration _config;
-    private readonly CdcOptions _options;
+    private readonly WallabyOptions _options;
     private readonly bool _skipFailedBatches;
     private readonly CdcDataSource _dataSource;
     private readonly IClusterLock _clusterLock;
@@ -33,7 +33,7 @@ internal sealed class CdcRuntime
     private readonly ILogger<CdcRuntime> _logger;
 
     // Built once.
-    private CdcModel _cdcModel = null!;
+    private WallabyModel _cdcModel = null!;
     private EntityMaterializer _materializer = null!;
     private MappingChangeRouter _router = null!;
     private SinkDispatcher _dispatcher = null!;
@@ -48,7 +48,7 @@ internal sealed class CdcRuntime
     public CdcRuntime(
         CapturedModel capturedModel,
         CdcConfiguration config,
-        CdcOptions options,
+        WallabyOptions options,
         CdcDataSource dataSource,
         IClusterLock clusterLock,
         IServiceProvider services,
@@ -59,7 +59,7 @@ internal sealed class CdcRuntime
         _capturedModel = capturedModel;
         _config = config;
         _options = options;
-        _skipFailedBatches = options.DeadLetterPolicy == CdcDeadLetterPolicy.Skip;
+        _skipFailedBatches = options.DeadLetterPolicy == WallabyDeadLetterPolicy.Skip;
         _dataSource = dataSource;
         _clusterLock = clusterLock;
         _services = services;
@@ -225,7 +225,7 @@ internal sealed class CdcRuntime
         foreach (var registration in _config.Mappings.Values)
         {
             var captured = _cdcModel.FindByClrType(registration.EntityClrType)
-                ?? throw new CdcConfigurationException(
+                ?? throw new WallabyConfigurationException(
                     $"Mapped entity '{registration.EntityClrType.FullName}' is not captured. Ensure it is declared and mapped to a table.");
 
             mappings[registration.EntityClrType] = new EntityMapping
@@ -309,19 +309,19 @@ internal sealed class CdcRuntime
 /// <summary>Source-generated log messages for <see cref="CdcRuntime"/>.</summary>
 internal static partial class CdcRuntimeLog
 {
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire CDC leadership; retrying.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire Wallaby leadership; retrying.")]
     internal static partial void LeadershipAcquireFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "CDC standby: another node holds leadership for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Wallaby standby: another node holds leadership for slot '{Slot}'.")]
     internal static partial void Standby(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Acquired CDC leadership for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Acquired Wallaby leadership for slot '{Slot}'.")]
     internal static partial void LeadershipAcquired(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Lost CDC leadership for slot '{Slot}' (lock connection dropped); stepping down and re-electing.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Lost Wallaby leadership for slot '{Slot}' (lock connection dropped); stepping down and re-electing.")]
     internal static partial void LeadershipLost(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "CDC leader session failed; will retry.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Wallaby leader session failed; will retry.")]
     internal static partial void LeaderSessionFailed(this ILogger logger, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Backfill scheduler failed.")]

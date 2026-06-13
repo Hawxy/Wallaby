@@ -10,8 +10,8 @@ public class TransformInvokerTests
     public async Task Mismatched_entity_type_throws_instead_of_passing_a_null_entity()
     {
         var invoker = new TransformInvoker<Product>(new DelegateTransform<Product>((_, _, _) =>
-            Task.FromResult<IReadOnlyDictionary<DocumentKey, CdcDocument?>>(
-                new Dictionary<DocumentKey, CdcDocument?>())));
+            Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+                new Dictionary<DocumentKey, WallabyDocument?>())));
 
         var change = new ChangeEvent(
             ChangeAction.Update,

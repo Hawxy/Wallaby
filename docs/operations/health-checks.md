@@ -40,9 +40,9 @@ endpoint.
 
 ## Reading status directly
 
-The check reads a public `ICdcStatus` singleton that the core runtime maintains in memory (role, leadership,
+The check reads a public `IWallabyStatus` singleton that the core runtime maintains in memory (role, leadership,
 last acknowledged LSN, last ingestion lag, leader-session failures, fault). `AddWallaby` registers it, so
-you can resolve `ICdcStatus` and read `Current` to surface CDC status in your own diagnostics.
+you can resolve `IWallabyStatus` and read `Current` to surface CDC status in your own diagnostics.
 
 ::: tip Readiness
 A richer **readiness** check (graded on replication lag / retained WAL) may be added later. Lag is best watched through

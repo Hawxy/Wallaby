@@ -6,12 +6,12 @@ namespace Wallaby.UnitTests;
 
 public class WallabyHealthCheckTests
 {
-    private sealed class FakeStatus(CdcStatusSnapshot snapshot) : ICdcStatus
+    private sealed class FakeStatus(WallabyStatusSnapshot snapshot) : IWallabyStatus
     {
-        public CdcStatusSnapshot Current => snapshot;
+        public WallabyStatusSnapshot Current => snapshot;
     }
 
-    private static CdcStatusSnapshot Snap(CdcNodeRole role, bool faulted = false) => new()
+    private static WallabyStatusSnapshot Snap(WallabyNodeRole role, bool faulted = false) => new()
     {
         Role = role,
         Faulted = faulted,
@@ -19,7 +19,7 @@ public class WallabyHealthCheckTests
         SlotName = "slot",
     };
 
-    private static async Task<HealthStatus> CheckAsync(CdcStatusSnapshot snapshot)
+    private static async Task<HealthStatus> CheckAsync(WallabyStatusSnapshot snapshot)
     {
         var check = new WallabyHealthCheck(new FakeStatus(snapshot));
         var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
@@ -27,10 +27,10 @@ public class WallabyHealthCheckTests
     }
 
     [Test]
-    [Arguments(CdcNodeRole.Starting)]
-    [Arguments(CdcNodeRole.Leader)]
-    [Arguments(CdcNodeRole.Standby)]
-    public async Task Healthy_while_the_subsystem_is_alive(CdcNodeRole role)
+    [Arguments(WallabyNodeRole.Starting)]
+    [Arguments(WallabyNodeRole.Leader)]
+    [Arguments(WallabyNodeRole.Standby)]
+    public async Task Healthy_while_the_subsystem_is_alive(WallabyNodeRole role)
     {
         (await CheckAsync(Snap(role))).ShouldBe(HealthStatus.Healthy);
     }
@@ -38,6 +38,6 @@ public class WallabyHealthCheckTests
     [Test]
     public async Task Unhealthy_when_the_background_service_terminated()
     {
-        (await CheckAsync(Snap(CdcNodeRole.Stopped, faulted: true))).ShouldBe(HealthStatus.Unhealthy);
+        (await CheckAsync(Snap(WallabyNodeRole.Stopped, faulted: true))).ShouldBe(HealthStatus.Unhealthy);
     }
 }

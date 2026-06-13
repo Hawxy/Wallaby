@@ -8,7 +8,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class WallabyHealthCheckExtensions
 {
     /// <summary>
-    /// Add Wallaby's liveness health check, which is Unhealthy only when the CDC subsystem has terminated
+    /// Add Wallaby's liveness health check, which is Unhealthy only when the Wallaby subsystem has terminated
     /// (a healthy standby or a lagging leader stays Healthy). Wire it to a liveness probe.
     /// </summary>
     /// <param name="builder">The health-checks builder.</param>
