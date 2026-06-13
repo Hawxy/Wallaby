@@ -2,7 +2,7 @@ using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Sinks;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class SinkDispatcherTests
 {
@@ -21,8 +21,8 @@ public class SinkDispatcherTests
     {
         var dispatcher = new SinkDispatcher(FailingSink());
 
-        await Assert.That(async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None))
-            .Throws<Exception>();
+        await Should.ThrowAsync<Exception>(
+            async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
     }
 
     [Test]
@@ -49,6 +49,6 @@ public class SinkDispatcherTests
 
         await new SinkDispatcher(sinks).DispatchAsync(OneRecord(), CancellationToken.None);
 
-        await Assert.That(received).IsEqualTo(1);
+        received.ShouldBe(1);
     }
 }

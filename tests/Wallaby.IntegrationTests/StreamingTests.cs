@@ -1,9 +1,9 @@
-using EFCore.CDC.TestModel;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Wallaby.Abstractions;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
+using Wallaby.TestModel;
 
 namespace Wallaby.IntegrationTests;
 
@@ -50,7 +50,7 @@ public class StreamingTests
             timeout: TimeSpan.FromSeconds(90));
 
         var delivered = capture.For("products").Count(r => r.Document is not null);
-        await Assert.That(delivered).IsEqualTo(count);
+        delivered.ShouldBe(count);
 
         // And the server actually streamed it (proves the v2 path engaged, not buffer-then-send at commit).
         await Polling.UntilAsync(async () => await StreamTxnsAsync(connectionString, harness.Names.Slot) > 0L,

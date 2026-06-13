@@ -1,9 +1,9 @@
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
+using Wallaby.TestModel;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 /// <summary>
 /// Routing semantics for a single batch (one transaction's changes, or one dispatched slice). The key
@@ -68,8 +68,8 @@ public class MappingChangeRouterTests
         var routed = await Router().RouteAsync(
             [Change(ChangeAction.Insert, 1), Change(ChangeAction.Delete, 1)], CancellationToken.None);
 
-        await Assert.That(routed.Count).IsEqualTo(1);
-        await Assert.That(routed[0].Record.IsDeletion).IsTrue();
+        routed.Count.ShouldBe(1);
+        routed[0].Record.IsDeletion.ShouldBeTrue();
     }
 
     [Test]
@@ -78,8 +78,8 @@ public class MappingChangeRouterTests
         var routed = await Router().RouteAsync(
             [Change(ChangeAction.Update, 1), Change(ChangeAction.Delete, 1)], CancellationToken.None);
 
-        await Assert.That(routed.Count).IsEqualTo(1);
-        await Assert.That(routed[0].Record.IsDeletion).IsTrue();
+        routed.Count.ShouldBe(1);
+        routed[0].Record.IsDeletion.ShouldBeTrue();
     }
 
     [Test]
@@ -88,8 +88,8 @@ public class MappingChangeRouterTests
         var routed = await Router().RouteAsync(
             [Change(ChangeAction.Delete, 1), Change(ChangeAction.Insert, 1)], CancellationToken.None);
 
-        await Assert.That(routed.Count).IsEqualTo(1);
-        await Assert.That(routed[0].Record.IsDeletion).IsFalse();
+        routed.Count.ShouldBe(1);
+        routed[0].Record.IsDeletion.ShouldBeFalse();
     }
 
     [Test]
@@ -98,9 +98,9 @@ public class MappingChangeRouterTests
         var routed = await Router().RouteAsync(
             [Change(ChangeAction.Insert, 1), Change(ChangeAction.Delete, 2)], CancellationToken.None);
 
-        await Assert.That(routed.Count).IsEqualTo(2);
-        await Assert.That(routed.Count(r => r.Record.IsDeletion)).IsEqualTo(1);
-        await Assert.That(routed.Count(r => !r.Record.IsDeletion)).IsEqualTo(1);
+        routed.Count.ShouldBe(2);
+        routed.Count(r => r.Record.IsDeletion).ShouldBe(1);
+        routed.Count(r => !r.Record.IsDeletion).ShouldBe(1);
     }
 
     [Test]
@@ -108,8 +108,8 @@ public class MappingChangeRouterTests
     {
         var router = Router(new ThrowingTransform(), skipFailedBatches: false);
 
-        await Assert.That(async () => await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None))
-            .Throws<InvalidOperationException>();
+        await Should.ThrowAsync<InvalidOperationException>(
+            async () => await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None));
     }
 
     [Test]
@@ -120,6 +120,6 @@ public class MappingChangeRouterTests
         var routed = await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None);
 
         // The poison batch is dropped rather than throwing, so the pipeline can keep streaming.
-        await Assert.That(routed.Count).IsEqualTo(0);
+        routed.Count.ShouldBe(0);
     }
 }

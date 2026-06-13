@@ -2,7 +2,7 @@ using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Model;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 /// <summary><see cref="FileTransactionSpill"/> must append and read back a streamed transaction's changes in order.</summary>
 public class FileTransactionSpillTests
@@ -40,8 +40,8 @@ public class FileTransactionSpillTests
 
             var read = await ReadAllAsync(spill, 42);
 
-            await Assert.That(read.Count).IsEqualTo(5);
-            await Assert.That(string.Join(",", read.Select(c => c.NewValues[1].Value))).IsEqualTo("p0,p1,p2,p3,p4");
+            read.Count.ShouldBe(5);
+            string.Join(",", read.Select(c => c.NewValues[1].Value)).ShouldBe("p0,p1,p2,p3,p4");
         }
         finally
         {
@@ -60,12 +60,12 @@ public class FileTransactionSpillTests
             await spill.AppendAsync(1, Change(0, "a"), default);
             await spill.AppendAsync(2, Change(0, "b"), default);
 
-            await Assert.That((await ReadAllAsync(spill, 1)).Single().NewValues[1].Value).IsEqualTo("a");
-            await Assert.That((await ReadAllAsync(spill, 2)).Single().NewValues[1].Value).IsEqualTo("b");
+            (await ReadAllAsync(spill, 1)).Single().NewValues[1].Value.ShouldBe("a");
+            (await ReadAllAsync(spill, 2)).Single().NewValues[1].Value.ShouldBe("b");
 
             await spill.DiscardAsync(1, default);
-            await Assert.That((await ReadAllAsync(spill, 1)).Count).IsEqualTo(0);
-            await Assert.That((await ReadAllAsync(spill, 2)).Count).IsEqualTo(1); // unaffected
+            (await ReadAllAsync(spill, 1)).Count.ShouldBe(0);
+            (await ReadAllAsync(spill, 2)).Count.ShouldBe(1); // unaffected
         }
         finally
         {

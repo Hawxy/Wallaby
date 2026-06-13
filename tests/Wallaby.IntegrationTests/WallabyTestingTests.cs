@@ -1,4 +1,3 @@
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,6 +6,7 @@ using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
+using Wallaby.TestModel;
 
 namespace Wallaby.IntegrationTests;
 
@@ -76,9 +76,9 @@ public class WallabyTestingTests(PostgresFixture pg)
 
             var latest = capture.LatestByDocumentId(destination: "products");
             var record = latest[id.ToString()];
-            await Assert.That(record.IsDeletion).IsFalse();
-            await Assert.That(record.Destination).IsEqualTo("products");
-            await Assert.That(record.Document!["name"]).IsEqualTo($"testing_{names.Suffix}");
+            record.IsDeletion.ShouldBeFalse();
+            record.Destination.ShouldBe("products");
+            record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
         }
         finally
         {
@@ -149,8 +149,8 @@ public class WallabyTestingTests(PostgresFixture pg)
             await capture.WaitForDocumentsAsync([id.ToString()]);
 
             var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
-            await Assert.That(record.IsDeletion).IsFalse();
-            await Assert.That(record.Document!["name"]).IsEqualTo($"deferred_{names.Suffix}");
+            record.IsDeletion.ShouldBeFalse();
+            record.Document!["name"].ShouldBe($"deferred_{names.Suffix}");
         }
         finally
         {
@@ -167,19 +167,17 @@ public class WallabyTestingTests(PostgresFixture pg)
 public class WallabyTestingExtensionTests
 {
     [Test]
-    public async Task ReplaceWallabySink_throws_without_AddWallaby()
+    public void ReplaceWallabySink_throws_without_AddWallaby()
     {
         var services = new ServiceCollection();
-        await Assert.That(() => services.ReplaceWallabySink("meili", new CaptureSink()))
-            .Throws<InvalidOperationException>();
+        Should.Throw<InvalidOperationException>(() => services.ReplaceWallabySink("meili", new CaptureSink()));
     }
 
     [Test]
-    public async Task ReplaceWallabySink_throws_for_unknown_sink_name()
+    public void ReplaceWallabySink_throws_for_unknown_sink_name()
     {
         var services = BuildRegisteredServices(deferred: false);
-        await Assert.That(() => services.ReplaceWallabySink("wrong", new CaptureSink()))
-            .Throws<InvalidOperationException>();
+        Should.Throw<InvalidOperationException>(() => services.ReplaceWallabySink("wrong", new CaptureSink()));
     }
 
     [Test]
@@ -190,7 +188,7 @@ public class WallabyTestingExtensionTests
         services.ConfigureWallabyOptions(o => o.SlotName = "overridden_slot");
 
         await using var provider = services.BuildServiceProvider();
-        await Assert.That(provider.GetRequiredService<CdcOptions>().SlotName).IsEqualTo("overridden_slot");
+        provider.GetRequiredService<CdcOptions>().SlotName.ShouldBe("overridden_slot");
     }
 
     [Test]
@@ -205,10 +203,10 @@ public class WallabyTestingExtensionTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(provider.GetRequiredService<CdcOptions>().SlotName).IsEqualTo("second");
+        provider.GetRequiredService<CdcOptions>().SlotName.ShouldBe("second");
         var sinks = provider.GetRequiredService<CdcConfiguration>().Sinks;
-        await Assert.That(sinks.Count).IsEqualTo(1);
-        await Assert.That(ReferenceEquals(sinks[0].Factory(provider), capture)).IsTrue();
+        sinks.Count.ShouldBe(1);
+        ReferenceEquals(sinks[0].Factory(provider), capture).ShouldBeTrue();
     }
 
     [Test]
@@ -220,8 +218,7 @@ public class WallabyTestingExtensionTests
         services.ReplaceWallabySink("wrong", new CaptureSink());
 
         await using var provider = services.BuildServiceProvider();
-        await Assert.That(() => provider.GetRequiredService<CdcConfiguration>())
-            .Throws<InvalidOperationException>();
+        Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<CdcConfiguration>());
     }
 
     private static ServiceCollection BuildRegisteredServices(bool deferred)

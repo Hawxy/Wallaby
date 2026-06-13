@@ -1,8 +1,7 @@
-using EFCore.CDC.TestModel;
-using Wallaby;
 using Wallaby.Internal.SelfConfig;
+using Wallaby.TestModel;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class ModelToCdcModelTests
 {
@@ -20,14 +19,14 @@ public class ModelToCdcModelTests
         var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Product)));
 
         var product = model.FindByClrType(typeof(Product));
-        await Assert.That(product).IsNotNull();
-        await Assert.That(product!.Schema).IsEqualTo("public");
-        await Assert.That(product.TableName).IsEqualTo("products");
-        await Assert.That(product.QualifiedName).IsEqualTo("public.products");
+        product.ShouldNotBeNull();
+        product!.Schema.ShouldBe("public");
+        product.TableName.ShouldBe("products");
+        product.QualifiedName.ShouldBe("public.products");
 
         // Custom column name is honored.
         var sku = product.Columns.Single(c => c.PropertyName == nameof(Product.Sku));
-        await Assert.That(sku.ColumnName).IsEqualTo("product_sku");
+        sku.ColumnName.ShouldBe("product_sku");
     }
 
     [Test]
@@ -38,9 +37,9 @@ public class ModelToCdcModelTests
         var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Product)));
         var product = model.FindByClrType(typeof(Product))!;
 
-        await Assert.That(product.PrimaryKey.Count).IsEqualTo(1);
-        await Assert.That(product.PrimaryKey[0].PropertyName).IsEqualTo(nameof(Product.Id));
-        await Assert.That(product.PrimaryKey[0].IsPrimaryKey).IsTrue();
+        product.PrimaryKey.Count.ShouldBe(1);
+        product.PrimaryKey[0].PropertyName.ShouldBe(nameof(Product.Id));
+        product.PrimaryKey[0].IsPrimaryKey.ShouldBeTrue();
     }
 
     [Test]
@@ -53,7 +52,7 @@ public class ModelToCdcModelTests
 
         // Order matters for a composite key.
         var pkInOrder = string.Join(",", line.PrimaryKey.Select(c => c.PropertyName));
-        await Assert.That(pkInOrder).IsEqualTo($"{nameof(OrderLine.OrderId)},{nameof(OrderLine.LineNumber)}");
+        pkInOrder.ShouldBe($"{nameof(OrderLine.OrderId)},{nameof(OrderLine.LineNumber)}");
     }
 
     [Test]
@@ -64,8 +63,8 @@ public class ModelToCdcModelTests
         var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Order)));
         var order = model.FindByClrType(typeof(Order))!;
 
-        await Assert.That(order.Schema).IsEqualTo("sales");
-        await Assert.That(order.QualifiedName).IsEqualTo("sales.orders");
+        order.Schema.ShouldBe("sales");
+        order.QualifiedName.ShouldBe("sales.orders");
     }
 
     [Test]
@@ -75,8 +74,8 @@ public class ModelToCdcModelTests
 
         var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Product)));
 
-        await Assert.That(model.Tables.Count).IsEqualTo(1);
-        await Assert.That(model.FindByClrType(typeof(Customer))).IsNull();
+        model.Tables.Count.ShouldBe(1);
+        model.FindByClrType(typeof(Customer)).ShouldBeNull();
     }
 
     [Test]
@@ -86,8 +85,8 @@ public class ModelToCdcModelTests
 
         var model = ModelToCdcModel.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
 
-        await Assert.That(model.Tables.Select(t => t.QualifiedName).OrderBy(n => n).ToList())
-            .IsEquivalentTo(new[]
+        model.Tables.Select(t => t.QualifiedName).OrderBy(n => n).ToList()
+            .ShouldBe(new[]
             {
                 "public.categories",
                 "public.customers",
@@ -96,7 +95,7 @@ public class ModelToCdcModelTests
                 "public.products",
                 "sales.order_lines",
                 "sales.orders",
-            });
+            }, ignoreOrder: true);
     }
 
     [Test]
@@ -104,8 +103,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        await Assert.That(() => { ModelToCdcModel.Build(ctx.Model, Declared()); })
-            .Throws<CdcConfigurationException>();
+        Should.Throw<CdcConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared()); });
     }
 
     [Test]
@@ -113,8 +111,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        await Assert.That(() => { ModelToCdcModel.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); })
-            .Throws<CdcConfigurationException>();
+        Should.Throw<CdcConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); });
     }
 
     [Test]
@@ -131,6 +128,6 @@ public class ModelToCdcModelTests
 
         var model = ModelToCdcModel.Build(ctx.Model, spec);
 
-        await Assert.That(model.FindByClrType(typeof(Product))!.RequiresFullReplicaIdentity).IsTrue();
+        model.FindByClrType(typeof(Product))!.RequiresFullReplicaIdentity.ShouldBeTrue();
     }
 }

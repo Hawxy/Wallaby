@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
-namespace EFCore.CDC.TestModel;
+namespace Wallaby.TestModel;
 
 /// <summary>Helpers for building <see cref="AppDbContext"/> instances in tests.</summary>
 public static class TestModelFactory

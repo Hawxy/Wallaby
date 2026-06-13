@@ -1,9 +1,9 @@
-using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
@@ -46,8 +46,8 @@ public class BackfillSchedulerIntegrationTests(PostgresFixture pg, MeilisearchFi
         await AllIndexed();
 
         // The pass recorded the copied rows and moved the active-backfill gauge.
-        await Assert.That(rows.GetMeasurementSnapshot().Sum(m => m.Value)).IsGreaterThanOrEqualTo(6L);
-        await Assert.That(active.GetMeasurementSnapshot().Any(m => m.Value == 1)).IsTrue();
+        rows.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(6L);
+        active.GetMeasurementSnapshot().Any(m => m.Value == 1).ShouldBeTrue();
 
         // Version change (v2) re-backfills.
         await probe.DropAsync(index);

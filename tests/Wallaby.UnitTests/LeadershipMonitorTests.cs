@@ -1,6 +1,6 @@
 using Wallaby.Internal.Cluster;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class LeadershipMonitorTests
 {
@@ -14,7 +14,7 @@ public class LeadershipMonitorTests
         await LeadershipMonitor.WatchAsync(
             probe, TimeSpan.FromMilliseconds(10), () => { lost = true; return Task.CompletedTask; }, CancellationToken.None);
 
-        await Assert.That(lost).IsTrue();
+        lost.ShouldBeTrue();
     }
 
     [Test]
@@ -27,6 +27,6 @@ public class LeadershipMonitorTests
         await LeadershipMonitor.WatchAsync(
             probe, TimeSpan.FromMilliseconds(10), () => { lost = true; return Task.CompletedTask; }, cts.Token);
 
-        await Assert.That(lost).IsFalse();
+        lost.ShouldBeFalse();
     }
 }

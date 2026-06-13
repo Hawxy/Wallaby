@@ -1,10 +1,10 @@
 using System.Diagnostics;
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.Pipeline;
+using Wallaby.TestModel;
 
 namespace Wallaby.UnitTests.OpenTelemetry;
 
@@ -72,9 +72,9 @@ public class MappingChangeRouterTelemetryTests
 
         var routed = await router.RouteAsync([change], CancellationToken.None);
 
-        await Assert.That(routed.Count).IsEqualTo(1);
-        await Assert.That(duration.GetMeasurementSnapshot()).IsNotEmpty();
-        await Assert.That(captured).IsNotNull();
-        await Assert.That(captured!.GetTagItem("wallaby.entity")).IsEqualTo("Product");
+        routed.Count.ShouldBe(1);
+        duration.GetMeasurementSnapshot().ShouldNotBeEmpty();
+        captured.ShouldNotBeNull();
+        captured!.GetTagItem("wallaby.entity").ShouldBe("Product");
     }
 }

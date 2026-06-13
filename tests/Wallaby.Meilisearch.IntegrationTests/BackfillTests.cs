@@ -1,8 +1,8 @@
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
@@ -68,7 +68,7 @@ public class BackfillTests(PostgresFixture pg, MeilisearchFixture meili)
 
         foreach (var (id, name) in expected)
         {
-            await Assert.That(await probe.NameAsync(index, id)).IsEqualTo(name);
+            (await probe.NameAsync(index, id)).ShouldBe(name);
         }
     }
 }

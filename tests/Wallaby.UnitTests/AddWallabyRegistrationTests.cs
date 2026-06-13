@@ -1,15 +1,14 @@
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Wallaby;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Hosting;
+using Wallaby.TestModel;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 /// <summary>
 /// Registration-level coverage of the two AddWallaby overloads and the CdcOptions options-pipeline
@@ -60,7 +59,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(provider.GetRequiredService<CdcOptions>().ConnectionString).IsEqualTo(ConnectionString);
+        provider.GetRequiredService<CdcOptions>().ConnectionString.ShouldBe(ConnectionString);
     }
 
     [Test]
@@ -81,10 +80,10 @@ public class AddWallabyRegistrationTests
         await using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<CdcOptions>();
 
-        await Assert.That(options.SlotName).IsEqualTo("after");
-        await Assert.That(options.MaxBatchSize).IsEqualTo(456); // builder overrode the earlier Configure
-        await Assert.That(options.PublicationName).IsEqualTo("post_pub");
-        await Assert.That(options.ChunkSize).IsEqualTo(500); // untouched default
+        options.SlotName.ShouldBe("after");
+        options.MaxBatchSize.ShouldBe(456); // builder overrode the earlier Configure
+        options.PublicationName.ShouldBe("post_pub");
+        options.ChunkSize.ShouldBe(500); // untouched default
     }
 
     [Test]
@@ -106,8 +105,8 @@ public class AddWallabyRegistrationTests
         await using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<CdcOptions>();
 
-        await Assert.That(options.ChunkSize).IsEqualTo(42);
-        await Assert.That(options.ConnectionString).IsEqualTo(boundConnectionString);
+        options.ChunkSize.ShouldBe(42);
+        options.ConnectionString.ShouldBe(boundConnectionString);
     }
 
     [Test]
@@ -120,7 +119,7 @@ public class AddWallabyRegistrationTests
 
         var viaOptions = provider.GetRequiredService<IOptions<CdcOptions>>().Value;
         var plain = provider.GetRequiredService<CdcOptions>();
-        await Assert.That(ReferenceEquals(viaOptions, plain)).IsTrue();
+        ReferenceEquals(viaOptions, plain).ShouldBeTrue();
     }
 
     [Test]
@@ -135,8 +134,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(() => provider.GetRequiredService<CdcOptions>())
-            .Throws<CdcConfigurationException>();
+        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<CdcOptions>());
     }
 
     [Test]
@@ -150,7 +148,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(provider.GetRequiredService<CdcOptions>().ConnectionString).IsEqualTo(ConnectionString);
+        provider.GetRequiredService<CdcOptions>().ConnectionString.ShouldBe(ConnectionString);
     }
 
     [Test]
@@ -165,8 +163,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider(); // registration itself is fine
 
-        await Assert.That(() => provider.GetRequiredService<CdcConfiguration>())
-            .Throws<CdcConfigurationException>();
+        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<CdcConfiguration>());
     }
 
     [Test]
@@ -178,8 +175,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(() => provider.GetRequiredService<CdcOptions>())
-            .Throws<CdcConfigurationException>();
+        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<CdcOptions>());
     }
 
     [Test]
@@ -190,7 +186,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(provider.GetRequiredService<IHostedService>()).IsTypeOf<CdcBackgroundService>();
+        provider.GetRequiredService<IHostedService>().ShouldBeOfType<CdcBackgroundService>();
     }
 
     [Test]
@@ -201,7 +197,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(provider.GetRequiredService<IHostedService>()).IsTypeOf<ExternalSlotProvisioningService>();
+        provider.GetRequiredService<IHostedService>().ShouldBeOfType<ExternalSlotProvisioningService>();
     }
 
     [Test]
@@ -212,8 +208,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        await Assert.That(() => provider.GetRequiredService<ICdcBackfillManager>())
-            .Throws<CdcConfigurationException>();
+        Should.Throw<CdcConfigurationException>(() => provider.GetRequiredService<ICdcBackfillManager>());
     }
 
     [Test]
@@ -233,6 +228,6 @@ public class AddWallabyRegistrationTests
         _ = provider.GetRequiredService<ICdcStatus>();
         _ = provider.GetRequiredService<IHostedService>();
 
-        await Assert.That(calls).IsEqualTo(1);
+        calls.ShouldBe(1);
     }
 }

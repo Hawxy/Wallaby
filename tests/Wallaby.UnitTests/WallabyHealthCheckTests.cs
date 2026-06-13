@@ -2,7 +2,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Wallaby.Abstractions;
 using Wallaby.AspNetCore.HealthChecks;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class WallabyHealthCheckTests
 {
@@ -32,12 +32,12 @@ public class WallabyHealthCheckTests
     [Arguments(CdcNodeRole.Standby)]
     public async Task Healthy_while_the_subsystem_is_alive(CdcNodeRole role)
     {
-        await Assert.That(await CheckAsync(Snap(role))).IsEqualTo(HealthStatus.Healthy);
+        (await CheckAsync(Snap(role))).ShouldBe(HealthStatus.Healthy);
     }
 
     [Test]
     public async Task Unhealthy_when_the_background_service_terminated()
     {
-        await Assert.That(await CheckAsync(Snap(CdcNodeRole.Stopped, faulted: true))).IsEqualTo(HealthStatus.Unhealthy);
+        (await CheckAsync(Snap(CdcNodeRole.Stopped, faulted: true))).ShouldBe(HealthStatus.Unhealthy);
     }
 }

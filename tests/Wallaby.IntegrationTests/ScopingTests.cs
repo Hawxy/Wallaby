@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
+using Wallaby.TestModel;
 
 namespace Wallaby.IntegrationTests;
 
@@ -46,11 +46,11 @@ public class ScopingTests(PostgresFixture pg)
         await harness.RunUntilAsync(() => capture.For("products").Count() >= 4);
 
         // Every transform invocation saw exactly one tenant (the engine sub-grouped the batch).
-        await Assert.That(perInvocationTenantCounts).IsNotEmpty();
-        await Assert.That(perInvocationTenantCounts.All(count => count == 1)).IsTrue();
+        perInvocationTenantCounts.ShouldNotBeEmpty();
+        perInvocationTenantCounts.All(count => count == 1).ShouldBeTrue();
 
         // A scoped enrichment context was built for both tenants.
         var distinctKeys = contextScopeKeys.Select(k => (int)k!).Distinct().OrderBy(k => k).ToList();
-        await Assert.That(distinctKeys).IsEquivalentTo(new[] { 1, 2 });
+        distinctKeys.ShouldBe(new[] { 1, 2 }, ignoreOrder: true);
     }
 }

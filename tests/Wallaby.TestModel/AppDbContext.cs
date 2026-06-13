@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
-namespace EFCore.CDC.TestModel;
+namespace Wallaby.TestModel;
 
 /// <summary>
 /// Representative EF Core model used across unit and integration tests: single and composite primary

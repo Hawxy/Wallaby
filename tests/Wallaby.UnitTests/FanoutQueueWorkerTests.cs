@@ -5,7 +5,7 @@ using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class FanoutQueueWorkerTests
 {
@@ -47,8 +47,8 @@ public class FanoutQueueWorkerTests
 
         var ran = await worker.DrainOnceAsync(CancellationToken.None);
 
-        await Assert.That(ran).IsEqualTo(0);            // nothing actually ran
-        await Assert.That(queue.Deferred).IsEqualTo(1); // it was deferred...
-        await Assert.That(queue.Completed).IsEqualTo(0); // ...not dropped
+        ran.ShouldBe(0);            // nothing actually ran
+        queue.Deferred.ShouldBe(1); // it was deferred...
+        queue.Completed.ShouldBe(0); // ...not dropped
     }
 }

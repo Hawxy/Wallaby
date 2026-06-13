@@ -1,4 +1,3 @@
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,6 +6,7 @@ using Wallaby.DependencyInjection;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
@@ -83,7 +83,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
             var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
 
             await Polling.UntilAsync(async () => await probe.NameAsync(index, id) == $"e2e_{names.Suffix}");
-            await Assert.That(await probe.NameAsync(index, id)).IsEqualTo($"e2e_{names.Suffix}");
+            (await probe.NameAsync(index, id)).ShouldBe($"e2e_{names.Suffix}");
         }
         finally
         {
@@ -115,7 +115,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
 
             var id2 = await Db.AddProductAsync(categoryId, $"after_{names.Suffix}");
             await Polling.UntilAsync(async () => await probe.NameAsync(index, id2) == $"after_{names.Suffix}");
-            await Assert.That(await probe.NameAsync(index, id2)).IsEqualTo($"after_{names.Suffix}");
+            (await probe.NameAsync(index, id2)).ShouldBe($"after_{names.Suffix}");
         }
         finally
         {

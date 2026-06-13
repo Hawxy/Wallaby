@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
@@ -10,6 +9,7 @@ using Wallaby.Internal.State;
 using Wallaby.Model;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
+using Wallaby.TestModel;
 
 namespace Wallaby.IntegrationTests;
 
@@ -53,8 +53,8 @@ public class FanoutScalabilityTests(PostgresFixture pg)
         }
 
         // 12 changes in one transaction with MaxBatchSize 5 => at least 3 sink.deliver batches (5 + 5 + 2).
-        await Assert.That(spans.Count(n => n == "sink.deliver")).IsGreaterThanOrEqualTo(3);
-        await Assert.That(capture.For("products").Select(r => r.DocumentId).Distinct().Count()).IsEqualTo(12);
+        spans.Count(n => n == "sink.deliver").ShouldBeGreaterThanOrEqualTo(3);
+        capture.For("products").Select(r => r.DocumentId).Distinct().Count().ShouldBe(12);
     }
 
     [Test]
@@ -92,9 +92,9 @@ public class FanoutScalabilityTests(PostgresFixture pg)
 
         var productRecords = capture.For("products").ToList();
         // Each affected product is emitted exactly once (no duplicates from the consolidated fan-out).
-        await Assert.That(productRecords.Count).IsEqualTo(4);
-        await Assert.That(productRecords.Select(r => r.DocumentId).Distinct().Count()).IsEqualTo(4);
-        await Assert.That(synthetic.GetMeasurementSnapshot().Sum(m => m.Value)).IsGreaterThanOrEqualTo(4L);
+        productRecords.Count.ShouldBe(4);
+        productRecords.Select(r => r.DocumentId).Distinct().Count().ShouldBe(4);
+        synthetic.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(4L);
     }
 
     [Test]
@@ -127,8 +127,8 @@ public class FanoutScalabilityTests(PostgresFixture pg)
         }
 
         var records = capture.For("products").ToList();
-        await Assert.That(records.Count).IsEqualTo(2);
-        await Assert.That(records.Select(r => r.DocumentId).Distinct().Count()).IsEqualTo(2);
+        records.Count.ShouldBe(2);
+        records.Select(r => r.DocumentId).Distinct().Count().ShouldBe(2);
     }
 
     [Test]
@@ -161,15 +161,15 @@ public class FanoutScalabilityTests(PostgresFixture pg)
             await harness.Db.SetCategoryNameAsync(cat, "Cat-b");
             await harness.WaitUntilAsync(() => synthetic.GetMeasurementSnapshot().Sum(m => m.Value) >= 10, Timeout);
 
-            await Assert.That(await harness.PendingFanoutJobCountAsync()).IsEqualTo(1);
+            (await harness.PendingFanoutJobCountAsync()).ShouldBe(1);
 
             // The trigger transactions are acknowledged (slot advances) while the tail is still queued:
             // both renames re-emitted the same inline first page, so only 5 distinct products are delivered.
             await harness.WaitUntilAsync(() => harness.LastAcknowledgedLsn > 0, Timeout);
-            await Assert.That(capture.For("products").Select(r => r.DocumentId).Distinct().Count()).IsEqualTo(5);
+            capture.For("products").Select(r => r.DocumentId).Distinct().Count().ShouldBe(5);
 
             // Draining the offloaded job re-emits the remaining 7, completing the fan-out.
-            await Assert.That(await harness.DrainFanoutAsync()).IsEqualTo(1);
+            (await harness.DrainFanoutAsync()).ShouldBe(1);
             await harness.WaitUntilAsync(
                 () => capture.For("products").Select(r => r.DocumentId).Distinct().Count() >= 12, Timeout);
         }
@@ -201,25 +201,25 @@ public class FanoutScalabilityTests(PostgresFixture pg)
 
         await store.EnqueueAsync(spec, CancellationToken.None);
         var due = await store.GetNextDueAsync(CancellationToken.None);
-        await Assert.That(due).IsNotNull();
-        await Assert.That(due!.Status).IsEqualTo(BackfillStatus.Requested);
+        due.ShouldNotBeNull();
+        due!.Status.ShouldBe(BackfillStatus.Requested);
 
         // Marking in progress with a cursor makes it a resumable in-progress job.
         await store.MarkInProgressAsync(
             due.TableQualified, due.LookupHash, KeysetCodec.Serialize([(object?)42]), CancellationToken.None);
         var resumed = await store.GetNextDueAsync(CancellationToken.None);
-        await Assert.That(resumed!.Status).IsEqualTo(BackfillStatus.InProgress);
-        await Assert.That(resumed.CursorJson).IsNotNull();
+        resumed!.Status.ShouldBe(BackfillStatus.InProgress);
+        resumed.CursorJson.ShouldNotBeNull();
 
         // Completing it (guarded on InProgress) removes it from the due set.
         await store.CompleteAsync(due.TableQualified, due.LookupHash, CancellationToken.None);
-        await Assert.That(await store.GetNextDueAsync(CancellationToken.None)).IsNull();
+        (await store.GetNextDueAsync(CancellationToken.None)).ShouldBeNull();
 
         // A repeat trigger for the same lookup re-arms the SAME row rather than adding a second.
         await store.EnqueueAsync(spec, CancellationToken.None);
         var rearmed = await store.GetNextDueAsync(CancellationToken.None);
-        await Assert.That(rearmed!.Status).IsEqualTo(BackfillStatus.Requested);
-        await Assert.That((await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash))
-            .IsEqualTo(1);
+        rearmed!.Status.ShouldBe(BackfillStatus.Requested);
+        (await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash)
+            .ShouldBe(1);
     }
 }

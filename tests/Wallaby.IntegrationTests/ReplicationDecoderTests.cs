@@ -1,10 +1,10 @@
-using EFCore.CDC.TestModel;
 using Microsoft.Extensions.Logging.Abstractions;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.IntegrationTests;
 
@@ -84,23 +84,23 @@ public class ReplicationDecoderTests(PostgresFixture pg)
 
         // Insert
         var insert = collected.Single(c => c.Action == ChangeAction.Insert);
-        await Assert.That(insert.Schema).IsEqualTo("public");
-        await Assert.That(insert.TableName).IsEqualTo("products");
-        await Assert.That(insert.OldValues).IsNull();
-        await Assert.That(insert.CommitLsn).IsGreaterThan(0UL);
-        await Assert.That(Convert.ToInt32(Value(insert.NewValues, "Id"))).IsEqualTo(productId);
-        await Assert.That(Value(insert.NewValues, "Name")).IsEqualTo("Widget");
-        await Assert.That(Value(insert.NewValues, "product_sku")).IsEqualTo("W-1");
+        insert.Schema.ShouldBe("public");
+        insert.TableName.ShouldBe("products");
+        insert.OldValues.ShouldBeNull();
+        insert.CommitLsn.ShouldBeGreaterThan(0UL);
+        Convert.ToInt32(Value(insert.NewValues, "Id")).ShouldBe(productId);
+        Value(insert.NewValues, "Name").ShouldBe("Widget");
+        Value(insert.NewValues, "product_sku").ShouldBe("W-1");
 
         // Update (REPLICA IDENTITY DEFAULT + non-key change => new values only, no old tuple)
         var update = collected.Single(c => c.Action == ChangeAction.Update);
-        await Assert.That(Value(update.NewValues, "Name")).IsEqualTo("Widget v2");
-        await Assert.That(update.OldValues).IsNull();
+        Value(update.NewValues, "Name").ShouldBe("Widget v2");
+        update.OldValues.ShouldBeNull();
 
         // Delete (old values carry the primary key under REPLICA IDENTITY DEFAULT)
         var delete = collected.Single(c => c.Action == ChangeAction.Delete);
-        await Assert.That(delete.NewValues.Count).IsEqualTo(0);
-        await Assert.That(Convert.ToInt32(Value(delete.OldValues!, "Id"))).IsEqualTo(productId);
+        delete.NewValues.Count.ShouldBe(0);
+        Convert.ToInt32(Value(delete.OldValues!, "Id")).ShouldBe(productId);
     }
 
     private static object? Value(IReadOnlyList<RawColumn> columns, string name)

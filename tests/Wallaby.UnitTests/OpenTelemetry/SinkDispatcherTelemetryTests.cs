@@ -28,11 +28,11 @@ public class SinkDispatcherTelemetryTests
 
         await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None);
 
-        await Assert.That(delivered.GetMeasurementSnapshot().Sum(m => m.Value)).IsEqualTo(1L);
+        delivered.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBe(1L);
 
         var durations = duration.GetMeasurementSnapshot();
-        await Assert.That(durations.Count).IsEqualTo(1); // one delivery attempt
-        await Assert.That(durations.Any(m => Equals(m.Tags.GetValueOrDefault("wallaby.delivery.outcome"), "success"))).IsTrue();
+        durations.Count.ShouldBe(1); // one delivery attempt
+        durations.Any(m => Equals(m.Tags.GetValueOrDefault("wallaby.delivery.outcome"), "success")).ShouldBeTrue();
     }
 
     [Test]
@@ -55,8 +55,8 @@ public class SinkDispatcherTelemetryTests
         await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None);
 
         // The delivery-duration histogram is recorded once per attempt, so its count is the attempt count.
-        await Assert.That(duration.GetMeasurementSnapshot().Count).IsEqualTo(3); // 2 retryable + 1 success
-        await Assert.That(failures.GetMeasurementSnapshot().Sum(m => m.Value)).IsEqualTo(2L); // 2 retryable failures
+        duration.GetMeasurementSnapshot().Count.ShouldBe(3); // 2 retryable + 1 success
+        failures.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBe(2L); // 2 retryable failures
     }
 
     [Test]
@@ -87,14 +87,13 @@ public class SinkDispatcherTelemetryTests
             ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Permanent("boom"))),
         };
 
-        await Assert.That(async () =>
-                await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None))
-            .Throws<Exception>();
+        await Should.ThrowAsync<Exception>(
+            async () => await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None));
 
-        await Assert.That(failures.GetMeasurementSnapshot().Sum(m => m.Value)).IsGreaterThanOrEqualTo(1L);
-        await Assert.That(captured).IsNotNull();
-        await Assert.That(captured!.Status).IsEqualTo(ActivityStatusCode.Error);
-        await Assert.That(captured.GetTagItem("wallaby.sink")).IsEqualTo("sink");
+        failures.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(1L);
+        captured.ShouldNotBeNull();
+        captured!.Status.ShouldBe(ActivityStatusCode.Error);
+        captured.GetTagItem("wallaby.sink").ShouldBe("sink");
     }
 
     [Test]
@@ -113,6 +112,6 @@ public class SinkDispatcherTelemetryTests
             .DispatchAsync(OneRecord(), CancellationToken.None);
 
         var snapshot = failures.GetMeasurementSnapshot();
-        await Assert.That(snapshot.Any(m => Equals(m.Tags.GetValueOrDefault("wallaby.delivery.outcome"), "dead_letter"))).IsTrue();
+        snapshot.Any(m => Equals(m.Tags.GetValueOrDefault("wallaby.delivery.outcome"), "dead_letter")).ShouldBeTrue();
     }
 }

@@ -1,8 +1,8 @@
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
@@ -34,15 +34,15 @@ public class TenantDestinationTests(PostgresFixture pg, MeilisearchFixture meili
             await probe.NameAsync($"{prefix}_1", t1) == "t1a" && await probe.NameAsync($"{prefix}_2", t2) == "t2a");
 
         // Each document landed only in its own tenant index.
-        await Assert.That(await probe.NameAsync($"{prefix}_1", t1)).IsEqualTo("t1a");
-        await Assert.That(await probe.NameAsync($"{prefix}_2", t2)).IsEqualTo("t2a");
-        await Assert.That(await probe.NameAsync($"{prefix}_2", t1)).IsNull(); // not cross-indexed
+        (await probe.NameAsync($"{prefix}_1", t1)).ShouldBe("t1a");
+        (await probe.NameAsync($"{prefix}_2", t2)).ShouldBe("t2a");
+        (await probe.NameAsync($"{prefix}_2", t1)).ShouldBeNull(); // not cross-indexed
 
         // Delete tenant 1's product -> removed from the tenant-1 index, tenant-2 untouched.
         await harness.Db.DeleteProductAsync(t1);
         await harness.RunUntilAsync(async () => await probe.NameAsync($"{prefix}_1", t1) is null);
 
-        await Assert.That(await probe.NameAsync($"{prefix}_1", t1)).IsNull();
-        await Assert.That(await probe.NameAsync($"{prefix}_2", t2)).IsEqualTo("t2a");
+        (await probe.NameAsync($"{prefix}_1", t1)).ShouldBeNull();
+        (await probe.NameAsync($"{prefix}_2", t2)).ShouldBe("t2a");
     }
 }

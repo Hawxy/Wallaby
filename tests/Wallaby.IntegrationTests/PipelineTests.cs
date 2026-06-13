@@ -27,7 +27,7 @@ public class PipelineTests(PostgresFixture pg)
         await harness.RunUntilAsync(() => capture.For("products").Count(r => r.Document is not null) >= 2);
 
         var names = capture.For("products").Select(NameOf).Where(n => n is "alpha" or "beta").Select(n => n!).ToList();
-        await Assert.That(names).IsEquivalentTo(new[] { "alpha", "beta" });
+        names.ShouldBe(new[] { "alpha", "beta" }, ignoreOrder: true);
     }
 
     [Test]
@@ -46,7 +46,7 @@ public class PipelineTests(PostgresFixture pg)
             var a = capture.For("products").FirstOrDefault(r => NameOf(r) == "A");
             return a is not null && harness.LastAcknowledgedLsn >= a.Metadata.CommitLsn;
         });
-        await Assert.That(ProductNames(capture)).Contains("A");
+        ProductNames(capture).ShouldContain("A");
 
         // Run 2: a fresh stream on the same slot must resume after "A".
         capture.Clear();
@@ -54,7 +54,7 @@ public class PipelineTests(PostgresFixture pg)
         await harness.RunUntilAsync(() => capture.For("products").Any(r => NameOf(r) == "B"));
 
         var run2 = ProductNames(capture);
-        await Assert.That(run2).Contains("B");
-        await Assert.That(run2).DoesNotContain("A"); // no re-delivery
+        run2.ShouldContain("B");
+        run2.ShouldNotContain("A"); // no re-delivery
     }
 }

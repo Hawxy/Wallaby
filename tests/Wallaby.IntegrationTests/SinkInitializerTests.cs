@@ -1,6 +1,6 @@
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.IntegrationTests;
 
@@ -36,7 +36,7 @@ public class SinkInitializerTests(PostgresFixture pg)
         await harness.StartAsync(); // awaits ISinkInitializer.InitializeAsync before streaming
         try
         {
-            await Assert.That(sink.InitCount).IsEqualTo(1);
+            sink.InitCount.ShouldBe(1);
         }
         finally
         {

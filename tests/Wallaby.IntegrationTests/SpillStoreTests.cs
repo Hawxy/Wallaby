@@ -52,13 +52,13 @@ public class SpillStoreTests(PostgresFixture pg)
             }
 
             var read = await ReadAllAsync(spill, 7);
-            await Assert.That(read.Count).IsEqualTo(n);
-            await Assert.That((int)read[0].NewValues[0].Value!).IsEqualTo(0);
-            await Assert.That((int)read[^1].NewValues[0].Value!).IsEqualTo(n - 1);
-            await Assert.That(read[500].NewValues[1].Value).IsEqualTo("p500"); // ordering preserved across flushes
+            read.Count.ShouldBe(n);
+            ((int)read[0].NewValues[0].Value!).ShouldBe(0);
+            ((int)read[^1].NewValues[0].Value!).ShouldBe(n - 1);
+            read[500].NewValues[1].Value.ShouldBe("p500"); // ordering preserved across flushes
 
             await spill.DiscardAsync(7, CancellationToken.None);
-            await Assert.That((await ReadAllAsync(spill, 7)).Count).IsEqualTo(0);
+            (await ReadAllAsync(spill, 7)).Count.ShouldBe(0);
         }
         finally
         {

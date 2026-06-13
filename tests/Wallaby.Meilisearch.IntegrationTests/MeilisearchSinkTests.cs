@@ -1,10 +1,10 @@
-using EFCore.CDC.TestModel;
 using Meilisearch;
 using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
@@ -37,7 +37,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
         await harness.Db.DeleteProductAsync(id);
         await harness.RunUntilAsync(async () => await probe.NameAsync(index, id) is null);
 
-        await Assert.That(await probe.NameAsync(index, id)).IsNull();
+        (await probe.NameAsync(index, id)).ShouldBeNull();
     }
 
     [Test]
@@ -75,8 +75,8 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
         });
 
         var indexed = await probe.GetAsync(index, orderId.ToString());
-        await Assert.That(indexed!["customer"]!.GetValue<string>()).IsEqualTo("Ada");
-        await Assert.That(indexed["lineCount"]!.GetValue<int>()).IsEqualTo(3);
+        indexed!["customer"]!.GetValue<string>().ShouldBe("Ada");
+        indexed["lineCount"]!.GetValue<int>().ShouldBe(3);
     }
 
     [Test]
@@ -109,8 +109,8 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
 
         await harness.RunUntilAsync(async () => await probe.NameAsync(index, keepId) == "keep");
 
-        await Assert.That(await probe.NameAsync(index, keepId)).IsEqualTo("keep");
-        await Assert.That(await probe.NameAsync(index, skipId)).IsNull(); // null document => not indexed
+        (await probe.NameAsync(index, keepId)).ShouldBe("keep");
+        (await probe.NameAsync(index, skipId)).ShouldBeNull(); // null document => not indexed
     }
 
     [Test]
@@ -132,8 +132,8 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
         var result = await sink.DeliverAsync(new SinkBatch("meili", [record]), CancellationToken.None);
 
         // A configured-but-absent attribute is not retryable — it must fail permanently (before any network call).
-        await Assert.That(result.Status).IsEqualTo(DeliveryStatus.PermanentFailure);
-        await Assert.That(result.Error).Contains("category");
+        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        result.Error!.ShouldContain("category");
     }
 
     [Test]
@@ -155,7 +155,7 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
 
         await harness.RunUntilAsync(async () => await probe.NameAsync(index, id) == "alpha");
 
-        await Assert.That(await probe.NameAsync(index, id)).IsEqualTo("alpha");
+        (await probe.NameAsync(index, id)).ShouldBe("alpha");
     }
 
     [Test]
@@ -181,12 +181,12 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
         try
         {
             var probe = new MeiliProbe(meili);
-            await Assert.That(await probe.IndexExistsAsync(index)).IsTrue();
-            await Assert.That(await probe.PrimaryKeyAsync(index)).IsEqualTo("id");
+            (await probe.IndexExistsAsync(index)).ShouldBeTrue();
+            (await probe.PrimaryKeyAsync(index)).ShouldBe("id");
 
             var settings = await probe.SettingsAsync(index);
-            await Assert.That(settings.FilterableAttributes).Contains("category");
-            await Assert.That(settings.SortableAttributes).Contains("price");
+            settings.FilterableAttributes.ShouldContain("category");
+            settings.SortableAttributes.ShouldContain("price");
         }
         finally
         {

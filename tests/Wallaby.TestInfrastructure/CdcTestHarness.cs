@@ -1,5 +1,4 @@
 using System.Linq.Expressions;
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +14,7 @@ using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
 using Wallaby.Model;
+using Wallaby.TestModel;
 
 namespace Wallaby.TestInfrastructure;
 

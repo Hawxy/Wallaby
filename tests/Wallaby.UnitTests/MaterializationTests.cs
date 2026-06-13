@@ -1,10 +1,10 @@
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Materialization;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Model;
+using Wallaby.TestModel;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class MaterializationTests
 {
@@ -36,39 +36,39 @@ public class MaterializationTests
     };
 
     [Test]
-    public async Task Materializes_typed_entity_with_value_converters()
+    public void Materializes_typed_entity_with_value_converters()
     {
         var materializer = CreateMaterializer();
 
         var ok = materializer.TryMaterialize(ProductInsert(), out var row);
 
-        await Assert.That(ok).IsTrue();
+        ok.ShouldBeTrue();
         var product = row.Entity as Product;
-        await Assert.That(product).IsNotNull();
-        await Assert.That(product!.Id).IsEqualTo(42);
-        await Assert.That(product.Name).IsEqualTo("Widget");
-        await Assert.That(product.Price).IsEqualTo(9.99m);
-        await Assert.That(product.Sku).IsEqualTo("W-1");
-        await Assert.That(product.Status).IsEqualTo(ProductStatus.Active);   // string -> enum
-        await Assert.That(product.Tags).IsEquivalentTo(new[] { "a", "b" });  // jsonb text -> List<string>
-        await Assert.That(product.CategoryId).IsEqualTo(7);
+        product.ShouldNotBeNull();
+        product!.Id.ShouldBe(42);
+        product.Name.ShouldBe("Widget");
+        product.Price.ShouldBe(9.99m);
+        product.Sku.ShouldBe("W-1");
+        product.Status.ShouldBe(ProductStatus.Active);   // string -> enum
+        product.Tags.ShouldBe(new[] { "a", "b" }, ignoreOrder: true);  // jsonb text -> List<string>
+        product.CategoryId.ShouldBe(7);
     }
 
     [Test]
-    public async Task Record_and_primary_key_are_populated()
+    public void Record_and_primary_key_are_populated()
     {
         var materializer = CreateMaterializer();
 
         materializer.TryMaterialize(ProductInsert(), out var row);
 
-        await Assert.That(row.EntityClrType).IsEqualTo(typeof(Product));
-        await Assert.That(row.Record[nameof(Product.Name)]).IsEqualTo("Widget");
-        await Assert.That(row.PrimaryKey.Count).IsEqualTo(1);
-        await Assert.That(row.PrimaryKey[0]).IsEqualTo(42);
+        row.EntityClrType.ShouldBe(typeof(Product));
+        row.Record[nameof(Product.Name)].ShouldBe("Widget");
+        row.PrimaryKey.Count.ShouldBe(1);
+        row.PrimaryKey[0].ShouldBe(42);
     }
 
     [Test]
-    public async Task Update_with_full_old_values_computes_changed_fields()
+    public void Update_with_full_old_values_computes_changed_fields()
     {
         var materializer = CreateMaterializer();
 
@@ -90,14 +90,14 @@ public class MaterializationTests
 
         materializer.TryMaterialize(change, out var row);
 
-        await Assert.That(row.Changes).IsNotNull();
-        await Assert.That(row.Changes!.ContainsKey(nameof(Product.Name))).IsTrue();
-        await Assert.That(row.Changes[nameof(Product.Name)]).IsEqualTo("Widget");
-        await Assert.That(row.Changes.ContainsKey(nameof(Product.Price))).IsFalse(); // unchanged
+        row.Changes.ShouldNotBeNull();
+        row.Changes!.ContainsKey(nameof(Product.Name)).ShouldBeTrue();
+        row.Changes[nameof(Product.Name)].ShouldBe("Widget");
+        row.Changes.ContainsKey(nameof(Product.Price)).ShouldBeFalse(); // unchanged
     }
 
     [Test]
-    public async Task Delete_materializes_primary_key_from_old_values()
+    public void Delete_materializes_primary_key_from_old_values()
     {
         var materializer = CreateMaterializer();
 
@@ -113,14 +113,14 @@ public class MaterializationTests
 
         var ok = materializer.TryMaterialize(change, out var row);
 
-        await Assert.That(ok).IsTrue();
-        await Assert.That(row.PrimaryKey[0]).IsEqualTo(42);
-        await Assert.That(row.Changes).IsNull();
-        await Assert.That(((Product)row.Entity!).Id).IsEqualTo(42);
+        ok.ShouldBeTrue();
+        row.PrimaryKey[0].ShouldBe(42);
+        row.Changes.ShouldBeNull();
+        ((Product)row.Entity!).Id.ShouldBe(42);
     }
 
     [Test]
-    public async Task Unmapped_table_returns_false()
+    public void Unmapped_table_returns_false()
     {
         var materializer = CreateMaterializer();
 
@@ -130,23 +130,23 @@ public class MaterializationTests
             Action = ChangeAction.Insert, NewValues = [Col("Id", 1)],
         };
 
-        await Assert.That(materializer.TryMaterialize(change, out _)).IsFalse();
+        materializer.TryMaterialize(change, out _).ShouldBeFalse();
     }
 
     [Test]
-    public async Task ChangeEventFactory_builds_envelope_with_metadata()
+    public void ChangeEventFactory_builds_envelope_with_metadata()
     {
         var factory = new ChangeEventFactory(CreateMaterializer());
 
         var change = ProductInsert() with { CommitLsn = 123, CommitIdx = 2 };
         var ev = factory.Create(change);
 
-        await Assert.That(ev).IsNotNull();
-        await Assert.That(ev!.Action).IsEqualTo(ChangeAction.Insert);
-        await Assert.That(ev.Metadata.TableName).IsEqualTo("products");
-        await Assert.That(ev.Metadata.QualifiedTableName).IsEqualTo("public.products");
-        await Assert.That(ev.Metadata.CommitLsn).IsEqualTo(123UL);
-        await Assert.That(ev.Metadata.IsBackfill).IsFalse();
-        await Assert.That(ev.EntityClrType).IsEqualTo(typeof(Product));
+        ev.ShouldNotBeNull();
+        ev!.Action.ShouldBe(ChangeAction.Insert);
+        ev.Metadata.TableName.ShouldBe("products");
+        ev.Metadata.QualifiedTableName.ShouldBe("public.products");
+        ev.Metadata.CommitLsn.ShouldBe(123UL);
+        ev.Metadata.IsBackfill.ShouldBeFalse();
+        ev.EntityClrType.ShouldBe(typeof(Product));
     }
 }

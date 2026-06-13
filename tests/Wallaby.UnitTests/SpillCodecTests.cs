@@ -2,7 +2,7 @@ using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Model;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 /// <summary>
 /// <see cref="SpillCodec"/> must round-trip a <see cref="RawChange"/> with full CLR-type fidelity — it's how a
@@ -13,7 +13,7 @@ public class SpillCodecTests
     private static RawChange RoundTrip(RawChange change) => SpillCodec.Decode(SpillCodec.Encode(change));
 
     [Test]
-    public async Task Round_trips_scalar_types_with_fidelity()
+    public void Round_trips_scalar_types_with_fidelity()
     {
         var guid = Guid.NewGuid();
         var utc = new DateTime(2024, 1, 2, 3, 4, 5, 678, DateTimeKind.Utc);
@@ -50,29 +50,29 @@ public class SpillCodecTests
 
         var r = RoundTrip(change).NewValues;
 
-        await Assert.That(r[0].Value).IsEqualTo(true);
-        await Assert.That(r[1].Value).IsEqualTo((short)7);
-        await Assert.That(r[2].Value).IsEqualTo(123);
-        await Assert.That(r[3].Value).IsEqualTo(9_999_999_999L);
-        await Assert.That(r[4].Value).IsEqualTo(12.3400m);
-        await Assert.That(r[5].Value).IsEqualTo(3.141592653589793d);
-        await Assert.That(r[6].Value).IsEqualTo(1.5f);
-        await Assert.That(r[7].Value).IsEqualTo("héllo, wörld");
-        await Assert.That(r[8].Value).IsEqualTo('x');
-        await Assert.That(r[9].Value).IsEqualTo(guid);
-        await Assert.That(r[10].Value).IsEqualTo(utc);
-        await Assert.That(((DateTime)r[10].Value!).Kind).IsEqualTo(DateTimeKind.Utc);
-        await Assert.That(r[11].Value).IsEqualTo(dto);
-        await Assert.That(((DateTimeOffset)r[11].Value!).Offset).IsEqualTo(TimeSpan.FromHours(5));
-        await Assert.That(r[12].Value).IsEqualTo(new DateOnly(2024, 1, 2));
-        await Assert.That(r[13].Value).IsEqualTo(new TimeOnly(3, 4, 5));
-        await Assert.That(r[14].Value).IsEqualTo(TimeSpan.FromMinutes(90));
-        await Assert.That((byte[])r[15].Value!).IsEquivalentTo(new byte[] { 1, 2, 3, 255 });
-        await Assert.That(r[16].Value).IsNull();
+        r[0].Value.ShouldBe(true);
+        r[1].Value.ShouldBe((short)7);
+        r[2].Value.ShouldBe(123);
+        r[3].Value.ShouldBe(9_999_999_999L);
+        r[4].Value.ShouldBe(12.3400m);
+        r[5].Value.ShouldBe(3.141592653589793d);
+        r[6].Value.ShouldBe(1.5f);
+        r[7].Value.ShouldBe("héllo, wörld");
+        r[8].Value.ShouldBe('x');
+        r[9].Value.ShouldBe(guid);
+        r[10].Value.ShouldBe(utc);
+        ((DateTime)r[10].Value!).Kind.ShouldBe(DateTimeKind.Utc);
+        r[11].Value.ShouldBe(dto);
+        ((DateTimeOffset)r[11].Value!).Offset.ShouldBe(TimeSpan.FromHours(5));
+        r[12].Value.ShouldBe(new DateOnly(2024, 1, 2));
+        r[13].Value.ShouldBe(new TimeOnly(3, 4, 5));
+        r[14].Value.ShouldBe(TimeSpan.FromMinutes(90));
+        ((byte[])r[15].Value!).ShouldBe(new byte[] { 1, 2, 3, 255 }, ignoreOrder: true);
+        r[16].Value.ShouldBeNull();
     }
 
     [Test]
-    public async Task Round_trips_arrays_via_json_fallback()
+    public void Round_trips_arrays_via_json_fallback()
     {
         var change = new RawChange
         {
@@ -89,12 +89,12 @@ public class SpillCodecTests
 
         var r = RoundTrip(change).NewValues;
 
-        await Assert.That((string[])r[0].Value!).IsEquivalentTo(new[] { "a", "b", "c" });
-        await Assert.That((int[])r[1].Value!).IsEquivalentTo(new[] { 1, 2, 3 });
+        ((string[])r[0].Value!).ShouldBe(new[] { "a", "b", "c" }, ignoreOrder: true);
+        ((int[])r[1].Value!).ShouldBe(new[] { 1, 2, 3 }, ignoreOrder: true);
     }
 
     [Test]
-    public async Task Round_trips_unchanged_toast_and_old_values()
+    public void Round_trips_unchanged_toast_and_old_values()
     {
         var change = new RawChange
         {
@@ -112,12 +112,12 @@ public class SpillCodecTests
 
         var round = RoundTrip(change);
 
-        await Assert.That(round.Action).IsEqualTo(ChangeAction.Delete);
-        await Assert.That(round.Schema).IsEqualTo("sales");
-        await Assert.That(round.NewValues.Count).IsEqualTo(0);
-        await Assert.That(round.OldValues!.Count).IsEqualTo(2);
-        await Assert.That(round.OldValues![0].Value).IsEqualTo(5);
-        await Assert.That(round.OldValues![1].IsUnchangedToast).IsTrue();
-        await Assert.That(round.OldValues![1].Value).IsNull();
+        round.Action.ShouldBe(ChangeAction.Delete);
+        round.Schema.ShouldBe("sales");
+        round.NewValues.Count.ShouldBe(0);
+        round.OldValues!.Count.ShouldBe(2);
+        round.OldValues![0].Value.ShouldBe(5);
+        round.OldValues![1].IsUnchangedToast.ShouldBeTrue();
+        round.OldValues![1].Value.ShouldBeNull();
     }
 }

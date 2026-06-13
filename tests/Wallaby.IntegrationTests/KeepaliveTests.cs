@@ -39,6 +39,6 @@ public class KeepaliveTests(PostgresFixture pg)
         // If a keepalive corrupted the replication protocol, the pipeline would fault and this would time out.
         await harness.RunUntilAsync(() => sink.Delivered >= 1);
 
-        await Assert.That(sink.Delivered).IsGreaterThanOrEqualTo(1);
+        sink.Delivered.ShouldBeGreaterThanOrEqualTo(1);
     }
 }

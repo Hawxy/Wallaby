@@ -1,4 +1,4 @@
-namespace EFCore.CDC.TestModel;
+namespace Wallaby.TestModel;
 
 /// <summary>Value-converted enum (stored as text) used by <see cref="Product"/>.</summary>
 public enum ProductStatus

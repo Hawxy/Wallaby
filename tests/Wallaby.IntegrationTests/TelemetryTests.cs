@@ -37,12 +37,12 @@ public class TelemetryTests(PostgresFixture pg)
         await harness.RunUntilAsync(() => capture.For("products").Count(r => r.Document is not null) >= 2);
 
         // Throughput + lag metrics were recorded for the live changes.
-        await Assert.That(changes.GetMeasurementSnapshot().Sum(m => m.Value)).IsGreaterThanOrEqualTo(2L);
-        await Assert.That(lag.GetMeasurementSnapshot()).IsNotEmpty();
+        changes.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(2L);
+        lag.GetMeasurementSnapshot().ShouldNotBeEmpty();
 
         // A transaction root span and a sink-delivery span were emitted.
-        await Assert.That(spanNames).Contains("transaction");
-        await Assert.That(spanNames).Contains("sink.deliver");
+        spanNames.ShouldContain("transaction");
+        spanNames.ShouldContain("sink.deliver");
     }
 
     // Backfill metrics (wallaby.backfill.rows / wallaby.backfill.active) are asserted by

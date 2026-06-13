@@ -1,8 +1,8 @@
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
+using Wallaby.TestModel;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 public class TransformInvokerTests
 {
@@ -24,7 +24,7 @@ public class TransformInvokerTests
             EntityClrType = typeof(Category),
         };
 
-        await Assert.That(async () => _ = await invoker.InvokeAsync(db: null!, [change], CancellationToken.None))
-            .Throws<InvalidOperationException>();
+        await Should.ThrowAsync<InvalidOperationException>(
+            async () => _ = await invoker.InvokeAsync(db: null!, [change], CancellationToken.None));
     }
 }

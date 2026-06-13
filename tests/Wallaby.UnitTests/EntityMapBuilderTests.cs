@@ -1,6 +1,6 @@
-using EFCore.CDC.TestModel;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.TestModel;
 
 namespace Wallaby.UnitTests;
 
@@ -20,7 +20,7 @@ public class EntityMapBuilderTests
     }
 
     [Test]
-    public async Task ScopedBy_change_overload_reads_the_scope_key_from_the_record()
+    public void ScopedBy_change_overload_reads_the_scope_key_from_the_record()
     {
         var builder = new CdcBuilder();
         builder.UseContext<AppDbContext>();
@@ -38,8 +38,8 @@ public class EntityMapBuilderTests
         var config = builder.Build();
         var selector = config.Mappings[typeof(Product)].ScopeKeySelector;
 
-        await Assert.That(selector).IsNotNull();
+        selector.ShouldNotBeNull();
         var key = selector!(Insert(1, new Dictionary<string, object?> { ["TenantId"] = "tenant-a" }));
-        await Assert.That(key).IsEqualTo("tenant-a");
+        key.ShouldBe("tenant-a");
     }
 }

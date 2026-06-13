@@ -1,7 +1,7 @@
-using EFCore.CDC.TestModel;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using TUnit.Core.Interfaces;
+using Wallaby.TestModel;
 
 namespace Wallaby.TestInfrastructure;
 

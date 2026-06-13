@@ -1,5 +1,5 @@
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
+using Wallaby.TestModel;
 
 namespace Wallaby.TestInfrastructure;
 

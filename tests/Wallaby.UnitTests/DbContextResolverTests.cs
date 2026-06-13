@@ -1,9 +1,9 @@
-using EFCore.CDC.TestModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Internal.Pipeline;
+using Wallaby.TestModel;
 
-namespace EFCore.CDC.UnitTests;
+namespace Wallaby.UnitTests;
 
 /// <summary>
 /// <see cref="DbContextResolver"/> obtains the consumer's context without requiring an
@@ -21,7 +21,7 @@ public class DbContextResolverTests
 
         var model = DbContextResolver.ReadModel<AppDbContext>(sp);
 
-        await Assert.That(model.FindEntityType(typeof(Product))).IsNotNull();
+        model.FindEntityType(typeof(Product)).ShouldNotBeNull();
     }
 
     [Test]
@@ -33,7 +33,7 @@ public class DbContextResolverTests
 
         var model = DbContextResolver.ReadModel<AppDbContext>(sp);
 
-        await Assert.That(model.FindEntityType(typeof(Product))).IsNotNull();
+        model.FindEntityType(typeof(Product)).ShouldNotBeNull();
     }
 
     [Test]
@@ -45,7 +45,7 @@ public class DbContextResolverTests
 
         await using var lease = DbContextResolver.Lease<AppDbContext>(sp);
 
-        await Assert.That(lease.Context).IsNotNull();
+        lease.Context.ShouldNotBeNull();
     }
 
     [Test]
@@ -57,6 +57,6 @@ public class DbContextResolverTests
 
         await using var lease = DbContextResolver.Lease<AppDbContext>(sp);
 
-        await Assert.That(lease.Context).IsNotNull();
+        lease.Context.ShouldNotBeNull();
     }
 }
