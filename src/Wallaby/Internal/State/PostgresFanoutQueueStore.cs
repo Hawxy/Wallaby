@@ -26,8 +26,11 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         var hash = Hash(spec.PrimaryTable.QualifiedName, columns, valuesJson);
 
         await using var connection = await dataSource.OpenConnectionAsync(ct);
+        // The trailing pg_notify wakes the worker's LISTEN connection the instant this commits, so it drains
+        // without waiting for the fallback poll. It rides the same (auto-committed) statement batch, so the
+        // notification is delivered atomically with the row becoming visible.
         await using var cmd = new NpgsqlCommand(
-            """
+            $"""
             INSERT INTO wallaby.fanout_queue
                 (table_qualified, lookup_hash, lookup_columns, lookup_values, status, cursor_json, rows_copied, requested_at, updated_at)
             VALUES (@t, @h, @cols, @vals::jsonb, 'Requested', NULL, 0, now(), now())
@@ -35,7 +38,8 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
                 SET status = 'Requested',
                     lookup_values = EXCLUDED.lookup_values,
                     requested_at = now(),
-                    updated_at = now()
+                    updated_at = now();
+            SELECT pg_notify('{CdcSchema.FanoutNotifyChannel}', '');
             """,
             connection);
         cmd.Parameters.AddWithValue("t", spec.PrimaryTable.QualifiedName);
@@ -43,6 +47,67 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         cmd.Parameters.AddWithValue("cols", columns);
         cmd.Parameters.AddWithValue("vals", valuesJson);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public IFanoutQueueSubscription Subscribe() => new Subscription(dataSource);
+
+    /// <summary>
+    /// A dedicated <c>LISTEN wallaby_fanout</c> connection, opened lazily on first wait and held for the
+    /// worker's (leader session's) lifetime. <see cref="WaitForJobAsync"/> returns on a notification (immediate
+    /// wake) or after the fallback timeout (safety poll).
+    /// </summary>
+    private sealed class Subscription(NpgsqlDataSource dataSource) : IFanoutQueueSubscription
+    {
+        private NpgsqlConnection? _connection;
+
+        public async Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct)
+        {
+            try
+            {
+                var connection = await EnsureListeningAsync(ct);
+                // Returns true if a notification arrived, false on timeout — either way we loop and drain.
+                await connection.WaitAsync(fallbackTimeout, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // The listening connection faulted (e.g. server restart/failover). Drop it so the next wait
+                // reopens and re-listens; return now so the worker drains in case a notification was missed.
+                await DisposeConnectionAsync();
+            }
+        }
+
+        private async Task<NpgsqlConnection> EnsureListeningAsync(CancellationToken ct)
+        {
+            if (_connection is { State: System.Data.ConnectionState.Open } open)
+            {
+                return open;
+            }
+
+            await DisposeConnectionAsync();
+            var connection = await dataSource.OpenConnectionAsync(ct);
+            await using (var listen = new NpgsqlCommand($"LISTEN {CdcSchema.FanoutNotifyChannel}", connection))
+            {
+                await listen.ExecuteNonQueryAsync(ct);
+            }
+
+            _connection = connection;
+            return connection;
+        }
+
+        private async ValueTask DisposeConnectionAsync()
+        {
+            if (_connection is { } connection)
+            {
+                _connection = null;
+                await connection.DisposeAsync();
+            }
+        }
+
+        public ValueTask DisposeAsync() => DisposeConnectionAsync();
     }
 
     public async Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct)

@@ -49,6 +49,10 @@ internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IVal
         {
             failures.Add("LeaderHeartbeatInterval must be greater than zero.");
         }
+        if (options.FanoutPollInterval <= TimeSpan.Zero)
+        {
+            failures.Add("FanoutPollInterval must be greater than zero.");
+        }
 
         // External slots must not collide with the primary slot/publication (which only exists when
         // capturing). External-vs-external collisions are caught structurally in WallabyBuilder.Build().

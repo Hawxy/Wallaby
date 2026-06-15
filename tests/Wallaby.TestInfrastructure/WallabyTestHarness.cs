@@ -268,7 +268,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         {
             return 0;
         }
-        var worker = new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel!, NullLogger.Instance);
+        // The interval is unused here — DrainFanoutAsync only invokes DrainOnceAsync, not the polling loop.
+        var worker = new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel!, NullLogger.Instance, TimeSpan.FromSeconds(1));
         return await worker.DrainOnceAsync(_cts.Token);
     }
 

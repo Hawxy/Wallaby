@@ -35,6 +35,7 @@ You have a number of choices as to where streamed transactions spill:
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
 | `StandbyRetryInterval` / `LeaderRetryInterval` | `5s` | Leader-election retry cadence. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
+| `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/transforms#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
 | `DeadLetterPolicy` | `Halt` | What to do when a batch can't be processed — a permanent **sink** failure, a **transform** exception, or a **materialization** failure. `Halt` stops the pipeline (retried after the leader restarts); `Skip` logs, counts (`wallaby.dead_letter`), and drops the batch, then continues. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 

@@ -24,6 +24,13 @@ public class FanoutQueueWorkerTests
         public Task DeferAsync(string t, string h, CancellationToken ct) { Deferred++; return Task.CompletedTask; }
         public Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<FanoutJobRow>>([]);
+        public IFanoutQueueSubscription Subscribe() => new NoOpSubscription();
+    }
+
+    private sealed class NoOpSubscription : IFanoutQueueSubscription
+    {
+        public Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class FakeBackfillStore : IBackfillStateStore
@@ -43,7 +50,7 @@ public class FanoutQueueWorkerTests
         // The coordinator/store are never invoked on the divergent path, so a never-opened data source is fine.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
         var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
-        var worker = new FanoutQueueWorker(queue, coordinator, new WallabyModel([]), NullLogger.Instance);
+        var worker = new FanoutQueueWorker(queue, coordinator, new WallabyModel([]), NullLogger.Instance, TimeSpan.FromSeconds(1));
 
         var ran = await worker.DrainOnceAsync(CancellationToken.None);
 
