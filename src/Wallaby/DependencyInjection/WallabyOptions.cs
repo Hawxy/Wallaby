@@ -73,6 +73,14 @@ public sealed class WallabyOptions
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Fallback poll interval for the dependent fan-out queue. The worker is primarily woken on demand via
+    /// LISTEN/NOTIFY the instant a job is enqueued; this interval is only a safety net that re-checks the queue
+    /// in case a notification is ever missed (e.g. a dropped listening connection). Lower it for tighter
+    /// worst-case fan-out latency at the cost of more idle queue polls.
+    /// </summary>
+    public TimeSpan FanoutPollInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill
     /// reads. Supply it via <see cref="WallabyBuilder.UseConnectionString"/> or through the options pipeline
     /// (<c>Configure&lt;WallabyOptions&gt;</c>, configuration binding, or <c>PostConfigure</c> — the standard

@@ -9,4 +9,9 @@ internal static class CdcSchema
     public const string WatermarkPrefix = Schema + ".watermark";
     public const string WatermarkLowPrefix = WatermarkPrefix + ".low";
     public const string WatermarkHighPrefix = WatermarkPrefix + ".high";
+
+    /// <summary>
+    /// LISTEN/NOTIFY channel the fan-out queue uses to wake its worker the moment a job is enqueued.
+    /// </summary>
+    public const string FanoutNotifyChannel = "wallaby_fanout";
 }

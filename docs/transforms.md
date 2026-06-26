@@ -141,6 +141,9 @@ a million products). Wallaby keeps this bounded:
   are re-emitted inline; if more remain, the rest is handed to a *scoped backfill job* that re-snapshots
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.
+- **On-demand processing.** The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
+  the instant a job is enqueued so the tail is picked up promptly. A periodic
+  [`FanoutPollInterval`](/configuration#options) (default 30s) is only a safety-net fallback.
 - **Coalescing.** Repeated changes to the same principal collapse into a single pending re-snapshot.
 - **Same-transaction de-duplication.** If a primary row is changed *and* one of its dependents changes in
   the same transaction, the row is emitted once (its own change wins — the transform already re-reads the

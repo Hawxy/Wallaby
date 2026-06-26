@@ -12,15 +12,18 @@ namespace Wallaby.Internal.Backfill;
 /// not lost (it re-runs on the next pass).
 /// </summary>
 internal sealed class FanoutQueueWorker(
-    IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger)
+    IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger,
+    TimeSpan pollInterval)
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    // Fallback delay after a failed pass
+    private static readonly TimeSpan ErrorRetryDelay = TimeSpan.FromSeconds(1);
 
     // Job keys already warned about as model-divergent, so a deferred (retrying) job logs only once.
     private readonly HashSet<string> _warnedDivergent = [];
 
     public async Task RunAsync(CancellationToken ct)
     {
+        await using var signal = store.Subscribe();
         while (!ct.IsCancellationRequested)
         {
             try
@@ -28,7 +31,8 @@ internal sealed class FanoutQueueWorker(
                 var drained = await DrainOnceAsync(ct);
                 if (drained == 0)
                 {
-                    await Task.Delay(PollInterval, ct);
+                    // Idle: wake the moment a job is enqueued (NOTIFY), or after the fallback interval elapses.
+                    await signal.WaitForJobAsync(pollInterval, ct);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -38,7 +42,7 @@ internal sealed class FanoutQueueWorker(
             catch (Exception ex)
             {
                 logger.WorkerPassFailed(ex);
-                try { await Task.Delay(PollInterval, ct); }
+                try { await Task.Delay(ErrorRetryDelay, ct); }
                 catch (OperationCanceledException) { break; }
             }
         }

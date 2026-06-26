@@ -190,7 +190,7 @@ internal sealed class CdcRuntime
         var fanoutTask = _fanoutQueue is not null
             ? Task.Run(async () =>
             {
-                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger).RunAsync(linked.Token); }
+                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger, _options.FanoutPollInterval).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { _logger.FanoutWorkerFailed(ex); }
             }, linked.Token)
