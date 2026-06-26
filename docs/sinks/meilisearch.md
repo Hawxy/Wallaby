@@ -38,6 +38,7 @@ cdc.Map<Product>()
 | `WaitForCompletion` | `true` | Await each indexing task before the batch is acked (honest at-least-once). |
 | `WaitTimeoutMs` | `60000` | Max wait per task when `WaitForCompletion`. |
 | `WaitIntervalMs` | `50` | Poll interval while waiting. |
+| `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
 
 ## Index configuration
 
@@ -60,6 +61,20 @@ cdc.AddMeilisearchSink("meili", m =>
 
 `Settings` is Meilisearch's own settings type, so you have full control (ranking rules, stop words,
 synonyms, faceting, …). Setup is idempotent and re-applied on each leadership acquisition.
+
+### Attribute validation
+
+By default (`ValidateConfiguredAttributes = true`), every upsert routed to a `ConfigureIndex`-declared index
+is checked against that index's configured **searchable**, **filterable**, and **sortable** attributes: if the
+document is missing a key for any of them, delivery fails **permanently** with a
+`MeilisearchDocumentValidationException` (the dispatcher halts or dead-letters per
+[`DeadLetterPolicy`](/configuration#options)), rather than silently indexing a document that has a mismatched configuration. 
+A few details:
+
+- A key whose value is `null` counts as present, only an **absent** key is a failure.
+- The sink's `PrimaryKey` and Meilisearch's `*` wildcard are exempt.
+
+Set `ValidateConfiguredAttributes = false` to opt out and let Meilisearch accept whatever the transform emits.
 
 ::: tip
 Per-tenant indexes from [`ScopedDestination`](/multi-tenancy) are not supported at the moment. 

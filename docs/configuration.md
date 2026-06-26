@@ -33,7 +33,9 @@ You have a number of choices as to where streamed transactions spill:
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
-| `StandbyRetryInterval` / `LeaderRetryInterval` | `5s` | Leader-election retry cadence. |
+| `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
+| `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
+| `LeaderHeartbeatInterval` | `10s` | How often the leader verifies it still holds the cluster lock while streaming. If the lock's connection dropped (so Postgres auto-released it), the leader steps down within roughly this interval and re-elects. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
 | `DeadLetterPolicy` | `Halt` | What to do when a batch can't be processed — a permanent **sink** failure, a **transform** exception, or a **materialization** failure. `Halt` stops the pipeline (retried after the leader restarts); `Skip` logs, counts (`wallaby.dead_letter`), and drops the batch, then continues. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
