@@ -185,7 +185,8 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
             (await probe.PrimaryKeyAsync(index)).ShouldBe("id");
 
             var settings = await probe.SettingsAsync(index);
-            settings.FilterableAttributes.ShouldContain("category");
+            // Meilisearch 0.20: FilterableAttributes are FilterableAttribute objects, compare on the name.
+            settings.FilterableAttributes.Select(f => f.Attribute).ShouldContain("category");
             settings.SortableAttributes.ShouldContain("price");
         }
         finally

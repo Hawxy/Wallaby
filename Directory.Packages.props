@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Core runtime dependencies -->
-    <PackageVersion Include="DotNet.ReproducibleBuilds" Version="2.0.2" />
+    <PackageVersion Include="DotNet.ReproducibleBuilds" Version="2.0.5" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
@@ -13,13 +13,13 @@
     <PackageVersion Include="Nuke.Common" Version="10.1.0" />
     <PackageVersion Include="Polly.Core" Version="8.7.0" />
     <!-- Meilisearch sink package -->
-    <PackageVersion Include="Meilisearch" Version="0.18.0" />
+    <PackageVersion Include="Meilisearch" Version="0.20.0" />
     <!-- Sample / test infrastructure -->
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
     <!-- Test stack -->
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.Testing" Version="10.6.0" />
-    <PackageVersion Include="TUnit" Version="1.54.0" />
-    <PackageVersion Include="TUnit.Core" Version="1.54.0" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.Testing" Version="10.7.0" />
+    <PackageVersion Include="TUnit" Version="1.58.0" />
+    <PackageVersion Include="TUnit.Core" Version="1.58.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="Testcontainers" Version="4.12.0" />

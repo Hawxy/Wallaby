@@ -51,7 +51,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
 
             var required = new HashSet<string>(StringComparer.Ordinal);
             AddAttributes(required, config.Settings.SearchableAttributes);
-            AddAttributes(required, config.Settings.FilterableAttributes);
+            AddFilterableAttributes(required, config.Settings.FilterableAttributes);
             AddAttributes(required, config.Settings.SortableAttributes);
 
             // "*" is Meilisearch's "all attributes" wildcard, not a field name; the primary key is stamped on
@@ -77,6 +77,22 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
             foreach (var attribute in attributes)
             {
                 set.Add(attribute);
+            }
+        }
+
+        static void AddFilterableAttributes(HashSet<string> set, IEnumerable<FilterableAttribute>? attributes)
+        {
+            if (attributes is null)
+            {
+                return;
+            }
+
+            foreach (var attribute in attributes)
+            {
+                if (!string.IsNullOrEmpty(attribute.Attribute))
+                {
+                    set.Add(attribute.Attribute);
+                }
             }
         }
     }
