@@ -159,8 +159,7 @@ internal sealed class CdcRuntime
         await using var stream = new LogicalReplicationStream(
             _dataSource.ConnectionString, _options.SlotName, _options.PublicationName, spill,
             _options.MaxBufferedChangesPerTransaction);
-        var changeEventFactory = new ChangeEventFactory(
-            _materializer, skipFailedBatches: _skipFailedBatches, _logger, _instrumentation);
+        var changeEventFactory = new ChangeEventFactory(_materializer);
         var pipeline = new CdcPipeline(
             stream, changeEventFactory, _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
             _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue,
@@ -247,9 +246,7 @@ internal sealed class CdcRuntime
         IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
             : new DefaultEnrichmentContextProvider(() => _config.ContextLease!(_services));
-        _router = new MappingChangeRouter(
-            mappings, contextProvider, _instrumentation,
-            skipFailedBatches: _skipFailedBatches, _logger);
+        _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
         _dispatcher = new SinkDispatcher(
             _sinks, skipFailedBatches: _skipFailedBatches, _logger, _instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(

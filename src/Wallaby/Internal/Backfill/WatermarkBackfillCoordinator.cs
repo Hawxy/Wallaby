@@ -113,31 +113,42 @@ internal sealed class WatermarkBackfillCoordinator(
                 };
                 _byToken[window.Token] = window;
 
-                await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
-                var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
-                window.Buffer = chunk.Rows;
-                await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
-
-                await window.Completed.Task.WaitAsync(ct);
-
-                rowsCopied += chunk.Rows.Count;
-                sessionRows += chunk.Rows.Count;
-                cursor = chunk.NextCursor;
-                await saveProgress(cursor, rowsCopied, chunk.HasMore, ct);
-
-                _instr.RecordBackfillRows(qualifiedTable, chunk.Rows.Count);
-                _instr.RecordBackfillChunkDuration(qualifiedTable, chunkStart);
-
-                if (Stopwatch.GetElapsedTime(lastProgressLog) >= ProgressLogInterval)
+                try
                 {
-                    var rate = (long)(sessionRows / Stopwatch.GetElapsedTime(sessionStart).TotalSeconds);
-                    logger.BackfillProgress(qualifiedTable, rowsCopied, rate);
-                    lastProgressLog = Stopwatch.GetTimestamp();
+                    await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
+                    var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
+                    window.Buffer = chunk.Rows;
+                    await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
+
+                    await window.Completed.Task.WaitAsync(ct);
+
+                    rowsCopied += chunk.Rows.Count;
+                    sessionRows += chunk.Rows.Count;
+                    cursor = chunk.NextCursor;
+                    await saveProgress(cursor, rowsCopied, chunk.HasMore, ct);
+
+                    _instr.RecordBackfillRows(qualifiedTable, chunk.Rows.Count);
+                    _instr.RecordBackfillChunkDuration(qualifiedTable, chunkStart);
+
+                    if (Stopwatch.GetElapsedTime(lastProgressLog) >= ProgressLogInterval)
+                    {
+                        var rate = (long)(sessionRows / Stopwatch.GetElapsedTime(sessionStart).TotalSeconds);
+                        logger.BackfillProgress(qualifiedTable, rowsCopied, rate);
+                        lastProgressLog = Stopwatch.GetTimestamp();
+                    }
+
+                    if (!chunk.HasMore)
+                    {
+                        break;
+                    }
                 }
-
-                if (!chunk.HasMore)
+                finally
                 {
-                    break;
+                    // On success the pipeline already evicted this window via TryTakeHighWindow (a no-op here).
+                    // On fault/cancel (a chunk read or watermark emit failed, or the wait was cancelled) evict
+                    // the orphaned window so it can't leak in _byToken (with its buffered rows) or be re-paired
+                    // against a replayed high watermark in a later leadership session. 
+                    _byToken.TryRemove(window.Token, out _);
                 }
             }
         }
@@ -175,7 +186,18 @@ internal sealed class WatermarkBackfillCoordinator(
     }
 
     public bool IsRecording(string qualifiedTable)
-        => _recordingByTable.TryGetValue(qualifiedTable, out var list) && list.Count > 0;
+    {
+        if (!_recordingByTable.TryGetValue(qualifiedTable, out var list) || list.Count == 0)
+        {
+            return false;
+        }
+
+        // Drop windows abandoned by a faulted/cancelled backfill (evicted from _byToken but never taken by a
+        // high watermark) so a dead window neither forces key materialization nor grows its SeenKeys for the
+        // rest of the session.
+        list.RemoveAll(w => !_byToken.ContainsKey(w.Token));
+        return list.Count > 0;
+    }
 
     public void RecordLiveKey(string qualifiedTable, DocumentKey key)
     {
@@ -183,7 +205,10 @@ internal sealed class WatermarkBackfillCoordinator(
         {
             foreach (var window in list)
             {
-                window.SeenKeys.Add(key);
+                if (_byToken.ContainsKey(window.Token))
+                {
+                    window.SeenKeys.Add(key);
+                }
             }
         }
     }

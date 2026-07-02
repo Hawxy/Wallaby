@@ -27,7 +27,7 @@ public class MappingChangeRouterTests
         }
     }
 
-    /// <summary>A transform that always throws — to exercise the dead-letter policy.</summary>
+    /// <summary>A transform that always throws — to exercise the halt-on-transform-failure behavior.</summary>
     private sealed class ThrowingTransform : ITransformInvoker
     {
         public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
@@ -35,7 +35,7 @@ public class MappingChangeRouterTests
             => throw new InvalidOperationException("boom");
     }
 
-    private static MappingChangeRouter Router(ITransformInvoker? transform = null, bool skipFailedBatches = false)
+    private static MappingChangeRouter Router(ITransformInvoker? transform = null)
     {
         var mapping = new EntityMapping
         {
@@ -47,8 +47,7 @@ public class MappingChangeRouterTests
         var contextProvider = new DefaultEnrichmentContextProvider(
             () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         return new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, contextProvider,
-            skipFailedBatches: skipFailedBatches);
+            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, contextProvider);
     }
 
     private static ChangeEvent Change(ChangeAction action, int id)
@@ -104,22 +103,11 @@ public class MappingChangeRouterTests
     }
 
     [Test]
-    public async Task Transform_failure_halts_by_default()
+    public async Task Transform_failure_always_halts()
     {
-        var router = Router(new ThrowingTransform(), skipFailedBatches: false);
+        var router = Router(new ThrowingTransform());
 
         await Should.ThrowAsync<InvalidOperationException>(
             async () => await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None));
-    }
-
-    [Test]
-    public async Task Transform_failure_is_dead_lettered_when_policy_is_skip()
-    {
-        var router = Router(new ThrowingTransform(), skipFailedBatches: true);
-
-        var routed = await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None);
-
-        // The poison batch is dropped rather than throwing, so the pipeline can keep streaming.
-        routed.Count.ShouldBe(0);
     }
 }
