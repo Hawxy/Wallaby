@@ -80,6 +80,11 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
             }
         }
 
+        // Meilisearch 0.20 changed FilterableAttributes from strings to FilterableAttribute (a plain name, or a
+        // { attributePatterns, features } object — the v1.14 form that opts filter features in/out). A document
+        // is validated against every concrete field name: the legacy string form (surfaced by the SDK's implicit
+        // conversion as Attribute) and any wildcard-free attribute pattern. Patterns containing '*' (e.g.
+        // "user.*") match a family of fields, not one key, so a document can't be checked against them — skip.
         static void AddFilterableAttributes(HashSet<string> set, IEnumerable<FilterableAttribute>? attributes)
         {
             if (attributes is null)
@@ -92,6 +97,17 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
                 if (!string.IsNullOrEmpty(attribute.Attribute))
                 {
                     set.Add(attribute.Attribute);
+                }
+
+                if (attribute.AttributePatterns is not null)
+                {
+                    foreach (var pattern in attribute.AttributePatterns)
+                    {
+                        if (!string.IsNullOrEmpty(pattern) && !pattern.Contains('*'))
+                        {
+                            set.Add(pattern);
+                        }
+                    }
                 }
             }
         }

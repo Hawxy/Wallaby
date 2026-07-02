@@ -137,6 +137,41 @@ public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
     }
 
     [Test]
+    public async Task Granular_filterable_attribute_pattern_is_validated_like_a_plain_name()
+    {
+        // The Meilisearch 0.20 granular form (opting comparison/facet-search out) uses AttributePatterns
+        // instead of a plain string. A wildcard-free pattern is a concrete field name, so it must still be
+        // validated like the legacy string form.
+        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        options.ConfigureIndex("products_granular", s =>
+        {
+            s.SearchableAttributes = ["name"];
+            s.FilterableAttributes =
+            [
+                new FilterableAttribute
+                {
+                    AttributePatterns = ["category"],
+                    Features = new FilterableAttributeFeatures
+                    {
+                        FacetSearch = false,
+                        Filter = new FilterableAttributeFilterFeatures { Equality = true, Comparison = false },
+                    },
+                },
+            ];
+        });
+        var sink = new MeilisearchSink("meili", options);
+
+        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+        // The document carries "name" but not the granular filterable "category".
+        var record = new SinkRecord("products_granular", "1", new WallabyDocument { ["name"] = "alpha" }, IsDeletion: false, meta);
+
+        var result = await sink.DeliverAsync(new SinkBatch("meili", [record]), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        result.Error!.ShouldContain("category");
+    }
+
+    [Test]
     public async Task Document_with_all_configured_attributes_passes_validation_and_indexes()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
