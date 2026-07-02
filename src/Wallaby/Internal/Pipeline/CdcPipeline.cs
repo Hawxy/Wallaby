@@ -340,10 +340,21 @@ internal sealed class CdcPipeline(
             }
 
             await DispatchChunkedAsync(events, ct);
-        }
-        finally
-        {
+
+            // Release the backfill loop as applied only once the chunk is durably sunk, so its checkpoint
+            // (and Status=Completed) can never advance past rows that failed to project or index.
             window.Completed.TrySetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            window.Completed.TrySetCanceled(ct);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fault the waiter so the backfill loop throws instead of persisting progress for an unapplied chunk.
+            window.Completed.TrySetException(ex);
+            throw;
         }
     }
 
