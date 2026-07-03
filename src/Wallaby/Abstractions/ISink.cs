@@ -9,7 +9,7 @@ public enum DeliveryStatus
     /// <summary>A transient failure; the dispatcher should retry with backoff.</summary>
     RetryableFailure,
 
-    /// <summary>A non-retryable failure; the dispatcher applies the dead-letter policy.</summary>
+    /// <summary>A non-retryable failure; the dispatcher halts the pipeline.</summary>
     PermanentFailure,
 }
 

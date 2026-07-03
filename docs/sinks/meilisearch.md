@@ -67,8 +67,8 @@ synonyms, faceting, …). Setup is idempotent and re-applied on each leadership 
 By default (`ValidateConfiguredAttributes = true`), every upsert routed to a `ConfigureIndex`-declared index
 is checked against that index's configured **searchable**, **filterable**, and **sortable** attributes: if the
 document is missing a key for any of them, delivery fails **permanently** with a
-`MeilisearchDocumentValidationException` (the dispatcher halts or dead-letters per
-[`DeadLetterPolicy`](/configuration#options)), rather than silently indexing a document that has a mismatched configuration. 
+`MeilisearchDocumentValidationException` (which halts the pipeline), rather than silently indexing a
+document that has a mismatched configuration. 
 A few details:
 
 - A key whose value is `null` counts as present, only an **absent** key is a failure.

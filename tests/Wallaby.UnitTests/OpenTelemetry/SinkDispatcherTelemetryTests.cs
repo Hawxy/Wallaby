@@ -95,23 +95,4 @@ public class SinkDispatcherTelemetryTests
         captured!.Status.ShouldBe(ActivityStatusCode.Error);
         captured.GetTagItem("wallaby.sink").ShouldBe("sink");
     }
-
-    [Test]
-    public async Task Dead_lettered_batch_records_a_dead_letter_failure()
-    {
-        var instr = new WallabyInstrumentation();
-        using var failures = new MetricCollector<long>(instr.Meter, "wallaby.sink.delivery.failures");
-
-        var sinks = new Dictionary<string, ISink>
-        {
-            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Permanent("boom"))),
-        };
-
-        // skipFailedBatches: completes without throwing, dead-lettering the batch.
-        await new SinkDispatcher(sinks, skipFailedBatches: true, instrumentation: instr)
-            .DispatchAsync(OneRecord(), CancellationToken.None);
-
-        var snapshot = failures.GetMeasurementSnapshot();
-        snapshot.Any(m => Equals(m.Tags.GetValueOrDefault("wallaby.delivery.outcome"), "dead_letter")).ShouldBeTrue();
-    }
 }

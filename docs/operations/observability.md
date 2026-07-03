@@ -30,11 +30,10 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.transform.duration` | Histogram (s) | `wallaby.entity` | Time spent invoking a mapping's transform for a batch. |
 | `wallaby.sink.delivery.duration` | Histogram (s) | `wallaby.sink`, `wallaby.delivery.outcome` | Duration of a single sink delivery attempt (its count by outcome gives attempts and retries). |
 | `wallaby.sink.records.delivered` | Counter | `wallaby.sink` | Records accepted by a sink. |
-| `wallaby.sink.delivery.failures` | Counter | `wallaby.sink`, `wallaby.delivery.outcome` | Failed deliveries (`retryable`/`permanent`/`dead_letter`). |
+| `wallaby.sink.delivery.failures` | Counter | `wallaby.sink`, `wallaby.delivery.outcome` | Failed deliveries (`retryable`/`permanent`). |
 | `wallaby.backfill.rows` | Counter | `wallaby.table` | Rows copied during backfill. |
 | `wallaby.backfill.active` | UpDownCounter | — | Tables currently being backfilled. |
 | `wallaby.backfill.chunk.duration` | Histogram (s) | `wallaby.table` | Time to read and emit one backfill chunk. |
-| `wallaby.dead_letter` | Counter | `wallaby.stage` | Changes dropped by `DeadLetterPolicy.Skip` after a `transform` or `materialization` failure. |
 
 The main questions you'll want to ask are:
 

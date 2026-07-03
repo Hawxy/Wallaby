@@ -1,15 +1,5 @@
 namespace Wallaby.DependencyInjection;
 
-/// <summary>What to do when a sink permanently fails (or exhausts retries) for a batch.</summary>
-public enum WallabyDeadLetterPolicy
-{
-    /// <summary>Stop the pipeline (default); the batch is retried after the leader session restarts.</summary>
-    Halt,
-
-    /// <summary>Log and drop the failed batch, then continue (acknowledging the transaction).</summary>
-    Skip,
-}
-
 /// <summary>Configuration for a Wallaby instance, set via the fluent builder / <c>ConfigureOptions</c>.</summary>
 public sealed class WallabyOptions
 {
@@ -87,7 +77,4 @@ public sealed class WallabyOptions
     /// ordering applies). Validated as non-empty on first resolution.
     /// </summary>
     public string ConnectionString { get; set; } = string.Empty;
-
-    /// <summary>What to do when a sink permanently fails (or exhausts retries) for a batch.</summary>
-    public WallabyDeadLetterPolicy DeadLetterPolicy { get; set; } = WallabyDeadLetterPolicy.Halt;
 }

@@ -25,7 +25,6 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string SourceTag = "wallaby.source";
     internal const string DeliveryOutcomeTag = "wallaby.delivery.outcome";
     internal const string DestinationTag = "wallaby.destination";
-    internal const string StageTag = "wallaby.stage";
 
     // ---- span names ----
     internal const string TransactionActivity = "transaction";
@@ -42,9 +41,6 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliverySuccess = "success";
     internal const string DeliveryRetryable = "retryable";
     internal const string DeliveryPermanent = "permanent";
-    internal const string DeliveryDeadLetter = "dead_letter";
-    internal const string StageTransform = "transform";
-    internal const string StageMaterialization = "materialization";
 
     /// <summary>A shared, never-observed instance for components constructed outside DI (tests, direct use).</summary>
     internal static readonly WallabyInstrumentation NoOp = new();
@@ -62,7 +58,6 @@ public sealed class WallabyInstrumentation : IDisposable
     private readonly Counter<long> _backfillRows;
     private readonly UpDownCounter<int> _backfillActive;
     private readonly Histogram<double> _backfillChunkDuration;
-    private readonly Counter<long> _deadLetter;
 
     /// <summary>Create instrumentation whose meter is owned by the host's <see cref="IMeterFactory"/>.</summary>
     internal WallabyInstrumentation(IMeterFactory meterFactory)
@@ -101,8 +96,6 @@ public sealed class WallabyInstrumentation : IDisposable
             "wallaby.backfill.active", unit: "{table}", description: "Tables currently being backfilled.");
         _backfillChunkDuration = _meter.CreateHistogram<double>(
             "wallaby.backfill.chunk.duration", unit: "s", description: "Time to read and emit one backfill chunk.");
-        _deadLetter = _meter.CreateCounter<long>(
-            "wallaby.dead_letter", unit: "{record}", description: "Changes skipped by DeadLetterPolicy after a transform or materialization failure.");
     }
 
     /// <summary>The underlying meter (exposed for tests that attach a <c>MetricCollector</c>).</summary>
@@ -171,10 +164,6 @@ public sealed class WallabyInstrumentation : IDisposable
             _transformDuration.Record(ElapsedSeconds(startTimestamp), new KeyValuePair<string, object?>(EntityTag, entity));
         }
     }
-
-    /// <summary>Count a change dropped by <c>DeadLetterPolicy.Skip</c> at the given stage (transform/materialization).</summary>
-    internal void RecordDeadLetter(string stage)
-        => _deadLetter.Add(1, new KeyValuePair<string, object?>(StageTag, stage));
 
     // ---- sink delivery ----
 

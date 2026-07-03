@@ -15,8 +15,10 @@ internal sealed class FanoutQueueWorker(
     IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger,
     TimeSpan pollInterval)
 {
-    // Fallback delay after a failed pass
-    private static readonly TimeSpan ErrorRetryDelay = TimeSpan.FromSeconds(1);
+    // Base delay before retrying after a failed drain pass. A pass fails when a job errors (e.g. a poison
+    // scoped re-snapshot); the job is left in place to retry — never dropped — so the delay grows
+    // exponentially to a cap, keeping a deterministically-failing job from hot-looping the worker.
+    private static readonly TimeSpan BaseErrorRetryDelay = TimeSpan.FromSeconds(1);
 
     // Job keys already warned about as model-divergent, so a deferred (retrying) job logs only once.
     private readonly HashSet<string> _warnedDivergent = [];
@@ -24,11 +26,13 @@ internal sealed class FanoutQueueWorker(
     public async Task RunAsync(CancellationToken ct)
     {
         await using var signal = store.Subscribe();
+        var backoff = new RetryBackoff(BaseErrorRetryDelay);
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 var drained = await DrainOnceAsync(ct);
+                backoff.Reset();
                 if (drained == 0)
                 {
                     // Idle: wake the moment a job is enqueued (NOTIFY), or after the fallback interval elapses.
@@ -42,7 +46,7 @@ internal sealed class FanoutQueueWorker(
             catch (Exception ex)
             {
                 logger.WorkerPassFailed(ex);
-                try { await Task.Delay(ErrorRetryDelay, ct); }
+                try { await Task.Delay(backoff.Next(), ct); }
                 catch (OperationCanceledException) { break; }
             }
         }

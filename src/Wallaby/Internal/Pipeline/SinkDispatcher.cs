@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Polly;
 using Polly.Retry;
 using Wallaby.Abstractions;
@@ -12,30 +10,25 @@ namespace Wallaby.Internal.Pipeline;
 internal sealed class SinkRetryableException(string sinkName, string error, Exception? inner)
     : Exception($"Sink '{sinkName}' reported a retryable failure: {error}", inner);
 
-/// <summary>Raised when a sink permanently fails (or retries are exhausted); stops the pipeline by default.</summary>
+/// <summary>Raised when a sink permanently fails (or retries are exhausted); halts the pipeline.</summary>
 internal sealed class SinkDeliveryException(string sinkName, string error, Exception? inner)
     : Exception($"Sink '{sinkName}' failed to deliver: {error}", inner);
 
 /// <summary>
 /// Groups routed documents by sink (preserving commit order) and delivers each group as a
-/// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. Sinks are delivered
-/// sequentially in v1; per-sink ordering is preserved.
+/// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. A permanent failure (or
+/// exhausted retries) halts the pipeline. Sinks are delivered sequentially in v1; per-sink ordering is preserved.
 /// </summary>
 internal sealed class SinkDispatcher
 {
     private readonly IReadOnlyDictionary<string, ISink> _sinks;
-    private readonly bool _skipFailedBatches;
-    private readonly ILogger _logger;
     private readonly WallabyInstrumentation _instr;
     private readonly ResiliencePipeline _retry;
 
     public SinkDispatcher(
-        IReadOnlyDictionary<string, ISink> sinks, bool skipFailedBatches = false, ILogger? logger = null,
-        WallabyInstrumentation? instrumentation = null)
+        IReadOnlyDictionary<string, ISink> sinks, WallabyInstrumentation? instrumentation = null)
     {
         _sinks = sinks;
-        _skipFailedBatches = skipFailedBatches;
-        _logger = logger ?? NullLogger.Instance;
         _instr = instrumentation ?? WallabyInstrumentation.NoOp;
         _retry = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
@@ -96,14 +89,7 @@ internal sealed class SinkDispatcher
             {
                 activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 activity?.AddException(ex);
-
-                if (!_skipFailedBatches)
-                {
-                    throw;
-                }
-
-                _instr.RecordSinkFailure(sinkName, WallabyInstrumentation.DeliveryDeadLetter);
-                _logger.DeadLettering(ex, records.Count, sinkName);
+                throw;
             }
         }
     }
@@ -130,11 +116,4 @@ internal sealed class SinkDispatcher
             yield return (name, groups[name]);
         }
     }
-}
-
-/// <summary>Source-generated log messages for <see cref="SinkDispatcher"/>.</summary>
-internal static partial class SinkDispatcherLog
-{
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Dead-lettering {Count} record(s) for sink '{Sink}' (DeadLetterPolicy=Skip).")]
-    internal static partial void DeadLettering(this ILogger logger, Exception ex, int count, string sink);
 }

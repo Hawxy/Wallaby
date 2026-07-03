@@ -1,10 +1,10 @@
-namespace Wallaby.Hosting;
+namespace Wallaby.Internal;
 
 /// <summary>
-/// Computes an exponentially-growing, jittered retry delay for the leader loop — so a persistently
-/// failing leader session (e.g. a self-config error) backs off instead of hot-looping at a fixed interval.
-/// The first delay is ~<c>baseDelay</c>; each subsequent call doubles up to a cap, with ±20% jitter.
-/// <see cref="Reset"/> returns to the base after a healthy session.
+/// Computes an exponentially-growing, jittered retry delay so a persistently failing loop (a leader
+/// session, a fan-out drain pass) backs off instead of hot-looping at a fixed interval. The first delay is
+/// ~<c>baseDelay</c>; each subsequent call doubles up to a cap, with ±20% jitter. <see cref="Reset"/>
+/// returns to the base after a healthy run.
 /// </summary>
 internal sealed class RetryBackoff(TimeSpan baseDelay)
 {

@@ -24,7 +24,6 @@ internal sealed class CdcRuntime
     private readonly CapturedModel _capturedModel;
     private readonly CdcConfiguration _config;
     private readonly WallabyOptions _options;
-    private readonly bool _skipFailedBatches;
     private readonly CdcDataSource _dataSource;
     private readonly IClusterLock _clusterLock;
     private readonly IServiceProvider _services;
@@ -59,7 +58,6 @@ internal sealed class CdcRuntime
         _capturedModel = capturedModel;
         _config = config;
         _options = options;
-        _skipFailedBatches = options.DeadLetterPolicy == WallabyDeadLetterPolicy.Skip;
         _dataSource = dataSource;
         _clusterLock = clusterLock;
         _services = services;
@@ -247,8 +245,7 @@ internal sealed class CdcRuntime
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
             : new DefaultEnrichmentContextProvider(() => _config.ContextLease!(_services));
         _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
-        _dispatcher = new SinkDispatcher(
-            _sinks, skipFailedBatches: _skipFailedBatches, _logger, _instrumentation);
+        _dispatcher = new SinkDispatcher(_sinks, _instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
         _dependentResolver = _cdcModel.DependentBindings.Count > 0

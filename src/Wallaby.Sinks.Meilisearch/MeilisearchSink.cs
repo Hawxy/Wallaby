@@ -184,7 +184,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
         catch (MeilisearchDocumentValidationException ex)
         {
             // A configured attribute is absent from the document — a configuration/transform bug. Retrying
-            // would never succeed, so fail permanently (the dispatcher halts or dead-letters per policy).
+            // would never succeed, so fail permanently (the dispatcher halts the pipeline).
             return DeliveryResult.Permanent(ex.Message, ex);
         }
         catch (Exception ex)

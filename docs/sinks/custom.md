@@ -36,13 +36,12 @@ Classify the outcome so the dispatcher can react:
 ```csharp
 return DeliveryResult.Success;                       // batch accepted
 return DeliveryResult.Retry("503 from upstream");    // transient — retried with backoff
-return DeliveryResult.Permanent("schema rejected");  // non-retryable — dead-letter policy applies
+return DeliveryResult.Permanent("schema rejected");  // non-retryable — halts the pipeline
 ```
 
 Retryable failures are retried with exponential backoff and jitter. A permanent failure (or exhausted
-retries) follows the configured `DeadLetterPolicy`: 
-- `Halt` stops the pipeline (the batch is retried after the leader restarts); 
-- `Skip` logs and drops the batch, then continues.
+retries) halts the pipeline; the batch is retried after the leader session restarts (with its own backoff),
+so a batch is never silently dropped.
 
 ## Idempotency & ordering
 

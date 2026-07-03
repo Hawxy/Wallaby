@@ -17,21 +17,12 @@ public class SinkDispatcherTests
     };
 
     [Test]
-    public async Task Permanent_failure_halts_by_default()
+    public async Task Permanent_failure_halts()
     {
         var dispatcher = new SinkDispatcher(FailingSink());
 
         await Should.ThrowAsync<Exception>(
             async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
-    }
-
-    [Test]
-    public async Task Permanent_failure_is_skipped_when_configured()
-    {
-        var dispatcher = new SinkDispatcher(FailingSink(), skipFailedBatches: true);
-
-        // Should complete without throwing (batch is dead-lettered).
-        await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None);
     }
 
     [Test]

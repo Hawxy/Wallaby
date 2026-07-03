@@ -1,4 +1,4 @@
-using Wallaby.Hosting;
+using Wallaby.Internal;
 
 namespace Wallaby.UnitTests;
 
