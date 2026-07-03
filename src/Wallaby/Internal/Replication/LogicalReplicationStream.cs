@@ -78,15 +78,17 @@ internal sealed class LogicalReplicationStream(
     /// suspended then (no concurrent socket read), so sending is safe; dispose it before reading resumes.
     /// The update reports the last <see cref="AcknowledgeAsync"/> position (it never calls
     /// <c>SetReplicationStatus</c>), so <c>confirmed_flush_lsn</c> is not advanced past durable delivery.
+    /// Disposing stops the ticks and lets an in-flight send finish; cancelling <paramref name="ct"/>
+    /// (shutdown/lost lock) also aborts an in-flight send, so teardown can't be blocked by a wedged connection.
     /// </summary>
     public IAsyncDisposable StartKeepalive(TimeSpan interval, CancellationToken ct) => new Keepalive(this, interval, ct);
 
-    private async Task SendKeepaliveAsync()
+    private async Task SendKeepaliveAsync(CancellationToken abort)
     {
-        await _statusLock.WaitAsync();
+        await _statusLock.WaitAsync(abort);
         try
         {
-            await _connection.SendStatusUpdate(CancellationToken.None);
+            await _connection.SendStatusUpdate(abort);
         }
         finally
         {
@@ -108,24 +110,26 @@ internal sealed class LogicalReplicationStream(
         public Keepalive(LogicalReplicationStream stream, TimeSpan interval, CancellationToken ct)
         {
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _loop = RunAsync(stream, interval, _cts.Token);
+            _loop = RunAsync(stream, interval, _cts.Token, ct);
         }
 
-        private static async Task RunAsync(LogicalReplicationStream stream, TimeSpan interval, CancellationToken ct)
+        private static async Task RunAsync(
+            LogicalReplicationStream stream, TimeSpan interval, CancellationToken tick, CancellationToken abort)
         {
             try
             {
                 using var timer = new PeriodicTimer(interval);
-                while (await timer.WaitForNextTickAsync(ct))
+                while (await timer.WaitForNextTickAsync(tick))
                 {
-                    // The actual send is not cancellable so it can't be torn mid-write; cancellation only
-                    // stops the wait between ticks.
-                    await stream.SendKeepaliveAsync();
+                    // The send aborts only on the outer (shutdown/lost-lock) token — a normal dispose
+                    // between transactions cancels just the tick wait, so an in-flight send on a healthy
+                    // connection is never torn mid-write.
+                    await stream.SendKeepaliveAsync(abort);
                 }
             }
             catch (OperationCanceledException)
             {
-                // Stopped between ticks.
+                // Stopped between ticks, or the send was aborted on shutdown.
             }
         }
 

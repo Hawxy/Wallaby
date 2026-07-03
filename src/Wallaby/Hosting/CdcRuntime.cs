@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
@@ -98,6 +99,7 @@ internal sealed class CdcRuntime
                 backoff.Reset();
                 _status.EnterStandby();
                 _status.ResetLeaderFailures();
+                _status.ResetFanoutFailures();
                 _logger.Standby(_options.SlotName);
                 await DelaySafeAsync(_options.StandbyRetryInterval, ct);
                 continue;
@@ -113,6 +115,7 @@ internal sealed class CdcRuntime
                     var lostLeadership = await RunAsLeaderAsync(leadership, ct);
                     backoff.Reset();
                     _status.ResetLeaderFailures();
+                    _status.ResetFanoutFailures();
                     if (lostLeadership)
                     {
                         // We stepped down because the lock dropped (not an error); re-elect immediately.
@@ -142,7 +145,8 @@ internal sealed class CdcRuntime
     /// <summary>
     /// Run the leader workload (self-config, sinks, pipeline, backfill/fan-out) for the lifetime of
     /// leadership. Returns true if it ended because the cluster lock was lost (so the caller re-elects
-    /// without treating it as a fault); a real fault propagates, and shutdown re-throws cancellation.
+    /// without treating it as a fault); a real fault — from the pipeline or a background task — propagates,
+    /// and shutdown re-throws cancellation.
     /// </summary>
     private async Task<bool> RunAsLeaderAsync(IClusterLockHandle leadership, CancellationToken ct)
     {
@@ -176,21 +180,35 @@ internal sealed class CdcRuntime
             },
             _logger);
 
+        // A background-task fault fails the whole leader session (first fault wins): the task records it,
+        // cancels the workload, and the fault is rethrown below so the caller halts and retries with backoff.
+        Exception? backgroundFault = null;
+
         var backfillTask = Task.Run(async () =>
         {
             try { await scheduler.RunDueBackfillsAsync(linked.Token); }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { _logger.BackfillSchedulerFailed(ex); }
-        }, linked.Token);
+            catch (Exception ex)
+            {
+                _logger.BackfillSchedulerFailed(ex);
+                Interlocked.CompareExchange(ref backgroundFault, ex, null);
+                await linked.CancelAsync();
+            }
+        });
 
         // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
         var fanoutTask = _fanoutQueue is not null
             ? Task.Run(async () =>
             {
-                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger, _options.FanoutPollInterval).RunAsync(linked.Token); }
+                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger, _options.FanoutPollInterval, _status).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
-                catch (Exception ex) { _logger.FanoutWorkerFailed(ex); }
-            }, linked.Token)
+                catch (Exception ex)
+                {
+                    _logger.FanoutWorkerFailed(ex);
+                    Interlocked.CompareExchange(ref backgroundFault, ex, null);
+                    await linked.CancelAsync();
+                }
+            })
             : Task.CompletedTask;
 
         try
@@ -199,16 +217,20 @@ internal sealed class CdcRuntime
         }
         catch (OperationCanceledException)
         {
-            // Either shutdown (ct) or the lost-lock cancellation — distinguished below.
+            // Shutdown (ct), lost-lock, or a background fault cancelled the workload — distinguished below.
         }
         finally
         {
             await linked.CancelAsync();
-            try { await backfillTask; } catch { /* already logged */ }
-            try { await fanoutTask; } catch { /* already logged */ }
+            await backfillTask; // never faults: the body records + swallows
+            await fanoutTask;
         }
 
         ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks
+        if (backgroundFault is not null)
+        {
+            ExceptionDispatchInfo.Capture(backgroundFault).Throw(); // fail the session so the caller retries with backoff
+        }
         return leadership.Lost.IsCancellationRequested; // otherwise: did we step down because the lock dropped?
     }
 

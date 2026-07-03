@@ -69,6 +69,20 @@ public class CdcStatusTests
     }
 
     [Test]
+    public void Fanout_failures_increment_set_the_error_and_reset()
+    {
+        var status = new CdcStatus();
+
+        status.RecordFanoutFailure("e1");
+        status.RecordFanoutFailure("e2");
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(2);
+        status.Current.LastError.ShouldBe("e2");
+
+        status.ResetFanoutFailures();
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(0);
+    }
+
+    [Test]
     public void EnterStandby_clears_leader_since()
     {
         var status = new CdcStatus();

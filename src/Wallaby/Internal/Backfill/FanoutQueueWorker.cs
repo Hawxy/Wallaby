@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
@@ -13,7 +14,7 @@ namespace Wallaby.Internal.Backfill;
 /// </summary>
 internal sealed class FanoutQueueWorker(
     IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger,
-    TimeSpan pollInterval)
+    TimeSpan pollInterval, CdcStatus? status = null)
 {
     // Base delay before retrying after a failed drain pass. A pass fails when a job errors (e.g. a poison
     // scoped re-snapshot); the job is left in place to retry — never dropped — so the delay grows
@@ -33,6 +34,7 @@ internal sealed class FanoutQueueWorker(
             {
                 var drained = await DrainOnceAsync(ct);
                 backoff.Reset();
+                status?.ResetFanoutFailures();
                 if (drained == 0)
                 {
                     // Idle: wake the moment a job is enqueued (NOTIFY), or after the fallback interval elapses.
@@ -46,6 +48,7 @@ internal sealed class FanoutQueueWorker(
             catch (Exception ex)
             {
                 logger.WorkerPassFailed(ex);
+                status?.RecordFanoutFailure($"{ex.GetType().Name}: {ex.Message}");
                 try { await Task.Delay(backoff.Next(), ct); }
                 catch (OperationCanceledException) { break; }
             }

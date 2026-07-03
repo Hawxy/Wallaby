@@ -46,6 +46,12 @@ internal sealed class CdcStatus : IWallabyStatus
     internal void ResetLeaderFailures() =>
         Update(s => s.ConsecutiveLeaderFailures == 0 ? s : s with { ConsecutiveLeaderFailures = 0 });
 
+    internal void RecordFanoutFailure(string error) =>
+        Update(s => s with { ConsecutiveFanoutFailures = s.ConsecutiveFanoutFailures + 1, LastError = error });
+
+    internal void ResetFanoutFailures() =>
+        Update(s => s.ConsecutiveFanoutFailures == 0 ? s : s with { ConsecutiveFanoutFailures = 0 });
+
     internal void RecordProgress(ulong lsn, double lagSeconds, DateTimeOffset at) =>
         Update(s => s with
         {

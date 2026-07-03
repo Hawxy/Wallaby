@@ -35,8 +35,7 @@ cdc.Map<Product>()
 | `ApiKey` | `null` | Master/write key; `null` for unsecured. |
 | `DefaultIndex` | `null` | Index used when a routed record has no destination. |
 | `PrimaryKey` | `id` | Document key field Wallaby injects into every document. |
-| `WaitForCompletion` | `true` | Await each indexing task before the batch is acked (honest at-least-once). |
-| `WaitTimeoutMs` | `60000` | Max wait per task when `WaitForCompletion`. |
+| `WaitTimeoutMs` | `60000` | Max wait per indexing task (every task is awaited before the batch is acked). |
 | `WaitIntervalMs` | `50` | Poll interval while waiting. |
 | `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
 
@@ -97,8 +96,8 @@ If a way to customize this would be useful, open an issue.
 ## Delivery semantics
 
 Network/HTTP/task failures are reported as **retryable** - the dispatcher retries with exponential
-backoff. With `WaitForCompletion = true`, a task that finishes `Failed`/`Canceled` also surfaces as a
-failure so the batch isn't acked prematurely. Because Meilisearch upserts are by primary key, redelivery
+backoff. Every indexing task is awaited to completion; a task that finishes `Failed`/`Canceled` surfaces as
+a failure so the batch isn't acked prematurely. Because Meilisearch upserts are by primary key, redelivery
 after a crash is safe.
 
 ## Per-tenant indexes

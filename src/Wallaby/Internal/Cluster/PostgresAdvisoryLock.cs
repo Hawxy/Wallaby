@@ -53,6 +53,10 @@ internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource, TimeSpan
 
     private sealed class Handle : IClusterLockHandle
     {
+        // Short probe timeout so a silently wedged connection surfaces as a lost lock within roughly one
+        // heartbeat interval, instead of stalling on Npgsql's default 30s command timeout.
+        private const int ProbeTimeoutSeconds = 5;
+
         private readonly NpgsqlConnection _connection;
         private readonly long _lockKey;
         private readonly CancellationTokenSource _lost = new();
@@ -82,16 +86,17 @@ internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource, TimeSpan
         {
             try
             {
-                await PgExec.ScalarAsync(_connection, "SELECT 1", ct);
+                await using var cmd = new NpgsqlCommand("SELECT 1", _connection) { CommandTimeout = ProbeTimeoutSeconds };
+                await cmd.ExecuteScalarAsync(ct);
                 return true;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw; // we're stopping, not losing the lock
             }
             catch
             {
-                return false; // connection broken => session gone => lock lost
+                return false; // broken/timed-out connection => session gone => lock lost
             }
         }
 

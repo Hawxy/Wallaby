@@ -126,13 +126,13 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
             if (!await IndexExistsAsync(config.Name, ct))
             {
                 var created = await _client.CreateIndexAsync(config.Name, _options.PrimaryKey, ct);
-                await WaitAsync(index, created, ct, force: true);
+                await WaitAsync(index, created, ct);
             }
 
             if (config.Settings is not null)
             {
                 var updated = await index.UpdateSettingsAsync(config.Settings, ct);
-                await WaitAsync(index, updated, ct, force: true);
+                await WaitAsync(index, updated, ct);
             }
         }
     }
@@ -211,15 +211,10 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
         }
     }
 
-    private async Task WaitAsync(global::Meilisearch.Index index, TaskInfo info, CancellationToken ct, bool force = false)
+    private async Task WaitAsync(global::Meilisearch.Index index, TaskInfo info, CancellationToken ct)
     {
-        // Index setup (force=true) always waits so the index is ready before streaming; delivery waits
-        // only when WaitForCompletion is set.
-        if (!force && !_options.WaitForCompletion)
-        {
-            return;
-        }
-
+        // Every task is awaited to completion, so a batch is only reported delivered (and the LSN acked)
+        // once Meilisearch has actually applied it.
         var result = await index.WaitForTaskAsync(info.TaskUid, _options.WaitTimeoutMs, _options.WaitIntervalMs, ct);
         if (result.Status is TaskInfoStatus.Failed or TaskInfoStatus.Canceled)
         {

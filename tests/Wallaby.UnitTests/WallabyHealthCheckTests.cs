@@ -40,4 +40,17 @@ public class WallabyHealthCheckTests
     {
         (await CheckAsync(Snap(WallabyNodeRole.Stopped, faulted: true))).ShouldBe(HealthStatus.Unhealthy);
     }
+
+    [Test]
+    public async Task Fanout_failures_stay_healthy_and_appear_in_data()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveFanoutFailures = 3 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        // A stuck-retrying fan-out is degraded, not dead — a restart wouldn't fix it, so the node stays Healthy.
+        result.Status.ShouldBe(HealthStatus.Healthy);
+        result.Data["consecutiveFanoutFailures"].ShouldBe(3);
+    }
 }

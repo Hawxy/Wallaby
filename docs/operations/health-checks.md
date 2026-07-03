@@ -31,7 +31,9 @@ Registered as **`wallaby`** (tag `wallaby`). It reports:
 
 The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
 `leaderSince`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
-`consecutiveLeaderFailures`, and `slotName`.
+`consecutiveLeaderFailures`, `consecutiveFanoutFailures`, and `slotName`. A nonzero
+`consecutiveFanoutFailures` means the fan-out worker is stuck retrying with backoff. 
+Live replication keeps flowing, so the node stays Healthy, but the value is worth alerting on.
 
 ::: warning Don't expose full detail publicly
 The `data` dictionary can include exception text. Don't expose a detailed `/health` response on a public

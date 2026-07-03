@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
@@ -57,5 +58,66 @@ public class FanoutQueueWorkerTests
         ran.ShouldBe(0);            // nothing actually ran
         queue.Deferred.ShouldBe(1); // it was deferred...
         queue.Completed.ShouldBe(0); // ...not dropped
+    }
+
+    // Throws on the first pass, is empty (healthy) on the second, and stops the worker at the idle wait.
+    private sealed class ThrowOnceQueue(Action onHealthyPass, Action onIdle) : IFanoutQueueStore
+    {
+        private int _calls;
+
+        public Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct)
+        {
+            if (++_calls == 1)
+            {
+                throw new InvalidOperationException("poison pass");
+            }
+            onHealthyPass();
+            return Task.FromResult<FanoutJobRow?>(null);
+        }
+
+        public IFanoutQueueSubscription Subscribe() => new StoppingSubscription(onIdle);
+
+        public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
+        public Task MarkInProgressAsync(string t, string h, string? c, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(string t, string h, string? c, long r, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string t, string h, CancellationToken ct) => Task.CompletedTask;
+        public Task DeferAsync(string t, string h, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<FanoutJobRow>>([]);
+    }
+
+    private sealed class StoppingSubscription(Action onIdle) : IFanoutQueueSubscription
+    {
+        public Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct)
+        {
+            onIdle();
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Test]
+    public async Task Failed_pass_records_a_fanout_failure_and_a_healthy_pass_resets_it()
+    {
+        var status = new CdcStatus();
+        using var stop = new CancellationTokenSource();
+        var failuresSeenOnHealthyPass = -1;
+
+        // Capture the counter as the healthy pass starts (before its reset), and stop once the worker idles.
+        var queue = new ThrowOnceQueue(
+            onHealthyPass: () => failuresSeenOnHealthyPass = status.Current.ConsecutiveFanoutFailures,
+            onIdle: stop.Cancel);
+
+        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
+        var worker = new FanoutQueueWorker(
+            queue, coordinator, new WallabyModel([]), NullLogger.Instance, TimeSpan.FromSeconds(1), status);
+
+        await worker.RunAsync(stop.Token);
+
+        failuresSeenOnHealthyPass.ShouldBe(1); // the failed pass was recorded...
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(0); // ...and the healthy pass reset it
+        status.Current.LastError.ShouldBe("InvalidOperationException: poison pass");
     }
 }

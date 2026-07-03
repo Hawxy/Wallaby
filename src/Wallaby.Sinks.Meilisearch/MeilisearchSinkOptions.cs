@@ -18,12 +18,9 @@ public sealed class MeilisearchSinkOptions
     public string PrimaryKey { get; set; } = "id";
 
     /// <summary>
-    /// When true (default), each indexing task is awaited to completion before the batch is considered
-    /// delivered. This keeps delivery honest for at-least-once semantics at the cost of throughput.
+    /// Maximum time to wait for an indexing task to complete. Every task is awaited to completion before
+    /// the batch is considered delivered, keeping delivery honest for at-least-once semantics.
     /// </summary>
-    public bool WaitForCompletion { get; set; } = true;
-
-    /// <summary>Maximum time to wait for a task when <see cref="WaitForCompletion"/> is true.</summary>
     public double WaitTimeoutMs { get; set; } = 60_000;
 
     /// <summary>Polling interval while waiting for a task.</summary>

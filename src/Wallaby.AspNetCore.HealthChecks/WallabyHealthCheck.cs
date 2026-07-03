@@ -30,6 +30,7 @@ public sealed class WallabyHealthCheck(IWallabyStatus status) : IHealthCheck
             ["startedAt"] = s.StartedAt,
             ["lastAcknowledgedLsn"] = s.LastAcknowledgedLsn,
             ["consecutiveLeaderFailures"] = s.ConsecutiveLeaderFailures,
+            ["consecutiveFanoutFailures"] = s.ConsecutiveFanoutFailures,
             ["slotName"] = s.SlotName,
         };
         if (s.LastError is { } error) data["lastError"] = error;

@@ -46,6 +46,12 @@ public sealed record WallabyStatusSnapshot
     /// <summary>Consecutive failed leader sessions (reset on a healthy-length session or on becoming a standby).</summary>
     public int ConsecutiveLeaderFailures { get; init; }
 
+    /// <summary>
+    /// Consecutive failed fan-out drain passes. Nonzero means the fan-out worker is stuck retrying (e.g. a
+    /// poison scoped re-snapshot) with backoff; live replication is unaffected. Reset on a healthy pass.
+    /// </summary>
+    public int ConsecutiveFanoutFailures { get; init; }
+
     /// <summary>The replication slot name.</summary>
     public string SlotName { get; init; } = "";
 }
