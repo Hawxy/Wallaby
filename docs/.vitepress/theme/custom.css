@@ -179,6 +179,18 @@
   text-decoration: underline;
 }
 
+/* Navbar search: visible pill again (theme sets --vp-c-bg-alt = page bg,
+   which erases the button's default background) */
+.VPNavBarSearchButton.VPNavBarSearchButton {
+  background-color: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  transition: border-color 0.25s;
+}
+
+.VPNavBarSearchButton.VPNavBarSearchButton:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
 /* Text selection: amber tint */
 ::selection {
   background: rgba(154, 84, 16, 0.25);
