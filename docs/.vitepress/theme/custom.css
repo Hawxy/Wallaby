@@ -24,7 +24,6 @@
 .vp-doc h6,
 .VPHero .name,
 .VPHero .text,
-.VPHero .tagline,
 .VPFeature .title,
 .VPButton,
 .VPNavBarTitle .title,
@@ -96,7 +95,7 @@
   --vp-custom-block-warning-bg: rgba(154, 84, 16, 0.08);
   --vp-custom-block-warning-code-bg: rgba(154, 84, 16, 0.09);
 
-  /* Badges: purple informational chips */
+  /* Badges: blue informational, amber caution */
   --vp-badge-info-text: #0a5d8f;
   --vp-badge-info-bg: rgba(10, 93, 143, 0.08);
   --vp-badge-tip-text: #0a5d8f;
@@ -165,7 +164,7 @@
   --vp-custom-block-warning-bg: rgba(255, 180, 84, 0.1);
   --vp-custom-block-warning-code-bg: rgba(255, 180, 84, 0.1);
 
-  /* Badges: purple informational chips */
+  /* Badges: blue informational, amber caution */
   --vp-badge-info-text: #59c2ff;
   --vp-badge-info-bg: rgba(89, 194, 255, 0.14);
   --vp-badge-tip-text: #59c2ff;
@@ -292,6 +291,56 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 12px;
+}
+
+/* ---- Hero pipeline column ---- */
+
+/* The hero "image" slot holds the live pipeline (HeroPipeline.vue),
+   not a logo — undo VitePress's logo-oriented sizing: the fixed 320px
+   square, the negative pull-up margins that put a logo above the title
+   on mobile, and the desktop translate offset. On mobile the pipeline
+   moves below the actions (order 3) instead. */
+.VPHome .VPHero .image {
+  order: 3;
+  margin: 40px 0 0;
+}
+
+.VPHome .VPHero .image-container {
+  display: flex;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  transform: none;
+}
+
+@media (min-width: 960px) {
+  .VPHome .VPHero .image {
+    order: 2;
+    margin: 0;
+  }
+
+  .VPHome .VPHero .image-container {
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding-left: 24px;
+  }
+}
+
+/* has-image centers the hero text below 960px (logo styling again) —
+   keep our left-aligned terminal look. Extra .main/.VPHero class hops
+   beat the scoped [data-v] rules that inject after this file. */
+.VPHome .VPHero.VPHero.has-image .container {
+  text-align: left;
+}
+
+.VPHome .VPHero.has-image .main .name,
+.VPHome .VPHero.has-image .main .text {
+  margin: 0;
+}
+
+.VPHome .VPHero.VPHero.has-image .actions {
+  justify-content: flex-start;
 }
 
 /* ---- Chrome polish ---- */

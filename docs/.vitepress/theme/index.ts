@@ -3,7 +3,7 @@ import type { Theme } from 'vitepress';
 import DefaultTheme from 'vitepress/theme';
 import { useData } from 'vitepress';
 import { createMermaidRenderer } from 'vitepress-mermaid-renderer';
-import LsnStatusLine from './LsnStatusLine.vue';
+import HeroPipeline from './HeroPipeline.vue';
 import './custom.css';
 
 export default {
@@ -89,7 +89,7 @@ export default {
     );
 
     return h(DefaultTheme.Layout, null, {
-      'home-hero-info-after': () => h(LsnStatusLine),
+      'home-hero-image': () => h(HeroPipeline),
     });
   },
 } satisfies Theme;
