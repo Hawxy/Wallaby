@@ -10,7 +10,11 @@ import { lsn, tickLsn } from './lsn';
 const delivered = ref(1184); // deterministic start — SSR hydration
 const pulsingTop = ref(false);
 const pulsingBottom = ref(false);
-const glowing = ref(false);
+// 0 = idle, 1..3 = decode/transform/deliver lighting up in sequence
+const stage = ref(0);
+// end chips flash as the packet is emitted / arrives
+const sourceActive = ref(false);
+const destActive = ref(false);
 
 // destination cycles with each batch; starts (and, under reduced
 // motion, stays) on the catch-all
@@ -22,17 +26,25 @@ let stepTimers: ReturnType<typeof setTimeout>[] = [];
 let cycleCount = 0;
 
 // One packet flowing through, with the numbers telling the same story:
-// the WAL advances as the packet leaves postgres, the wallaby chip
-// glows while it "processes" (0.6s travel per connector), and the
-// delivered counter bumps when the packet lands.
+// the WAL advances as the packet leaves postgres (0.6s travel per
+// connector), wallaby "processes" it — the stage words light up in
+// sequence and the slot line reads processing — and the delivered
+// counter bumps when the packet lands.
 function runPulseCycle() {
   stepTimers = ([
-    [0, () => { tickLsn(); pulsingTop.value = true; }],
-    [600, () => (glowing.value = true)],
+    [0, () => { tickLsn(); sourceActive.value = true; pulsingTop.value = true; }],
+    [400, () => (sourceActive.value = false)],
+    [600, () => (stage.value = 1)],
     [650, () => (pulsingTop.value = false)],
-    [1150, () => { glowing.value = false; pulsingBottom.value = true; }],
-    [1750, () => (delivered.value += 6 + Math.floor(Math.random() * 34))],
-    [1800, () => (pulsingBottom.value = false)],
+    [900, () => (stage.value = 2)],
+    [1200, () => (stage.value = 3)],
+    [1500, () => { stage.value = 0; pulsingBottom.value = true; }],
+    [2100, () => {
+      delivered.value += 6 + Math.floor(Math.random() * 34);
+      destActive.value = true;
+    }],
+    [2150, () => (pulsingBottom.value = false)],
+    [2450, () => (destActive.value = false)],
   ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
 }
 
@@ -50,7 +62,9 @@ onMounted(() => {
         destIndex.value = (destIndex.value + 1) % destinations.length;
       }
       runPulseCycle();
-    }, 2500);
+      // the sequence ends at ~2.45s; the extra half second is a rest
+      // beat before the next packet
+    }, 3000);
   }
 });
 
@@ -62,7 +76,7 @@ onUnmounted(() => {
 
 <template>
   <div class="wb-flow" aria-hidden="true">
-    <div class="wb-flow-chip">
+    <div class="wb-flow-chip" :class="{ 'is-active': sourceActive }">
       <div class="wb-flow-title">postgres</div>
       <div class="wb-flow-sub">
         wal @ <span class="wb-flow-lsn">{{ lsn }}</span>
@@ -71,19 +85,23 @@ onUnmounted(() => {
 
     <div class="wb-flow-link" :class="{ 'is-pulsing': pulsingTop }"></div>
 
-    <div class="wb-flow-chip is-wallaby" :class="{ 'is-glowing': glowing }">
+    <div class="wb-flow-chip is-wallaby" :class="{ 'is-processing': stage > 0 }">
       <div class="wb-flow-title">
         <span class="wb-flow-name">wallaby</span>
-      </div>    
+      </div>
       <div class="wb-flow-sub">
         slot: wallaby_cdc <span class="wb-flow-state">► active</span>
       </div>
-      <div class="wb-flow-sub">decode ▸ transform ▸ deliver</div>
+      <div class="wb-flow-sub">
+        <span class="wb-flow-stage" :class="{ 'is-on': stage === 1 }">decode</span> ▸
+        <span class="wb-flow-stage" :class="{ 'is-on': stage === 2 }">transform</span> ▸
+        <span class="wb-flow-stage" :class="{ 'is-on': stage === 3 }">deliver</span>
+      </div>
     </div>
 
     <div class="wb-flow-link" :class="{ 'is-pulsing': pulsingBottom }"></div>
 
-    <div class="wb-flow-chip">
+    <div class="wb-flow-chip" :class="{ 'is-active': destActive }">
       <div class="wb-flow-title">
         <Transition name="wb-swipe" mode="out-in">
           <span :key="destIndex" class="wb-flow-dest">{{ destinations[destIndex] }}</span>
@@ -110,15 +128,27 @@ onUnmounted(() => {
   border: 1px solid var(--vp-c-divider);
   border-radius: 2px;
   background-color: var(--vp-code-block-bg);
+  transition: border-color 0.4s;
+}
+
+/* end chips flash blue as the packet is emitted / arrives — matching
+   their data values (LSN, counter), which update in the same instant */
+.wb-flow-chip.is-active {
+  border-color: var(--wb-accent-blue);
 }
 
 .wb-flow-chip.is-wallaby {
   border-color: var(--vp-c-brand-1);
-  transition: box-shadow 0.4s;
 }
 
-.wb-flow-chip.is-wallaby.is-glowing {
-  box-shadow: var(--wb-glow-amber);
+/* processing: border steps up a shade while the stage words carry the
+   story — no shadow; the light theme is paper, and paper doesn't glow */
+.wb-flow-chip.is-wallaby.is-processing {
+  border-color: var(--vp-c-brand-2);
+}
+
+.wb-flow-stage.is-on {
+  color: var(--vp-c-brand-1);
 }
 
 .wb-flow-title {
