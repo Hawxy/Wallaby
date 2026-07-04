@@ -48,6 +48,10 @@ export default defineConfig({
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/Hawxy/Wallaby' }
-    ]
+    ],
+
+  },
+  markdown: {
+    theme: { light: 'github-light-default', dark: 'ayu-dark' },
   }
 })

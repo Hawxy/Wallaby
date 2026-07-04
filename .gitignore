@@ -483,3 +483,7 @@ $RECYCLE.BIN/
 
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+docs/.vitepress/theme/fonts/
+*.ttf
+*.woff2
