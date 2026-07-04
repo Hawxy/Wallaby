@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Getting Started
 
 Wallaby streams row changes from Postgres logical replication, materializes them into your mapped

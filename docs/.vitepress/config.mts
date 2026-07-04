@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: "Wallaby",
-  description: "Postgres CDC Engine for .NET + EF Core",
+  description: "Postgres CDC Engine for .NET",
   base: '/Wallaby/',
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
@@ -52,6 +52,6 @@ export default defineConfig({
 
   },
   markdown: {
-    theme: { light: 'github-light-default', dark: 'ayu-dark' },
+    theme: { light: 'github-light-high-contrast', dark: 'ayu-dark' },
   }
 })

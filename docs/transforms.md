@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Transforms
 
 A **transform** turns the changes for one entity type into the documents you want in a destination.

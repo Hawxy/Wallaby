@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Multi-tenancy (per-row scoping)
 
 Sometimes the enrichment `DbContext` and/or destination must be derived from the **changed row's own

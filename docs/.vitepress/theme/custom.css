@@ -179,16 +179,93 @@
   text-decoration: underline;
 }
 
+/* ---- Boxed layout: frame lines between regions, squared corners ---- */
+
+/* Neon glow for interactive elements: amber = primary, blue = secondary.
+   Two layers: tight bright halo + wide faint bloom. */
+:root {
+  --wb-accent-blue: #0a5d8f;
+  --wb-glow-amber: 0 0 4px rgba(154, 84, 16, 0.45), 0 0 16px rgba(154, 84, 16, 0.3);
+  --wb-glow-blue: 0 0 4px rgba(10, 93, 143, 0.45), 0 0 16px rgba(10, 93, 143, 0.3);
+}
+
+.dark {
+  --wb-accent-blue: #59c2ff;
+  --wb-glow-amber: 0 0 5px rgba(255, 180, 84, 0.6), 0 0 20px rgba(255, 180, 84, 0.35);
+  --wb-glow-blue: 0 0 5px rgba(89, 194, 255, 0.6), 0 0 20px rgba(89, 194, 255, 0.35);
+}
+
+.VPButton.VPButton {
+  transition: color 0.25s, border-color 0.25s, background-color 0.25s,
+    box-shadow 0.25s;
+}
+
+.VPButton.VPButton.brand:hover,
+.VPButton.VPButton.brand:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
+}
+
+.VPButton.VPButton.alt:hover,
+.VPButton.VPButton.alt:focus-visible {
+  border-color: var(--wb-accent-blue);
+  box-shadow: var(--wb-glow-blue);
+}
+
+/* Frame lines around the chrome */
+.VPNavBar {
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.VPSidebar {
+  border-right: 1px solid var(--vp-c-divider);
+}
+
+/* Code blocks: bordered panels with near-square corners */
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 2px;
+}
+
+/* Callouts and inline code: squared */
+.vp-doc .custom-block {
+  border-radius: 2px;
+}
+
+.vp-doc :not(pre) > code {
+  border-radius: 2px;
+}
+
+/* Home feature cards: bordered, squared */
+.VPFeature.VPFeature.VPFeature {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 2px;
+}
+
+/* Hero buttons: rectangles instead of pills */
+.VPButton.VPButton.medium,
+.VPButton.VPButton.big {
+  border-radius: 2px;
+}
+
+/* Badges: squared chips */
+.VPBadge {
+  border-radius: 2px;
+}
+
 /* Navbar search: visible pill again (theme sets --vp-c-bg-alt = page bg,
    which erases the button's default background) */
 .VPNavBarSearchButton.VPNavBarSearchButton {
   background-color: var(--vp-c-bg-soft);
   border: 1px solid var(--vp-c-divider);
+  border-radius: 2px;
   transition: border-color 0.25s;
 }
 
-.VPNavBarSearchButton.VPNavBarSearchButton:hover {
+.VPNavBarSearchButton.VPNavBarSearchButton:hover,
+.VPNavBarSearchButton.VPNavBarSearchButton:focus-visible {
   border-color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
 }
 
 /* Text selection: amber tint */

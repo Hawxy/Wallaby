@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # How it works
 
 Wallaby runs a single ordered pipeline per slot. It reads committed transactions from Postgres logical

@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Meilisearch Sink
 
 The `Wallaby.Sinks.Meilisearch` package keeps Meilisearch indexes continuously in sync with your

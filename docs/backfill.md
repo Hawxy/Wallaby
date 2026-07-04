@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Backfill
 
 Backfill loads existing rows into a destination. It runs concurrently with the realtime publish and merges with it so there are no

@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Custom Sinks
 
 A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere — an HTTP API,

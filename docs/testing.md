@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Testing
 
 The `Wallaby.Testing` package helps you test your CDC pipeline **end-to-end**: write rows through your
