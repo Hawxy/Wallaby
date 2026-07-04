@@ -21,12 +21,12 @@ export default defineConfig({
         text: 'Usage',
         items: [
           { text: 'Getting Started', link: '/getting-started' },
-          { text: 'How it works', link: '/how-it-works' },
+          { text: 'How It Works', link: '/how-it-works' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
-          { text: 'Multi-tenancy', link: '/multi-tenancy' },
-          { text: 'External slots', link: '/external-slots' },
+          { text: 'Multi-Tenancy', link: '/multi-tenancy' },
+          { text: 'External Slots', link: '/external-slots' },
           { text: 'Testing', link: '/testing' },
         ]
       },
@@ -41,7 +41,7 @@ export default defineConfig({
         text: 'Operations',
         items: [
           { text: 'Observability', link: '/operations/observability' },
-          { text: 'Health checks', link: '/operations/health-checks' }
+          { text: 'Health Checks', link: '/operations/health-checks' }
         ]
       }
     ],

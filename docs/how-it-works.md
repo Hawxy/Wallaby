@@ -1,4 +1,4 @@
-# How it works
+# How It Works
 
 Wallaby runs a single ordered pipeline per slot. It reads committed transactions from Postgres logical
 replication, materializes each row change into your mapped EF Core entity, transforms it into a document,
@@ -6,7 +6,7 @@ and delivers it to your sinks. **Only after every sink accepts the batch** does 
 and advance the slot — that ordering is what gives at-least-once delivery, since a crash simply re-streams
 from the last acknowledged position.
 
-## The pipeline
+## The Pipeline
 
 ```mermaid
 flowchart LR
