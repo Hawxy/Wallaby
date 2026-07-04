@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: Automated Configuration
-    details: Point at your EFCore entities or custom tables and get up & running with minimal effort. Get compile-time errors as your model changes.
+    details: Point at your EF Core entities or custom tables and get up & running with minimal effort. Get compile-time errors as your model changes.
   - title: Transform + Enrich
     details: Convert, enhance & flatten materialized changes into the required shape for your output destination. Use your existing DBContext or drop down to manual SQL.
   - title: Pluggable Sinks

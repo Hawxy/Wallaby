@@ -276,3 +276,74 @@
 .dark ::selection {
   background: rgba(255, 180, 84, 0.3);
 }
+
+/* ---- Terminal details ---- */
+
+/* Markdown-flavored prompt prefix on section headings: the built-in
+   permalink anchor (#) made permanently visible in amber, so the prompt
+   IS the clickable anchor rather than duplicating it */
+.vp-doc h2 .header-anchor {
+  opacity: 1;
+  color: var(--vp-c-brand-1);
+}
+
+/* Sidebar group labels: control-panel style */
+.VPSidebarItem.VPSidebarItem.level-0 > .item > .text {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+/* ---- Chrome polish ---- */
+
+/* Square scrollbars: page + code-block overflow */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vp-c-brand-1);
+}
+
+html {
+  scrollbar-color: var(--vp-c-divider) transparent;
+}
+
+/* Keyboard focus rings on the accent instead of browser default */
+:focus-visible {
+  outline: 1px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
+/* Code-block language label as a bordered chip */
+.vp-doc [class*='language-'] > span.lang {
+  border: 1px solid var(--vp-c-divider);
+  background-color: var(--vp-c-bg-soft);
+  padding: 0 6px;
+  border-radius: 2px;
+  color: var(--vp-c-text-2);
+}
+
+/* Doc tables: full grid to match the boxed layout */
+.vp-doc table {
+  border-collapse: collapse;
+}
+
+.vp-doc th,
+.vp-doc td {
+  border: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc th {
+  background-color: var(--vp-c-bg-soft);
+}
