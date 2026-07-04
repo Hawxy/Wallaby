@@ -1,13 +1,11 @@
 import { ref } from 'vue';
 
-// One fake WAL position shared by every homepage widget that shows an
-// LSN (the hero statusline, the console window), so they can never
-// display diverging positions. Starts at the last value the console's
-// static startup history acknowledges, and only moves forward.
+// The homepage's fake WAL position. It only advances when the hero
+// pipeline runs its pulse choreography (tickLsn at packet launch), so
+// the position, the moving packet, and the delivered counter always
+// tell one story. Deterministic start — SSR hydration.
 let hi = 0x16;
 let lo = 0xb3762a94;
-let timer: ReturnType<typeof setInterval> | undefined;
-let subscribers = 0;
 
 function format() {
   return `${hi.toString(16).toUpperCase()}/${lo
@@ -18,28 +16,11 @@ function format() {
 
 export const lsn = ref(format());
 
-function tick() {
+export function tickLsn() {
   lo += 0x100 + Math.floor(Math.random() * 0x4000);
   if (lo > 0xffffffff) {
     lo -= 0x100000000;
     hi += 1;
   }
   lsn.value = format();
-}
-
-// Call from onMounted only (touches window). Idempotent across widgets;
-// the ticker stops when the last subscriber unmounts.
-export function subscribeLsn() {
-  subscribers += 1;
-  if (!timer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    timer = setInterval(tick, 1200);
-  }
-}
-
-export function unsubscribeLsn() {
-  subscribers -= 1;
-  if (subscribers <= 0 && timer) {
-    clearInterval(timer);
-    timer = undefined;
-  }
 }

@@ -1,43 +1,62 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { lsn, subscribeLsn, unsubscribeLsn } from './lsn';
+import { lsn, tickLsn } from './lsn';
 
-// The hero "image": a live vertical pipeline — postgres (WAL position,
-// shared ticker) → wallaby (stages + slot status) → anywhere (delivered
-// counter). Every few seconds a batch lands: a pulse runs down the
-// connectors and the counter jumps. Telemetry is fake, so the whole
-// widget is hidden from assistive tech.
+// The hero "image": a live vertical pipeline — postgres (WAL position)
+// → wallaby (stages + slot status) → rotating destination (delivered
+// counter). Every 2.5s a packet flows through and the numbers update in
+// step with it. Telemetry is fake, so the whole widget is hidden from
+// assistive tech.
 const delivered = ref(1184); // deterministic start — SSR hydration
-const pulsing = ref(false);
+const pulsingTop = ref(false);
+const pulsingBottom = ref(false);
+const glowing = ref(false);
 
 // destination cycles with each batch; starts (and, under reduced
 // motion, stays) on the catch-all
 const destinations = ['anywhere', 'search index', 'vector db'];
 const destIndex = ref(0);
 
-let batchTimer: ReturnType<typeof setInterval> | undefined;
-let pulseTimer: ReturnType<typeof setTimeout> | undefined;
+let cycleTimer: ReturnType<typeof setInterval> | undefined;
+let stepTimers: ReturnType<typeof setTimeout>[] = [];
+let cycleCount = 0;
+
+// One packet flowing through, with the numbers telling the same story:
+// the WAL advances as the packet leaves postgres, the wallaby chip
+// glows while it "processes" (0.6s travel per connector), and the
+// delivered counter bumps when the packet lands.
+function runPulseCycle() {
+  stepTimers = ([
+    [0, () => { tickLsn(); pulsingTop.value = true; }],
+    [600, () => (glowing.value = true)],
+    [650, () => (pulsingTop.value = false)],
+    [1150, () => { glowing.value = false; pulsingBottom.value = true; }],
+    [1750, () => (delivered.value += 6 + Math.floor(Math.random() * 34))],
+    [1800, () => (pulsingBottom.value = false)],
+  ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
+}
 
 function formatCount(n: number) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 onMounted(() => {
-  subscribeLsn();
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    batchTimer = setInterval(() => {
-      delivered.value += 12 + Math.floor(Math.random() * 68);
-      destIndex.value = (destIndex.value + 1) % destinations.length;
-      pulsing.value = true;
-      pulseTimer = setTimeout(() => (pulsing.value = false), 700);
-    }, 5000);
+    cycleTimer = setInterval(() => {
+      // destination rotates every other cycle, before the packet launches,
+      // so a delivery never lands on a mid-swap word
+      cycleCount += 1;
+      if (cycleCount % 2 === 0) {
+        destIndex.value = (destIndex.value + 1) % destinations.length;
+      }
+      runPulseCycle();
+    }, 2500);
   }
 });
 
 onUnmounted(() => {
-  unsubscribeLsn();
-  if (batchTimer) clearInterval(batchTimer);
-  if (pulseTimer) clearTimeout(pulseTimer);
+  if (cycleTimer) clearInterval(cycleTimer);
+  stepTimers.forEach(clearTimeout);
 });
 </script>
 
@@ -50,9 +69,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="wb-flow-link" :class="{ 'is-pulsing': pulsing }"></div>
+    <div class="wb-flow-link" :class="{ 'is-pulsing': pulsingTop }"></div>
 
-    <div class="wb-flow-chip is-wallaby">
+    <div class="wb-flow-chip is-wallaby" :class="{ 'is-glowing': glowing }">
       <div class="wb-flow-title">
         <span class="wb-flow-name">wallaby</span>
       </div>    
@@ -62,7 +81,7 @@ onUnmounted(() => {
       <div class="wb-flow-sub">decode ▸ transform ▸ deliver</div>
     </div>
 
-    <div class="wb-flow-link" :class="{ 'is-pulsing': pulsing }"></div>
+    <div class="wb-flow-link" :class="{ 'is-pulsing': pulsingBottom }"></div>
 
     <div class="wb-flow-chip">
       <div class="wb-flow-title">
@@ -95,6 +114,11 @@ onUnmounted(() => {
 
 .wb-flow-chip.is-wallaby {
   border-color: var(--vp-c-brand-1);
+  transition: box-shadow 0.4s;
+}
+
+.wb-flow-chip.is-wallaby.is-glowing {
+  box-shadow: var(--wb-glow-amber);
 }
 
 .wb-flow-title {
