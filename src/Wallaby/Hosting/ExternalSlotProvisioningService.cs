@@ -5,6 +5,7 @@ using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
 using Wallaby.Internal.SelfConfig;
+using Wallaby.Providers;
 
 namespace Wallaby.Hosting;
 
@@ -38,10 +39,12 @@ internal sealed class ExternalSlotProvisioningService(
                 return;
             }
 
-            // ForEntity<T>() needs the provider's model; only resolve it when a slot actually uses an entity type.
+            // ForEntity<T>() needs the providers' models; only build them when a slot actually uses an entity type.
             var needsModel = config.ExternalSlots.Exists(s => s.EntityTypes.Count > 0);
-            var modelProvider = needsModel ? config.ModelProvider?.Invoke(services) : null;
-            var specs = ExternalSlotResolver.Resolve(config.ExternalSlots, modelProvider);
+            IReadOnlyList<(string Name, IWallabyModelProvider Provider)> modelProviders = needsModel
+                ? [.. config.Providers.Select(p => (p.Name, Provider: p.ModelProvider(services)))]
+                : [];
+            var specs = ExternalSlotResolver.Resolve(config.ExternalSlots, modelProviders);
 
             await using var lease = await clusterLock.TryAcquireAsync(LockKey, stoppingToken);
             if (lease is null)

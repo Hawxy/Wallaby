@@ -76,12 +76,28 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// <summary>
     /// Register the transform via a provider-built invoker. Provider packages call this from their typed
     /// <c>UsingTransform</c> extensions (e.g. Wallaby.EntityFrameworkCore's DbContext-typed overloads);
-    /// use those instead of calling this directly.
+    /// use those instead of calling this directly. A provider-typed extension passes its
+    /// <paramref name="providerName"/> so the mapping resolves to the provider whose session type the
+    /// transform expects.
     /// </summary>
-    public EntityMapBuilder<TEntity> UsingTransformInvoker(Func<IServiceProvider, IWallabyTransformInvoker> factory)
+    public EntityMapBuilder<TEntity> UsingTransformInvoker(
+        Func<IServiceProvider, IWallabyTransformInvoker> factory, string? providerName = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
         _registration.TransformFactory = factory;
+        _registration.TransformProviderName = providerName;
+        return this;
+    }
+
+    /// <summary>
+    /// Pin this mapping to the named storage provider. Only needed when more than one registered provider
+    /// models <typeparamref name="TEntity"/> and the transform's type doesn't already decide it — the usual
+    /// auto-resolution assigns each mapping to the sole provider that models its type.
+    /// </summary>
+    public EntityMapBuilder<TEntity> FromProvider(string providerName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
+        _registration.ExplicitProviderName = providerName;
         return this;
     }
 

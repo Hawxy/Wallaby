@@ -36,37 +36,42 @@ public sealed class WallabyBuilder
     }
 
     /// <summary>
-    /// Register the storage provider that derives the capture model and leases enrichment sessions.
+    /// Register a storage provider that derives a capture model and leases enrichment sessions.
     /// Called by provider packages' registration extensions (e.g. <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>
     /// from Wallaby.EntityFrameworkCore); consumers normally never call it directly. A provider is required
     /// whenever Wallaby streams (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) and to
     /// resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations; omit it for a
-    /// provision-only worker that declares external slots by table name only.
+    /// provision-only worker that declares external slots by table name only. Multiple providers may be
+    /// registered (their capture plans merge onto one slot/publication); names must be unique.
     /// </summary>
     public WallabyBuilder UseProvider(WallabyProviderRegistration registration)
     {
         ArgumentNullException.ThrowIfNull(registration);
-        if (_configuration.ProviderName is not null)
+        if (_configuration.Providers.Any(p => p.Name == registration.Name))
         {
             throw new WallabyConfigurationException(
-                $"A storage provider is already registered ('{_configuration.ProviderName}'); " +
-                $"cannot register '{registration.Name}'. Declare exactly one provider.");
+                $"A storage provider named '{registration.Name}' is already registered. Provider names must be unique.");
         }
-        _configuration.ProviderName = registration.Name;
-        _configuration.ModelProvider = registration.ModelProvider;
-        _configuration.EnrichmentSessions = registration.EnrichmentSessions;
+        _configuration.Providers.Add(registration);
         return this;
     }
 
     /// <summary>
-    /// Override enrichment sessions with a scope-key-aware provider (e.g. context-per-tenant). Called by
-    /// provider packages' scoped-context extensions (e.g. <c>UseScopedDbContext</c>); used by mappings that
-    /// declare <c>ScopedBy(...)</c>. Composes order-independently with <see cref="UseProvider"/>.
+    /// Override the named provider's enrichment sessions with a scope-key-aware provider (e.g.
+    /// context-per-tenant). Called by provider packages' scoped-context extensions (e.g.
+    /// <c>UseScopedDbContext</c>); used by mappings that declare <c>ScopedBy(...)</c>. The provider must be
+    /// registered (via <see cref="UseProvider"/>) before this is called.
     /// </summary>
-    public WallabyBuilder UseScopedEnrichmentSessions(Func<IServiceProvider, IEnrichmentSessionProvider> factory)
+    public WallabyBuilder UseScopedEnrichmentSessions(
+        string providerName, Func<IServiceProvider, IEnrichmentSessionProvider> factory)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
         ArgumentNullException.ThrowIfNull(factory);
-        _configuration.ScopedEnrichmentSessions = factory;
+        var registration = _configuration.Providers.FirstOrDefault(p => p.Name == providerName)
+            ?? throw new WallabyConfigurationException(
+                $"UseScopedEnrichmentSessions(\"{providerName}\", ...) requires that provider to be registered first " +
+                "(e.g. call UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...)).");
+        registration.ScopedEnrichmentSessions = factory;
         return this;
     }
 
@@ -165,7 +170,7 @@ public sealed class WallabyBuilder
         // (no primary slot, no streaming), so neither a provider nor a sink is required.
         if (_configuration.CaptureIntended)
         {
-            if (_configuration.ModelProvider is null)
+            if (_configuration.Providers.Count == 0)
             {
                 throw new WallabyConfigurationException(
                     "Capturing requires a storage provider. Register one with " +
@@ -195,7 +200,23 @@ public sealed class WallabyBuilder
                 throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>().ScopedDestination(...) requires .ScopedBy(...) to provide the scope key.");
             }
-            if (mapping.ScopeKeySelector is not null && mapping.DestinationSelector is null && _configuration.ScopedEnrichmentSessions is null)
+            if (mapping.ExplicitProviderName is not null && mapping.TransformProviderName is not null &&
+                mapping.ExplicitProviderName != mapping.TransformProviderName)
+            {
+                throw new WallabyConfigurationException(
+                    $"Map<{mapping.EntityClrType.Name}>() is pinned to provider '{mapping.ExplicitProviderName}' via " +
+                    $"FromProvider(...), but its transform is typed for provider '{mapping.TransformProviderName}'. " +
+                    "Use that provider's UsingTransform overload or align the FromProvider name.");
+            }
+            if (mapping.ProviderName is not null &&
+                !_configuration.Providers.Any(p => p.Name == mapping.ProviderName))
+            {
+                throw new WallabyConfigurationException(
+                    $"Map<{mapping.EntityClrType.Name}>() is pinned to provider '{mapping.ProviderName}', which is not " +
+                    $"registered. Registered providers: {DescribeProviders()}.");
+            }
+            if (mapping.ScopeKeySelector is not null && mapping.DestinationSelector is null &&
+                !_configuration.Providers.Any(p => p.ScopedEnrichmentSessions is not null))
             {
                 throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register UseScopedContext(...).");
@@ -207,8 +228,8 @@ public sealed class WallabyBuilder
             }
         }
 
-        // ForEntity<T>() resolves against the provider's model, so it needs a declared provider. ForTable(...) does not.
-        if (_configuration.ModelProvider is null &&
+        // ForEntity<T>() resolves against a provider's model, so it needs a declared provider. ForTable(...) does not.
+        if (_configuration.Providers.Count == 0 &&
             _configuration.ExternalSlots.Any(e => e.EntityTypes.Count > 0))
         {
             throw new WallabyConfigurationException(
@@ -243,4 +264,7 @@ public sealed class WallabyBuilder
 
         return _configuration;
     }
+
+    private string DescribeProviders()
+        => string.Join(", ", _configuration.Providers.Select(p => $"'{p.Name}'"));
 }

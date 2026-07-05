@@ -16,4 +16,11 @@ public sealed class WallabyProviderRegistration
 
     /// <summary>Builds the default (unscoped) enrichment-session provider.</summary>
     public required Func<IServiceProvider, IEnrichmentSessionProvider> EnrichmentSessions { get; init; }
+
+    /// <summary>
+    /// Optional scope-key-aware enrichment-session provider (e.g. context-per-tenant); overrides
+    /// <see cref="EnrichmentSessions"/> for this provider's mappings when set. Set via
+    /// <c>WallabyBuilder.UseScopedEnrichmentSessions(providerName, ...)</c> (e.g. by <c>UseScopedDbContext</c>).
+    /// </summary>
+    public Func<IServiceProvider, IEnrichmentSessionProvider>? ScopedEnrichmentSessions { get; set; }
 }

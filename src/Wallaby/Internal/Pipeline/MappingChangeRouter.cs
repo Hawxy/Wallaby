@@ -10,11 +10,12 @@ namespace Wallaby.Internal.Pipeline;
 /// (e.g. tenant) so each invocation gets a same-scope enrichment session and only that scope's changes —
 /// producing a document per source key; a missing or null document becomes a deletion. Deletes are routed
 /// directly by key (no transform), but still resolve their scope key so a scoped destination is honored.
-/// One enrichment session is leased per distinct scope key per batch and disposed at the end.
+/// Sessions come from each mapping's <see cref="EntityMapping.Sessions"/>: one lease per distinct
+/// (session provider, scope key) per batch — so same-provider mappings share a session while mappings on
+/// different providers lease independently — all disposed at the end.
 /// </summary>
 internal sealed class MappingChangeRouter(
     IReadOnlyDictionary<Type, EntityMapping> mappings,
-    IEnrichmentSessionProvider sessionProvider,
     WallabyInstrumentation? instrumentation = null) : IChangeRouter
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
@@ -25,7 +26,7 @@ internal sealed class MappingChangeRouter(
         IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var routed = new List<RoutedDocument>();
-        var sessions = new Dictionary<object, IEnrichmentSession>();
+        var sessions = new Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>();
         try
         {
             foreach (var group in changes.GroupBy(c => c.EntityClrType))
@@ -72,7 +73,7 @@ internal sealed class MappingChangeRouter(
                     var scopeKey = scopeGroup.Key;
                     var subset = scopeGroup.ToList();
                     var destination = mapping.ResolveDestination(scopeKey);
-                    var session = GetOrCreateSession(sessions, scopeKey);
+                    var session = GetOrCreateSession(sessions, mapping.Sessions, scopeKey);
                     var entityName = mapping.EntityClrType.Name;
 
                     using var activity = _instr.StartTransform();
@@ -113,10 +114,13 @@ internal sealed class MappingChangeRouter(
         return routed;
     }
 
-    private object GetOrCreateSession(Dictionary<object, IEnrichmentSession> cache, object? scopeKey)
+    private static object GetOrCreateSession(
+        Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession> cache,
+        IEnrichmentSessionProvider sessionProvider, object? scopeKey)
     {
         // Unscoped providers share one session per batch; scoped providers cache one per distinct key.
-        var cacheKey = sessionProvider.IsScoped ? scopeKey ?? NullScopeKey : SharedContextKey;
+        // Keyed by the session provider too, so mappings on different storage providers lease independently.
+        var cacheKey = (sessionProvider, sessionProvider.IsScoped ? scopeKey ?? NullScopeKey : SharedContextKey);
         if (!cache.TryGetValue(cacheKey, out var lease))
         {
             lease = sessionProvider.Lease(scopeKey);

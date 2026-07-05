@@ -12,4 +12,8 @@ internal sealed class MartenModelProvider : IWallabyModelProvider
     public QualifiedTable ResolveTable(Type entityClrType)
         => throw new NotSupportedException(
             "The Wallaby.Marten provider is a preview placeholder; table resolution is not yet implemented.");
+
+    public bool Handles(Type entityClrType)
+        => throw new NotSupportedException(
+            "The Wallaby.Marten provider is a preview placeholder; model probing is not yet implemented.");
 }

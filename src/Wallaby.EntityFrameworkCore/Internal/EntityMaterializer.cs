@@ -85,7 +85,7 @@ internal sealed class EntityMaterializer : IRowMaterializer
             changes = BuildChanges(plan, oldValues, record);
         }
 
-        row = new MaterializedRow(entity, record, changes, primaryKey, plan.ClrType);
+        row = new MaterializedRow(change.Action, entity, record, changes, primaryKey, plan.ClrType);
         return true;
     }
 

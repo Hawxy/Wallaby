@@ -158,7 +158,7 @@ public class ExternalSlotConfigTests
         registration.TableNames.Add(("public", "products"));
         registration.EntityTypes.Add(typeof(Order)); // maps to sales.orders
 
-        var specs = ExternalSlotResolver.Resolve(new[] { registration }, new EfCoreModelProvider(ctx.Model));
+        var specs = ExternalSlotResolver.Resolve(new[] { registration }, [("EntityFrameworkCore", new EfCoreModelProvider(ctx.Model))]);
 
         specs.Count.ShouldBe(1);
         specs[0].PublicationName.ShouldBe("elt_pub"); // defaulted from slot name
@@ -175,7 +175,7 @@ public class ExternalSlotConfigTests
         registration.TableNames.Add(("public", "products"));
         registration.EntityTypes.Add(typeof(Product)); // also public.products
 
-        var specs = ExternalSlotResolver.Resolve(new[] { registration }, new EfCoreModelProvider(ctx.Model));
+        var specs = ExternalSlotResolver.Resolve(new[] { registration }, [("EntityFrameworkCore", new EfCoreModelProvider(ctx.Model))]);
 
         specs[0].Tables.Count.ShouldBe(1);
     }
@@ -189,7 +189,7 @@ public class ExternalSlotConfigTests
         registration.EntityTypes.Add(typeof(ExternalSlotConfigTests)); // not in the EF model
 
         Should.Throw<WallabyConfigurationException>(
-            () => ExternalSlotResolver.Resolve(new[] { registration }, new EfCoreModelProvider(ctx.Model)));
+            () => ExternalSlotResolver.Resolve(new[] { registration }, [("EntityFrameworkCore", new EfCoreModelProvider(ctx.Model))]));
     }
 
     [Test]
@@ -199,7 +199,7 @@ public class ExternalSlotConfigTests
         var registration = new ExternalSlotRegistration { SlotName = "elt" };
         registration.TableNames.Add(("public", "orders"));
 
-        var specs = ExternalSlotResolver.Resolve(new[] { registration }, modelProvider: null);
+        var specs = ExternalSlotResolver.Resolve(new[] { registration }, modelProviders: []);
 
         specs.Count.ShouldBe(1);
         specs[0].PublicationName.ShouldBe("elt_pub");
@@ -214,6 +214,6 @@ public class ExternalSlotConfigTests
         registration.EntityTypes.Add(typeof(Product));
 
         Should.Throw<WallabyConfigurationException>(
-            () => ExternalSlotResolver.Resolve(new[] { registration }, modelProvider: null));
+            () => ExternalSlotResolver.Resolve(new[] { registration }, modelProviders: []));
     }
 }

@@ -49,19 +49,19 @@ public class MappingChangeRouterTelemetryTests
         };
         ActivitySource.AddActivityListener(listener);
 
+        // The transform ignores the context, so a never-opened context is sufficient for a unit test.
+        var sessionProvider = new DbContextEnrichmentSessionProvider(
+            () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         var mapping = new EntityMapping
         {
             EntityClrType = typeof(Product),
             SinkName = "sink",
             Destination = "products",
             Transform = new StubTransform(),
+            Sessions = sessionProvider,
         };
-
-        // The transform ignores the context, so a never-opened context is sufficient for a unit test.
-        var sessionProvider = new DbContextEnrichmentSessionProvider(
-            () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         var router = new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, sessionProvider, instr);
+            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, instr);
 
         var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
         var change = new ChangeEvent(

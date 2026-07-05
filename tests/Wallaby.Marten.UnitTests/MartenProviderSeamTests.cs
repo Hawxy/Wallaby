@@ -27,13 +27,14 @@ public class MartenProviderSeamTests
 
         var config = builder.Build();
 
-        config.ProviderName.ShouldBe("Marten");
-        config.ModelProvider.ShouldNotBeNull();
-        config.EnrichmentSessions.ShouldNotBeNull();
+        var registration = config.Providers.ShouldHaveSingleItem();
+        registration.Name.ShouldBe("Marten");
+        registration.ModelProvider.ShouldNotBeNull();
+        registration.EnrichmentSessions.ShouldNotBeNull();
     }
 
     [Test]
-    public void Registering_a_second_provider_fails_fast()
+    public void Registering_the_same_provider_twice_fails_fast()
     {
         var builder = CapturingBuilder();
         builder.UseMarten();
@@ -48,9 +49,10 @@ public class MartenProviderSeamTests
         builder.UseMarten();
         var config = builder.Build();
 
-        var provider = config.ModelProvider!(new NullProvider());
+        var provider = config.Providers[0].ModelProvider(new NullProvider());
 
-        Should.Throw<NotSupportedException>(() => provider.BuildCapturePlan(config.ToCaptureSpec()));
+        Should.Throw<NotSupportedException>(() => provider.BuildCapturePlan(
+            config.ToCaptureSpec("Marten", new Dictionary<Type, string>())));
     }
 
     private sealed class NullProvider : IServiceProvider

@@ -23,6 +23,19 @@ internal sealed class MappingRegistration
     public Func<IServiceProvider, IWallabyTransformInvoker>? TransformFactory { get; set; }
     public Func<ChangeEvent, string>? DocumentIdSelector { get; set; }
 
+    /// <summary>Provider name pinned by <c>FromProvider(...)</c>; wins over <see cref="TransformProviderName"/>.</summary>
+    public string? ExplicitProviderName { get; set; }
+
+    /// <summary>Provider name implied by a provider-typed <c>UsingTransform</c> (its session type fixes the provider).</summary>
+    public string? TransformProviderName { get; set; }
+
+    /// <summary>
+    /// The provider this mapping is pinned to, or null to auto-resolve by probing each provider's model.
+    /// An explicit <c>FromProvider(...)</c> wins over the transform-implied name; a conflict between the
+    /// two fails at <see cref="WallabyBuilder"/> build time.
+    /// </summary>
+    public string? ProviderName => ExplicitProviderName ?? TransformProviderName;
+
     /// <summary>Per-row scope key (e.g. tenant id) for enrichment-session + destination scoping.</summary>
     public Func<ChangeEvent, object?>? ScopeKeySelector { get; set; }
 
@@ -86,27 +99,13 @@ internal sealed class WallabyConfiguration
     /// </summary>
     public Func<SpillContext, ITransactionSpill>? SpillFactory { get; set; }
 
-    /// <summary>The registered storage provider's display name (e.g. <c>"EntityFrameworkCore"</c>), for error messages.</summary>
-    public string? ProviderName { get; set; }
-
     /// <summary>
-    /// Builds the storage provider's model provider. Set by <see cref="WallabyBuilder.UseProvider"/>; null when
-    /// no provider is registered (provision-only). Used to resolve the capture plan and
-    /// <c>ForEntity&lt;T&gt;()</c> external-slot table declarations.
+    /// The registered storage providers, in registration order. Empty when no provider is registered
+    /// (provision-only). Each provider derives its own capture plan; the plans are merged into one model
+    /// sharing a single slot/publication/checkpoint. Names are unique (enforced by
+    /// <see cref="WallabyBuilder.UseProvider"/>).
     /// </summary>
-    public Func<IServiceProvider, IWallabyModelProvider>? ModelProvider { get; set; }
-
-    /// <summary>
-    /// Builds the default (unscoped) enrichment-session provider transforms lease their sessions from.
-    /// Set by <see cref="WallabyBuilder.UseProvider"/>.
-    /// </summary>
-    public Func<IServiceProvider, IEnrichmentSessionProvider>? EnrichmentSessions { get; set; }
-
-    /// <summary>
-    /// Optional scope-key-aware enrichment-session provider (e.g. context-per-tenant); overrides
-    /// <see cref="EnrichmentSessions"/> when set. Set via <see cref="WallabyBuilder.UseScopedEnrichmentSessions"/>.
-    /// </summary>
-    public Func<IServiceProvider, IEnrichmentSessionProvider>? ScopedEnrichmentSessions { get; set; }
+    public List<WallabyProviderRegistration> Providers { get; } = [];
 
     /// <summary>
     /// True when the consumer declared anything that requires the streaming pipeline (a sink, a mapping, or
@@ -116,15 +115,28 @@ internal sealed class WallabyConfiguration
     public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0 || CaptureAllMapped;
 
     /// <summary>
-    /// Build the <see cref="CaptureSpec"/> the storage provider consumes, including each mapping's
-    /// <c>DependsOn(...)</c> navigations. Shared by the runtime and the backfill-manager registration so both
-    /// derive the same <see cref="WallabyModel"/> (dependent tables/bindings included).
+    /// Build the <see cref="CaptureSpec"/> for one provider: the declared entities, replica-identity flags,
+    /// and <c>DependsOn(...)</c> navigations whose mapping resolved to <paramref name="providerName"/> (per
+    /// <paramref name="affinities"/>). <see cref="CaptureAllMapped"/> applies to every provider — each
+    /// captures everything its own model maps.
     /// </summary>
-    public CaptureSpec ToCaptureSpec()
+    public CaptureSpec ToCaptureSpec(string providerName, IReadOnlyDictionary<Type, string> affinities)
     {
+        var declaredEntities = new List<Type>();
+        var requiresFullReplicaIdentity = new HashSet<Type>();
         var declaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
         foreach (var mapping in Mappings.Values)
         {
+            if (affinities[mapping.EntityClrType] != providerName)
+            {
+                continue;
+            }
+
+            declaredEntities.Add(mapping.EntityClrType);
+            if (RequiresFullReplicaIdentity.Contains(mapping.EntityClrType))
+            {
+                requiresFullReplicaIdentity.Add(mapping.EntityClrType);
+            }
             if (mapping.DeclaredDependencies.Count > 0)
             {
                 declaredDependencies[mapping.EntityClrType] = mapping.DeclaredDependencies;
@@ -134,8 +146,8 @@ internal sealed class WallabyConfiguration
         return new CaptureSpec
         {
             CaptureAllMapped = CaptureAllMapped,
-            DeclaredEntities = [.. Mappings.Keys],
-            RequiresFullReplicaIdentity = RequiresFullReplicaIdentity,
+            DeclaredEntities = declaredEntities,
+            RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
             DeclaredDependencies = declaredDependencies,
         };
     }

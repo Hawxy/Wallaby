@@ -23,8 +23,7 @@ namespace Wallaby.Hosting;
 /// </summary>
 internal sealed class WallabyRuntime
 {
-    private readonly CapturePlan _capturePlan;
-    private readonly IWallabyModelProvider _modelProvider;
+    private readonly ResolvedProviderSet _providers;
     private readonly WallabyConfiguration _config;
     private readonly WallabyOptions _options;
     private readonly WallabyDataSource _dataSource;
@@ -49,8 +48,7 @@ internal sealed class WallabyRuntime
     private IReadOnlyList<(CapturedTable Table, string? Version)> _backfillTables = [];
 
     public WallabyRuntime(
-        CapturePlan capturePlan,
-        IWallabyModelProvider modelProvider,
+        ResolvedProviderSet providers,
         WallabyConfiguration config,
         WallabyOptions options,
         WallabyDataSource dataSource,
@@ -60,8 +58,7 @@ internal sealed class WallabyRuntime
         WallabyStatus status,
         ILogger<WallabyRuntime> logger)
     {
-        _capturePlan = capturePlan;
-        _modelProvider = modelProvider;
+        _providers = providers;
         _config = config;
         _options = options;
         _dataSource = dataSource;
@@ -300,8 +297,8 @@ internal sealed class WallabyRuntime
 
     private void BuildComponents()
     {
-        _model = _capturePlan.Model;
-        _materializer = _capturePlan.Materializer;
+        _model = _providers.MergedPlan.Model;
+        _materializer = _providers.MergedPlan.Materializer;
 
         var mappings = new Dictionary<Type, EntityMapping>();
         var backfillTables = new List<(CapturedTable, string?)>();
@@ -318,6 +315,7 @@ internal sealed class WallabyRuntime
                 Destination = registration.Destination,
                 BackfillVersion = registration.BackfillVersion,
                 Transform = registration.TransformFactory!(_services),
+                Sessions = _providers.ProviderByMappedType[registration.EntityClrType].Sessions,
                 DocumentIdSelector = registration.DocumentIdSelector,
                 ScopeKeySelector = registration.ScopeKeySelector,
                 DestinationSelector = registration.DestinationSelector,
@@ -327,8 +325,7 @@ internal sealed class WallabyRuntime
 
         _sinks = _config.Sinks.ToDictionary(s => s.Name, s => s.Factory(_services));
 
-        var sessions = (_config.ScopedEnrichmentSessions ?? _config.EnrichmentSessions)!(_services);
-        _router = new MappingChangeRouter(mappings, sessions, _instrumentation);
+        _router = new MappingChangeRouter(mappings, _instrumentation);
         _dispatcher = new SinkDispatcher(_sinks, _instrumentation, _options.SinkRetry, _status);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
@@ -348,7 +345,7 @@ internal sealed class WallabyRuntime
                 PublicationName = _options.PublicationName,
                 ManagePublicationTables = _options.ManagePublicationTables,
                 RequireFullReplicaIdentity = _options.RequireFullReplicaIdentity,
-                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, _modelProvider),
+                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, _providers.ModelProviders),
             },
             _logger);
         _backfillTables = backfillTables;

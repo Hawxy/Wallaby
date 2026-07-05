@@ -16,4 +16,11 @@ public interface IWallabyModelProvider
 
     /// <summary>Resolve an entity type declared via <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> to its table.</summary>
     QualifiedTable ResolveTable(Type entityClrType);
+
+    /// <summary>
+    /// True when this provider's model maps <paramref name="entityClrType"/> to a capturable table.
+    /// With multiple registered providers, each mapping is assigned to the provider that claims its
+    /// type here (ambiguity or no claimant fails startup).
+    /// </summary>
+    bool Handles(Type entityClrType);
 }

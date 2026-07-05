@@ -38,17 +38,18 @@ public class MappingChangeRouterTests
 
     private static MappingChangeRouter Router(IWallabyTransformInvoker? transform = null)
     {
+        var sessionProvider = new DbContextEnrichmentSessionProvider(
+            () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         var mapping = new EntityMapping
         {
             EntityClrType = typeof(Product),
             SinkName = "sink",
             Destination = "products",
             Transform = transform ?? new PassthroughTransform(),
+            Sessions = sessionProvider,
         };
-        var sessionProvider = new DbContextEnrichmentSessionProvider(
-            () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         return new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, sessionProvider);
+            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping });
     }
 
     private static ChangeEvent Change(ChangeAction action, int id)

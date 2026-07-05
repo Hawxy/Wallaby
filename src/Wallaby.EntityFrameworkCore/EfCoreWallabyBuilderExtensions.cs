@@ -32,13 +32,15 @@ public static class EfCoreWallabyBuilderExtensions
     /// <summary>
     /// Build the enrichment <see cref="DbContext"/> handed to transforms from a row's scope key (e.g. tenant),
     /// e.g. by selecting a tenant connection string or a context carrying the tenant for global query filters.
-    /// Used by mappings that declare <c>ScopedBy(...)</c>.
+    /// Used by mappings that declare <c>ScopedBy(...)</c>. Call after <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>;
+    /// only this provider's mappings are affected.
     /// </summary>
     public static WallabyBuilder UseScopedDbContext(
         this WallabyBuilder cdc, Func<object?, IServiceProvider, DbContext> factory)
     {
         ArgumentNullException.ThrowIfNull(cdc);
         ArgumentNullException.ThrowIfNull(factory);
-        return cdc.UseScopedEnrichmentSessions(sp => new ScopedDbContextEnrichmentSessionProvider(factory, sp));
+        return cdc.UseScopedEnrichmentSessions(
+            "EntityFrameworkCore", sp => new ScopedDbContextEnrichmentSessionProvider(factory, sp));
     }
 }

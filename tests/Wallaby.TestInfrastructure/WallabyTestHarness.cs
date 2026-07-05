@@ -201,14 +201,22 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
 
-        IChangeRouter router = _broadcast
-            ? new BroadcastChangeRouter(_sinks.Keys.ToList())
-            : new MappingChangeRouter(
-                _mappings,
-                _sessionProvider ?? throw new InvalidOperationException(
-                    "No enrichment session provider is registered. Create the harness through a provider " +
-                    "factory (e.g. WallabyTestHarness.ForTestModel) or call UseEnrichmentSessions(...)."),
+        IChangeRouter router;
+        if (_broadcast)
+        {
+            router = new BroadcastChangeRouter(_sinks.Keys.ToList());
+        }
+        else
+        {
+            // Sessions are late-bound here so UseEnrichmentSessions/UseScopedContext compose in any order
+            // with the Map/Project calls that created the mappings.
+            var sessions = _sessionProvider ?? throw new InvalidOperationException(
+                "No enrichment session provider is registered. Create the harness through a provider " +
+                "factory (e.g. WallabyTestHarness.ForTestModel) or call UseEnrichmentSessions(...).");
+            router = new MappingChangeRouter(
+                _mappings.ToDictionary(kv => kv.Key, kv => kv.Value with { Sessions = sessions }),
                 Instrumentation);
+        }
 
         _dependentResolver = _model!.DependentBindings.Count > 0
             ? new DependentChangeResolver(_dataSource, _model, Instrumentation)

@@ -116,17 +116,8 @@ public static class WallabyServiceCollectionExtensions
                 sp.GetRequiredService<WallabyOptions>().LeaderHeartbeatInterval));
 
         // Capture runtime — registered unconditionally as lazy factories; only the hosted-service dispatch
-        // below (or a consumer resolving IWallabyBackfillManager) materializes it. The storage provider and
-        // the capture plan it builds are resolved once; the runtime and the backfill manager share them.
-        services.AddSingleton<IWallabyModelProvider>(sp =>
-        {
-            var config = sp.GetRequiredService<WallabyConfiguration>();
-            return config.ModelProvider?.Invoke(sp)
-                ?? throw new WallabyConfigurationException(
-                    "Capturing requires a storage provider. Register one with " +
-                    "UseEntityFrameworkCore<TContext>() (from Wallaby.EntityFrameworkCore).");
-        });
-
+        // below (or a consumer resolving IWallabyBackfillManager) materializes it. The providers and the
+        // capture plans they build are resolved once; the runtime and the backfill manager share the merged plan.
         services.AddSingleton(sp =>
         {
             var config = sp.GetRequiredService<WallabyConfiguration>();
@@ -136,8 +127,10 @@ public static class WallabyServiceCollectionExtensions
                     "This Wallaby instance is provision-only (no sinks or mappings were declared), so the " +
                     "capture/backfill runtime is unavailable. Declare a sink and a mapping to enable capture.");
             }
-            return sp.GetRequiredService<IWallabyModelProvider>().BuildCapturePlan(config.ToCaptureSpec());
+            return ResolvedProviderSet.Build(config, sp);
         });
+
+        services.AddSingleton(sp => sp.GetRequiredService<ResolvedProviderSet>().MergedPlan);
 
         services.AddSingleton<IWallabyBackfillManager>(sp =>
             new DefaultBackfillManager(

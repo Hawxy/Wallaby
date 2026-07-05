@@ -30,7 +30,7 @@ internal sealed class ChangeEventFactory(IRowMaterializer materializer)
             IsBackfill: change.Action == ChangeAction.Read);
 
         return new ChangeEvent(
-            change.Action,
+            row.Action,
             metadata,
             row.Entity,
             row.Record,

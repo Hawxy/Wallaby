@@ -5,15 +5,23 @@ namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
 /// A routing rule binding an entity type to a sink/destination (and a transform that shapes the document).
-/// Routing concerns only — the transform owns the data shaping.
+/// Routing concerns only — the transform owns the data shaping. A record so test infrastructure can
+/// late-bind <see cref="Sessions"/> via <c>with</c>.
 /// </summary>
-internal sealed class EntityMapping
+internal sealed record EntityMapping
 {
     public required Type EntityClrType { get; init; }
     public required string SinkName { get; init; }
     public string? Destination { get; init; }
     public string? BackfillVersion { get; init; }
     public required IWallabyTransformInvoker Transform { get; init; }
+
+    /// <summary>
+    /// The enrichment sessions this mapping's transform leases (the mapping's provider's, scoped override
+    /// first). Mappings on the same provider share a session per batch; mappings on different providers
+    /// lease independently.
+    /// </summary>
+    public required IEnrichmentSessionProvider Sessions { get; init; }
 
     /// <summary>Optional custom document-id rule; defaults to the source primary key.</summary>
     public Func<ChangeEvent, string>? DocumentIdSelector { get; init; }

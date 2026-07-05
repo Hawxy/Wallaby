@@ -28,4 +28,7 @@ internal sealed class EfCoreModelProvider(IModel model) : IWallabyModelProvider
                 $"'{entityClrType.FullName}' is not mapped to a table.");
         return new QualifiedTable(entityType.GetSchema() ?? "public", tableName);
     }
+
+    public bool Handles(Type entityClrType)
+        => model.FindEntityType(entityClrType)?.GetTableName() is not null;
 }
