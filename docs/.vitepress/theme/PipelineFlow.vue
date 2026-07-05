@@ -39,25 +39,28 @@ function runLiveCycle() {
     }],
     [400, () => (flash.value = '')],
     [600, () => { lit.value = 'read'; pulse.value = ''; }],
-    [1100, () => (pulse.value = 'l2')],
-    [1700, () => { lit.value = 'xform'; pulse.value = ''; }],
-    [2200, () => (pulse.value = 'l3')],
-    [2800, () => {
+    [900, () => (pulse.value = 'l2')],
+    [1500, () => { lit.value = 'xform'; pulse.value = ''; }],
+    [1800, () => (pulse.value = 'l3')],
+    [2400, () => {
       lit.value = '';
       pulse.value = '';
       delivered.value += 6 + Math.floor(Math.random() * 34);
       flash.value = 'sinks';
     }],
-    [3200, () => (flash.value = '')],
-    [3300, () => (pulse.value = 'l4')],
-    [3900, () => { lit.value = 'ack'; pulse.value = ''; }],
-    [4400, () => { lit.value = ''; pulse.value = 'rail'; }],
-    [5300, () => {
+    // sinks stays lit while the packet rides to ack — matching the
+    // ~1s hold of the processing chips, so its decay doesn't read as
+    // faster than theirs
+    [2700, () => (pulse.value = 'l4')],
+    [3300, () => { lit.value = 'ack'; pulse.value = ''; }],
+    [3400, () => (flash.value = '')],
+    [3600, () => { lit.value = ''; pulse.value = 'rail'; }],
+    [4500, () => {
       pulse.value = '';
       flushed.value = inFlightLsn;
       flash.value = 'pg';
     }],
-    [5700, () => (flash.value = '')],
+    [4900, () => (flash.value = '')],
   ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
 }
 
@@ -69,16 +72,16 @@ function runBackfillCycle() {
   stepTimers = ([
     [0, () => { flash.value = 'backfill'; pulse.value = 'bf'; }],
     [400, () => { flash.value = ''; lit.value = 'read'; pulse.value = ''; }],
-    [900, () => (pulse.value = 'l2')],
-    [1500, () => { lit.value = 'xform'; pulse.value = ''; }],
-    [2000, () => (pulse.value = 'l3')],
-    [2600, () => {
+    [700, () => (pulse.value = 'l2')],
+    [1300, () => { lit.value = 'xform'; pulse.value = ''; }],
+    [1600, () => (pulse.value = 'l3')],
+    [2200, () => {
       lit.value = '';
       pulse.value = '';
       delivered.value += 180 + Math.floor(Math.random() * 120);
       flash.value = 'sinks';
     }],
-    [3000, () => (flash.value = '')],
+    [3200, () => (flash.value = '')],
   ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
 }
 
@@ -88,7 +91,7 @@ function formatCount(n: number) {
 
 onMounted(() => {
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    // first packet after a short settle instead of a 6.5s empty stare
+    // first packet after a short settle instead of a 5.5s empty stare
     kickTimer = setTimeout(() => {
       cycleCount = 1;
       runLiveCycle();
@@ -100,9 +103,9 @@ onMounted(() => {
       } else {
         runLiveCycle();
       }
-      // the live sequence ends at ~5.7s; the rest is a beat between
-      // packets
-    }, 6500);
+      // the live sequence ends at ~4.9s; the rest is a beat between
+      // packets — same ~600ms breather as the homepage widget
+    }, 5500);
   }
 });
 
@@ -202,17 +205,21 @@ onUnmounted(() => {
   border: 1px solid var(--vp-c-divider);
   border-radius: 2px;
   background-color: var(--vp-code-block-bg);
-  transition: border-color 0.4s;
+  /* asymmetric: light up fast (the active-state rules below), decay
+     lazily on the way back to gray */
+  transition: border-color 0.8s;
 }
 
 /* amber while the packet is being processed inside the chip */
 .wb-pipe-chip.is-lit {
   border-color: var(--vp-c-brand-1);
+  transition: border-color 0.2s;
 }
 
 /* blue when the chip's data value updates — LSNs, delivered counter */
 .wb-pipe-chip.is-flash {
   border-color: var(--wb-accent-blue);
+  transition: border-color 0.2s;
 }
 
 .wb-pipe-title {

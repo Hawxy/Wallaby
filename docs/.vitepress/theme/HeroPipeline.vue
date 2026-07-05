@@ -21,6 +21,7 @@ const destActive = ref(false);
 const destinations = ['anywhere', 'search index', 'vector db'];
 const destIndex = ref(0);
 
+let kickTimer: ReturnType<typeof setTimeout> | undefined;
 let cycleTimer: ReturnType<typeof setInterval> | undefined;
 let stepTimers: ReturnType<typeof setTimeout>[] = [];
 let cycleCount = 0;
@@ -54,6 +55,12 @@ function formatCount(n: number) {
 
 onMounted(() => {
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    // first packet after a short settle instead of a 3s empty stare;
+    // its sequence ends at ~2.95s, just before the interval's first tick
+    kickTimer = setTimeout(() => {
+      cycleCount = 1;
+      runPulseCycle();
+    }, 500);
     cycleTimer = setInterval(() => {
       // destination rotates every other cycle, before the packet launches,
       // so a delivery never lands on a mid-swap word
@@ -69,6 +76,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (kickTimer) clearTimeout(kickTimer);
   if (cycleTimer) clearInterval(cycleTimer);
   stepTimers.forEach(clearTimeout);
 });
