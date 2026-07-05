@@ -3,9 +3,9 @@ using Wallaby.Internal.SelfConfig;
 using Wallaby.Providers;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
-public class ModelToCdcModelTests
+public class EfCoreCaptureModelBuilderTests
 {
     private static CaptureSpec Declared(params Type[] types) => new()
     {
@@ -113,7 +113,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        Should.Throw<WallabyConfigurationException>(() => { EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); });
+        Should.Throw<WallabyConfigurationException>(() => { EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(EfCoreCaptureModelBuilderTests))); });
     }
 
     [Test]

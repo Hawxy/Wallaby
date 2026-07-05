@@ -6,14 +6,15 @@ using Wallaby.Internal;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
 using Wallaby.Providers;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class SelfConfigTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class SelfConfigTests(TestModelPostgresFixture pg)
 {
     private static WallabyModel BuildAllMappedModel()
     {

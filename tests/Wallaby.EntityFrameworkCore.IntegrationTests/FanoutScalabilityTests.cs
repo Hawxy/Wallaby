@@ -7,15 +7,16 @@ using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class FanoutScalabilityTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class FanoutScalabilityTests(TestModelPostgresFixture pg)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 

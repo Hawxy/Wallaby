@@ -1,14 +1,15 @@
 using System.Collections.Concurrent;
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class ScopingTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class ScopingTests(TestModelPostgresFixture pg)
 {
     [Test]
     public async Task Enrichment_context_is_built_per_scope_key_and_transform_batches_are_single_tenant()

@@ -19,7 +19,8 @@ cdc.Map<Product>()
    });
 ```
 
-For more complex transforms, or anything with dependencies, implement `IWallabyTransform<TEntity>` as a class:
+For more complex transforms, or anything with dependencies, implement `IWallabyTransform<TEntity>`
+(from `Wallaby.EntityFrameworkCore`) as a class:
 
 ```csharp
 public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyTransform<Product>
@@ -37,7 +38,7 @@ public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyTr
 // register:
 cdc.Map<Product>()
     .ToSink("meili", "products")
-    .UsingTransform<ProductSearchTransform>();
+    .UsingTransform<Product, ProductSearchTransform>();
 ```
 
 ## Internals
@@ -158,4 +159,4 @@ lands shortly *after* the trigger commits rather than in commit order with it. S
 ## Per-row scoping
 
 When the enrichment context or the destination depends on the row's own data (e.g. a `TenantId`), see
-[Multi-tenancy](/multi-tenancy) for `ScopedBy` / `UseScopedContext` / `ScopedDestination`.
+[Multi-tenancy](/multi-tenancy) for `ScopedBy` / `UseScopedDbContext` / `ScopedDestination`.

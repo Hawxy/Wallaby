@@ -7,7 +7,7 @@ using Wallaby.Internal.Pipeline;
 using Wallaby.Providers;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests.OpenTelemetry;
+namespace Wallaby.EntityFrameworkCore.UnitTests.OpenTelemetry;
 
 public class MappingChangeRouterTelemetryTests
 {

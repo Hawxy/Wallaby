@@ -8,13 +8,18 @@
   <Folder Name="/src/">
     <Project Path="src/Wallaby.AspNetCore.HealthChecks/Wallaby.AspNetCore.HealthChecks.csproj" />
     <Project Path="src/Wallaby.EntityFrameworkCore/Wallaby.EntityFrameworkCore.csproj" />
+    <Project Path="src/Wallaby.Marten/Wallaby.Marten.csproj" />
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
     <Project Path="src/Wallaby.Testing/Wallaby.Testing.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wallaby.EntityFrameworkCore.IntegrationTests/Wallaby.EntityFrameworkCore.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.EntityFrameworkCore.UnitTests/Wallaby.EntityFrameworkCore.UnitTests.csproj" />
     <Project Path="tests/Wallaby.IntegrationTests/Wallaby.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Marten.UnitTests/Wallaby.Marten.UnitTests.csproj" />
     <Project Path="tests/Wallaby.Meilisearch.IntegrationTests/Wallaby.Meilisearch.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.TestInfrastructure.EntityFrameworkCore/Wallaby.TestInfrastructure.EntityFrameworkCore.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
     <Project Path="tests/Wallaby.TestModel/Wallaby.TestModel.csproj" />
     <Project Path="tests/Wallaby.UnitTests/Wallaby.UnitTests.csproj" />

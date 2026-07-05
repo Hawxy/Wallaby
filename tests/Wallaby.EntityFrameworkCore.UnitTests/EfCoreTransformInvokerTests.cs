@@ -4,9 +4,9 @@ using Wallaby.EntityFrameworkCore;
 using Wallaby.Internal.Pipeline;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
-public class TransformInvokerTests
+public class EfCoreTransformInvokerTests
 {
     [Test]
     public async Task Mismatched_entity_type_throws_instead_of_passing_a_null_entity()

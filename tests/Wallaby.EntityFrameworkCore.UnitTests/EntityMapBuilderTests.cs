@@ -3,7 +3,7 @@ using Wallaby.DependencyInjection;
 using Wallaby.EntityFrameworkCore;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 /// <summary>
 /// The <see cref="ChangeEvent"/>-based <c>ScopedBy</c> overload lets the scope key come from a captured column

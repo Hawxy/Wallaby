@@ -5,11 +5,12 @@ using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.EntityFrameworkCore;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 /// <summary>
 /// End-to-end coverage of the consumer-facing <c>Wallaby.Testing</c> package: a production-style
@@ -18,8 +19,8 @@ namespace Wallaby.IntegrationTests;
 /// changes stream through logical replication into the capture sink.
 /// </summary>
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class WallabyTestingTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class WallabyTestingTests(TestModelPostgresFixture pg)
 {
     private TestDatabase Db => new(pg.ConnectionString);
 

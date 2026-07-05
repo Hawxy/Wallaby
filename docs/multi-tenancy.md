@@ -8,17 +8,17 @@ a per-tenant destination (e.g. an index per tenant).
 ## API
 
 ```csharp
-cdc.UseScopedContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)))
+cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)))
    .Map<Order>()
        .ScopedBy(o => o.TenantId)                  // derive the scope key from the change
-       .UsingTransform<OrderTransform>()           // transform receives the tenant-scoped DbContext
+       .UsingTransform<Order, OrderTransform>()           // transform receives the tenant-scoped DbContext
        .ScopedDestination(key => $"orders_{key}"); // per-tenant destination (optional)
 ```
 
 - **`ScopedBy(o => o.TenantId)`** extracts a scope key from each change's entity. When the key isn't a CLR
   property of the entity, e.g. a shadow `tenant_id` column added by a multi-tenancy library, use the
   `ChangeEvent` overload instead: `ScopedBy(c => c.Record["TenantId"])`.
-- **`UseScopedContext((key, services) => ...)`** builds the enrichment `DbContext` for a scope key - point
+- **`UseScopedDbContext((key, services) => ...)`** builds the enrichment `DbContext` for a scope key - point
   it at a tenant connection string, or hand the context the tenant so a global query filter applies. `services`
   is a DI scope that disposes together with the returned context, so scoped services are safe to resolve.
 - **`ScopedDestination(key => ...)`** computes the destination per scope key. Without it, the scope only

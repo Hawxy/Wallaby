@@ -4,7 +4,7 @@ using Wallaby.Internal.Pipeline;
 using Wallaby.Model;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 public class MaterializationTests
 {

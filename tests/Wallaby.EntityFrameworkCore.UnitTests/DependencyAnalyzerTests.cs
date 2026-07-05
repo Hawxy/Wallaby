@@ -5,7 +5,7 @@ using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 public class DependencyAnalyzerTests
 {

@@ -2,14 +2,15 @@ using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
-public class BackfillSchedulerIntegrationTests(PostgresFixture pg, MeilisearchFixture meili)
+[ClassDataSource<TestModelPostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
+public class BackfillSchedulerIntegrationTests(TestModelPostgresFixture pg, MeilisearchFixture meili)
 {
     [Test]
     public async Task Scheduler_re_backfills_on_version_change_and_on_manual_request()

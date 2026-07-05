@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\Wallaby.Sinks.Meilisearch\Wallaby.Sinks.Meilisearch.csproj" />
     <ProjectReference Include="..\Wallaby.TestModel\Wallaby.TestModel.csproj" />
     <ProjectReference Include="..\Wallaby.TestInfrastructure\Wallaby.TestInfrastructure.csproj" />
+    <ProjectReference Include="..\Wallaby.TestInfrastructure.EntityFrameworkCore\Wallaby.TestInfrastructure.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
 </Project>

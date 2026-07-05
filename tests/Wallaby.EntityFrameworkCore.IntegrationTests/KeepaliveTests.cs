@@ -1,11 +1,12 @@
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class KeepaliveTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class KeepaliveTests(TestModelPostgresFixture pg)
 {
     /// <summary>A sink whose delivery is slow enough that several keepalives fire while the consumer is
     /// not reading the replication stream.</summary>

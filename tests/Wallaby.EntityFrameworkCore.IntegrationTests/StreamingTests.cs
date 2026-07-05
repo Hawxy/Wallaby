@@ -1,11 +1,12 @@
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 /// <summary>
 /// Exercises pgoutput <b>v2 streaming</b>: a single transaction larger than the server's

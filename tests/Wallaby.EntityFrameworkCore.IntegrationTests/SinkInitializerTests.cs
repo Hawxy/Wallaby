@@ -1,12 +1,13 @@
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class SinkInitializerTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class SinkInitializerTests(TestModelPostgresFixture pg)
 {
     /// <summary>A sink that records how many times its one-time initializer ran.</summary>
     private sealed class InitCountingSink : ISink, ISinkInitializer

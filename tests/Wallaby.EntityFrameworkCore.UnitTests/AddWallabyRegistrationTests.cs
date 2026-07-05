@@ -9,7 +9,7 @@ using Wallaby.EntityFrameworkCore;
 using Wallaby.Hosting;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 /// <summary>
 /// Registration-level coverage of the two AddWallaby overloads and the WallabyOptions options-pipeline

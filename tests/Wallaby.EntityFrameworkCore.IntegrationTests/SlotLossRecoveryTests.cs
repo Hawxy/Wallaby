@@ -6,11 +6,12 @@ using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.EntityFrameworkCore;
 using Wallaby.Internal;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 /// <summary>
 /// Proves slot-loss gap detection end to end: a change committed while the replication slot did not exist
@@ -18,8 +19,8 @@ namespace Wallaby.IntegrationTests;
 /// re-backfilling the mapped tables.
 /// </summary>
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class SlotLossRecoveryTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
 {
     private TestDatabase Db => new(pg.ConnectionString);
 

@@ -1,12 +1,13 @@
 using Wallaby.Abstractions;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class PipelineTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class PipelineTests(TestModelPostgresFixture pg)
 {
     private static string? NameOf(SinkRecord r) => r.Document?.GetValueOrDefault("Name") as string;
 

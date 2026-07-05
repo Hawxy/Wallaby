@@ -1,13 +1,14 @@
 using Wallaby.Abstractions;
 using Wallaby.Internal.Backfill;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class BackfillFailureTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class BackfillFailureTests(TestModelPostgresFixture pg)
 {
     // A backfill chunk whose transform throws (e.g. an enrichment query timing out) must NOT advance the
     // checkpoint to Completed: the window's rows never reached the sink, and a Completed@version state makes

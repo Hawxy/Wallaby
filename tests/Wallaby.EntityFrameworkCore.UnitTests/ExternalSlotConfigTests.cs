@@ -5,7 +5,7 @@ using Wallaby.EntityFrameworkCore;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 public class ExternalSlotConfigTests
 {

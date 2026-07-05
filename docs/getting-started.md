@@ -8,6 +8,7 @@ Wallaby streams row changes from Postgres logical replication, materializes them
 
 ```bash
 dotnet add package Wallaby
+dotnet add package Wallaby.EntityFrameworkCore #the EF Core storage provider
 dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 ```
 
@@ -25,7 +26,7 @@ Wallaby validates these on startup and fails fast with an actionable error if so
 
 ## Register
 
-Call `AddWallaby` to started and chain in your `DbContext` via `UseContext<TContext>()`. Wallably will resolve your context regardless of if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
+Call `AddWallaby` to start and chain in your `DbContext` via `UseEntityFrameworkCore<TContext>()` (from the `Wallaby.EntityFrameworkCore` package). Wallaby will resolve your context regardless of if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
 
 You must also supply a connection string — via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#the-options-pattern) such as configuration binding — so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 
@@ -36,6 +37,7 @@ See [External slots](/external-slots).
 
 ```csharp
 using Wallaby.Abstractions;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.DependencyInjection;
 using Wallaby.Sinks.Meilisearch;
 
@@ -45,7 +47,7 @@ builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
 
 builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseContext<AppDbContext>()
+    cdc.UseEntityFrameworkCore<AppDbContext>()
        .UseConnectionString(conn)
        .ConfigureOptions(o =>
        {
@@ -82,7 +84,7 @@ builder.Services.AddWallaby((sp, cdc) =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
 
-    cdc.UseContext<AppDbContext>()
+    cdc.UseEntityFrameworkCore<AppDbContext>()
        .UseConnectionString(config.GetConnectionString("App")!)
        // ... sinks and mappings as usual ...
 });

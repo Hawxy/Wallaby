@@ -4,7 +4,7 @@ using Wallaby.Internal.Pipeline;
 using Wallaby.Providers;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 /// <summary>
 /// Routing semantics for a single batch (one transaction's changes, or one dispatched slice). The key

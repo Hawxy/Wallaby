@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wallaby\Wallaby.csproj" />
-    <ProjectReference Include="..\Wallaby.TestInfrastructure\Wallaby.TestInfrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Marten\Wallaby.Marten.csproj" />
   </ItemGroup>
 
 </Project>

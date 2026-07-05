@@ -4,7 +4,7 @@ using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
 using Wallaby.TestModel;
 
-namespace Wallaby.UnitTests;
+namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 /// <summary>
 /// <see cref="DbContextResolver"/> obtains the consumer's context without requiring an

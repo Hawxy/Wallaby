@@ -2,13 +2,14 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Diagnostics;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 
-namespace Wallaby.IntegrationTests;
+namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
-public class TelemetryTests(PostgresFixture pg)
+[ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
+public class TelemetryTests(TestModelPostgresFixture pg)
 {
     [Test]
     public async Task Pipeline_emits_metrics_and_spans_for_live_changes()

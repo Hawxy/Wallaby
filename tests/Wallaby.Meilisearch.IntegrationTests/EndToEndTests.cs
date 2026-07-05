@@ -6,14 +6,15 @@ using Wallaby.DependencyInjection;
 using Wallaby.EntityFrameworkCore;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
-public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
+[ClassDataSource<TestModelPostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
+public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili)
 {
     private TestDatabase Db => new(pg.ConnectionString);
 
