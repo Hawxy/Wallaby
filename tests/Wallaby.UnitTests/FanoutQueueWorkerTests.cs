@@ -19,6 +19,7 @@ public class FanoutQueueWorkerTests
         public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
         public Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct)
             => Task.FromResult(_due.Count > 0 ? _due.Dequeue() : null);
+        public Task<long> CountDueAsync(CancellationToken ct) => Task.FromResult((long)_due.Count);
         public Task MarkInProgressAsync(string t, string h, string? c, CancellationToken ct) => Task.CompletedTask;
         public Task SaveProgressAsync(string t, string h, string? c, long r, CancellationToken ct) => Task.CompletedTask;
         public Task CompleteAsync(string t, string h, CancellationToken ct) { Completed++; return Task.CompletedTask; }
@@ -77,6 +78,7 @@ public class FanoutQueueWorkerTests
 
         public IFanoutQueueSubscription Subscribe() => new StoppingSubscription(onIdle);
 
+        public Task<long> CountDueAsync(CancellationToken ct) => Task.FromResult(0L);
         public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
         public Task MarkInProgressAsync(string t, string h, string? c, CancellationToken ct) => Task.CompletedTask;
         public Task SaveProgressAsync(string t, string h, string? c, long r, CancellationToken ct) => Task.CompletedTask;
@@ -95,6 +97,44 @@ public class FanoutQueueWorkerTests
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    // Empty queue (drains immediately) with a fixed due count, stopping the worker at the idle wait.
+    private sealed class CountingQueue(long dueCount, Action onIdle) : IFanoutQueueStore
+    {
+        public Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct) => Task.FromResult<FanoutJobRow?>(null);
+        public Task<long> CountDueAsync(CancellationToken ct) => Task.FromResult(dueCount);
+        public IFanoutQueueSubscription Subscribe() => new StoppingSubscription(onIdle);
+
+        public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
+        public Task MarkInProgressAsync(string t, string h, string? c, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(string t, string h, string? c, long r, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string t, string h, CancellationToken ct) => Task.CompletedTask;
+        public Task DeferAsync(string t, string h, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<FanoutJobRow>>([]);
+    }
+
+    [Test]
+    public async Task Drain_pass_records_the_fanout_queue_depth_gauge()
+    {
+        using var instr = new WallabyInstrumentation();
+        using var depth = new Microsoft.Extensions.Diagnostics.Metrics.Testing.MetricCollector<long>(
+            instr.Meter, "wallaby.fanout.queue.depth");
+        using var stop = new CancellationTokenSource();
+        var queue = new CountingQueue(dueCount: 3, onIdle: stop.Cancel);
+
+        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
+        var worker = new FanoutQueueWorker(
+            queue, coordinator, new WallabyModel([]), NullLogger.Instance, TimeSpan.FromSeconds(1),
+            instrumentation: instr);
+
+        await worker.RunAsync(stop.Token);
+
+        depth.RecordObservableInstruments();
+        depth.LastMeasurement.ShouldNotBeNull();
+        depth.LastMeasurement.Value.ShouldBe(3);
     }
 
     [Test]

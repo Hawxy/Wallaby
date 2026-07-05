@@ -60,6 +60,53 @@ public class SinkDispatcherTelemetryTests
     }
 
     [Test]
+    public async Task Successful_delivery_updates_the_sink_delivery_lag_gauge_and_status()
+    {
+        using var instr = new WallabyInstrumentation();
+        using var lag = new MetricCollector<double>(instr.Meter, "wallaby.sink.delivery.lag");
+        var status = new CdcStatus();
+
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)),
+        };
+
+        var before = DateTimeOffset.UtcNow;
+        await new SinkDispatcher(sinks, instrumentation: instr, status: status)
+            .DispatchAsync(OneRecord(), CancellationToken.None);
+
+        lag.RecordObservableInstruments();
+        var measurement = lag.LastMeasurement;
+        measurement.ShouldNotBeNull();
+        measurement.Value.ShouldBeGreaterThanOrEqualTo(0);
+        measurement.Tags.GetValueOrDefault("wallaby.sink").ShouldBe("sink");
+
+        status.Current.LastSinkDeliveryAt.ShouldContainKey("sink");
+        status.Current.LastSinkDeliveryAt["sink"].ShouldBeGreaterThanOrEqualTo(before);
+    }
+
+    [Test]
+    public async Task Failed_delivery_does_not_report_sink_delivery_lag()
+    {
+        using var instr = new WallabyInstrumentation();
+        using var lag = new MetricCollector<double>(instr.Meter, "wallaby.sink.delivery.lag");
+        var status = new CdcStatus();
+
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Permanent("boom"))),
+        };
+
+        await Should.ThrowAsync<Exception>(
+            async () => await new SinkDispatcher(sinks, instrumentation: instr, status: status)
+                .DispatchAsync(OneRecord(), CancellationToken.None));
+
+        lag.RecordObservableInstruments();
+        lag.GetMeasurementSnapshot().ShouldBeEmpty();
+        status.Current.LastSinkDeliveryAt.ShouldBeEmpty();
+    }
+
+    [Test]
     public async Task Permanent_failure_records_a_failure_and_marks_the_span_as_error()
     {
         var instr = new WallabyInstrumentation();

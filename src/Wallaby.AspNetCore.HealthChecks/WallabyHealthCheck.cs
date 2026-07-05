@@ -37,6 +37,10 @@ public sealed class WallabyHealthCheck(IWallabyStatus status) : IHealthCheck
         if (s.LeaderSince is { } leaderSince) data["leaderSince"] = leaderSince;
         if (s.LastProgressAt is { } progress) data["lastProgressAt"] = progress;
         if (s.LastIngestionLagSeconds >= 0) data["lastIngestionLagSeconds"] = s.LastIngestionLagSeconds;
+        foreach (var (sink, at) in s.LastSinkDeliveryAt)
+        {
+            data[$"lastSinkDeliveryAt:{sink}"] = at;
+        }
         return data;
     }
 }

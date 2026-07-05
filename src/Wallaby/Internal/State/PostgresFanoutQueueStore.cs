@@ -127,6 +127,14 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         return await reader.ReadAsync(ct) ? Map(reader) : null;
     }
 
+    public async Task<long> CountDueAsync(CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(
+            $"SELECT count(*) FROM wallaby.fanout_queue WHERE status IN {DueStatuses}", connection);
+        return (long)(await cmd.ExecuteScalarAsync(ct))!;
+    }
+
     public Task MarkInProgressAsync(string tableQualified, string lookupHash, string? startCursorJson, CancellationToken ct)
         => PgExec.ExecuteAsync(
             dataSource,

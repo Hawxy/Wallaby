@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
+using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
@@ -40,7 +42,8 @@ internal sealed class CdcRuntime
     private IReadOnlyDictionary<string, ISink> _sinks = null!;
     private WatermarkBackfillCoordinator _coordinator = null!;
     private PostgresSelfConfigurator _selfConfigurator = null!;
-    private PostgresCheckpointStore _checkpoints = null!;
+    private ICheckpointStore _checkpoints = null!;
+    private PostgresCheckpointStore _checkpointsDirect = null!;
     private DependentChangeResolver? _dependentResolver;
     private IFanoutQueueStore? _fanoutQueue;
     private IReadOnlyList<(CapturedTable Table, string? Version)> _backfillTables = [];
@@ -67,7 +70,7 @@ internal sealed class CdcRuntime
         _logger = logger;
     }
 
-    // A leader session lasting at least this long before failing is treated as transient (resets backoff);
+    // A leader session lasting at least this long before failing retries at the base delay (resets backoff);
     // a faster failure (e.g. self-config erroring) grows the backoff so it doesn't hot-loop.
     private static readonly TimeSpan HealthyLeaderSession = TimeSpan.FromMinutes(1);
 
@@ -132,9 +135,9 @@ internal sealed class CdcRuntime
                     _status.RecordLeaderFailure(Describe(ex));
                     if (Stopwatch.GetElapsedTime(sessionStart) >= HealthyLeaderSession)
                     {
-                        // A long, healthy session that then dropped is transient — don't accumulate failures.
+                        // A long session that then dropped is likely transient — retry at the base delay.
+                        // The failure counter clears only on real progress or a clean step-down.
                         backoff.Reset();
-                        _status.ResetLeaderFailures();
                     }
                     await DelaySafeAsync(backoff.Next(), ct);
                 }
@@ -150,7 +153,8 @@ internal sealed class CdcRuntime
     /// </summary>
     private async Task<bool> RunAsLeaderAsync(IClusterLockHandle leadership, CancellationToken ct)
     {
-        await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
+        var selfConfig = await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
+        await RepairSlotGapAsync(selfConfig, ct);
         await InitializeSinksAsync(ct);
 
         // Spill target for pgoutput v2 streamed (large) transactions. Clear any leftovers from a prior crash —
@@ -200,7 +204,7 @@ internal sealed class CdcRuntime
         var fanoutTask = _fanoutQueue is not null
             ? Task.Run(async () =>
             {
-                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger, _options.FanoutPollInterval, _status).RunAsync(linked.Token); }
+                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger, _options.FanoutPollInterval, _status, _instrumentation).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
@@ -232,6 +236,64 @@ internal sealed class CdcRuntime
             ExceptionDispatchInfo.Capture(backgroundFault).Throw(); // fail the session so the caller retries with backoff
         }
         return leadership.Lost.IsCancellationRequested; // otherwise: did we step down because the lock dropped?
+    }
+
+    /// <summary>
+    /// Detects and repairs a slot-loss gap: a persisted checkpoint behind the slot's consistent point can
+    /// only mean the slot was recreated after that checkpoint was written (invalidation, failover, manual
+    /// drop), so every change between the two LSNs was never streamed. Repairs by marking all mapped
+    /// tables for re-backfill; the marks are durable before the checkpoint advances to the consistent
+    /// point, so a crash mid-repair re-detects on the next leader session.
+    /// </summary>
+    private async Task RepairSlotGapAsync(SelfConfigResult selfConfig, CancellationToken ct)
+    {
+        var consistentPoint = selfConfig.ConsistentPoint ?? await ReadRegisteredConsistentPointAsync(ct);
+        if (consistentPoint is null)
+        {
+            return;
+        }
+
+        var checkpoint = await _checkpointsDirect.GetAsync(_options.SlotName, ct);
+        var consistentLsn = ParseLsn(consistentPoint);
+        if (checkpoint is null || checkpoint.ConfirmedLsn >= consistentLsn)
+        {
+            return;
+        }
+
+        _logger.SlotGapDetected(
+            _options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
+
+        var store = new PostgresBackfillStore(_dataSource.Source);
+        foreach (var (table, _) in _backfillTables)
+        {
+            var existing = await store.GetAsync(table.QualifiedName, ct);
+            await store.SaveAsync(
+                new BackfillState(
+                    table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
+                    null, 0, DateTimeOffset.UtcNow),
+                ct);
+        }
+
+        await _checkpointsDirect.SaveAsync(
+            _options.SlotName, new Checkpoint(consistentLsn, DateTimeOffset.UtcNow), ct);
+    }
+
+    private async Task<string?> ReadRegisteredConsistentPointAsync(CancellationToken ct)
+    {
+        await using var connection = await _dataSource.Source.OpenConnectionAsync(ct);
+        return await PgExec.ScalarStringAsync(
+            connection,
+            "SELECT consistent_point::text FROM wallaby.slot_registry WHERE slot_name = @s", ct,
+            ("s", _options.SlotName));
+    }
+
+    // pg_lsn text form: two hex words separated by '/'.
+    private static ulong ParseLsn(string lsn)
+    {
+        var slash = lsn.IndexOf('/');
+        var hi = ulong.Parse(lsn.AsSpan(0, slash), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        var lo = ulong.Parse(lsn.AsSpan(slash + 1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        return (hi << 32) | lo;
     }
 
     private void BuildComponents()
@@ -267,14 +329,17 @@ internal sealed class CdcRuntime
             ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
             : new DefaultEnrichmentContextProvider(() => _config.ContextLease!(_services));
         _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
-        _dispatcher = new SinkDispatcher(_sinks, _instrumentation);
+        _dispatcher = new SinkDispatcher(_sinks, _instrumentation, _options.SinkRetry, _status);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
         _dependentResolver = _cdcModel.DependentBindings.Count > 0
             ? new DependentChangeResolver(_dataSource.Source, _cdcModel, _instrumentation)
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource.Source) : null;
-        _checkpoints = new PostgresCheckpointStore(_dataSource.Source);
+        _checkpointsDirect = new PostgresCheckpointStore(_dataSource.Source);
+        _checkpoints = _options.CheckpointSaveInterval > TimeSpan.Zero
+            ? new ThrottledCheckpointStore(_checkpointsDirect, _options.CheckpointSaveInterval)
+            : _checkpointsDirect;
         _selfConfigurator = new PostgresSelfConfigurator(
             _dataSource.Source,
             new SelfConfigOptions
@@ -339,6 +404,9 @@ internal static partial class CdcRuntimeLog
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Wallaby leader session failed; will retry.")]
     internal static partial void LeaderSessionFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot '{Slot}' was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
+    internal static partial void SlotGapDetected(this ILogger logger, string slot, string checkpointLsn, string consistentPoint);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Backfill scheduler failed.")]
     internal static partial void BackfillSchedulerFailed(this ILogger logger, Exception ex);

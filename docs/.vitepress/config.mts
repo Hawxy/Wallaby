@@ -5,6 +5,10 @@ export default defineConfig({
   title: "Wallaby",
   description: "Postgres CDC Engine for .NET",
   base: '/Wallaby/',
+  head: [
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/Wallaby/favicon-32.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/Wallaby/favicon-16.png' }],
+  ],
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [

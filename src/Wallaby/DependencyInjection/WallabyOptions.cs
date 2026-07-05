@@ -9,7 +9,7 @@ public sealed class WallabyOptions
     /// <summary>Publication name.</summary>
     public string PublicationName { get; set; } = "wallaby_cdc_pub";
 
-    /// <summary>Backfill keyset page size.</summary>
+    /// <summary>Backfill keyset page size. Chunk rows are held in memory, so capped at 100,000.</summary>
     public int ChunkSize { get; set; } = 500;
 
     /// <summary>
@@ -17,6 +17,7 @@ public sealed class WallabyOptions
     /// working set for large live transactions, dependent fan-out, and backfill alike: the pipeline
     /// slices each dispatch into windows of at most this many records. It also caps the inline portion
     /// of a dependent fan-out — a wider fan-out's tail is offloaded to a scoped backfill job.
+    /// Batches are materialized lists, so capped at 100,000.
     /// </summary>
     public int MaxBatchSize { get; set; } = 1000;
 
@@ -69,6 +70,18 @@ public sealed class WallabyOptions
     /// worst-case fan-out latency at the cost of more idle queue polls.
     /// </summary>
     public TimeSpan FanoutPollInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Retry policy for sink delivery (attempts, base delay, delay ceiling).</summary>
+    public SinkRetryOptions SinkRetry { get; set; } = new();
+
+    /// <summary>
+    /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap
+    /// detection and observability; the authoritative resume position is the slot's
+    /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a
+    /// detected gap, and the repair is a re-backfill either way). <see cref="TimeSpan.Zero"/> writes on
+    /// every acknowledged transaction.
+    /// </summary>
+    public TimeSpan CheckpointSaveInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill

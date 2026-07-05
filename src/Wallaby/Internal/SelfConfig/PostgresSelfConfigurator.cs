@@ -164,7 +164,7 @@ internal sealed class PostgresSelfConfigurator(
         var existing = await GetSlotAsync(connection, slot, ct);
         if (existing is not null)
         {
-            var (slotType, plugin) = existing.Value;
+            var (slotType, plugin, walStatus) = existing.Value;
 
             // Adopt a slot we didn't create this run. It must be a pgoutput logical slot — anything else
             // (a physical slot, or a logical slot on a different output plugin) can't serve this slot's
@@ -178,10 +178,19 @@ internal sealed class PostgresSelfConfigurator(
                     $"slot. Drop it with SELECT pg_drop_replication_slot('{slot}'); or use a different slot name.");
             }
 
-            // Record the adopted slot so wallaby.slot_registry reflects reality (we don't know its original
-            // consistent point, so keep any value already recorded).
-            await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint: null, kind, ct);
-            return (false, null);
+            if (!string.Equals(walStatus, "lost", StringComparison.Ordinal))
+            {
+                // Record the adopted slot so wallaby.slot_registry reflects reality (we don't know its original
+                // consistent point, so keep any value already recorded).
+                await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint: null, kind, ct);
+                return (false, null);
+            }
+
+            // The server invalidated the slot (e.g. max_slot_wal_keep_size exceeded); its WAL is gone and
+            // streaming from it can never resume. Recreate it — the caller repairs the missed window via
+            // checkpoint gap detection and re-backfill.
+            logger.SlotInvalidated(slot);
+            await PgExec.ExecuteAsync(connection, "SELECT pg_drop_replication_slot(@s)", ct, ("s", slot));
         }
 
         var consistentPoint = await PgExec.ScalarStringAsync(
@@ -193,11 +202,11 @@ internal sealed class PostgresSelfConfigurator(
         return (true, consistentPoint);
     }
 
-    private static async Task<(string SlotType, string? Plugin)?> GetSlotAsync(
+    private static async Task<(string SlotType, string? Plugin, string? WalStatus)?> GetSlotAsync(
         NpgsqlConnection connection, string slot, CancellationToken ct)
     {
         await using var cmd = new NpgsqlCommand(
-            "SELECT slot_type, plugin FROM pg_replication_slots WHERE slot_name = @s", connection);
+            "SELECT slot_type, plugin, wal_status::text FROM pg_replication_slots WHERE slot_name = @s", connection);
         cmd.Parameters.AddWithValue("s", slot);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
@@ -207,7 +216,8 @@ internal sealed class PostgresSelfConfigurator(
 
         var slotType = reader.GetString(0);
         var plugin = reader.IsDBNull(1) ? null : reader.GetString(1);
-        return (slotType, plugin);
+        var walStatus = reader.IsDBNull(2) ? null : reader.GetString(2);
+        return (slotType, plugin, walStatus);
     }
 
     private static Task UpsertSlotRegistryAsync(
@@ -285,6 +295,9 @@ internal static partial class PostgresSelfConfiguratorLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot '{Slot}' at {ConsistentPoint}.")]
     internal static partial void SlotCreated(this ILogger logger, string slot, string? consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot '{Slot}' was invalidated by the server (wal_status=lost); dropping and recreating it.")]
+    internal static partial void SlotInvalidated(this ILogger logger, string slot);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Configured external slot '{Slot}' (publication '{Publication}') for a third-party consumer.")]
     internal static partial void ExternalSlotConfigured(this ILogger logger, string slot, string publication);

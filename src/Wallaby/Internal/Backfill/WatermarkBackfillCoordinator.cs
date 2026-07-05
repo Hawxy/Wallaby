@@ -44,10 +44,22 @@ internal sealed class WatermarkBackfillCoordinator(
     public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
     {
         var pager = new KeysetPager(table);
+        var pkColumns = table.PrimaryKey.Select(c => c.ColumnName).ToArray();
         var pkTypes = table.PrimaryKey.Select(c => c.ClrType).ToArray();
         var existing = await store.GetAsync(table.QualifiedName, ct);
-        var cursor = KeysetCodec.Deserialize(existing?.CursorJson, pkTypes);
-        var startRows = existing?.RowsCopied ?? 0;
+
+        long startRows;
+        if (KeysetCodec.TryDeserializeCursor(existing?.CursorJson, pkColumns, pkTypes, out var cursor))
+        {
+            startRows = existing?.RowsCopied ?? 0;
+        }
+        else
+        {
+            // The persisted cursor was built against a different key shape (or format) — resuming with it
+            // would page incorrectly, so restart the snapshot from the beginning.
+            logger.BackfillCursorRejected(table.QualifiedName);
+            startRows = 0;
+        }
 
         logger.BackfillStarting(table.QualifiedName);
 
@@ -58,7 +70,7 @@ internal sealed class WatermarkBackfillCoordinator(
                     table.QualifiedName,
                     hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
                     transformVersion,
-                    KeysetCodec.Serialize(cur),
+                    KeysetCodec.SerializeCursor(cur, pkColumns),
                     rows,
                     DateTimeOffset.UtcNow),
                 token),
@@ -235,6 +247,9 @@ internal static partial class WatermarkBackfillCoordinatorLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting backfill of {Table}.")]
     internal static partial void BackfillStarting(this ILogger logger, string table);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Persisted cursor for {Table} does not match the table's current primary key; restarting the backfill from scratch.")]
+    internal static partial void BackfillCursorRejected(this ILogger logger, string table);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill of {Table} complete ({Rows} rows).")]
     internal static partial void BackfillComplete(this ILogger logger, string table, long rows);
