@@ -23,7 +23,9 @@ public class MartenRowMaterializerTests
         options.DatabaseSchemaName = "docs";
         options.Schema.For<SoftDoc>().SoftDeleted();
         options.Schema.For<TenantDoc>().MultiTenanted();
-        return new MartenModelProvider(options).BuildCapturePlan(new CaptureSpec { CaptureAllMapped = true }).Materializer;
+        return new MartenModelProvider(options)
+            .BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(SoftDoc), typeof(TenantDoc)] })
+            .Materializer;
     }
 
     private static RawColumn Col(string name, object? value) => new() { ColumnName = name, Value = value };

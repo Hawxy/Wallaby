@@ -9,7 +9,6 @@ public class EfCoreCaptureModelBuilderTests
 {
     private static CaptureSpec Declared(params Type[] types) => new()
     {
-        CaptureAllMapped = false,
         DeclaredEntities = types,
     };
 
@@ -81,26 +80,6 @@ public class EfCoreCaptureModelBuilderTests
     }
 
     [Test]
-    public async Task CaptureAllMapped_includes_every_keyed_table()
-    {
-        await using var ctx = TestModelFactory.CreateModelOnlyContext();
-
-        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
-
-        model.Tables.Select(t => t.QualifiedName).OrderBy(n => n).ToList()
-            .ShouldBe(new[]
-            {
-                "public.categories",
-                "public.customers",
-                "public.labels",
-                "public.product_labels",
-                "public.products",
-                "sales.order_lines",
-                "sales.orders",
-            }, ignoreOrder: true);
-    }
-
-    [Test]
     public async Task No_declaration_fails_fast()
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
@@ -123,7 +102,6 @@ public class EfCoreCaptureModelBuilderTests
 
         var spec = new CaptureSpec
         {
-            CaptureAllMapped = false,
             DeclaredEntities = new[] { typeof(Product) },
             RequiresFullReplicaIdentity = new HashSet<Type> { typeof(Product) },
         };

@@ -24,7 +24,7 @@ public class MartenModelProviderTests
         return new MartenModelProvider(options);
     }
 
-    private static CaptureSpec All => new() { CaptureAllMapped = true };
+    private static CaptureSpec All => new() { DeclaredEntities = [typeof(PlainDoc), typeof(SoftDoc), typeof(TenantDoc)] };
 
     [Test]
     public void Captures_the_document_table_with_the_minimal_column_set()
@@ -114,15 +114,13 @@ public class MartenModelProviderTests
     }
 
     [Test]
-    public void Document_hierarchies_are_rejected_when_declared_and_skipped_by_capture_all()
+    public void Document_hierarchies_are_rejected()
     {
         var provider = Provider(o => o.Schema.For<BaseDoc>().AddSubClass<SubDoc>());
 
         Should.Throw<WallabyConfigurationException>(
                 () => provider.BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(BaseDoc)] }))
             .Message.ShouldContain("hierarchy");
-
-        provider.BuildCapturePlan(All).Model.FindByClrType(typeof(BaseDoc)).ShouldBeNull();
     }
 
     [Test]

@@ -51,7 +51,7 @@ Transforms receive a leased Marten `IQuerySession` for enrichment lookups. Three
 overloads are available: an `IWallabyMartenTransform<T>` instance, a container-resolved
 `UsingTransform<TEntity, TTransform>()`, or the inline lambda above.
 
-::: warning Warning
+::: warning
 Wallaby builds its capture model at startup from the store's registered documents
 (`RegisterDocumentType<T>()`, `Schema.For<T>()`, …). Marten's usual lazy discovery — registering a
 document type the first time a session touches it — happens too late for capture, so a `Map<T>()` for
@@ -134,7 +134,7 @@ The Meilisearch sink is not yet AOT-compatible.
 - **`DependsOn(...)` is not supported** — documents are self-contained; there are no related tables to
   fan out from.
 - **`ChangeEvent.Changes` is always `null`** (no JSON diffing).
-- **Document hierarchies** (subclass documents sharing the root table) are not capturable: declared
-  ones fail fast, `CaptureAllMappedTables()` skips them.
+- **Document hierarchies** (subclass documents sharing the root table) are not capturable and fail
+  fast when mapped.
 - Strong-typed identifiers and `Duplicate(...)`d fields are not mapped into `Record`.
 - Separate-database tenancy is not supported (conjoined and single tenancy are).

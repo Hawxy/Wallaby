@@ -2,6 +2,7 @@ using Wallaby.Abstractions;
 using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
+using Wallaby.TestModel;
 
 namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
@@ -17,7 +18,7 @@ public class PipelineTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Changes_are_delivered_to_sink_in_commit_order()
     {
-        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();
         var capture = harness.AddCaptureSink();
         await harness.SelfConfigureAsync();
 
@@ -34,7 +35,7 @@ public class PipelineTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Restart_resumes_from_confirmed_flush_lsn_without_loss_or_duplication()
     {
-        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();
         var capture = harness.AddCaptureSink();
         await harness.SelfConfigureAsync();
 

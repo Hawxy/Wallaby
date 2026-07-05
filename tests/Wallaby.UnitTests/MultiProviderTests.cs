@@ -45,10 +45,13 @@ public class MultiProviderTests
 
         public CaptureSpec? LastSpec { get; private set; }
 
+        /// <summary>Plan every modeled table regardless of the spec (simulates a misbehaving provider).</summary>
+        public bool IgnoresDeclaredEntities { get; init; }
+
         public CapturePlan BuildCapturePlan(CaptureSpec spec)
         {
             LastSpec = spec;
-            var declared = spec.CaptureAllMapped
+            var declared = IgnoresDeclaredEntities
                 ? entities
                 : entities.Where(e => spec.DeclaredEntities.Contains(e.Type)).ToArray();
             var tables = declared.Select(e => Table(e.Type, e.Table)).ToList();
@@ -345,12 +348,11 @@ public class MultiProviderTests
     [Test]
     public void A_clr_type_captured_by_two_providers_fails_with_both_names()
     {
-        // Different tables, same CLR type: reachable via FromProvider pinning the mapping to one provider
-        // while CaptureAllMappedTables() makes the other capture its own table for the type too.
+        // Different tables, same CLR type: only reachable when a provider plans tables beyond its
+        // declared entities, so simulate one that ignores the spec.
         var builder = CapturingBuilder(
             Registration(new FakeModelProvider("A", (typeof(Shared), "shared_a"))),
-            Registration(new FakeModelProvider("B", (typeof(Shared), "shared_b"))));
-        builder.CaptureAllMappedTables();
+            Registration(new FakeModelProvider("B", (typeof(Shared), "shared_b")) { IgnoresDeclaredEntities = true }));
         Map<Shared>(builder).FromProvider("A");
 
         var ex = Should.Throw<WallabyConfigurationException>(() => Resolve(builder));

@@ -41,6 +41,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private readonly Dictionary<Type, EntityMapping> _mappings = [];
     private readonly Dictionary<Type, string?> _backfillTypes = [];
     private readonly Dictionary<Type, List<LambdaExpression>> _declaredDependencies = [];
+    private readonly HashSet<Type> _capturedEntities = [];
     private bool _broadcast;
     private IEnrichmentSessionProvider? _sessionProvider;
 
@@ -128,6 +129,16 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     public WallabyTestHarness Broadcast()
     {
         _broadcast = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Declare an entity for capture without routing it (mappings declare theirs implicitly). Needed by
+    /// <see cref="Broadcast"/>-style tests, which have no mappings to derive the capture set from.
+    /// </summary>
+    public WallabyTestHarness Capture<TEntity>()
+    {
+        _capturedEntities.Add(typeof(TEntity));
         return this;
     }
 
@@ -368,7 +379,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             kv => (IReadOnlyList<LambdaExpression>)kv.Value);
         var plan = _modelProvider.BuildCapturePlan(new CaptureSpec
         {
-            CaptureAllMapped = true,
+            DeclaredEntities = [.. _capturedEntities.Union(_mappings.Keys)],
             DeclaredDependencies = declared,
         });
         _model = plan.Model;

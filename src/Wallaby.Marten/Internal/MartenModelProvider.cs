@@ -51,13 +51,6 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
 
     private IEnumerable<DocumentMapping> SelectMappings(CaptureSpec spec)
     {
-        if (spec.CaptureAllMapped)
-        {
-            // Hierarchies (subclass documents share the root table) are not capturable in v1: rows would
-            // deserialize into the root type and silently lose subclass data.
-            return KnownMappings().Where(m => !m.IsHierarchy());
-        }
-
         return spec.DeclaredEntities.Select(type =>
         {
             var mapping = FindMapping(type)

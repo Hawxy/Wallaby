@@ -40,7 +40,7 @@ public sealed class WallabyBuilder
     /// Register a storage provider that derives a capture model and leases enrichment sessions.
     /// Called by provider packages' registration extensions (e.g. <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>
     /// from Wallaby.EntityFrameworkCore); consumers normally never call it directly. A provider is required
-    /// whenever Wallaby streams (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) and to
+    /// whenever Wallaby streams (any sink or <c>Map&lt;T&gt;()</c>) and to
     /// resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations; omit it for a
     /// provision-only worker that declares external slots by table name only. Multiple providers may be
     /// registered (their capture plans merge onto one slot/publication); names must be unique.
@@ -74,13 +74,6 @@ public sealed class WallabyBuilder
                 $"UseScopedEnrichmentSessions(\"{providerName}\", ...) requires that provider to be registered first " +
                 "(e.g. call UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...)).");
         registration.ScopedEnrichmentSessions = factory;
-        return this;
-    }
-
-    /// <summary>Track every mapped entity in the model (opt-in; default is explicit declaration).</summary>
-    public WallabyBuilder CaptureAllMappedTables()
-    {
-        _configuration.CaptureAllMapped = true;
         return this;
     }
 
@@ -167,9 +160,9 @@ public sealed class WallabyBuilder
         // supply or change them), so those checks live in WallabyOptionsValidator and surface on first WallabyOptions
         // resolution.
 
-        // Capturing (any sink, Map<>(), or CaptureAllMappedTables()) requires a provider + a sink. Without
-        // any of these, Wallaby runs in provision-only mode: it just provisions the declared external slots
-        // (no primary slot, no streaming), so neither a provider nor a sink is required.
+        // Capturing (any sink or Map<>()) requires a provider + a sink. Without either, Wallaby runs in
+        // provision-only mode: it just provisions the declared external slots (no primary slot, no
+        // streaming), so neither a provider nor a sink is required.
         if (_configuration.CaptureIntended)
         {
             if (_configuration.Providers.Count == 0)

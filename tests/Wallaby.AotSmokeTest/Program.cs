@@ -97,7 +97,7 @@ Check("marten capture plan derives and materializes a document", () =>
         o => o.TypeInfoResolverChain.Insert(0, SmokeJsonContext.Default));
     options.RegisterDocumentType<SmokeDoc>();
 
-    var plan = new MartenModelProvider(options).BuildCapturePlan(new CaptureSpec { CaptureAllMapped = true });
+    var plan = new MartenModelProvider(options).BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(SmokeDoc)] });
 
     var table = plan.Model.FindByClrType(typeof(SmokeDoc))
         ?? throw new InvalidOperationException("SmokeDoc table missing from the capture plan");

@@ -39,6 +39,9 @@ lives in the new **`Wallaby.EntityFrameworkCore`** package, and Marten support s
 6. `Map<T>().DependsOn(...)` is now an EF Core-typed extension in `Wallaby.EntityFrameworkCore` —
    call sites are unchanged beyond the package's `using`.
 
+7. `CaptureAllMappedTables()` is removed. Capture is always declared explicitly: `Map<T>()` each
+   table you want routed (dependent tables still come in via `DependsOn(...)`).
+
 Everything else — sinks, options, backfill, external slots, health checks, `Wallaby.Testing` — is
 unchanged.
 

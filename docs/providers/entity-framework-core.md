@@ -86,12 +86,9 @@ at host start instead of at registration.
 
 ## What gets tracked
 
-Only entities you **declare** are captured and added to the publication:
-
-- `Map<T>()` declares a table *and* routes it to a sink.
-- `CaptureAllMappedTables()` opts every mapped entity in (not recommended).
-
-Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured automatically. Captured tables must have a primary key.
+Only entities you **declare** are captured and added to the publication: `Map<T>()` declares a table
+*and* routes it to a sink. Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured
+automatically. Captured tables must have a primary key.
 
 ## Combining providers
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Diagnostics;
 using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
+using Wallaby.TestModel;
 
 namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 
@@ -14,7 +15,7 @@ public class TelemetryTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Pipeline_emits_metrics_and_spans_for_live_changes()
     {
-        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();
         var capture = harness.AddCaptureSink();
 
         using var changes = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.changes.received");

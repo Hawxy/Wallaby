@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -16,10 +17,18 @@ namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 [ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
 public class SelfConfigTests(TestModelPostgresFixture pg)
 {
-    private static WallabyModel BuildAllMappedModel()
+    private static WallabyModel BuildTestModel()
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
-        return EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
+        Expression<Func<Product, List<Label>>> labels = p => p.Labels;
+        return EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec
+        {
+            DeclaredEntities = [typeof(Category), typeof(Product), typeof(Customer), typeof(Order), typeof(OrderLine), typeof(Label)],
+            DeclaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>
+            {
+                [typeof(Product)] = [labels],
+            },
+        });
     }
 
     private PostgresSelfConfigurator CreateConfigurator(string slot, string pub) =>
@@ -33,7 +42,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var suffix = Guid.NewGuid().ToString("N");
         var slot = $"cdc_slot_{suffix}";
         var pub = $"cdc_pub_{suffix}";
-        var model = BuildAllMappedModel();
+        var model = BuildTestModel();
 
         var result = await CreateConfigurator(slot, pub).EnsureConfiguredAsync(model, CancellationToken.None);
 
@@ -51,8 +60,8 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
             "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", slot));
         plugin.ShouldBe("pgoutput");
 
-        // 5 directly-mapped (categories, products, customers, sales.orders, sales.order_lines) plus
-        // 2 from the skip-navigation (labels and the product_labels join table) — all in capture-all-mapped mode.
+        // 6 declared (categories, products, customers, labels, sales.orders, sales.order_lines) plus
+        // the product_labels join table pulled in by the Labels DependsOn.
         (await PgExec.ScalarLongAsync(conn,
             "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p AND schemaname IN ('public', 'sales')",
             default, ("p", pub))).ShouldBe(7L);
@@ -80,7 +89,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var suffix = Guid.NewGuid().ToString("N");
         var slot = $"cdc_slot_{suffix}";
         var pub = $"cdc_pub_{suffix}";
-        var model = BuildAllMappedModel();
+        var model = BuildTestModel();
 
         var first = await CreateConfigurator(slot, pub).EnsureConfiguredAsync(model, CancellationToken.None);
         var second = await CreateConfigurator(slot, pub).EnsureConfiguredAsync(model, CancellationToken.None);
@@ -99,7 +108,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var pub = $"cdc_pub_{suffix}";
         var extSlot = $"elt_slot_{suffix}";
         var extPub = $"elt_pub_{suffix}";
-        var model = BuildAllMappedModel();
+        var model = BuildTestModel();
 
         var configurator = new PostgresSelfConfigurator(
             pg.DataSource,
@@ -214,7 +223,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var pub = $"cdc_pub_{suffix}";
         var extSlot = $"elt_slot_{suffix}";
         var extPub = $"elt_pub_{suffix}";
-        var model = BuildAllMappedModel();
+        var model = BuildTestModel();
 
         PostgresSelfConfigurator Make(params (string Schema, string Table)[] tables) => new(
             pg.DataSource,
@@ -271,7 +280,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var pub = $"cdc_pub_{suffix}";
         var extSlot = $"elt_slot_{suffix}";
         var extPub = $"elt_pub_{suffix}";
-        var model = BuildAllMappedModel();
+        var model = BuildTestModel();
 
         try
         {
@@ -318,7 +327,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var pub = $"cdc_pub_{suffix}";
         var extSlot = $"elt_slot_{suffix}";
         var extPub = $"elt_pub_{suffix}";
-        var model = BuildAllMappedModel();
+        var model = BuildTestModel();
 
         try
         {
@@ -387,7 +396,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
                 NullLogger.Instance);
 
             await Should.ThrowAsync<WallabyConfigurationException>(
-                async () => await configurator.EnsureConfiguredAsync(BuildAllMappedModel(), CancellationToken.None));
+                async () => await configurator.EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None));
         }
         finally
         {

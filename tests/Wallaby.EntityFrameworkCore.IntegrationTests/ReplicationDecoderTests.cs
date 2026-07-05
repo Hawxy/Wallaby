@@ -15,10 +15,11 @@ namespace Wallaby.EntityFrameworkCore.IntegrationTests;
 [ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
 public class ReplicationDecoderTests(TestModelPostgresFixture pg)
 {
-    private static WallabyModel BuildAllMappedModel()
+    private static WallabyModel BuildTestModel()
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
-        return EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
+        return EfCoreCaptureModelBuilder.Build(
+            ctx.Model, new CaptureSpec { DeclaredEntities = [typeof(Category), typeof(Product)] });
     }
 
     [Test]
@@ -33,7 +34,7 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
             pg.DataSource,
             new SelfConfigOptions { SlotName = slot, PublicationName = pub },
             NullLogger.Instance);
-        await configurator.EnsureConfiguredAsync(BuildAllMappedModel(), CancellationToken.None);
+        await configurator.EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None);
 
         // 2) Generate changes on the products table (each SaveChanges is its own transaction).
         int productId;

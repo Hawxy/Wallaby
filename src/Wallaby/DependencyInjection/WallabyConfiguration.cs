@@ -84,7 +84,6 @@ internal sealed class WallabyConfiguration
     /// </summary>
     public List<Action<WallabyOptions>> OptionsActions { get; } = [];
 
-    public bool CaptureAllMapped { get; set; }
     public List<SinkRegistration> Sinks { get; } = [];
     public Dictionary<Type, MappingRegistration> Mappings { get; } = [];
     public HashSet<Type> RequiresFullReplicaIdentity { get; } = [];
@@ -108,17 +107,16 @@ internal sealed class WallabyConfiguration
     public List<WallabyProviderRegistration> Providers { get; } = [];
 
     /// <summary>
-    /// True when the consumer declared anything that requires the streaming pipeline (a sink, a mapping, or
-    /// <c>CaptureAllMappedTables()</c>). When false, Wallaby runs in provision-only mode: it only creates the
-    /// declared external slots and never opens a primary slot or streams.
+    /// True when the consumer declared anything that requires the streaming pipeline (a sink or a mapping).
+    /// When false, Wallaby runs in provision-only mode: it only creates the declared external slots and
+    /// never opens a primary slot or streams.
     /// </summary>
-    public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0 || CaptureAllMapped;
+    public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0;
 
     /// <summary>
     /// Build the <see cref="CaptureSpec"/> for one provider: the declared entities, replica-identity flags,
     /// and <c>DependsOn(...)</c> navigations whose mapping resolved to <paramref name="providerName"/> (per
-    /// <paramref name="affinities"/>). <see cref="CaptureAllMapped"/> applies to every provider — each
-    /// captures everything its own model maps.
+    /// <paramref name="affinities"/>).
     /// </summary>
     public CaptureSpec ToCaptureSpec(string providerName, IReadOnlyDictionary<Type, string> affinities)
     {
@@ -145,7 +143,6 @@ internal sealed class WallabyConfiguration
 
         return new CaptureSpec
         {
-            CaptureAllMapped = CaptureAllMapped,
             DeclaredEntities = declaredEntities,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
             DeclaredDependencies = declaredDependencies,

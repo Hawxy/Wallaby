@@ -7,8 +7,7 @@ namespace Wallaby.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// Resolves a <see cref="WallabyModel"/> from an EF Core <see cref="IModel"/> and a <see cref="CaptureSpec"/>.
-/// Declared entities fail fast on problems (no PK, owned, view); the "all mapped" mode silently skips
-/// entities that can't be captured (owned, keyless, or not table-backed). Per-mapping
+/// Declared entities fail fast on problems (no PK, owned, view). Per-mapping
 /// <c>DependsOn(...)</c> navigation expressions are resolved through <see cref="DependencyAnalyzer"/>
 /// — pulling additional dependent tables into the capture set and emitting the fan-out
 /// <see cref="DependentBinding"/>s the live pipeline uses.
@@ -20,9 +19,7 @@ internal static class EfCoreCaptureModelBuilder
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(spec);
 
-        var primaries = spec.CaptureAllMapped
-            ? BuildPrimariesFromAllMapped(model, spec)
-            : BuildPrimariesFromDeclared(model, spec);
+        var primaries = BuildPrimariesFromDeclared(model, spec);
 
         var (allTables, bindings) = AttachDependents(model, primaries, spec);
         return new WallabyModel(allTables, bindings);
@@ -33,8 +30,7 @@ internal static class EfCoreCaptureModelBuilder
         if (spec.DeclaredEntities.Count == 0)
         {
             throw new WallabyConfigurationException(
-                "No tables were declared for capture. Map each table with Map<T>(), " +
-                "or opt into CaptureAllMappedTables().");
+                "No tables were declared for capture. Map each table with Map<T>().");
         }
 
         var primaries = new List<(IEntityType, CapturedTable)>(spec.DeclaredEntities.Count);
@@ -63,28 +59,6 @@ internal static class EfCoreCaptureModelBuilder
             }
 
             primaries.Add((entityType, BuildTable(entityType, spec.RequiresFullReplicaIdentity.Contains(clrType))));
-        }
-
-        return primaries;
-    }
-
-    private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromAllMapped(IModel model, CaptureSpec spec)
-    {
-        var primaries = new List<(IEntityType, CapturedTable)>();
-        var seen = new HashSet<(string, string)>();
-
-        foreach (var entityType in model.GetEntityTypes())
-        {
-            if (entityType.IsOwned()) continue;
-            if (entityType.GetTableName() is null) continue;     // view / keyless / unmapped
-            if (entityType.FindPrimaryKey() is null) continue;   // cannot capture without a PK
-
-            var schema = entityType.GetSchema() ?? "public";
-            var tableName = entityType.GetTableName()!;
-            if (!seen.Add((schema, tableName))) continue;        // de-dup shared tables (e.g. TPH)
-
-            var requiresFull = spec.RequiresFullReplicaIdentity.Contains(entityType.ClrType);
-            primaries.Add((entityType, BuildTable(entityType, requiresFull)));
         }
 
         return primaries;

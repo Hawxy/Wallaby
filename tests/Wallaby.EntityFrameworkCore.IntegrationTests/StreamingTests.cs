@@ -35,7 +35,7 @@ public class StreamingTests
             await ctx.Database.EnsureCreatedAsync();
         }
 
-        await using var harness = WallabyTestHarness.ForTestModel(connectionString).Broadcast();
+        await using var harness = WallabyTestHarness.ForTestModel(connectionString).Broadcast().Capture<Product>();
         var capture = harness.AddCaptureSink();
         await harness.SelfConfigureAsync();
 

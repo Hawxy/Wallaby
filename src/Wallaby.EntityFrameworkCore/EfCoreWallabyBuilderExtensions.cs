@@ -10,8 +10,8 @@ public static class EfCoreWallabyBuilderExtensions
 {
     /// <summary>
     /// Drive capture from the EF Core model of <typeparamref name="TContext"/> and lease it for transform
-    /// enrichment. Required whenever Wallaby streams (any sink, <c>Map&lt;T&gt;()</c>, or
-    /// <c>CaptureAllMappedTables()</c>) and to resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table
+    /// enrichment. Required whenever Wallaby streams (any sink or <c>Map&lt;T&gt;()</c>)
+    /// and to resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table
     /// declarations. The consumer registers the context as usual — a scoped <c>AddDbContext&lt;TContext&gt;()</c>
     /// is sufficient (Wallaby uses an <see cref="IDbContextFactory{TContext}"/> if one is registered,
     /// otherwise a DI scope). Omit it entirely for a provision-only worker that declares external slots by
