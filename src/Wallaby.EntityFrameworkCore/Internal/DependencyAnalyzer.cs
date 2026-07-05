@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Wallaby.Model;
 
-namespace Wallaby.Internal.SelfConfig;
+namespace Wallaby.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// Resolves a navigation expression declared via <c>DependsOn(...)</c> into a

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure;
@@ -25,7 +26,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
         services.AddWallaby(cdc =>
         {
-            cdc.UseContext<AppDbContext>()
+            cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(pg.ConnectionString)
                .ConfigureOptions(o =>
                {

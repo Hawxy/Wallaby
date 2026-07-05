@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
@@ -6,15 +7,16 @@ using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Wallaby.Abstractions;
 using Wallaby.Model;
+using Wallaby.Providers;
 
-namespace Wallaby.Internal.Materialization;
+namespace Wallaby.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// Turns decoded <see cref="RawChange"/>s into materialized CLR entities
 /// using EF Core model metadata (column-to-property mappings and value converters). Plans are computed
 /// once per table and cached.
 /// </summary>
-internal sealed class EntityMaterializer
+internal sealed class EntityMaterializer : IRowMaterializer
 {
     private readonly Dictionary<(string Schema, string Table), EntityPlan> _plans;
 
@@ -36,11 +38,11 @@ internal sealed class EntityMaterializer
     }
 
     /// <summary>Materialize a change. Returns false when the change's table is not part of the model.</summary>
-    public bool TryMaterialize(RawChange change, out MaterializedRow row)
+    public bool TryMaterialize(RawChange change, [NotNullWhen(true)] out MaterializedRow? row)
     {
         if (!_plans.TryGetValue((change.Schema, change.TableName), out var plan))
         {
-            row = null!;
+            row = null;
             return false;
         }
 
@@ -57,7 +59,7 @@ internal sealed class EntityMaterializer
             if (column.IsUnchangedToast) continue;
             if (!plan.ColumnsByName.TryGetValue(column.ColumnName, out var columnPlan)) continue;
 
-            var modelValue = ValueCoercion.ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
+            var modelValue = ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
             if (modelValue is null && !columnPlan.AcceptsNull)
             {
                 // pgoutput emits non-identity columns as nulls on DELETE/REPLICA IDENTITY DEFAULT.
@@ -87,6 +89,23 @@ internal sealed class EntityMaterializer
         return true;
     }
 
+    private static object? ToModelValue(object? rawValue, Type modelClrType, ValueConverter? converter)
+    {
+        if (converter is null)
+        {
+            return ValueCoercion.ToClr(rawValue, modelClrType);
+        }
+
+        if (rawValue is null)
+        {
+            return null;
+        }
+
+        // The converter expects the provider representation; make sure the raw value matches it first.
+        var providerValue = ValueCoercion.ToClr(rawValue, converter.ProviderClrType);
+        return converter.ConvertFromProvider(providerValue);
+    }
+
     private static Dictionary<string, object?> BuildChanges(
         EntityPlan plan, IReadOnlyList<RawColumn> oldValues, IReadOnlyDictionary<string, object?> newRecord)
     {
@@ -98,7 +117,7 @@ internal sealed class EntityMaterializer
             if (column.IsUnchangedToast) continue;
             if (!plan.ColumnsByName.TryGetValue(column.ColumnName, out var columnPlan)) continue;
 
-            var oldValue = ValueCoercion.ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
+            var oldValue = ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
             var hasNew = newRecord.TryGetValue(columnPlan.PropertyName, out var newValue);
             if (!hasNew || !Equals(oldValue, newValue))
             {

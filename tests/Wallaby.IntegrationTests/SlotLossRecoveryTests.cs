@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.Internal;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
@@ -77,7 +78,7 @@ public class SlotLossRecoveryTests(PostgresFixture pg)
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
         services.AddWallaby(cdc =>
         {
-            cdc.UseContext<AppDbContext>()
+            cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(pg.ConnectionString)
                .AddDelegateSink("capture", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
                .Map<Product>()

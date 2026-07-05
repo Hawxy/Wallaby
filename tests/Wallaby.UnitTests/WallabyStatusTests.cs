@@ -3,12 +3,12 @@ using Wallaby.Diagnostics;
 
 namespace Wallaby.UnitTests;
 
-public class CdcStatusTests
+public class WallabyStatusTests
 {
     [Test]
     public void Starts_in_starting_role_with_unknown_lag()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         status.Current.Role.ShouldBe(WallabyNodeRole.Starting);
         status.Current.LastIngestionLagSeconds.ShouldBe(-1d);
@@ -17,7 +17,7 @@ public class CdcStatusTests
     [Test]
     public void EnterLeader_then_RecordProgress_updates_snapshot()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
         var since = DateTimeOffset.UtcNow;
 
         status.EnterLeader(since);
@@ -33,7 +33,7 @@ public class CdcStatusTests
     [Test]
     public void RecordProgress_with_unknown_lag_keeps_the_previous_lag()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         status.RecordProgress(1, 5.0, DateTimeOffset.UtcNow);
         status.RecordProgress(2, -1, DateTimeOffset.UtcNow);
@@ -45,7 +45,7 @@ public class CdcStatusTests
     [Test]
     public void MarkFaulted_sets_faulted_stopped_and_error()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
         status.EnterLeader(DateTimeOffset.UtcNow);
 
         status.MarkFaulted("Boom: bad");
@@ -58,7 +58,7 @@ public class CdcStatusTests
     [Test]
     public void Leader_failures_increment_and_reset()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         status.RecordLeaderFailure("e1");
         status.RecordLeaderFailure("e2");
@@ -71,7 +71,7 @@ public class CdcStatusTests
     [Test]
     public void RecordProgress_clears_accumulated_leader_failures()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         status.RecordLeaderFailure("e1");
         status.RecordLeaderFailure("e2");
@@ -86,7 +86,7 @@ public class CdcStatusTests
     [Test]
     public void Fanout_failures_increment_set_the_error_and_reset()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         status.RecordFanoutFailure("e1");
         status.RecordFanoutFailure("e2");
@@ -100,7 +100,7 @@ public class CdcStatusTests
     [Test]
     public void EnterStandby_clears_leader_since()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
         status.EnterLeader(DateTimeOffset.UtcNow);
 
         status.EnterStandby();

@@ -1,6 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
+using Wallaby.Providers;
 using Wallaby.TestModel;
 
 namespace Wallaby.UnitTests;
@@ -13,10 +14,10 @@ namespace Wallaby.UnitTests;
 public class MappingChangeRouterTests
 {
     /// <summary>Emits one document per change (so every non-delete becomes an upsert).</summary>
-    private sealed class PassthroughTransform : ITransformInvoker
+    private sealed class PassthroughTransform : IWallabyTransformInvoker
     {
         public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
-            DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
+            object session, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
         {
             var documents = new Dictionary<DocumentKey, WallabyDocument?>();
             foreach (var change in changes)
@@ -28,14 +29,14 @@ public class MappingChangeRouterTests
     }
 
     /// <summary>A transform that always throws — to exercise the halt-on-transform-failure behavior.</summary>
-    private sealed class ThrowingTransform : ITransformInvoker
+    private sealed class ThrowingTransform : IWallabyTransformInvoker
     {
         public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
-            DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
+            object session, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
             => throw new InvalidOperationException("boom");
     }
 
-    private static MappingChangeRouter Router(ITransformInvoker? transform = null)
+    private static MappingChangeRouter Router(IWallabyTransformInvoker? transform = null)
     {
         var mapping = new EntityMapping
         {
@@ -44,10 +45,10 @@ public class MappingChangeRouterTests
             Destination = "products",
             Transform = transform ?? new PassthroughTransform(),
         };
-        var contextProvider = new DefaultEnrichmentContextProvider(
+        var sessionProvider = new DbContextEnrichmentSessionProvider(
             () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         return new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, contextProvider);
+            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, sessionProvider);
     }
 
     private static ChangeEvent Change(ChangeAction action, int id)

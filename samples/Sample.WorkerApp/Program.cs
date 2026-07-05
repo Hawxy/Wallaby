@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Sample.WorkerApp;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -19,7 +20,7 @@ builder.Services.AddHostedService<SchemaInitializer>();
 
 builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseContext<SampleDbContext>()
+    cdc.UseEntityFrameworkCore<SampleDbContext>()
        .UseConnectionString(postgres)
        .ConfigureOptions(o =>
        {

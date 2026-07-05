@@ -1,5 +1,5 @@
 using Wallaby.Abstractions;
-using Wallaby.Internal.Materialization;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Model;
 using Wallaby.TestModel;

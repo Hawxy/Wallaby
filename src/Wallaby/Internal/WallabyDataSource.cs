@@ -8,9 +8,9 @@ namespace Wallaby.Internal;
 /// locks, backfill reads, dependent-key lookups). Built from the connection string supplied via
 /// <see cref="WallabyBuilder.UseConnectionString"/>; lifetime is tied to the DI container.
 /// </summary>
-internal sealed class CdcDataSource : IAsyncDisposable
+internal sealed class WallabyDataSource : IAsyncDisposable
 {
-    public CdcDataSource(string connectionString)
+    public WallabyDataSource(string connectionString)
     {
         ConnectionString = connectionString;
         Source = NpgsqlDataSource.Create(connectionString);

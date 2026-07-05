@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Wallaby.Abstractions;
 
-namespace Wallaby.Abstractions;
+namespace Wallaby.EntityFrameworkCore;
 
 /// <summary>
 /// Adapts a lambda to <see cref="IWallabyTransform{TEntity}"/> for the trivial cases that don't

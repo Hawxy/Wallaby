@@ -1,4 +1,5 @@
 using Wallaby.Abstractions;
+using Wallaby.Providers;
 
 namespace Wallaby.Internal.Pipeline;
 
@@ -12,14 +13,14 @@ internal sealed class EntityMapping
     public required string SinkName { get; init; }
     public string? Destination { get; init; }
     public string? BackfillVersion { get; init; }
-    public required ITransformInvoker Transform { get; init; }
+    public required IWallabyTransformInvoker Transform { get; init; }
 
     /// <summary>Optional custom document-id rule; defaults to the source primary key.</summary>
     public Func<ChangeEvent, string>? DocumentIdSelector { get; init; }
 
     /// <summary>
     /// Optional per-row scope key (e.g. tenant id) derived from a change. Drives the enrichment
-    /// <c>DbContext</c> chosen for the transform and (when set) the destination. Null when not scoped.
+    /// session chosen for the transform and (when set) the destination. Null when not scoped.
     /// </summary>
     public Func<ChangeEvent, object?>? ScopeKeySelector { get; init; }
 

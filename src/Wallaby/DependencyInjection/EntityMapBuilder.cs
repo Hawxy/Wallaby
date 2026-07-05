@@ -1,8 +1,6 @@
 using System.Linq.Expressions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
-using Wallaby.Internal.Pipeline;
+using Wallaby.Providers;
 
 namespace Wallaby.DependencyInjection;
 
@@ -43,8 +41,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Derive a per-row scope key (e.g. tenant id) from the change. The engine sub-groups the transform
-    /// batch by this key and supplies a scope-scoped enrichment <c>DbContext</c> (see <c>UseScopedContext</c>);
-    /// it also feeds <see cref="ScopedDestination"/>.
+    /// batch by this key and supplies a scope-scoped enrichment session (see the provider's scoped-context
+    /// registration, e.g. <c>UseScopedDbContext</c>); it also feeds <see cref="ScopedDestination"/>.
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedBy(Func<TEntity, object?> keySelector)
     {
@@ -75,28 +73,15 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
         return this;
     }
 
-    /// <summary>Use a transform instance.</summary>
-    public EntityMapBuilder<TEntity> UsingTransform(IWallabyTransform<TEntity> transform)
+    /// <summary>
+    /// Register the transform via a provider-built invoker. Provider packages call this from their typed
+    /// <c>UsingTransform</c> extensions (e.g. Wallaby.EntityFrameworkCore's DbContext-typed overloads);
+    /// use those instead of calling this directly.
+    /// </summary>
+    public EntityMapBuilder<TEntity> UsingTransformInvoker(Func<IServiceProvider, IWallabyTransformInvoker> factory)
     {
-        _registration.TransformFactory = _ => new TransformInvoker<TEntity>(transform);
-        return this;
-    }
-
-    /// <summary>Use a transform type resolved (or constructed) from the container.</summary>
-    public EntityMapBuilder<TEntity> UsingTransform<TTransform>()
-        where TTransform : class, IWallabyTransform<TEntity>
-    {
-        _registration.TransformFactory = sp =>
-            new TransformInvoker<TEntity>(ActivatorUtilities.GetServiceOrCreateInstance<TTransform>(sp));
-        return this;
-    }
-
-    /// <summary>Use an inline transform lambda (the trivial, no-class case).</summary>
-    public EntityMapBuilder<TEntity> UsingTransform(
-        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> handler)
-    {
-        _registration.TransformFactory = _ =>
-            new TransformInvoker<TEntity>(new DelegateTransform<TEntity>(handler));
+        ArgumentNullException.ThrowIfNull(factory);
+        _registration.TransformFactory = factory;
         return this;
     }
 
@@ -104,8 +89,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// Declare that changes to the table behind <paramref name="navigation"/> should fan out and re-emit
     /// this entity. Use this when the transform reads data from related tables (a referenced principal,
     /// a many-to-many skip-navigation's join table, or an owned side table) — otherwise those changes
-    /// would not reach the pipeline. The navigation expression is resolved against the EF Core model at
-    /// startup; it must point at a single one-hop navigation (no chains, no method calls).
+    /// would not reach the pipeline. The navigation expression is resolved against the storage provider's
+    /// model at startup; it must point at a single one-hop navigation (no chains, no method calls).
     /// </summary>
     public EntityMapBuilder<TEntity> DependsOn<TNav>(Expression<Func<TEntity, TNav>> navigation)
     {

@@ -4,9 +4,9 @@ using Wallaby.Diagnostics;
 
 namespace Wallaby.Hosting;
 
-/// <summary>Hosts the <see cref="CdcRuntime"/> as a long-running background service.</summary>
-internal sealed class CdcBackgroundService(
-    CdcRuntime runtime, CdcStatus status, ILogger<CdcBackgroundService> logger) : BackgroundService
+/// <summary>Hosts the <see cref="WallabyRuntime"/> as a long-running background service.</summary>
+internal sealed class WallabyBackgroundService(
+    WallabyRuntime runtime, WallabyStatus status, ILogger<WallabyBackgroundService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -29,8 +29,8 @@ internal sealed class CdcBackgroundService(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="CdcBackgroundService"/>.</summary>
-internal static partial class CdcBackgroundServiceLog
+/// <summary>Source-generated log messages for <see cref="WallabyBackgroundService"/>.</summary>
+internal static partial class WallabyBackgroundServiceLog
 {
     [LoggerMessage(Level = LogLevel.Critical, Message = "Wallaby background service terminated unexpectedly.")]
     internal static partial void BackgroundServiceTerminated(this ILogger logger, Exception ex);

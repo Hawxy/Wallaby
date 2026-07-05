@@ -28,7 +28,7 @@ namespace Wallaby.Internal.Pipeline;
 /// changes).
 /// </para>
 /// </summary>
-internal sealed class CdcPipeline(
+internal sealed class WallabyPipeline(
     LogicalReplicationStream stream,
     ChangeEventFactory changeEventFactory,
     IChangeRouter router,
@@ -42,7 +42,7 @@ internal sealed class CdcPipeline(
     DependentChangeResolver? dependentResolver = null,
     IFanoutQueueStore? fanoutQueue = null,
     WallabyInstrumentation? instrumentation = null,
-    CdcStatus? status = null)
+    WallabyStatus? status = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
@@ -142,7 +142,7 @@ internal sealed class CdcPipeline(
         {
             foreach (var wm in transaction.Watermarks)
             {
-                if (wm.Prefix == CdcSchema.WatermarkLowPrefix)
+                if (wm.Prefix == WallabySchema.WatermarkLowPrefix)
                 {
                     backfill.OnLowWatermark(wm.Token);
                 }
@@ -164,7 +164,7 @@ internal sealed class CdcPipeline(
         {
             foreach (var wm in transaction.Watermarks)
             {
-                if (wm.Prefix == CdcSchema.WatermarkHighPrefix && backfill.TryTakeHighWindow(wm.Token, out var window))
+                if (wm.Prefix == WallabySchema.WatermarkHighPrefix && backfill.TryTakeHighWindow(wm.Token, out var window))
                 {
                     await EmitBackfillChunkAsync(window, ct);
                 }
@@ -396,8 +396,8 @@ internal sealed class CdcPipeline(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="CdcPipeline"/>.</summary>
-internal static partial class CdcPipelineLog
+/// <summary>Source-generated log messages for <see cref="WallabyPipeline"/>.</summary>
+internal static partial class WallabyPipelineLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot '{Slot}'.")]
     internal static partial void PipelineStarted(this ILogger logger, string slot);

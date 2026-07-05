@@ -64,7 +64,7 @@ public class SinkDispatcherTelemetryTests
     {
         using var instr = new WallabyInstrumentation();
         using var lag = new MetricCollector<double>(instr.Meter, "wallaby.sink.delivery.lag");
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         var sinks = new Dictionary<string, ISink>
         {
@@ -90,7 +90,7 @@ public class SinkDispatcherTelemetryTests
     {
         using var instr = new WallabyInstrumentation();
         using var lag = new MetricCollector<double>(instr.Meter, "wallaby.sink.delivery.lag");
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
 
         var sinks = new Dictionary<string, ISink>
         {

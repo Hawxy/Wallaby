@@ -1,8 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Wallaby.Model;
+using Wallaby.Providers;
 
-namespace Wallaby.Internal.SelfConfig;
+namespace Wallaby.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// Resolves a <see cref="WallabyModel"/> from an EF Core <see cref="IModel"/> and a <see cref="CaptureSpec"/>.
@@ -12,7 +13,7 @@ namespace Wallaby.Internal.SelfConfig;
 /// — pulling additional dependent tables into the capture set and emitting the fan-out
 /// <see cref="DependentBinding"/>s the live pipeline uses.
 /// </summary>
-internal static class ModelToCdcModel
+internal static class EfCoreCaptureModelBuilder
 {
     public static WallabyModel Build(IModel model, CaptureSpec spec)
     {

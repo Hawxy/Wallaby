@@ -1,5 +1,4 @@
 using System.Diagnostics.Metrics;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -8,8 +7,8 @@ using Wallaby.Diagnostics;
 using Wallaby.Hosting;
 using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
-using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
+using Wallaby.Providers;
 
 namespace Wallaby.DependencyInjection;
 
@@ -18,9 +17,9 @@ public static class WallabyServiceCollectionExtensions
 {
     /// <summary>
     /// Add Postgres CDC. Supply a connection string via <c>cdc.UseConnectionString(...)</c>. For capture
-    /// (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) also declare the driving
-    /// <c>DbContext</c> with <c>cdc.UseContext&lt;TContext&gt;()</c> and register an
-    /// <see cref="IDbContextFactory{TContext}"/>. If only external slots are declared (no capture), Wallaby
+    /// (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) also register a storage provider,
+    /// e.g. <c>cdc.UseEntityFrameworkCore&lt;TContext&gt;()</c> from the Wallaby.EntityFrameworkCore
+    /// package. If only external slots are declared (no capture), Wallaby
     /// runs provision-only: it creates/reconciles those slots and never opens a primary slot or streams.
     /// Wallaby owns a pooled <c>NpgsqlDataSource</c> built from the connection string for all non-replication work.
     /// <see cref="WallabyOptions"/> participates in the standard options pipeline: <c>Configure&lt;WallabyOptions&gt;</c>
@@ -60,7 +59,7 @@ public static class WallabyServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registrations shared by both overloads. Every factory resolves <see cref="CdcConfiguration"/> /
+    /// Registrations shared by both overloads. Every factory resolves <see cref="WallabyConfiguration"/> /
     /// <see cref="WallabyOptions"/> from the provider, so it works whether the configuration was registered as an
     /// instance (eager overload) or a deferred factory (provider-aware overload).
     /// </summary>
@@ -70,17 +69,17 @@ public static class WallabyServiceCollectionExtensions
 
         // Bridge the builder's option actions into the options pipeline at THIS registration position:
         // Configure<WallabyOptions> calls made before AddWallaby run first (the builder overrides them), later
-        // ones override the builder, and PostConfigure always wins. Resolving CdcConfiguration lazily keeps
+        // ones override the builder, and PostConfigure always wins. Resolving WallabyConfiguration lazily keeps
         // this working for both the eager (instance) and deferred (factory) registration.
         services.AddSingleton<IConfigureOptions<WallabyOptions>>(sp => new ConfigureOptions<WallabyOptions>(options =>
         {
-            foreach (var apply in sp.GetRequiredService<CdcConfiguration>().OptionsActions)
+            foreach (var apply in sp.GetRequiredService<WallabyConfiguration>().OptionsActions)
             {
                 apply(options);
             }
         }));
         services.AddSingleton<IValidateOptions<WallabyOptions>>(sp =>
-            new CdcOptionsValidator(sp.GetRequiredService<CdcConfiguration>()));
+            new WallabyOptionsValidator(sp.GetRequiredService<WallabyConfiguration>()));
 
         // The plain WallabyOptions singleton everyone injects is the pipeline's product. Validation failures are
         // rethrown as WallabyConfigurationException so misconfiguration keeps its documented exception type.
@@ -96,7 +95,7 @@ public static class WallabyServiceCollectionExtensions
             }
         });
 
-        services.AddSingleton(sp => new CdcDataSource(sp.GetRequiredService<WallabyOptions>().ConnectionString));
+        services.AddSingleton(sp => new WallabyDataSource(sp.GetRequiredService<WallabyOptions>().ConnectionString));
 
         services.AddMetrics();
         services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));
@@ -104,51 +103,57 @@ public static class WallabyServiceCollectionExtensions
         // Live node status surface (role, progress, faults) — read by diagnostics and health checks.
         services.AddSingleton(sp =>
         {
-            var configuration = sp.GetRequiredService<CdcConfiguration>();
-            return new CdcStatus(
+            var configuration = sp.GetRequiredService<WallabyConfiguration>();
+            return new WallabyStatus(
                 configuration.CaptureIntended ? sp.GetRequiredService<WallabyOptions>().SlotName : "",
                 TimeProvider.System);
         });
-        services.AddSingleton<IWallabyStatus>(sp => sp.GetRequiredService<CdcStatus>());
+        services.AddSingleton<IWallabyStatus>(sp => sp.GetRequiredService<WallabyStatus>());
 
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(
-                sp.GetRequiredService<CdcDataSource>().Source,
+                sp.GetRequiredService<WallabyDataSource>().Source,
                 sp.GetRequiredService<WallabyOptions>().LeaderHeartbeatInterval));
 
         // Capture runtime — registered unconditionally as lazy factories; only the hosted-service dispatch
-        // below (or a consumer resolving IWallabyBackfillManager) materializes it. Resolve the capture model once;
-        // both the runtime and the backfill manager share this instance. The model is read via the consumer's
-        // context (factory or DI scope) — no IDbContextFactory required.
+        // below (or a consumer resolving IWallabyBackfillManager) materializes it. The storage provider and
+        // the capture plan it builds are resolved once; the runtime and the backfill manager share them.
+        services.AddSingleton<IWallabyModelProvider>(sp =>
+        {
+            var config = sp.GetRequiredService<WallabyConfiguration>();
+            return config.ModelProvider?.Invoke(sp)
+                ?? throw new WallabyConfigurationException(
+                    "Capturing requires a storage provider. Register one with " +
+                    "UseEntityFrameworkCore<TContext>() (from Wallaby.EntityFrameworkCore).");
+        });
+
         services.AddSingleton(sp =>
         {
-            var config = sp.GetRequiredService<CdcConfiguration>();
+            var config = sp.GetRequiredService<WallabyConfiguration>();
             if (!config.CaptureIntended)
             {
                 throw new WallabyConfigurationException(
                     "This Wallaby instance is provision-only (no sinks or mappings were declared), so the " +
                     "capture/backfill runtime is unavailable. Declare a sink and a mapping to enable capture.");
             }
-            var efModel = config.ModelAccessor!(sp);
-            var cdc = ModelToCdcModel.Build(efModel, config.ToCaptureSpec());
-            return new CapturedModel(efModel, cdc);
+            return sp.GetRequiredService<IWallabyModelProvider>().BuildCapturePlan(config.ToCaptureSpec());
         });
 
         services.AddSingleton<IWallabyBackfillManager>(sp =>
             new DefaultBackfillManager(
-                sp.GetRequiredService<CapturedModel>().Cdc,
-                new PostgresBackfillStore(sp.GetRequiredService<CdcDataSource>().Source)));
+                sp.GetRequiredService<CapturePlan>().Model,
+                new PostgresBackfillStore(sp.GetRequiredService<WallabyDataSource>().Source)));
 
-        services.AddSingleton<CdcRuntime>();
-        services.AddSingleton<CdcBackgroundService>();
+        services.AddSingleton<WallabyRuntime>();
+        services.AddSingleton<WallabyBackgroundService>();
         services.AddSingleton<ExternalSlotProvisioningService>();
 
         // Capture: stream via the runtime. Provision-only: create the declared external slots (if any) and
         // idle — no primary slot/stream. Decided at host start, when the (possibly deferred) configuration
         // first materializes.
         services.AddSingleton<IHostedService>(sp =>
-            sp.GetRequiredService<CdcConfiguration>().CaptureIntended
-                ? (IHostedService)sp.GetRequiredService<CdcBackgroundService>()
+            sp.GetRequiredService<WallabyConfiguration>().CaptureIntended
+                ? (IHostedService)sp.GetRequiredService<WallabyBackgroundService>()
                 : sp.GetRequiredService<ExternalSlotProvisioningService>());
 
         return services;

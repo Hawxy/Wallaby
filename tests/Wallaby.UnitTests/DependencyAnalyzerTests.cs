@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.TestModel;
 

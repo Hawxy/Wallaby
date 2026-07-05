@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.Hosting;
 using Wallaby.TestModel;
 
@@ -21,7 +22,7 @@ public class AddWallabyRegistrationTests
 
     private static void AddCaptureConfig(WallabyBuilder cdc, string connectionString)
     {
-        cdc.UseContext<AppDbContext>()
+        cdc.UseEntityFrameworkCore<AppDbContext>()
            .UseConnectionString(connectionString)
            .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
            .Map<Product>()
@@ -129,7 +130,7 @@ public class AddWallabyRegistrationTests
         // No UseConnectionString — a later Configure/binding could still supply it, so registration
         // succeeds and the absence is a validation failure at first resolution.
         services.AddWallaby(cdc => cdc
-            .UseContext<AppDbContext>()
+            .UseEntityFrameworkCore<AppDbContext>()
             .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)));
 
         await using var provider = services.BuildServiceProvider();
@@ -142,7 +143,7 @@ public class AddWallabyRegistrationTests
     {
         var services = NewServices();
         services.AddWallaby(cdc => cdc
-            .UseContext<AppDbContext>()
+            .UseEntityFrameworkCore<AppDbContext>()
             .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))); // no UseConnectionString
         services.PostConfigure<WallabyOptions>(o => o.ConnectionString = ConnectionString);
 
@@ -156,14 +157,14 @@ public class AddWallabyRegistrationTests
     {
         var services = NewServices();
         services.AddWallaby((_, cdc) => cdc
-            .UseContext<AppDbContext>()
+            .UseEntityFrameworkCore<AppDbContext>()
             .UseConnectionString(ConnectionString)
             .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
             .Map<Product>()); // structurally invalid: no .ToSink(...)
 
         await using var provider = services.BuildServiceProvider(); // registration itself is fine
 
-        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<CdcConfiguration>());
+        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<WallabyConfiguration>());
     }
 
     [Test]
@@ -186,7 +187,7 @@ public class AddWallabyRegistrationTests
 
         await using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<IHostedService>().ShouldBeOfType<CdcBackgroundService>();
+        provider.GetRequiredService<IHostedService>().ShouldBeOfType<WallabyBackgroundService>();
     }
 
     [Test]
@@ -223,7 +224,7 @@ public class AddWallabyRegistrationTests
         });
 
         await using var provider = services.BuildServiceProvider();
-        _ = provider.GetRequiredService<CdcConfiguration>();
+        _ = provider.GetRequiredService<WallabyConfiguration>();
         _ = provider.GetRequiredService<WallabyOptions>();
         _ = provider.GetRequiredService<IWallabyStatus>();
         _ = provider.GetRequiredService<IHostedService>();

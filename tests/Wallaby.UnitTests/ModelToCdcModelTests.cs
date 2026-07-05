@@ -1,4 +1,6 @@
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.SelfConfig;
+using Wallaby.Providers;
 using Wallaby.TestModel;
 
 namespace Wallaby.UnitTests;
@@ -16,7 +18,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Product)));
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(Product)));
 
         var product = model.FindByClrType(typeof(Product));
         product.ShouldNotBeNull();
@@ -34,7 +36,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Product)));
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(Product)));
         var product = model.FindByClrType(typeof(Product))!;
 
         product.PrimaryKey.Count.ShouldBe(1);
@@ -47,7 +49,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(OrderLine)));
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(OrderLine)));
         var line = model.FindByClrType(typeof(OrderLine))!;
 
         // Order matters for a composite key.
@@ -60,7 +62,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Order)));
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(Order)));
         var order = model.FindByClrType(typeof(Order))!;
 
         order.Schema.ShouldBe("sales");
@@ -72,7 +74,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        var model = ModelToCdcModel.Build(ctx.Model, Declared(typeof(Product)));
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(Product)));
 
         model.Tables.Count.ShouldBe(1);
         model.FindByClrType(typeof(Customer)).ShouldBeNull();
@@ -83,7 +85,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        var model = ModelToCdcModel.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
 
         model.Tables.Select(t => t.QualifiedName).OrderBy(n => n).ToList()
             .ShouldBe(new[]
@@ -103,7 +105,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        Should.Throw<WallabyConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared()); });
+        Should.Throw<WallabyConfigurationException>(() => { EfCoreCaptureModelBuilder.Build(ctx.Model, Declared()); });
     }
 
     [Test]
@@ -111,7 +113,7 @@ public class ModelToCdcModelTests
     {
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        Should.Throw<WallabyConfigurationException>(() => { ModelToCdcModel.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); });
+        Should.Throw<WallabyConfigurationException>(() => { EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(ModelToCdcModelTests))); });
     }
 
     [Test]
@@ -126,7 +128,7 @@ public class ModelToCdcModelTests
             RequiresFullReplicaIdentity = new HashSet<Type> { typeof(Product) },
         };
 
-        var model = ModelToCdcModel.Build(ctx.Model, spec);
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, spec);
 
         model.FindByClrType(typeof(Product))!.RequiresFullReplicaIdentity.ShouldBeTrue();
     }

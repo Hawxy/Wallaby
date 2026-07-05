@@ -127,10 +127,10 @@ internal sealed class WatermarkBackfillCoordinator(
 
                 try
                 {
-                    await EmitWatermarkAsync(emitter, CdcSchema.WatermarkLowPrefix, window.Token, ct);
+                    await EmitWatermarkAsync(emitter, WallabySchema.WatermarkLowPrefix, window.Token, ct);
                     var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
                     window.Buffer = chunk.Rows;
-                    await EmitWatermarkAsync(emitter, CdcSchema.WatermarkHighPrefix, window.Token, ct);
+                    await EmitWatermarkAsync(emitter, WallabySchema.WatermarkHighPrefix, window.Token, ct);
 
                     await window.Completed.Task.WaitAsync(ct);
 

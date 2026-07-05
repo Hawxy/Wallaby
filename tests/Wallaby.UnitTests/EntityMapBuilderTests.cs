@@ -1,5 +1,6 @@
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.TestModel;
 
 namespace Wallaby.UnitTests;
@@ -23,11 +24,11 @@ public class EntityMapBuilderTests
     public void ScopedBy_change_overload_reads_the_scope_key_from_the_record()
     {
         var builder = new WallabyBuilder();
-        builder.UseContext<AppDbContext>();
+        builder.UseEntityFrameworkCore<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
         // ScopedBy is only valid when something consumes the key — here a scoped enrichment context.
-        builder.UseScopedContext((_, _) =>
+        builder.UseScopedDbContext((_, _) =>
             new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Database=db;Username=u;Password=p")));
         builder.Map<Product>()
             .ToSink("sink", "products")

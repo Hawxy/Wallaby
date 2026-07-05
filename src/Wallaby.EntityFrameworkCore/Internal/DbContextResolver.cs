@@ -2,14 +2,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Wallaby.Internal.Pipeline;
+namespace Wallaby.EntityFrameworkCore.Internal;
 
 /// <summary>
 /// Obtains the consumer's <see cref="DbContext"/> without forcing them to register an
 /// <see cref="IDbContextFactory{TContext}"/>: it uses a registered factory when present (the recommended setup
 /// for background services), and otherwise creates a DI scope and resolves the scoped context registered by the
 /// ubiquitous <c>AddDbContext&lt;TContext&gt;()</c>. The generic methods are captured by
-/// <c>WallabyBuilder.UseContext&lt;TContext&gt;()</c> as the model accessor and the enrichment-context lease.
+/// <c>WallabyBuilder.UseContext&lt;TContext&gt;()</c> as the model reader and the enrichment-session lease.
 /// </summary>
 internal static class DbContextResolver
 {
@@ -31,15 +31,15 @@ internal static class DbContextResolver
     /// Lease a context for enrichment. Factory-created contexts are disposed directly; scope-resolved contexts
     /// are owned by the returned lease's scope (disposing the lease disposes the scope and the context).
     /// </summary>
-    public static EnrichmentContextLease Lease<TContext>(IServiceProvider services) where TContext : DbContext
+    public static DbContextEnrichmentSession Lease<TContext>(IServiceProvider services) where TContext : DbContext
     {
         var factory = services.GetService<IDbContextFactory<TContext>>();
         if (factory is not null)
         {
-            return new EnrichmentContextLease(factory.CreateDbContext(), scope: null);
+            return new DbContextEnrichmentSession(factory.CreateDbContext(), scope: null);
         }
 
         var scope = services.CreateAsyncScope();
-        return new EnrichmentContextLease(scope.ServiceProvider.GetRequiredService<TContext>(), scope);
+        return new DbContextEnrichmentSession(scope.ServiceProvider.GetRequiredService<TContext>(), scope);
     }
 }

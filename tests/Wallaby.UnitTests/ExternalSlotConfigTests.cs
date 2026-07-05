@@ -1,5 +1,7 @@
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore.Internal;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.TestModel;
 
@@ -12,7 +14,7 @@ public class ExternalSlotConfigTests
     private static WallabyBuilder MinimalBuilder()
     {
         var builder = new WallabyBuilder();
-        builder.UseContext<AppDbContext>();
+        builder.UseEntityFrameworkCore<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
         return builder;
@@ -124,14 +126,14 @@ public class ExternalSlotConfigTests
     }
 
     /// <summary>Materialize WallabyOptions the way AddWallaby does: builder actions applied, then validated.</summary>
-    private static WallabyOptions ValidatedOptions(CdcConfiguration config)
+    private static WallabyOptions ValidatedOptions(WallabyConfiguration config)
     {
         var options = new WallabyOptions();
         foreach (var apply in config.OptionsActions)
         {
             apply(options);
         }
-        var result = new CdcOptionsValidator(config).Validate(null, options);
+        var result = new WallabyOptionsValidator(config).Validate(null, options);
         return result.Failed
             ? throw new WallabyConfigurationException(string.Join(" ", result.Failures ?? []))
             : options;
@@ -156,7 +158,7 @@ public class ExternalSlotConfigTests
         registration.TableNames.Add(("public", "products"));
         registration.EntityTypes.Add(typeof(Order)); // maps to sales.orders
 
-        var specs = ExternalSlotResolver.Resolve(new[] { registration }, ctx.Model);
+        var specs = ExternalSlotResolver.Resolve(new[] { registration }, new EfCoreModelProvider(ctx.Model));
 
         specs.Count.ShouldBe(1);
         specs[0].PublicationName.ShouldBe("elt_pub"); // defaulted from slot name
@@ -173,7 +175,7 @@ public class ExternalSlotConfigTests
         registration.TableNames.Add(("public", "products"));
         registration.EntityTypes.Add(typeof(Product)); // also public.products
 
-        var specs = ExternalSlotResolver.Resolve(new[] { registration }, ctx.Model);
+        var specs = ExternalSlotResolver.Resolve(new[] { registration }, new EfCoreModelProvider(ctx.Model));
 
         specs[0].Tables.Count.ShouldBe(1);
     }
@@ -186,7 +188,8 @@ public class ExternalSlotConfigTests
         var registration = new ExternalSlotRegistration { SlotName = "elt" };
         registration.EntityTypes.Add(typeof(ExternalSlotConfigTests)); // not in the EF model
 
-        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve(new[] { registration }, ctx.Model));
+        Should.Throw<WallabyConfigurationException>(
+            () => ExternalSlotResolver.Resolve(new[] { registration }, new EfCoreModelProvider(ctx.Model)));
     }
 
     [Test]
@@ -196,7 +199,7 @@ public class ExternalSlotConfigTests
         var registration = new ExternalSlotRegistration { SlotName = "elt" };
         registration.TableNames.Add(("public", "orders"));
 
-        var specs = ExternalSlotResolver.Resolve(new[] { registration }, model: null);
+        var specs = ExternalSlotResolver.Resolve(new[] { registration }, modelProvider: null);
 
         specs.Count.ShouldBe(1);
         specs[0].PublicationName.ShouldBe("elt_pub");
@@ -210,6 +213,7 @@ public class ExternalSlotConfigTests
         var registration = new ExternalSlotRegistration { SlotName = "elt" };
         registration.EntityTypes.Add(typeof(Product));
 
-        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve(new[] { registration }, model: null));
+        Should.Throw<WallabyConfigurationException>(
+            () => ExternalSlotResolver.Resolve(new[] { registration }, modelProvider: null));
     }
 }

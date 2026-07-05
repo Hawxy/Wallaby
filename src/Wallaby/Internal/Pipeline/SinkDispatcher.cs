@@ -24,12 +24,12 @@ internal sealed class SinkDispatcher
 {
     private readonly IReadOnlyDictionary<string, ISink> _sinks;
     private readonly WallabyInstrumentation _instr;
-    private readonly CdcStatus? _status;
+    private readonly WallabyStatus? _status;
     private readonly ResiliencePipeline _retry;
 
     public SinkDispatcher(
         IReadOnlyDictionary<string, ISink> sinks, WallabyInstrumentation? instrumentation = null,
-        SinkRetryOptions? retry = null, CdcStatus? status = null)
+        SinkRetryOptions? retry = null, WallabyStatus? status = null)
     {
         _sinks = sinks;
         _instr = instrumentation ?? WallabyInstrumentation.NoOp;

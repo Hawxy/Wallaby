@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
+using Wallaby.Providers;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
@@ -16,7 +18,7 @@ public class SelfConfigTests(PostgresFixture pg)
     private static WallabyModel BuildAllMappedModel()
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
-        return ModelToCdcModel.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
+        return EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
     }
 
     private PostgresSelfConfigurator CreateConfigurator(string slot, string pub) =>

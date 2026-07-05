@@ -82,7 +82,7 @@ internal sealed class TransactionAssembler(ITransactionSpill spill, int maxBuffe
                 };
 
             // ---- watermarks (only ever in tiny non-streamed transactions) ----
-            case LogicalDecodingMessage msg when msg.Prefix.StartsWith(CdcSchema.WatermarkPrefix, StringComparison.Ordinal):
+            case LogicalDecodingMessage msg when msg.Prefix.StartsWith(WallabySchema.WatermarkPrefix, StringComparison.Ordinal):
                 _watermarks.Add(new Watermark(msg.Prefix, await ReadAsStringAsync(msg.Data, ct)));
                 return null;
 

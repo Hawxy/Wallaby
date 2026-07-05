@@ -2,12 +2,12 @@ using Wallaby.DependencyInjection;
 
 namespace Wallaby.UnitTests;
 
-public class CdcOptionsValidatorTests
+public class WallabyOptionsValidatorTests
 {
     private static WallabyOptions ValidOptions() => new() { ConnectionString = "Host=localhost" };
 
     private static Microsoft.Extensions.Options.ValidateOptionsResult Validate(WallabyOptions options)
-        => new CdcOptionsValidator(new CdcConfiguration()).Validate(null, options);
+        => new WallabyOptionsValidator(new WallabyConfiguration()).Validate(null, options);
 
     [Test]
     public void Valid_options_pass()

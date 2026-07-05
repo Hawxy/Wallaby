@@ -7,12 +7,12 @@ namespace Wallaby.Diagnostics;
 /// service update it at lifecycle points; reads (from health-check probe threads) are lock-free via an
 /// atomically-swapped immutable snapshot.
 /// </summary>
-internal sealed class CdcStatus : IWallabyStatus
+internal sealed class WallabyStatus : IWallabyStatus
 {
     private readonly Lock _gate = new();
     private WallabyStatusSnapshot _snapshot;
 
-    public CdcStatus(string slotName = "", TimeProvider? clock = null)
+    public WallabyStatus(string slotName = "", TimeProvider? clock = null)
     {
         _snapshot = new WallabyStatusSnapshot
         {

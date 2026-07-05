@@ -70,38 +70,29 @@ class Build : NukeBuild
             });
         });
     
+    // Wallaby.Marten is excluded until the provider is functional.
+    static readonly string[] PackableProjects =
+    [
+        "Wallaby",
+        "Wallaby.EntityFrameworkCore",
+        "Wallaby.Sinks.Meilisearch",
+        "Wallaby.AspNetCore.HealthChecks",
+        "Wallaby.Testing",
+    ];
+
     Target NugetPack => _ => _
         .DependsOn(Compile)
         .Executes(() =>
         {
-            var wallaby = Solution.AllProjects.Single(x=> x.Name == "Wallaby");
-            var wallabySink = Solution.AllProjects.Single(x=> x.Name == "Wallaby.Sinks.Meilisearch");
-            var wallabyHealthChecks = Solution.AllProjects.Single(x=> x.Name == "Wallaby.AspNetCore.HealthChecks");
-            var wallabyTesting = Solution.AllProjects.Single(x=> x.Name == "Wallaby.Testing");
-            
-            DotNetPack(_ => _
-                .SetProject(wallaby)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
-
-            DotNetPack(_ => _
-                .SetProject(wallabySink)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
-            
-            DotNetPack(_ => _
-                .SetProject(wallabyHealthChecks)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
-
-            DotNetPack(_ => _
-                .SetProject(wallabyTesting)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
+            foreach (var name in PackableProjects)
+            {
+                var project = Solution.AllProjects.Single(x => x.Name == name);
+                DotNetPack(_ => _
+                    .SetProject(project)
+                    .SetConfiguration("Release")
+                    .EnableContinuousIntegrationBuild()
+                    .SetOutputDirectory(ArtifactsDirectory));
+            }
         });
     
     [Parameter("Nuget Api Key")] [Secret] readonly string NugetApiKey;

@@ -1,20 +1,21 @@
 using System.Diagnostics;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
+using Wallaby.Providers;
 using Wallaby.TestModel;
 
 namespace Wallaby.UnitTests.OpenTelemetry;
 
 public class MappingChangeRouterTelemetryTests
 {
-    /// <summary>A transform that emits one document per change without touching the DbContext.</summary>
-    private sealed class StubTransform : ITransformInvoker
+    /// <summary>A transform that emits one document per change without touching the session.</summary>
+    private sealed class StubTransform : IWallabyTransformInvoker
     {
         public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
-            DbContext db, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
+            object session, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
         {
             var documents = new Dictionary<DocumentKey, WallabyDocument?>();
             foreach (var change in changes)
@@ -57,10 +58,10 @@ public class MappingChangeRouterTelemetryTests
         };
 
         // The transform ignores the context, so a never-opened context is sufficient for a unit test.
-        var contextProvider = new DefaultEnrichmentContextProvider(
+        var sessionProvider = new DbContextEnrichmentSessionProvider(
             () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
         var router = new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, contextProvider, instr);
+            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, sessionProvider, instr);
 
         var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
         var change = new ChangeEvent(

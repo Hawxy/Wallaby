@@ -1,10 +1,8 @@
 using System.Linq.Expressions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Wallaby.Abstractions;
-using Wallaby.Internal.Pipeline;
-using Wallaby.Internal.SelfConfig;
+using Wallaby.Internal.Replication;
 using Wallaby.Model;
+using Wallaby.Providers;
 
 namespace Wallaby.DependencyInjection;
 
@@ -22,10 +20,10 @@ internal sealed class MappingRegistration
     public string SinkName { get; set; } = "";
     public string? Destination { get; set; }
     public string? BackfillVersion { get; set; }
-    public Func<IServiceProvider, ITransformInvoker>? TransformFactory { get; set; }
+    public Func<IServiceProvider, IWallabyTransformInvoker>? TransformFactory { get; set; }
     public Func<ChangeEvent, string>? DocumentIdSelector { get; set; }
 
-    /// <summary>Per-row scope key (e.g. tenant id) for enrichment-context + destination scoping.</summary>
+    /// <summary>Per-row scope key (e.g. tenant id) for enrichment-session + destination scoping.</summary>
     public Func<ChangeEvent, object?>? ScopeKeySelector { get; set; }
 
     /// <summary>Per-scope-key destination (e.g. index-per-tenant); falls back to <see cref="Destination"/>.</summary>
@@ -33,9 +31,9 @@ internal sealed class MappingRegistration
 
     /// <summary>
     /// Navigation expressions declared via <c>DependsOn(...)</c>. Each expression points at a single
-    /// EF Core navigation (reference, collection, or skip-navigation) whose target/join table should
-    /// be captured and fan changes out to this entity. Resolved against the EF Core <c>IModel</c> at
-    /// startup by <c>DependencyAnalyzer</c>.
+    /// one-hop navigation whose target/join table should be captured and fan changes out to this
+    /// entity. Resolved against the storage provider's model at startup (via
+    /// <see cref="IWallabyModelProvider.BuildCapturePlan"/>).
     /// </summary>
     public List<LambdaExpression> DeclaredDependencies { get; } = [];
 }
@@ -43,7 +41,7 @@ internal sealed class MappingRegistration
 /// <summary>
 /// A declared external replication slot — an additional pgoutput publication + slot that Wallaby
 /// provisions (and reconciles) for a third-party CDC consumer (e.g. an ELT tool) but never consumes.
-/// Table declarations are resolved to schema-qualified names against the EF Core model at startup.
+/// Table declarations are resolved to schema-qualified names against the storage provider's model at startup.
 /// </summary>
 internal sealed class ExternalSlotRegistration
 {
@@ -58,12 +56,12 @@ internal sealed class ExternalSlotRegistration
     /// <summary>Tables declared by schema-qualified name.</summary>
     public List<(string Schema, string Table)> TableNames { get; } = [];
 
-    /// <summary>Tables declared by entity CLR type, resolved against the EF Core model at startup.</summary>
+    /// <summary>Tables declared by entity CLR type, resolved against the storage provider's model at startup.</summary>
     public List<Type> EntityTypes { get; } = [];
 }
 
 /// <summary>The immutable result of the fluent builder, consumed by the runtime.</summary>
-internal sealed class CdcConfiguration
+internal sealed class WallabyConfiguration
 {
     /// <summary>
     /// Option mutations queued by <see cref="WallabyBuilder.ConfigureOptions"/> and
@@ -81,9 +79,6 @@ internal sealed class CdcConfiguration
     /// <summary>External pgoutput publication+slot pairs to provision for third-party consumers (e.g. ELT).</summary>
     public List<ExternalSlotRegistration> ExternalSlots { get; } = [];
 
-    /// <summary>Optional factory that builds the enrichment <see cref="DbContext"/> from a row's scope key.</summary>
-    public Func<object?, IServiceProvider, DbContext>? ScopedContextFactory { get; set; }
-
     /// <summary>
     /// Builds the <see cref="ITransactionSpill"/> that buffers a pgoutput v2 streamed (large) transaction until
     /// commit. Set by <c>SpillToDisk</c>/<c>SpillToDatabase</c>/<c>UseTransactionSpill</c>; null selects the
@@ -91,19 +86,27 @@ internal sealed class CdcConfiguration
     /// </summary>
     public Func<SpillContext, ITransactionSpill>? SpillFactory { get; set; }
 
-    /// <summary>
-    /// Reads the EF Core <see cref="IModel"/> from the declared capture context. Set by
-    /// <see cref="WallabyBuilder.UseContext{TContext}"/>; null when no context is declared (provision-only).
-    /// Used to resolve <c>ForEntity&lt;T&gt;()</c> external-slot table declarations.
-    /// </summary>
-    public Func<IServiceProvider, IModel>? ModelAccessor { get; set; }
+    /// <summary>The registered storage provider's display name (e.g. <c>"EntityFrameworkCore"</c>), for error messages.</summary>
+    public string? ProviderName { get; set; }
 
     /// <summary>
-    /// Leases an enrichment <see cref="DbContext"/> for the runtime, using a registered
-    /// <see cref="IDbContextFactory{TContext}"/> when present and otherwise a DI scope over the consumer's
-    /// <c>AddDbContext</c> registration. Set by <see cref="WallabyBuilder.UseContext{TContext}"/>.
+    /// Builds the storage provider's model provider. Set by <see cref="WallabyBuilder.UseProvider"/>; null when
+    /// no provider is registered (provision-only). Used to resolve the capture plan and
+    /// <c>ForEntity&lt;T&gt;()</c> external-slot table declarations.
     /// </summary>
-    public Func<IServiceProvider, EnrichmentContextLease>? ContextLease { get; set; }
+    public Func<IServiceProvider, IWallabyModelProvider>? ModelProvider { get; set; }
+
+    /// <summary>
+    /// Builds the default (unscoped) enrichment-session provider transforms lease their sessions from.
+    /// Set by <see cref="WallabyBuilder.UseProvider"/>.
+    /// </summary>
+    public Func<IServiceProvider, IEnrichmentSessionProvider>? EnrichmentSessions { get; set; }
+
+    /// <summary>
+    /// Optional scope-key-aware enrichment-session provider (e.g. context-per-tenant); overrides
+    /// <see cref="EnrichmentSessions"/> when set. Set via <see cref="WallabyBuilder.UseScopedEnrichmentSessions"/>.
+    /// </summary>
+    public Func<IServiceProvider, IEnrichmentSessionProvider>? ScopedEnrichmentSessions { get; set; }
 
     /// <summary>
     /// True when the consumer declared anything that requires the streaming pipeline (a sink, a mapping, or
@@ -113,7 +116,7 @@ internal sealed class CdcConfiguration
     public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0 || CaptureAllMapped;
 
     /// <summary>
-    /// Build the <see cref="CaptureSpec"/> the model resolver consumes, including each mapping's
+    /// Build the <see cref="CaptureSpec"/> the storage provider consumes, including each mapping's
     /// <c>DependsOn(...)</c> navigations. Shared by the runtime and the backfill-manager registration so both
     /// derive the same <see cref="WallabyModel"/> (dependent tables/bindings included).
     /// </summary>

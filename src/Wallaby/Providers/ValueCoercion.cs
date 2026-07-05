@@ -1,37 +1,21 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
-namespace Wallaby.Internal.Materialization;
+namespace Wallaby.Providers;
 
 /// <summary>
-/// Converts a raw value produced by the pgoutput decoder into the CLR value expected by an EF Core
-/// property, applying the property's value converter when present and coercing common type mismatches
-/// (enums, Guids, date/times, numerics) otherwise.
+/// Coerces a raw value produced by the pgoutput decoder into a target CLR type, handling common
+/// mismatches (enums, Guids, date/times, numerics). Storage providers layer their own conversion
+/// machinery (e.g. EF Core value converters) on top of this.
 /// </summary>
-internal static class ValueCoercion
+public static class ValueCoercion
 {
     // Cache the case-insensitive enum-name → underlying-value map per enum type. Enum.Parse goes
     // through reflection + IL emit on first call; afterwards it's still a few dictionary probes,
     // but caching collapses it to a single lookup per row.
     private static readonly ConcurrentDictionary<Type, Dictionary<string, object>> EnumByName = new();
-    public static object? ToModelValue(object? rawValue, Type modelClrType, ValueConverter? converter)
-    {
-        if (converter is null)
-        {
-            return ToClr(rawValue, modelClrType);
-        }
 
-        if (rawValue is null)
-        {
-            return null;
-        }
-
-        // The converter expects the provider representation; make sure the raw value matches it first.
-        var providerValue = ToClr(rawValue, converter.ProviderClrType);
-        return converter.ConvertFromProvider(providerValue);
-    }
-
+    /// <summary>Coerce <paramref name="rawValue"/> to <paramref name="targetType"/> (nullable-aware; null/DBNull → null).</summary>
     public static object? ToClr(object? rawValue, Type targetType)
     {
         if (rawValue is null || rawValue is DBNull)

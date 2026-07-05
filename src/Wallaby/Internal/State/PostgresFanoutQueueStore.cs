@@ -39,7 +39,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
                     lookup_values = EXCLUDED.lookup_values,
                     requested_at = now(),
                     updated_at = now();
-            SELECT pg_notify('{CdcSchema.FanoutNotifyChannel}', '');
+            SELECT pg_notify('{WallabySchema.FanoutNotifyChannel}', '');
             """,
             connection);
         cmd.Parameters.AddWithValue("t", spec.PrimaryTable.QualifiedName);
@@ -89,7 +89,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
 
             await DisposeConnectionAsync();
             var connection = await dataSource.OpenConnectionAsync(ct);
-            await using (var listen = new NpgsqlCommand($"LISTEN {CdcSchema.FanoutNotifyChannel}", connection))
+            await using (var listen = new NpgsqlCommand($"LISTEN {WallabySchema.FanoutNotifyChannel}", connection))
             {
                 await listen.ExecuteNonQueryAsync(ct);
             }

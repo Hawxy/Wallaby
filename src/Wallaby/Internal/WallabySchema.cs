@@ -1,7 +1,7 @@
 namespace Wallaby.Internal;
 
 /// <summary>Names of the library's internal schema and the watermark message prefixes.</summary>
-internal static class CdcSchema
+internal static class WallabySchema
 {
     public const string Schema = "wallaby";
 

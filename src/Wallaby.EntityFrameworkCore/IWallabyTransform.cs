@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Wallaby.Abstractions;
 
-namespace Wallaby.Abstractions;
+namespace Wallaby.EntityFrameworkCore;
 
 /// <summary>
 /// The single interface for all enrichment/transformation. Given a batch of changes for one

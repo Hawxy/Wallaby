@@ -9,7 +9,7 @@ namespace Wallaby.DependencyInjection;
 /// Runs on first resolution; failures surface as a <see cref="WallabyConfigurationException"/> from the
 /// <see cref="WallabyOptions"/> singleton registration.
 /// </summary>
-internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IValidateOptions<WallabyOptions>
+internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration) : IValidateOptions<WallabyOptions>
 {
     public ValidateOptionsResult Validate(string? name, WallabyOptions options)
     {

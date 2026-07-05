@@ -6,14 +6,16 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.Internal.Backfill;
-using Wallaby.Internal.Materialization;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Testing;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
 using Wallaby.Model;
+using Wallaby.Providers;
 using Wallaby.TestModel;
 
 namespace Wallaby.TestInfrastructure;
@@ -53,7 +55,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private ITransactionSpill? _spill;
     private LogicalReplicationStream? _stream;
-    private CdcPipeline? _pipeline;
+    private WallabyPipeline? _pipeline;
     private WatermarkBackfillCoordinator? _coordinator;
     private DependentChangeResolver? _dependentResolver;
     private IFanoutQueueStore? _fanoutQueue;
@@ -155,7 +157,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             SinkName = sink,
             Destination = destination,
             BackfillVersion = backfillVersion,
-            Transform = new TransformInvoker<TEntity>(new DelegateTransform<TEntity>(transform)),
+            Transform = new EfCoreTransformInvoker<TEntity>(new DelegateTransform<TEntity>(transform)),
             ScopeKeySelector = scopeKey is null ? null : change => change.Entity is TEntity e ? scopeKey(e) : null,
             DestinationSelector = scopedDestination,
         };
@@ -232,19 +234,19 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
 
-        IEnrichmentContextProvider contextProvider = _scopedContextFactory is { } scoped
-            ? new ScopedEnrichmentContextProvider((key, _) => scoped(key), NullServiceProvider.Instance)
-            : new DefaultEnrichmentContextProvider(_newContext);
+        IEnrichmentSessionProvider sessionProvider = _scopedContextFactory is { } scoped
+            ? new ScopedDbContextEnrichmentSessionProvider((key, _) => scoped(key), NullServiceProvider.Instance)
+            : new DbContextEnrichmentSessionProvider(_newContext);
         IChangeRouter router = _broadcast
             ? new BroadcastChangeRouter(_sinks.Keys.ToList())
-            : new MappingChangeRouter(_mappings, contextProvider, Instrumentation);
+            : new MappingChangeRouter(_mappings, sessionProvider, Instrumentation);
 
         _dependentResolver = _cdcModel!.DependentBindings.Count > 0
             ? new DependentChangeResolver(_dataSource, _cdcModel, Instrumentation)
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
-        _pipeline = new CdcPipeline(
+        _pipeline = new WallabyPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
@@ -389,7 +391,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         var declared = _declaredDependencies.ToDictionary(
             kv => kv.Key,
             kv => (IReadOnlyList<LambdaExpression>)kv.Value);
-        _cdcModel = ModelToCdcModel.Build(_model, new CaptureSpec
+        _cdcModel = EfCoreCaptureModelBuilder.Build(_model, new CaptureSpec
         {
             CaptureAllMapped = true,
             DeclaredDependencies = declared,

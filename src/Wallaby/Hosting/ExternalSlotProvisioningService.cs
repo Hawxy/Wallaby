@@ -13,13 +13,13 @@ namespace Wallaby.Hosting;
 /// mappings), this creates/reconciles the declared pgoutput publications + slots and then completes. There
 /// is no primary slot and no streaming. Runs under the cluster lock so only one node provisions at a time,
 /// and is idempotent. A failure faults the host (which restarts and retries), matching
-/// <see cref="CdcBackgroundService"/> and the hand-rolled initializer it replaces.
+/// <see cref="WallabyBackgroundService"/> and the hand-rolled initializer it replaces.
 /// </summary>
 internal sealed class ExternalSlotProvisioningService(
-    CdcConfiguration config,
-    CdcDataSource dataSource,
+    WallabyConfiguration config,
+    WallabyDataSource dataSource,
     IClusterLock clusterLock,
-    CdcStatus status,
+    WallabyStatus status,
     IServiceProvider services,
     ILogger<ExternalSlotProvisioningService> logger) : BackgroundService
 {
@@ -38,10 +38,10 @@ internal sealed class ExternalSlotProvisioningService(
                 return;
             }
 
-            // ForEntity<T>() needs the EF model; only resolve it when a slot actually uses an entity type.
+            // ForEntity<T>() needs the provider's model; only resolve it when a slot actually uses an entity type.
             var needsModel = config.ExternalSlots.Exists(s => s.EntityTypes.Count > 0);
-            var model = needsModel ? config.ModelAccessor?.Invoke(services) : null;
-            var specs = ExternalSlotResolver.Resolve(config.ExternalSlots, model);
+            var modelProvider = needsModel ? config.ModelProvider?.Invoke(services) : null;
+            var specs = ExternalSlotResolver.Resolve(config.ExternalSlots, modelProvider);
 
             await using var lease = await clusterLock.TryAcquireAsync(LockKey, stoppingToken);
             if (lease is null)

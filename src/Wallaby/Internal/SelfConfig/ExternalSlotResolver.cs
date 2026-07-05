@@ -1,19 +1,18 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Wallaby.DependencyInjection;
+using Wallaby.Providers;
 
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
 /// Resolves the consumer's declared <see cref="ExternalSlotRegistration"/>s into concrete
-/// <see cref="ExternalSlotSpec"/>s at startup: entity-type table declarations are resolved against the EF
-/// Core model, schema-qualified names are de-duplicated, and the publication name is defaulted to
-/// <c>"{slotName}_pub"</c> when not specified.
+/// <see cref="ExternalSlotSpec"/>s at startup: entity-type table declarations are resolved against the
+/// storage provider's model, schema-qualified names are de-duplicated, and the publication name is
+/// defaulted to <c>"{slotName}_pub"</c> when not specified.
 /// </summary>
 internal static class ExternalSlotResolver
 {
     public static IReadOnlyList<ExternalSlotSpec> Resolve(
-        IReadOnlyCollection<ExternalSlotRegistration> registrations, IModel? model)
+        IReadOnlyCollection<ExternalSlotRegistration> registrations, IWallabyModelProvider? modelProvider)
     {
         if (registrations.Count == 0)
         {
@@ -41,22 +40,25 @@ internal static class ExternalSlotResolver
 
             foreach (var entityClrType in registration.EntityTypes)
             {
-                if (model is null)
+                if (modelProvider is null)
                 {
                     throw new WallabyConfigurationException(
                         $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>() requires a " +
-                        "DbContext to resolve the table. Declare one with UseContext<TContext>() or use ForTable(...).");
+                        "storage provider to resolve the table. Register one with UseEntityFrameworkCore<TContext>() " +
+                        "or use ForTable(...).");
                 }
 
-                var entityType = model.FindEntityType(entityClrType)
-                    ?? throw new WallabyConfigurationException(
-                        $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>(): " +
-                        $"'{entityClrType.FullName}' is not part of the EF Core model.");
-                var tableName = entityType.GetTableName()
-                    ?? throw new WallabyConfigurationException(
-                        $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>(): " +
-                        $"'{entityClrType.FullName}' is not mapped to a table.");
-                Add(entityType.GetSchema() ?? "public", tableName);
+                QualifiedTable table;
+                try
+                {
+                    table = modelProvider.ResolveTable(entityClrType);
+                }
+                catch (WallabyConfigurationException ex)
+                {
+                    throw new WallabyConfigurationException(
+                        $"AddExternalSlot(\"{registration.SlotName}\").ForEntity<{entityClrType.Name}>(): {ex.Message}", ex);
+                }
+                Add(table.Schema, table.Table);
             }
 
             var publication = string.IsNullOrWhiteSpace(registration.PublicationName)

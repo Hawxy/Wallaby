@@ -1,20 +1,20 @@
-using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
+using Wallaby.Providers;
 
 namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
 /// Routes change events using per-entity <see cref="EntityMapping"/>s. For each mapped entity type the
 /// transform is invoked over the transaction's insert/update/read changes — <em>sub-grouped by scope key</em>
-/// (e.g. tenant) so each invocation gets a same-scope <see cref="DbContext"/> and only that scope's changes —
+/// (e.g. tenant) so each invocation gets a same-scope enrichment session and only that scope's changes —
 /// producing a document per source key; a missing or null document becomes a deletion. Deletes are routed
 /// directly by key (no transform), but still resolve their scope key so a scoped destination is honored.
-/// One enrichment context is created per distinct scope key per batch and disposed at the end.
+/// One enrichment session is leased per distinct scope key per batch and disposed at the end.
 /// </summary>
 internal sealed class MappingChangeRouter(
     IReadOnlyDictionary<Type, EntityMapping> mappings,
-    IEnrichmentContextProvider contextProvider,
+    IEnrichmentSessionProvider sessionProvider,
     WallabyInstrumentation? instrumentation = null) : IChangeRouter
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
@@ -25,7 +25,7 @@ internal sealed class MappingChangeRouter(
         IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var routed = new List<RoutedDocument>();
-        var contexts = new Dictionary<object, EnrichmentContextLease>();
+        var sessions = new Dictionary<object, IEnrichmentSession>();
         try
         {
             foreach (var group in changes.GroupBy(c => c.EntityClrType))
@@ -72,7 +72,7 @@ internal sealed class MappingChangeRouter(
                     var scopeKey = scopeGroup.Key;
                     var subset = scopeGroup.ToList();
                     var destination = mapping.ResolveDestination(scopeKey);
-                    var db = GetOrCreateContext(contexts, scopeKey);
+                    var session = GetOrCreateSession(sessions, scopeKey);
                     var entityName = mapping.EntityClrType.Name;
 
                     using var activity = _instr.StartTransform();
@@ -84,7 +84,7 @@ internal sealed class MappingChangeRouter(
 
                     var transformStart = WallabyInstrumentation.StartTimer();
                     // A transform exception always propagates and halts the pipeline
-                    var documents = await mapping.Transform.InvokeAsync(db, subset, ct);
+                    var documents = await mapping.Transform.InvokeAsync(session, subset, ct);
                     _instr.RecordTransformDuration(entityName, transformStart);
 
                     foreach (var change in subset)
@@ -104,7 +104,7 @@ internal sealed class MappingChangeRouter(
         }
         finally
         {
-            foreach (var lease in contexts.Values)
+            foreach (var lease in sessions.Values)
             {
                 await lease.DisposeAsync();
             }
@@ -113,16 +113,16 @@ internal sealed class MappingChangeRouter(
         return routed;
     }
 
-    private DbContext GetOrCreateContext(Dictionary<object, EnrichmentContextLease> cache, object? scopeKey)
+    private object GetOrCreateSession(Dictionary<object, IEnrichmentSession> cache, object? scopeKey)
     {
-        // Unscoped providers share one context per batch; scoped providers cache one per distinct key.
-        var cacheKey = contextProvider.IsScoped ? scopeKey ?? NullScopeKey : SharedContextKey;
+        // Unscoped providers share one session per batch; scoped providers cache one per distinct key.
+        var cacheKey = sessionProvider.IsScoped ? scopeKey ?? NullScopeKey : SharedContextKey;
         if (!cache.TryGetValue(cacheKey, out var lease))
         {
-            lease = contextProvider.Create(scopeKey);
+            lease = sessionProvider.Lease(scopeKey);
             cache[cacheKey] = lease;
         }
-        return lease.Context;
+        return lease.Session;
     }
 
     private static RoutedDocument Upsert(

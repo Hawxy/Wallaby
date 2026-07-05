@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Wallaby.Abstractions;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
+using Wallaby.Providers;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
@@ -15,7 +17,7 @@ public class ReplicationDecoderTests(PostgresFixture pg)
     private static WallabyModel BuildAllMappedModel()
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
-        return ModelToCdcModel.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
+        return EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec { CaptureAllMapped = true });
     }
 
     [Test]

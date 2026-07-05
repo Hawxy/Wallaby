@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
@@ -33,7 +34,7 @@ public class WallabyTestingTests(PostgresFixture pg)
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
         services.AddWallaby(cdc =>
         {
-            cdc.UseContext<AppDbContext>()
+            cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(pg.ConnectionString)
                // Production-style sink the test will replace; throws if a batch ever reaches it.
                .AddDelegateSink("meili", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
@@ -108,7 +109,7 @@ public class WallabyTestingTests(PostgresFixture pg)
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
         services.AddWallaby((sp, cdc) =>
         {
-            cdc.UseContext<AppDbContext>()
+            cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
                .AddDelegateSink("meili", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
                .Map<Product>()
@@ -204,7 +205,7 @@ public class WallabyTestingExtensionTests
         await using var provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<WallabyOptions>().SlotName.ShouldBe("second");
-        var sinks = provider.GetRequiredService<CdcConfiguration>().Sinks;
+        var sinks = provider.GetRequiredService<WallabyConfiguration>().Sinks;
         sinks.Count.ShouldBe(1);
         ReferenceEquals(sinks[0].Factory(provider), capture).ShouldBeTrue();
     }
@@ -218,7 +219,7 @@ public class WallabyTestingExtensionTests
         services.ReplaceWallabySink("wrong", new CaptureSink());
 
         await using var provider = services.BuildServiceProvider();
-        Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<CdcConfiguration>());
+        Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<WallabyConfiguration>());
     }
 
     private static ServiceCollection BuildRegisteredServices(bool deferred)
@@ -235,7 +236,7 @@ public class WallabyTestingExtensionTests
         return services;
 
         static void Configure(WallabyBuilder cdc) => cdc
-            .UseContext<AppDbContext>()
+            .UseEntityFrameworkCore<AppDbContext>()
             .UseConnectionString("Host=localhost;Database=unused")
             .AddDelegateSink("real", (_, _) => Task.FromResult(DeliveryResult.Success))
             .Map<Product>()

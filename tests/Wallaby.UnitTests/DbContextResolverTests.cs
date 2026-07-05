@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
 using Wallaby.TestModel;
 

@@ -2,18 +2,24 @@
 
   <PropertyGroup>
     <IsPackable>true</IsPackable>
-    <PackageId>Wallaby</PackageId>
+    <PackageId>Wallaby.EntityFrameworkCore</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>Postgres Change Data Capture for .NET: self-configuring logical replication, transforms/enrichment, pluggable destinations, and watermark-coordinated backfill. Pair with a storage provider package such as Wallaby.EntityFrameworkCore.</Description>
+    <Description>EF Core storage provider for Wallaby: drives capture from your EF Core model — table/key discovery, entity materialization with value converters, DbContext-based transforms/enrichment, and DependsOn navigation fan-out.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Wallaby.Testing" />
     <InternalsVisibleTo Include="Wallaby.UnitTests" />
     <InternalsVisibleTo Include="Wallaby.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.Meilisearch.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
+    <InternalsVisibleTo Include="Wallaby.EntityFrameworkCore.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.EntityFrameworkCore.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby\Wallaby.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,9 +27,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Npgsql" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="Polly.Core" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
 
   <Import Project="../../Package.Build.props" />

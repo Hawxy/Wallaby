@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wallaby\Wallaby.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.EntityFrameworkCore\Wallaby.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\Wallaby.TestModel\Wallaby.TestModel.csproj" />
     <ProjectReference Include="..\Wallaby.TestInfrastructure\Wallaby.TestInfrastructure.csproj" />
   </ItemGroup>

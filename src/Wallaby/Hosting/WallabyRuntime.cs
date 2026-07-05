@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
@@ -9,12 +8,12 @@ using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
-using Wallaby.Internal.Materialization;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
 using Wallaby.Model;
+using Wallaby.Providers;
 
 namespace Wallaby.Hosting;
 
@@ -22,21 +21,22 @@ namespace Wallaby.Hosting;
 /// Owns the end-to-end Wallaby lifecycle for a context: elect leadership (cluster lock), self-configure,
 /// then run the live pipeline and backfill scheduler. Standby nodes wait and take over on failover.
 /// </summary>
-internal sealed class CdcRuntime
+internal sealed class WallabyRuntime
 {
-    private readonly CapturedModel _capturedModel;
-    private readonly CdcConfiguration _config;
+    private readonly CapturePlan _capturePlan;
+    private readonly IWallabyModelProvider _modelProvider;
+    private readonly WallabyConfiguration _config;
     private readonly WallabyOptions _options;
-    private readonly CdcDataSource _dataSource;
+    private readonly WallabyDataSource _dataSource;
     private readonly IClusterLock _clusterLock;
     private readonly IServiceProvider _services;
     private readonly WallabyInstrumentation _instrumentation;
-    private readonly CdcStatus _status;
-    private readonly ILogger<CdcRuntime> _logger;
+    private readonly WallabyStatus _status;
+    private readonly ILogger<WallabyRuntime> _logger;
 
     // Built once.
-    private WallabyModel _cdcModel = null!;
-    private EntityMaterializer _materializer = null!;
+    private WallabyModel _model = null!;
+    private IRowMaterializer _materializer = null!;
     private MappingChangeRouter _router = null!;
     private SinkDispatcher _dispatcher = null!;
     private IReadOnlyDictionary<string, ISink> _sinks = null!;
@@ -48,18 +48,20 @@ internal sealed class CdcRuntime
     private IFanoutQueueStore? _fanoutQueue;
     private IReadOnlyList<(CapturedTable Table, string? Version)> _backfillTables = [];
 
-    public CdcRuntime(
-        CapturedModel capturedModel,
-        CdcConfiguration config,
+    public WallabyRuntime(
+        CapturePlan capturePlan,
+        IWallabyModelProvider modelProvider,
+        WallabyConfiguration config,
         WallabyOptions options,
-        CdcDataSource dataSource,
+        WallabyDataSource dataSource,
         IClusterLock clusterLock,
         IServiceProvider services,
         WallabyInstrumentation instrumentation,
-        CdcStatus status,
-        ILogger<CdcRuntime> logger)
+        WallabyStatus status,
+        ILogger<WallabyRuntime> logger)
     {
-        _capturedModel = capturedModel;
+        _capturePlan = capturePlan;
+        _modelProvider = modelProvider;
         _config = config;
         _options = options;
         _dataSource = dataSource;
@@ -153,7 +155,7 @@ internal sealed class CdcRuntime
     /// </summary>
     private async Task<bool> RunAsLeaderAsync(IClusterLockHandle leadership, CancellationToken ct)
     {
-        var selfConfig = await _selfConfigurator.EnsureConfiguredAsync(_cdcModel, ct);
+        var selfConfig = await _selfConfigurator.EnsureConfiguredAsync(_model, ct);
         await RepairSlotGapAsync(selfConfig, ct);
         await InitializeSinksAsync(ct);
 
@@ -166,7 +168,7 @@ internal sealed class CdcRuntime
             _dataSource.ConnectionString, _options.SlotName, _options.PublicationName, spill,
             _options.MaxBufferedChangesPerTransaction);
         var changeEventFactory = new ChangeEventFactory(_materializer);
-        var pipeline = new CdcPipeline(
+        var pipeline = new WallabyPipeline(
             stream, changeEventFactory, _router, _dispatcher, _checkpoints, _options.SlotName, _logger,
             _options.MaxBatchSize, _options.KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue,
             _instrumentation, _status);
@@ -204,7 +206,7 @@ internal sealed class CdcRuntime
         var fanoutTask = _fanoutQueue is not null
             ? Task.Run(async () =>
             {
-                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel, _logger, _options.FanoutPollInterval, _status, _instrumentation).RunAsync(linked.Token); }
+                try { await new FanoutQueueWorker(_fanoutQueue, _coordinator, _model, _logger, _options.FanoutPollInterval, _status, _instrumentation).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
@@ -298,14 +300,14 @@ internal sealed class CdcRuntime
 
     private void BuildComponents()
     {
-        _cdcModel = _capturedModel.Cdc;
-        _materializer = new EntityMaterializer(_capturedModel.EfModel);
+        _model = _capturePlan.Model;
+        _materializer = _capturePlan.Materializer;
 
         var mappings = new Dictionary<Type, EntityMapping>();
         var backfillTables = new List<(CapturedTable, string?)>();
         foreach (var registration in _config.Mappings.Values)
         {
-            var captured = _cdcModel.FindByClrType(registration.EntityClrType)
+            var captured = _model.FindByClrType(registration.EntityClrType)
                 ?? throw new WallabyConfigurationException(
                     $"Mapped entity '{registration.EntityClrType.FullName}' is not captured. Ensure it is declared and mapped to a table.");
 
@@ -325,15 +327,13 @@ internal sealed class CdcRuntime
 
         _sinks = _config.Sinks.ToDictionary(s => s.Name, s => s.Factory(_services));
 
-        IEnrichmentContextProvider contextProvider = _config.ScopedContextFactory is { } scopedFactory
-            ? new ScopedEnrichmentContextProvider(scopedFactory, _services)
-            : new DefaultEnrichmentContextProvider(() => _config.ContextLease!(_services));
-        _router = new MappingChangeRouter(mappings, contextProvider, _instrumentation);
+        var sessions = (_config.ScopedEnrichmentSessions ?? _config.EnrichmentSessions)!(_services);
+        _router = new MappingChangeRouter(mappings, sessions, _instrumentation);
         _dispatcher = new SinkDispatcher(_sinks, _instrumentation, _options.SinkRetry, _status);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource.Source, new PostgresBackfillStore(_dataSource.Source), _logger, _instrumentation) { ChunkSize = _options.ChunkSize };
-        _dependentResolver = _cdcModel.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_dataSource.Source, _cdcModel, _instrumentation)
+        _dependentResolver = _model.DependentBindings.Count > 0
+            ? new DependentChangeResolver(_dataSource.Source, _model, _instrumentation)
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource.Source) : null;
         _checkpointsDirect = new PostgresCheckpointStore(_dataSource.Source);
@@ -348,7 +348,7 @@ internal sealed class CdcRuntime
                 PublicationName = _options.PublicationName,
                 ManagePublicationTables = _options.ManagePublicationTables,
                 RequireFullReplicaIdentity = _options.RequireFullReplicaIdentity,
-                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, _capturedModel.EfModel),
+                ExternalSlots = ExternalSlotResolver.Resolve(_config.ExternalSlots, _modelProvider),
             },
             _logger);
         _backfillTables = backfillTables;
@@ -387,8 +387,8 @@ internal sealed class CdcRuntime
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 }
 
-/// <summary>Source-generated log messages for <see cref="CdcRuntime"/>.</summary>
-internal static partial class CdcRuntimeLog
+/// <summary>Source-generated log messages for <see cref="WallabyRuntime"/>.</summary>
+internal static partial class WallabyRuntimeLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire Wallaby leadership; retrying.")]
     internal static partial void LeadershipAcquireFailed(this ILogger logger, Exception ex);
