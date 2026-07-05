@@ -1,3 +1,7 @@
+<script setup>
+import PipelineFlow from './.vitepress/theme/PipelineFlow.vue'
+</script>
+
 # How It Works
 
 Wallaby runs a single ordered pipeline per slot. It reads committed transactions from Postgres logical
@@ -8,15 +12,7 @@ from the last acknowledged position.
 
 ## The Pipeline
 
-```mermaid
-flowchart LR
-    PG[("Postgres")] -->|"logical replication"| READ["Read + materialize<br/>committed transactions"]
-    READ --> XFORM["Transform + route"]
-    XFORM --> SINKS[("Sinks")]
-    SINKS --> ACK["Acknowledge + checkpoint"]
-    ACK -.->|"advance slot"| PG
-    BACKFILL["Backfill + dependent fan-out<br/>(leader)"] -->|"snapshot rows"| READ
-```
+<PipelineFlow />
 
 - **Read + materialize** — decode each committed transaction and turn its row changes into typed
   `ChangeEvent`s.
