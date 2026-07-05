@@ -69,6 +69,21 @@ public class CdcStatusTests
     }
 
     [Test]
+    public void RecordProgress_clears_accumulated_leader_failures()
+    {
+        var status = new CdcStatus();
+
+        status.RecordLeaderFailure("e1");
+        status.RecordLeaderFailure("e2");
+        status.RecordLeaderFailure("e3");
+        status.Current.ConsecutiveLeaderFailures.ShouldBe(3);
+
+        status.RecordProgress(lsn: 7, lagSeconds: 0.5, at: DateTimeOffset.UtcNow);
+
+        status.Current.ConsecutiveLeaderFailures.ShouldBe(0);
+    }
+
+    [Test]
     public void Fanout_failures_increment_set_the_error_and_reset()
     {
         var status = new CdcStatus();

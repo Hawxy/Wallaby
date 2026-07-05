@@ -31,9 +31,15 @@ Registered as **`wallaby`** (tag `wallaby`). It reports:
 
 The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
 `leaderSince`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
-`consecutiveLeaderFailures`, `consecutiveFanoutFailures`, and `slotName`. A nonzero
+`consecutiveLeaderFailures`, `consecutiveFanoutFailures`, `slotName`, and one
+`lastSinkDeliveryAt:<sink>` entry per sink that has accepted a batch this session. A nonzero
 `consecutiveFanoutFailures` means the fan-out worker is stuck retrying with backoff. 
 Live replication keeps flowing, so the node stays Healthy, but the value is worth alerting on.
+
+A climbing `consecutiveLeaderFailures` means the leader is crash-looping: sessions keep dying before a
+single transaction is fully delivered and acknowledged (e.g. a sink permanently rejecting a batch). The
+counter only resets on real progress or a clean step-down — not just because a failing session ran for a
+while first — so it is a reliable alerting signal even when each session streams briefly before failing.
 
 ::: warning Don't expose full detail publicly
 The `data` dictionary can include exception text. Don't expose a detailed `/health` response on a public

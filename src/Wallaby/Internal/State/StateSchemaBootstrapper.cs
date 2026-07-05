@@ -48,6 +48,11 @@ internal sealed class StateSchemaBootstrapper
             PRIMARY KEY (table_qualified, lookup_hash)
         );
 
+        -- Serves the worker's due-job scan: WHERE status IN (...) ORDER BY requested_at LIMIT 1.
+        CREATE INDEX IF NOT EXISTS fanout_queue_due_idx
+            ON wallaby.fanout_queue (requested_at)
+            WHERE status IN ('Requested', 'InProgress');
+
         -- Disk-free spill for pgoutput v2 streamed transactions buffered until commit. 
         -- Used only by the database spill backend (PostgresUnloggedTableSpill);
         CREATE UNLOGGED TABLE IF NOT EXISTS wallaby.stream_buffer (

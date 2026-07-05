@@ -59,6 +59,16 @@ internal sealed class CdcStatus : IWallabyStatus
             LastProgressAt = at,
             // Keep the previous known lag when this transaction had no commit timestamp.
             LastIngestionLagSeconds = lagSeconds >= 0 ? lagSeconds : s.LastIngestionLagSeconds,
+            // A fully delivered + acknowledged transaction proves the leader is healthy; a crash-looping
+            // leader never gets here, so its failure count accumulates across sessions.
+            ConsecutiveLeaderFailures = 0,
+        });
+
+    internal void RecordSinkDelivered(string sink, DateTimeOffset at) =>
+        Update(s => s with
+        {
+            LastSinkDeliveryAt =
+                new Dictionary<string, DateTimeOffset>(s.LastSinkDeliveryAt, StringComparer.Ordinal) { [sink] = at },
         });
 
     internal void MarkFaulted(string error) =>

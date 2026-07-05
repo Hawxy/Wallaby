@@ -14,6 +14,9 @@ internal interface IFanoutQueueStore
     /// <summary>The oldest job that is <c>Requested</c> or (orphaned) <c>InProgress</c>, or null when the queue is drained.</summary>
     Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct);
 
+    /// <summary>How many jobs are currently due (<c>Requested</c> or <c>InProgress</c>); feeds the queue-depth gauge.</summary>
+    Task<long> CountDueAsync(CancellationToken ct);
+
     /// <summary>Mark a job <c>InProgress</c> and set its starting cursor (null restarts from the beginning).</summary>
     Task MarkInProgressAsync(string tableQualified, string lookupHash, string? startCursorJson, CancellationToken ct);
 

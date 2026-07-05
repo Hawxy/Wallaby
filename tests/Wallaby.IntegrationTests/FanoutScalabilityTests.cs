@@ -206,7 +206,7 @@ public class FanoutScalabilityTests(PostgresFixture pg)
 
         // Marking in progress with a cursor makes it a resumable in-progress job.
         await store.MarkInProgressAsync(
-            due.TableQualified, due.LookupHash, KeysetCodec.Serialize([(object?)42]), CancellationToken.None);
+            due.TableQualified, due.LookupHash, KeysetCodec.SerializeCursor([42], ["id"]), CancellationToken.None);
         var resumed = await store.GetNextDueAsync(CancellationToken.None);
         resumed!.Status.ShouldBe(BackfillStatus.InProgress);
         resumed.CursorJson.ShouldNotBeNull();

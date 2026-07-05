@@ -78,8 +78,8 @@
 
   /* Home hero: amber → blue duotone, riso-print style */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(
-    120deg,
+  --vp-home-hero-name-background: linear-gradient(
+    150deg,
     #9a5410 30%,
     #0a5d8f
   );
@@ -147,8 +147,8 @@
   --vp-button-brand-active-border: #b3b3b3;
 
   /* Home hero: amber → blue neon gradient */
-  --vp-home-hero-name-background: -webkit-linear-gradient(
-    120deg,
+  --vp-home-hero-name-background: linear-gradient(
+    150deg,
     #ffb454 30%,
     #59c2ff
   );

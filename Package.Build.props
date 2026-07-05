@@ -10,8 +10,10 @@
         <Copyright>JT 2026</Copyright>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>icon.png</PackageIcon>
     </PropertyGroup>
     <ItemGroup>
         <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
+        <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\"/>
     </ItemGroup>
 </Project>

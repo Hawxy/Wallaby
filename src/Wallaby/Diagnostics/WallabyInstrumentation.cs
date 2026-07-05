@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Wallaby.Abstractions;
@@ -58,6 +59,14 @@ public sealed class WallabyInstrumentation : IDisposable
     private readonly Counter<long> _backfillRows;
     private readonly UpDownCounter<int> _backfillActive;
     private readonly Histogram<double> _backfillChunkDuration;
+    private readonly ObservableGauge<long> _fanoutQueueDepthGauge;
+
+    // Cached by the fan-out worker once per drain pass, so the exporter thread never queries the database.
+    // -1 = never sampled (no leader session yet); the gauge emits nothing until a real sample exists.
+    private long _fanoutQueueDepth = -1;
+
+    // Per sink, the Stopwatch timestamp of the last successful delivery; the lag gauge derives seconds-since.
+    private readonly ConcurrentDictionary<string, long> _sinkLastDeliveredAt = new(StringComparer.Ordinal);
 
     /// <summary>Create instrumentation whose meter is owned by the host's <see cref="IMeterFactory"/>.</summary>
     internal WallabyInstrumentation(IMeterFactory meterFactory)
@@ -96,6 +105,12 @@ public sealed class WallabyInstrumentation : IDisposable
             "wallaby.backfill.active", unit: "{table}", description: "Tables currently being backfilled.");
         _backfillChunkDuration = _meter.CreateHistogram<double>(
             "wallaby.backfill.chunk.duration", unit: "s", description: "Time to read and emit one backfill chunk.");
+        _fanoutQueueDepthGauge = _meter.CreateObservableGauge(
+            "wallaby.fanout.queue.depth", ObserveFanoutQueueDepth, unit: "{job}",
+            description: "Scoped fan-out jobs currently due (Requested or InProgress), sampled once per drain pass.");
+        _meter.CreateObservableGauge(
+            "wallaby.sink.delivery.lag", ObserveSinkDeliveryLag, unit: "s",
+            description: "Seconds since each sink last accepted a batch.");
     }
 
     /// <summary>The underlying meter (exposed for tests that attach a <c>MetricCollector</c>).</summary>
@@ -167,25 +182,56 @@ public sealed class WallabyInstrumentation : IDisposable
 
     // ---- sink delivery ----
 
-    internal void RecordSinkDelivery(string sink, string outcome, long startTimestamp)
+    /// <summary>
+    /// Record one finished delivery attempt: the duration histogram always; on success also the
+    /// records-delivered counter and the lag-gauge timestamp, otherwise the failure counter.
+    /// </summary>
+    internal void RecordSinkAttempt(string sink, string outcome, long startTimestamp, int recordCount)
     {
         if (_sinkDeliveryDuration.Enabled)
         {
             _sinkDeliveryDuration.Record(
                 ElapsedSeconds(startTimestamp), new TagList { { SinkTag, sink }, { DeliveryOutcomeTag, outcome } });
         }
-    }
 
-    internal void RecordSinkRecordsDelivered(string sink, long count)
-    {
-        if (count > 0)
+        if (outcome == DeliverySuccess)
         {
-            _sinkRecordsDelivered.Add(count, new KeyValuePair<string, object?>(SinkTag, sink));
+            if (recordCount > 0)
+            {
+                _sinkRecordsDelivered.Add(recordCount, new KeyValuePair<string, object?>(SinkTag, sink));
+            }
+            _sinkLastDeliveredAt[sink] = Stopwatch.GetTimestamp();
+        }
+        else
+        {
+            _sinkDeliveryFailures.Add(1, new TagList { { SinkTag, sink }, { DeliveryOutcomeTag, outcome } });
         }
     }
 
-    internal void RecordSinkFailure(string sink, string outcome)
-        => _sinkDeliveryFailures.Add(1, new TagList { { SinkTag, sink }, { DeliveryOutcomeTag, outcome } });
+    private IEnumerable<Measurement<double>> ObserveSinkDeliveryLag()
+    {
+        foreach (var (sink, timestamp) in _sinkLastDeliveredAt)
+        {
+            yield return new Measurement<double>(
+                Stopwatch.GetElapsedTime(timestamp).TotalSeconds, new KeyValuePair<string, object?>(SinkTag, sink));
+        }
+    }
+
+    // ---- fan-out queue ----
+
+    /// <summary>True when something is collecting the depth gauge, so the worker knows whether counting is worth a query.</summary>
+    internal bool FanoutQueueDepthEnabled => _fanoutQueueDepthGauge.Enabled;
+
+    internal void RecordFanoutQueueDepth(long depth) => Interlocked.Exchange(ref _fanoutQueueDepth, depth);
+
+    private IEnumerable<Measurement<long>> ObserveFanoutQueueDepth()
+    {
+        var depth = Interlocked.Read(ref _fanoutQueueDepth);
+        if (depth >= 0)
+        {
+            yield return new Measurement<long>(depth);
+        }
+    }
 
     // ---- backfill ----
 

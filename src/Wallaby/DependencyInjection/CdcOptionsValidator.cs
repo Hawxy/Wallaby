@@ -29,13 +29,14 @@ internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IVal
         {
             failures.Add("SlotName and PublicationName must be non-empty.");
         }
-        if (options.ChunkSize <= 0)
+        // Chunk rows and batches are fully materialized in memory, so both are capped.
+        if (options.ChunkSize is <= 0 or > 100_000)
         {
-            failures.Add("ChunkSize must be greater than zero.");
+            failures.Add("ChunkSize must be between 1 and 100000.");
         }
-        if (options.MaxBatchSize <= 0)
+        if (options.MaxBatchSize is <= 0 or > 100_000)
         {
-            failures.Add("MaxBatchSize must be greater than zero.");
+            failures.Add("MaxBatchSize must be between 1 and 100000.");
         }
         if (options.MaxBufferedChangesPerTransaction <= 0)
         {
@@ -52,6 +53,29 @@ internal sealed class CdcOptionsValidator(CdcConfiguration configuration) : IVal
         if (options.FanoutPollInterval <= TimeSpan.Zero)
         {
             failures.Add("FanoutPollInterval must be greater than zero.");
+        }
+        if (options.CheckpointSaveInterval < TimeSpan.Zero)
+        {
+            failures.Add("CheckpointSaveInterval must be zero or greater.");
+        }
+        if (options.SinkRetry is null)
+        {
+            failures.Add("SinkRetry must not be null.");
+        }
+        else
+        {
+            if (options.SinkRetry.MaxAttempts is < 0 or > 100)
+            {
+                failures.Add("SinkRetry.MaxAttempts must be between 0 and 100.");
+            }
+            if (options.SinkRetry.BaseDelay <= TimeSpan.Zero)
+            {
+                failures.Add("SinkRetry.BaseDelay must be greater than zero.");
+            }
+            if (options.SinkRetry.MaxDelay < options.SinkRetry.BaseDelay)
+            {
+                failures.Add("SinkRetry.MaxDelay must be at least SinkRetry.BaseDelay.");
+            }
         }
 
         // External slots must not collide with the primary slot/publication (which only exists when

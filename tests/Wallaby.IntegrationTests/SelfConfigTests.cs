@@ -55,11 +55,16 @@ public class SelfConfigTests(PostgresFixture pg)
             default, ("p", pub))).ShouldBe(7L);
 
         // State tables exist.
-        foreach (var table in new[] { "wallaby.checkpoint", "wallaby.backfill_state", "wallaby.slot_registry" })
+        foreach (var table in new[] { "wallaby.checkpoint", "wallaby.backfill_state", "wallaby.slot_registry", "wallaby.fanout_queue" })
         {
             (await PgExec.ScalarStringAsync(conn,
                 "SELECT to_regclass(@t)::text", default, ("t", table))).ShouldBe(table);
         }
+
+        // Due-job index on the fan-out queue exists.
+        (await PgExec.ScalarLongAsync(conn,
+            "SELECT count(*) FROM pg_indexes WHERE schemaname = 'wallaby' AND indexname = 'fanout_queue_due_idx'",
+            default)).ShouldBe(1L);
 
         // Slot registry row recorded.
         (await PgExec.ScalarLongAsync(conn,

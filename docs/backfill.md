@@ -44,6 +44,14 @@ sink path** as live changes. If a row is changed live during the window, the liv
 
 Progress is persisted per table, so a backfill resumes from its last cursor after a restart.
 
+### Duplicates across failover
+
+Chunk delivery and cursor persistence are two steps, so there is a small window where a leader dies
+*after* a chunk was applied to the sinks but *before* its cursor was saved. The next leader resumes from
+the last saved cursor and re-emits that chunk. This is the intended at-least-once behavior: sinks
+upsert/delete by document id, so redelivered rows converge to the same state and nothing is lost — see
+[How it works](/how-it-works).
+
 ## Scoped (fan-out) backfill
 
 The same engine also re-snapshots a *subset* of a table's rows on demand. When a [dependent fan-out](/transforms#dependent-tables)
@@ -54,6 +62,6 @@ like a full backfill, and emit through the same transform/sink path. See [Transf
 
 ## Tuning & safety
 
-- `ChunkSize` (default 500) sets the keyset page size; `MaxBatchSize` (default 1000) bounds each dispatched batch.
+- `ChunkSize` (default 500) sets the keyset page size; `MaxBatchSize` (default 1000) bounds each dispatched batch. Both are held fully in memory per chunk/batch, so both are capped at 100,000.
 - Re-backfills are safe because sinks are idempotent (upsert/delete by id).
 - A backfill of a large table is chunked and resumable, so it can be interrupted and will continue.

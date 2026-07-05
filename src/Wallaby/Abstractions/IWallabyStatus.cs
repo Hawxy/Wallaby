@@ -43,7 +43,12 @@ public sealed record WallabyStatusSnapshot
     /// <summary>The most recent ingestion lag (now − source commit timestamp) in seconds; <c>-1</c> if unknown.</summary>
     public double LastIngestionLagSeconds { get; init; } = -1;
 
-    /// <summary>Consecutive failed leader sessions (reset on a healthy-length session or on becoming a standby).</summary>
+    /// <summary>
+    /// Consecutive failed leader sessions. Reset when a transaction is fully delivered and acknowledged,
+    /// on a clean step-down (lost lock), or on becoming a standby — never merely because a failing session
+    /// survived for a while first. A steadily climbing value therefore indicates a crash-looping leader
+    /// (e.g. a sink that permanently rejects a batch), even when each session streams before dying.
+    /// </summary>
     public int ConsecutiveLeaderFailures { get; init; }
 
     /// <summary>
@@ -54,6 +59,10 @@ public sealed record WallabyStatusSnapshot
 
     /// <summary>The replication slot name.</summary>
     public string SlotName { get; init; } = "";
+
+    /// <summary>Per sink, when it last accepted a batch this session. Empty until a first delivery.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> LastSinkDeliveryAt { get; init; } =
+        System.Collections.ObjectModel.ReadOnlyDictionary<string, DateTimeOffset>.Empty;
 }
 
 /// <summary>

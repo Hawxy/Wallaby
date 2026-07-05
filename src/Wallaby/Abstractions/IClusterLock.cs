@@ -23,9 +23,11 @@ public interface IClusterLockHandle : IAsyncDisposable
 
     /// <summary>
     /// A token cancelled when leadership is lost — e.g. the lock's connection/session dropped — so the
-    /// leader can stop promptly instead of running on with a stale lock while a standby waits. The default
-    /// never fires; an implementation should cancel it when it detects loss (the Postgres lock heartbeats
-    /// its connection and cancels this on a failed probe).
+    /// leader can stop promptly instead of running on with a stale lock while a standby waits.
+    /// Custom implementations <b>must</b> override this and cancel it when loss is detected: with the
+    /// default (never fires), a partitioned ex-leader keeps streaming until it next touches the lock,
+    /// while a standby that acquired the lock also streams — a temporary double-leader. The built-in
+    /// Postgres lock heartbeats its connection and cancels this on a failed probe.
     /// </summary>
     CancellationToken Lost => CancellationToken.None;
 }

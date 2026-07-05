@@ -87,6 +87,9 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>Sink retry policy (set before <see cref="StartAsync"/>).</summary>
+    public DependencyInjection.SinkRetryOptions SinkRetry { get; set; } = new();
+
     /// <summary>Number of rows currently in the scoped fan-out queue (for coalescing/offload assertions).</summary>
     public async Task<int> PendingFanoutJobCountAsync()
         => _fanoutQueue is null ? 0 : (await _fanoutQueue.ListAsync(_cts?.Token ?? CancellationToken.None)).Count;
@@ -242,7 +245,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
         _pipeline = new CdcPipeline(
-            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, instrumentation: Instrumentation),
+            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
 

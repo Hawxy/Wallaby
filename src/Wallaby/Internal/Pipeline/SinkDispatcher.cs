@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Polly;
 using Polly.Retry;
 using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 
 namespace Wallaby.Internal.Pipeline;
@@ -23,24 +24,32 @@ internal sealed class SinkDispatcher
 {
     private readonly IReadOnlyDictionary<string, ISink> _sinks;
     private readonly WallabyInstrumentation _instr;
+    private readonly CdcStatus? _status;
     private readonly ResiliencePipeline _retry;
 
     public SinkDispatcher(
-        IReadOnlyDictionary<string, ISink> sinks, WallabyInstrumentation? instrumentation = null)
+        IReadOnlyDictionary<string, ISink> sinks, WallabyInstrumentation? instrumentation = null,
+        SinkRetryOptions? retry = null, CdcStatus? status = null)
     {
         _sinks = sinks;
         _instr = instrumentation ?? WallabyInstrumentation.NoOp;
-        _retry = new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
-            {
-                ShouldHandle = new PredicateBuilder().Handle<SinkRetryableException>(),
-                MaxRetryAttempts = 10,
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                Delay = TimeSpan.FromMilliseconds(200),
-                MaxDelay = TimeSpan.FromMinutes(3),
-            })
-            .Build();
+        _status = status;
+        retry ??= new SinkRetryOptions();
+        // MaxAttempts = 0 skips the retry strategy entirely: the first retryable failure propagates and
+        // halts the leader session, whose own backoff then governs the retry cadence.
+        _retry = retry.MaxAttempts == 0
+            ? ResiliencePipeline.Empty
+            : new ResiliencePipelineBuilder()
+                .AddRetry(new RetryStrategyOptions
+                {
+                    ShouldHandle = new PredicateBuilder().Handle<SinkRetryableException>(),
+                    MaxRetryAttempts = retry.MaxAttempts,
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                    Delay = retry.BaseDelay,
+                    MaxDelay = retry.MaxDelay,
+                })
+                .Build();
     }
 
     public async Task DispatchAsync(IReadOnlyList<RoutedDocument> routed, CancellationToken ct)
@@ -67,23 +76,26 @@ internal sealed class SinkDispatcher
                 {
                     var attemptStart = WallabyInstrumentation.StartTimer();
                     var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
+                    var name = state.SinkBatch.SinkName;
+                    var outcome = result.Status switch
+                    {
+                        DeliveryStatus.Success => WallabyInstrumentation.DeliverySuccess,
+                        DeliveryStatus.RetryableFailure => WallabyInstrumentation.DeliveryRetryable,
+                        _ => WallabyInstrumentation.DeliveryPermanent,
+                    };
+                    state.Instr.RecordSinkAttempt(name, outcome, attemptStart, state.SinkBatch.Records.Count);
                     switch (result.Status)
                     {
                         case DeliveryStatus.Success:
-                            state.Instr.RecordSinkDelivery(state.SinkName, WallabyInstrumentation.DeliverySuccess, attemptStart);
-                            state.Instr.RecordSinkRecordsDelivered(state.SinkName, state.SinkBatch.Records.Count);
+                            state.Status?.RecordSinkDelivered(name, DateTimeOffset.UtcNow);
                             return;
                         case DeliveryStatus.RetryableFailure:
-                            state.Instr.RecordSinkDelivery(state.SinkName, WallabyInstrumentation.DeliveryRetryable, attemptStart);
-                            state.Instr.RecordSinkFailure(state.SinkName, WallabyInstrumentation.DeliveryRetryable);
                             state.Activity?.AddEvent(new ActivityEvent("retry"));
-                            throw new SinkRetryableException(state.SinkName, result.Error ?? "(unspecified)", result.Exception);
+                            throw new SinkRetryableException(name, result.Error ?? "(unspecified)", result.Exception);
                         default:
-                            state.Instr.RecordSinkDelivery(state.SinkName, WallabyInstrumentation.DeliveryPermanent, attemptStart);
-                            state.Instr.RecordSinkFailure(state.SinkName, WallabyInstrumentation.DeliveryPermanent);
-                            throw new SinkDeliveryException(state.SinkName, result.Error ?? "(unspecified)", result.Exception);
+                            throw new SinkDeliveryException(name, result.Error ?? "(unspecified)", result.Exception);
                     }
-                }, (Sink: sink, SinkName: sinkName, SinkBatch: batch, Instr: _instr, Activity: activity), ct);
+                }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity), ct);
             }
             catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
             {
