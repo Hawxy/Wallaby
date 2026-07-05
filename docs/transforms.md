@@ -112,8 +112,9 @@ project from the `ChangeEvent` instead and use `REPLICA IDENTITY FULL`.
 ## Dependent tables
 
 When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
-own. Declare the relationship with `DependsOn(...)` so Wallaby captures the related table and fans its
-changes out to synthetic updates of your entity:
+own. Declare the relationship with `DependsOn(...)` — an [EF Core provider](/providers/entity-framework-core)
+mapping extension — so Wallaby captures the related table and fans its changes out to synthetic updates
+of your entity:
 
 ```csharp
 cdc.Map<Product>()
@@ -134,7 +135,7 @@ a million products). Wallaby keeps this bounded:
 
 - **Consolidated lookups.** All distinct keys changed for a dependent table in one transaction are resolved
   with a single `IN (…)` query per relationship.
-- **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/getting-started#options) affected rows
+- **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/configuration#options) affected rows
   are re-emitted inline; if more remain, the rest is handed to a *scoped backfill job* that re-snapshots
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.

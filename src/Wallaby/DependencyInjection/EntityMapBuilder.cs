@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Linq.Expressions;
 using Wallaby.Abstractions;
 using Wallaby.Providers;
@@ -102,13 +103,12 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     }
 
     /// <summary>
-    /// Declare that changes to the table behind <paramref name="navigation"/> should fan out and re-emit
-    /// this entity. Use this when the transform reads data from related tables (a referenced principal,
-    /// a many-to-many skip-navigation's join table, or an owned side table) — otherwise those changes
-    /// would not reach the pipeline. The navigation expression is resolved against the storage provider's
-    /// model at startup; it must point at a single one-hop navigation (no chains, no method calls).
+    /// Declare a dependent navigation via a raw lambda. Provider packages call this from their typed
+    /// <c>DependsOn</c> extensions (e.g. Wallaby.EntityFrameworkCore's); use those instead of calling
+    /// this directly. The expression is resolved against the storage provider's model at startup.
     /// </summary>
-    public EntityMapBuilder<TEntity> DependsOn<TNav>(Expression<Func<TEntity, TNav>> navigation)
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public EntityMapBuilder<TEntity> DependsOnNavigation(LambdaExpression navigation)
     {
         ArgumentNullException.ThrowIfNull(navigation);
         _registration.DeclaredDependencies.Add(navigation);

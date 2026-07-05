@@ -14,6 +14,7 @@
     <Project Path="src/Wallaby/Wallaby.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wallaby.AotSmokeTest/Wallaby.AotSmokeTest.csproj" />
     <Project Path="tests/Wallaby.EntityFrameworkCore.IntegrationTests/Wallaby.EntityFrameworkCore.IntegrationTests.csproj" />
     <Project Path="tests/Wallaby.EntityFrameworkCore.UnitTests/Wallaby.EntityFrameworkCore.UnitTests.csproj" />
     <Project Path="tests/Wallaby.IntegrationTests/Wallaby.IntegrationTests.csproj" />

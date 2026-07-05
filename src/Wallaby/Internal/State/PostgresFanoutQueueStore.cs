@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Backfill;
@@ -18,7 +17,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         // Sort tuples by their JSON form so the same logical lookup set hashes identically regardless of
         // the order changes were encountered in — that's what lets repeat triggers coalesce.
         var sorted = spec.LookupValues
-            .Select(t => (Tuple: t, Json: JsonSerializer.Serialize(t)))
+            .Select(t => (Tuple: t, Json: KeysetCodec.SerializeTuples([t])))
             .OrderBy(x => x.Json, StringComparer.Ordinal)
             .Select(x => x.Tuple)
             .ToList();

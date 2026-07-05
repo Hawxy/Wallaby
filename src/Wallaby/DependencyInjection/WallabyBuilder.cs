@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Providers;
@@ -62,6 +63,7 @@ public sealed class WallabyBuilder
     /// <c>UseScopedDbContext</c>); used by mappings that declare <c>ScopedBy(...)</c>. The provider must be
     /// registered (via <see cref="UseProvider"/>) before this is called.
     /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public WallabyBuilder UseScopedEnrichmentSessions(
         string providerName, Func<IServiceProvider, IEnrichmentSessionProvider> factory)
     {

@@ -158,8 +158,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     /// <summary>
     /// Declare a dependency: changes to the table behind <paramref name="navigation"/> should fan out
-    /// and re-emit <typeparamref name="TPrimary"/>. Mirrors the production
-    /// <c>EntityMapBuilder.DependsOn(...)</c> API; the expression is resolved by the storage provider
+    /// and re-emit <typeparamref name="TPrimary"/>. Mirrors the production EF Core
+    /// <c>DependsOn(...)</c> mapping extension; the expression is resolved by the storage provider
     /// when the capture plan is built.
     /// </summary>
     public WallabyTestHarness DependsOn<TPrimary, TNav>(Expression<Func<TPrimary, TNav>> navigation)

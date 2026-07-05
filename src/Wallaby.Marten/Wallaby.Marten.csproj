@@ -5,6 +5,7 @@
     <PackageId>Wallaby.Marten</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
     <Description>Marten storage provider for Wallaby: drives capture from your Marten document store — document table discovery, JSONB rehydration through the store's serializer, soft-delete-aware delete events, conjoined tenancy, and IQuerySession-based transforms/enrichment.</Description>
   </PropertyGroup>
 
@@ -12,6 +13,7 @@
     <InternalsVisibleTo Include="Wallaby.Marten.UnitTests" />
     <InternalsVisibleTo Include="Wallaby.Marten.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure.Marten" />
+    <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
   </ItemGroup>
 
   <ItemGroup>

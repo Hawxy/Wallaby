@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
@@ -6,7 +7,7 @@ using Wallaby.EntityFrameworkCore.Internal;
 
 namespace Wallaby.EntityFrameworkCore;
 
-/// <summary>EF Core transform registration for entity mappings.</summary>
+/// <summary>EF Core-typed entity-mapping extensions: transforms and dependent-table declarations.</summary>
 public static class EfCoreEntityMapBuilderExtensions
 {
     private const string ProviderName = "EntityFrameworkCore";
@@ -36,5 +37,20 @@ public static class EfCoreEntityMapBuilderExtensions
         ArgumentNullException.ThrowIfNull(handler);
         return map.UsingTransformInvoker(
             _ => new EfCoreTransformInvoker<TEntity>(new DelegateTransform<TEntity>(handler)), ProviderName);
+    }
+
+    /// <summary>
+    /// Declare that changes to the table behind <paramref name="navigation"/> should fan out and re-emit
+    /// this entity. Use this when the transform reads data from related tables (a referenced principal,
+    /// a many-to-many skip-navigation's join table, or an owned side table) — otherwise those changes
+    /// would not reach the pipeline. The navigation expression is resolved against the EF Core model at
+    /// startup; it must point at a single one-hop navigation (no chains, no method calls).
+    /// </summary>
+    public static EntityMapBuilder<TEntity> DependsOn<TEntity, TNav>(
+        this EntityMapBuilder<TEntity> map, Expression<Func<TEntity, TNav>> navigation)
+        where TEntity : class
+    {
+        ArgumentNullException.ThrowIfNull(navigation);
+        return map.DependsOnNavigation(navigation);
     }
 }

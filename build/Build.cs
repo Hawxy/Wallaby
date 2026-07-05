@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Nuke.Common;
 using Nuke.Common.CI;
@@ -15,7 +16,7 @@ using static Nuke.Common.Tools.DotNet.DotNetTasks;
     GitHubActionsImage.UbuntuLatest,
     OnPushBranches = ["main"],
     OnPullRequestBranches = ["main"],
-    InvokedTargets = [nameof(Test)])]
+    InvokedTargets = [nameof(Test), nameof(AotSmoke)])]
 [GitHubActions(
     "Manual Nuget Push",
     GitHubActionsImage.UbuntuLatest,
@@ -70,6 +71,20 @@ class Build : NukeBuild
             });
         });
     
+    Target AotSmoke => _ => _
+        .Executes(() =>
+        {
+            var project = Solution.AllProjects.Single(x => x.Name == "Wallaby.AotSmokeTest");
+            var output = ArtifactsDirectory / "aot-smoke";
+            DotNetPublish(_ => _
+                .SetProject(project)
+                .SetConfiguration("Release")
+                .SetOutput(output));
+
+            var exe = output / (OperatingSystem.IsWindows() ? "Wallaby.AotSmokeTest.exe" : "Wallaby.AotSmokeTest");
+            ProcessTasks.StartProcess(exe, workingDirectory: output).AssertZeroExitCode();
+        });
+
     static readonly string[] PackableProjects =
     [
         "Wallaby",

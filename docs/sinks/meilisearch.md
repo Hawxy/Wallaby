@@ -4,6 +4,12 @@ The `Wallaby.Sinks.Meilisearch` package keeps Meilisearch indexes continuously i
 Postgres tables. Upserts are written with a stable primary key (so updates are idempotent) and
 deletions remove by that same id.
 
+## Install
+
+```csharp
+dotnet add package Wallaby.Sinks.Meilisearch
+```
+
 ## Register
 
 ```csharp

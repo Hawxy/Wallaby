@@ -37,7 +37,9 @@ export default defineConfig({
       {
         text: 'Storage Providers',
         items: [
-          { text: 'Marten', link: '/marten' },
+          { text: 'Overview', link: '/providers/overview' },
+          { text: 'EF Core', link: '/providers/entity-framework-core' },
+          { text: 'Marten', link: '/providers/marten' },
         ]
       },
       {

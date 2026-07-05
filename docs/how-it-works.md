@@ -17,7 +17,7 @@ from the last acknowledged position.
 - **Read + Materialize**: decode each committed transaction and turn its row changes into typed
   `ChangeEvent`s.
 - **Transform + Route**: group by mapping, run each [transform](/transforms) to shape documents, and slice
-  the result into batches of at most [`MaxBatchSize`](/getting-started#options).
+  the result into batches of at most [`MaxBatchSize`](/configuration#options).
 - **Sinks**: deliver each batch (with retry/backoff).
 - **Acknowledge + Checkpoint**: once everything is delivered, advance the replication slot and persist the
   checkpoint.

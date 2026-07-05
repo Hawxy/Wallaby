@@ -4,13 +4,13 @@ The `Wallaby.Marten` package drives capture from a [Marten](https://martendb.io)
 Wallaby watches Marten's document tables (`mt_doc_*`), rehydrates each change's JSONB body back into
 your document type through the store's own serializer, and routes the documents through the usual
 transform → sink pipeline. Soft deletes, conjoined multi-tenancy, and backfills all behave the way a
-document database consumer expects.
+Marten consumer expects.
 
 ## Install
 
 ```bash
-dotnet add package Wallaby
 dotnet add package Wallaby.Marten
+dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 ```
 
 ## Register
@@ -47,12 +47,11 @@ builder.Services.AddWallaby(cdc =>
 });
 ```
 
-Transforms receive a leased Marten `IQuerySession` for enrichment lookups — the Marten counterpart of
-the EF Core provider's `DbContext`. The three `UsingTransform` overloads mirror the EF Core ones:
-an `IWallabyMartenTransform<T>` instance, a container-resolved `UsingTransform<TEntity, TTransform>()`,
-or the inline lambda above.
+Transforms receive a leased Marten `IQuerySession` for enrichment lookups. Three `UsingTransform`
+overloads are available: an `IWallabyMartenTransform<T>` instance, a container-resolved
+`UsingTransform<TEntity, TTransform>()`, or the inline lambda above.
 
-::: warning Register documents up front
+::: warning Warning
 Wallaby builds its capture model at startup from the store's registered documents
 (`RegisterDocumentType<T>()`, `Schema.For<T>()`, …). Marten's usual lazy discovery — registering a
 document type the first time a session touches it — happens too late for capture, so a `Map<T>()` for
@@ -103,21 +102,32 @@ same-tenant `IQuerySession`, and `ScopedDestination` routes per tenant — inclu
 tenant comes from the key columns. Only conjoined (and single) tenancy is supported; separate-database
 tenancy is not.
 
-## Running alongside EF Core
+## Combining providers
 
-Both providers can be registered in one Wallaby instance sharing a single replication
-slot/publication/checkpoint — global commit ordering is preserved across EF tables and Marten
-document tables:
+Marten can be combined with another storage provider in the same Wallaby instance, sharing a single
+replication slot — see the [providers overview](/providers/overview#combining-providers).
 
-```csharp
-cdc.UseEntityFrameworkCore<AppDbContext>()
-   .UseMarten()
-   .Map<Product>().ToSink("meili").UsingTransform(/* DbContext transform */)
-   .Map<Order>().ToSink("meili").UsingTransform(/* IQuerySession transform */);
-```
+## NativeAOT
 
-Each mapping resolves to the provider that models its type; the provider-typed `UsingTransform`
-overloads break a tie when both model it, or pin explicitly with `Map<T>().FromProvider("Marten")`.
+The core `Wallaby` and `Wallaby.Marten` packages are trim- and NativeAOT-compatible
+(`IsAotCompatible`). Running under `PublishAot` additionally needs the Marten store itself configured
+for AOT:
+
+- **Pre-generated code**: Marten's runtime Roslyn codegen doesn't work under NativeAOT — use
+  `TypeLoadMode.Static` with types generated ahead of time (`dotnet run -- codegen write`).
+- **Source-generated serialization**: configure Marten's `System.Text.Json` serializer with a
+  source-generated `JsonSerializerContext` covering your document types, so Wallaby's rehydration
+  through the store's serializer needs no reflection.
+- **Root the Marten assembly**: Marten reflects over its own internals during store configuration, so
+  it cannot be trimmed yet — add `<TrimmerRootAssembly Include="Marten" />` to your app until Marten's
+  tier-1 AOT mode lands.
+
+One core caveat: when a very large transaction spills to disk/database, column values of common scalar
+and scalar-array types are encoded natively, but exotic column types fall back to reflection-based
+JSON — under NativeAOT that fallback fails the spill with a descriptive error. Marten's captured
+columns (`id`, `data`, `tenant_id`, `mt_deleted`, `mt_deleted_at`) are all natively encoded.
+
+The Meilisearch sink is not yet AOT-compatible.
 
 ## Limitations (v1)
 

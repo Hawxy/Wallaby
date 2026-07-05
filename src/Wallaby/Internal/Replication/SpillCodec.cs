@@ -1,5 +1,9 @@
+using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Wallaby.Abstractions;
 using Wallaby.Model;
 
@@ -10,22 +14,26 @@ namespace Wallaby.Internal.Replication;
 /// transaction out of memory and reading it back at commit. Unlike <c>KeysetCodec</c> (which is told each
 /// element's target type on the way out), this records a per-value type tag so the exact decoded CLR value is
 /// reconstructed without the EF model — the downstream materializer then coerces it exactly as for a live change.
-/// Common scalar types are tagged explicitly; arrays and anything else fall back to type-tagged JSON
-/// (round-trips within the process, which is all the spill needs — it is discarded on restart).
+/// Common scalar types and single-dimensional arrays of them are tagged explicitly; anything else falls back to
+/// type-tagged reflection-based JSON (round-trips within the process, which is all the spill needs — it is
+/// discarded on restart). The fallback requires reflection-based serialization and is unavailable in
+/// trimmed/NativeAOT hosts, where such values fail the spill with a descriptive error instead.
 /// <para>
 /// The codec is a shared implementation detail of the built-in spill backends, which own their own framing
 /// (length-prefixed bytes on disk, a <c>bytea</c> column in the database). It exposes a single canonical UTF-8
 /// byte form so both backends store identical bytes with no transcoding.
 /// </para>
 /// </summary>
-internal static class SpillCodec
+internal static partial class SpillCodec
 {
     /// <summary>Serialize a change to its canonical UTF-8 JSON bytes.</summary>
-    public static byte[] Encode(RawChange change) => JsonSerializer.SerializeToUtf8Bytes(ToRow(change));
+    public static byte[] Encode(RawChange change) =>
+        JsonSerializer.SerializeToUtf8Bytes(ToRow(change), SpillJsonContext.Default.SpillRow);
 
     /// <summary>Reconstruct a change from its canonical UTF-8 JSON bytes.</summary>
     public static RawChange Decode(ReadOnlySpan<byte> utf8) => FromRow(
-        JsonSerializer.Deserialize<SpillRow>(utf8) ?? throw new InvalidOperationException("Spilled change row was null."));
+        JsonSerializer.Deserialize(utf8, SpillJsonContext.Default.SpillRow)
+            ?? throw new InvalidOperationException("Spilled change row was null."));
 
     private static SpillRow ToRow(RawChange change) => new(
         change.Schema,
@@ -77,8 +85,9 @@ internal static class SpillCodec
         return result;
     }
 
-    // Tag + invariant-culture text per CLR type. "j:<assembly-qualified-name>" is the fallback for arrays and any
-    // other type, carrying STJ JSON; it round-trips within the same process (the spill never outlives one).
+    // Tag + invariant-culture text per CLR type. Arrays of tagged scalars carry "a:<element-tag>" with a JSON
+    // array of element texts. "j:<assembly-qualified-name>" is the fallback for any other type, carrying
+    // reflection-serialized JSON; it round-trips within the same process (the spill never outlives one).
     private static (string Tag, string? Text) EncodeValue(object? value) => value switch
     {
         null => ("0", null),
@@ -98,13 +107,59 @@ internal static class SpillCodec
         TimeOnly t => ("t", t.ToString("O", CultureInfo.InvariantCulture)),
         TimeSpan ts => ("ts", ts.ToString("c", CultureInfo.InvariantCulture)),
         byte[] bytes => ("bytes", Convert.ToBase64String(bytes)),
+        string[] a => EncodeArray("s", a),
+        bool[] a => EncodeArray("b", a),
+        short[] a => EncodeArray("i16", a),
+        int[] a => EncodeArray("i32", a),
+        long[] a => EncodeArray("i64", a),
+        decimal[] a => EncodeArray("dec", a),
+        double[] a => EncodeArray("f64", a),
+        float[] a => EncodeArray("f32", a),
+        Guid[] a => EncodeArray("g", a),
+        DateTime[] a => EncodeArray("dt", a),
+        DateTimeOffset[] a => EncodeArray("dto", a),
+        DateOnly[] a => EncodeArray("d", a),
+        TimeOnly[] a => EncodeArray("t", a),
+        TimeSpan[] a => EncodeArray("ts", a),
         _ => EncodeJson(value),
     };
 
+    private static (string Tag, string Text) EncodeArray<T>(string elementTag, T?[] items)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartArray();
+            foreach (var item in items)
+            {
+                if (item is null)
+                {
+                    writer.WriteNullValue();
+                }
+                else
+                {
+                    writer.WriteStringValue(EncodeValue(item).Text);
+                }
+            }
+            writer.WriteEndArray();
+        }
+        return ("a:" + elementTag, Encoding.UTF8.GetString(buffer.WrittenSpan));
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "Reflection-based serialization only runs when IsReflectionEnabledByDefault is true; trimmed hosts throw instead.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050",
+        Justification = "Reflection-based serialization only runs when IsReflectionEnabledByDefault is true; AOT hosts throw instead.")]
     private static (string Tag, string Text) EncodeJson(object value)
     {
-        var type = value.GetType();
-        return ("j:" + type.AssemblyQualifiedName, JsonSerializer.Serialize(value, type));
+        if (JsonSerializer.IsReflectionEnabledByDefault)
+        {
+            var type = value.GetType();
+            return ("j:" + type.AssemblyQualifiedName, JsonSerializer.Serialize(value, type));
+        }
+        throw new NotSupportedException(
+            $"Cannot spill a value of type '{value.GetType()}': reflection-based JSON serialization is disabled " +
+            "(trimmed/NativeAOT host), and the type has no explicit spill encoding.");
     }
 
     private static object? DecodeValue(string tag, string? text) => tag switch
@@ -126,19 +181,70 @@ internal static class SpillCodec
         "t" => TimeOnly.Parse(text!, CultureInfo.InvariantCulture),
         "ts" => TimeSpan.ParseExact(text!, "c", CultureInfo.InvariantCulture),
         "bytes" => Convert.FromBase64String(text!),
+        _ when tag.StartsWith("a:", StringComparison.Ordinal) => DecodeArray(tag[2..], text!),
         _ when tag.StartsWith("j:", StringComparison.Ordinal) => DecodeJson(tag, text!),
         _ => throw new InvalidOperationException($"Unknown spilled value tag '{tag}'."),
     };
 
+    private static object DecodeArray(string elementTag, string text)
+    {
+        using var doc = JsonDocument.Parse(text);
+        var root = doc.RootElement;
+        return elementTag switch
+        {
+            "s" => ToArray<string?>(root, elementTag),
+            "b" => ToArray<bool>(root, elementTag),
+            "i16" => ToArray<short>(root, elementTag),
+            "i32" => ToArray<int>(root, elementTag),
+            "i64" => ToArray<long>(root, elementTag),
+            "dec" => ToArray<decimal>(root, elementTag),
+            "f64" => ToArray<double>(root, elementTag),
+            "f32" => ToArray<float>(root, elementTag),
+            "g" => ToArray<Guid>(root, elementTag),
+            "dt" => ToArray<DateTime>(root, elementTag),
+            "dto" => ToArray<DateTimeOffset>(root, elementTag),
+            "d" => ToArray<DateOnly>(root, elementTag),
+            "t" => ToArray<TimeOnly>(root, elementTag),
+            "ts" => ToArray<TimeSpan>(root, elementTag),
+            _ => throw new InvalidOperationException($"Unknown spilled array element tag '{elementTag}'."),
+        };
+
+        static T[] ToArray<T>(JsonElement root, string elementTag)
+        {
+            var result = new T[root.GetArrayLength()];
+            var i = 0;
+            foreach (var element in root.EnumerateArray())
+            {
+                result[i++] = element.ValueKind == JsonValueKind.Null
+                    ? default!
+                    : (T)DecodeValue(elementTag, element.GetString())!;
+            }
+            return result;
+        }
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "Reflection-based deserialization only runs when IsReflectionEnabledByDefault is true; trimmed hosts throw instead.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050",
+        Justification = "Reflection-based deserialization only runs when IsReflectionEnabledByDefault is true; AOT hosts throw instead.")]
     private static object? DecodeJson(string tag, string text)
     {
-        var typeName = tag[2..];
-        var type = Type.GetType(typeName)
-            ?? throw new InvalidOperationException($"Cannot resolve spilled value type '{typeName}'.");
-        return JsonSerializer.Deserialize(text, type);
+        if (JsonSerializer.IsReflectionEnabledByDefault)
+        {
+            var typeName = tag[2..];
+            var type = Type.GetType(typeName)
+                ?? throw new InvalidOperationException($"Cannot resolve spilled value type '{typeName}'.");
+            return JsonSerializer.Deserialize(text, type);
+        }
+        throw new NotSupportedException(
+            "Cannot read a reflection-serialized spilled value: reflection-based JSON serialization is disabled " +
+            "(trimmed/NativeAOT host).");
     }
 
     private sealed record SpillColumn(string Name, bool Toast, string? Tag, string? Text);
 
     private sealed record SpillRow(string Schema, string Table, uint RelationId, int Action, SpillColumn[] New, SpillColumn[]? Old);
+
+    [JsonSerializable(typeof(SpillRow))]
+    private sealed partial class SpillJsonContext : JsonSerializerContext;
 }
