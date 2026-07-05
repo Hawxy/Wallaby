@@ -1,11 +1,11 @@
 # Wallaby
 
-Postgres Change Data Capture for .NET, driven by your **EF Core model**.
+Postgres Change Data Capture for .NET, driven by your **EF Core or Marten model**.
 
 Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
-EF Core entities, lets you **transform/enrich** them, and routes the resulting documents to pluggable
-**destinations** (sinks). It **self-configures** the publication and replication slot from your model,
-supports **backfill** operations, and is **cluster-safe** via leader election.
+EF Core entities or Marten documents, lets you **transform/enrich** them, and routes the resulting
+documents to pluggable **destinations** (sinks). It **self-configures** the publication and replication
+slot from your model, supports **backfill** operations, and is **cluster-safe** via leader election.
 
 A **Meilisearch** sink is supported out of the box. Contributions for additional sinks is welcome.
 
@@ -15,7 +15,7 @@ A **Meilisearch** sink is supported out of the box. Contributions for additional
 |--------------------------------|------------------------------------------|
 | `Wallaby`                      | Core package (provider-agnostic).        |
 | `Wallaby.EntityFrameworkCore`  | EF Core storage provider.                |
-| `Wallaby.Marten`               | Marten storage provider (preview stub).  |
+| `Wallaby.Marten`               | Marten storage provider.                 |
 | `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
 
 ## Quick start

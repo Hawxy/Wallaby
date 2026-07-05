@@ -17,9 +17,11 @@
     <Project Path="tests/Wallaby.EntityFrameworkCore.IntegrationTests/Wallaby.EntityFrameworkCore.IntegrationTests.csproj" />
     <Project Path="tests/Wallaby.EntityFrameworkCore.UnitTests/Wallaby.EntityFrameworkCore.UnitTests.csproj" />
     <Project Path="tests/Wallaby.IntegrationTests/Wallaby.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Marten.IntegrationTests/Wallaby.Marten.IntegrationTests.csproj" />
     <Project Path="tests/Wallaby.Marten.UnitTests/Wallaby.Marten.UnitTests.csproj" />
     <Project Path="tests/Wallaby.Meilisearch.IntegrationTests/Wallaby.Meilisearch.IntegrationTests.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure.EntityFrameworkCore/Wallaby.TestInfrastructure.EntityFrameworkCore.csproj" />
+    <Project Path="tests/Wallaby.TestInfrastructure.Marten/Wallaby.TestInfrastructure.Marten.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
     <Project Path="tests/Wallaby.TestModel/Wallaby.TestModel.csproj" />
     <Project Path="tests/Wallaby.UnitTests/Wallaby.UnitTests.csproj" />

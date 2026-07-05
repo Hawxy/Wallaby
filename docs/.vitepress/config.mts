@@ -35,6 +35,12 @@ export default defineConfig({
         ]
       },
       {
+        text: 'Storage Providers',
+        items: [
+          { text: 'Marten', link: '/marten' },
+        ]
+      },
+      {
         text: 'Sinks',
         items: [
           { text: 'Meilisearch', link: '/sinks/meilisearch' },

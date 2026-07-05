@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="Wallaby.EntityFrameworkCore.UnitTests" />
     <InternalsVisibleTo Include="Wallaby.EntityFrameworkCore.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.Marten.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.Marten.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.Marten" />
   </ItemGroup>
 
   <ItemGroup>

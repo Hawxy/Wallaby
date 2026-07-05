@@ -70,11 +70,11 @@ class Build : NukeBuild
             });
         });
     
-    // Wallaby.Marten is excluded until the provider is functional.
     static readonly string[] PackableProjects =
     [
         "Wallaby",
         "Wallaby.EntityFrameworkCore",
+        "Wallaby.Marten",
         "Wallaby.Sinks.Meilisearch",
         "Wallaby.AspNetCore.HealthChecks",
         "Wallaby.Testing",

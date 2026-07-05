@@ -38,9 +38,13 @@ internal sealed record EntityMapping
     public string GetDocumentId(ChangeEvent change)
         => DocumentIdSelector?.Invoke(change) ?? change.Key.ToString();
 
-    /// <summary>The scope key for a change (null when the mapping is not scoped, or the entity is unavailable).</summary>
+    /// <summary>
+    /// The scope key for a change (null when the mapping is not scoped). Runs for deletes too — a
+    /// record-based selector resolves the key from captured (old-row) values even when no entity was
+    /// materialized; the entity-typed <c>ScopedBy</c> overload guards its own entity access.
+    /// </summary>
     public object? GetScopeKey(ChangeEvent change)
-        => ScopeKeySelector is null || change.Entity is null ? null : ScopeKeySelector(change);
+        => ScopeKeySelector?.Invoke(change);
 
     /// <summary>The destination for a change's scope key (scoped selector wins, else the fixed destination).</summary>
     public string? ResolveDestination(object? scopeKey)

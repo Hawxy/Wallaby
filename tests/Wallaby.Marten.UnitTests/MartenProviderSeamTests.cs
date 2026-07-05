@@ -1,13 +1,13 @@
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
-using Wallaby.Marten;
+using Wallaby.Providers;
 
 namespace Wallaby.Marten.UnitTests;
 
 /// <summary>
-/// Proves the provider seams from a package with no EF Core dependency: UseMarten() satisfies the
-/// builder's provider requirement, and the placeholder surfaces its not-implemented state at
-/// capture-plan time rather than at registration.
+/// Registration seams from a package with no EF Core dependency: UseMarten() satisfies the builder's
+/// provider requirement, tenant sessions target the Marten registration, and the provider-typed
+/// UsingTransform overloads pin mappings to the Marten provider.
 /// </summary>
 public class MartenProviderSeamTests
 {
@@ -34,7 +34,7 @@ public class MartenProviderSeamTests
     }
 
     [Test]
-    public void Registering_the_same_provider_twice_fails_fast()
+    public void Registering_Marten_twice_fails_fast()
     {
         var builder = CapturingBuilder();
         builder.UseMarten();
@@ -43,20 +43,41 @@ public class MartenProviderSeamTests
     }
 
     [Test]
-    public void BuildCapturePlan_throws_until_the_provider_is_implemented()
+    public void UseTenantSessions_requires_UseMarten_first()
+    {
+        var builder = CapturingBuilder();
+
+        Should.Throw<WallabyConfigurationException>(() => builder.UseTenantSessions());
+    }
+
+    [Test]
+    public void UseTenantSessions_targets_the_Marten_registration()
     {
         var builder = CapturingBuilder();
         builder.UseMarten();
+        builder.UseTenantSessions();
+
         var config = builder.Build();
 
-        var provider = config.Providers[0].ModelProvider(new NullProvider());
-
-        Should.Throw<NotSupportedException>(() => provider.BuildCapturePlan(
-            config.ToCaptureSpec("Marten", new Dictionary<Type, string>())));
+        config.Providers.Single(p => p.Name == "Marten").ScopedEnrichmentSessions.ShouldNotBeNull();
     }
 
-    private sealed class NullProvider : IServiceProvider
+    [Test]
+    public void UsingTransform_pins_the_mapping_to_the_Marten_provider()
     {
-        public object? GetService(Type serviceType) => null;
+        var builder = CapturingBuilder();
+        builder.UseMarten();
+        builder.Map<Doc>().ToSink("sink").UsingTransform((_, changes, _) =>
+            Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+                changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null)));
+
+        var config = builder.Build();
+
+        config.Mappings[typeof(Doc)].ProviderName.ShouldBe("Marten");
+    }
+
+    private sealed class Doc
+    {
+        public Guid Id { get; set; }
     }
 }

@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure.EntityFrameworkCore" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.Marten" />
   </ItemGroup>
 
   <ItemGroup>

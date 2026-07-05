@@ -34,7 +34,7 @@ public class PostgresFixture : IAsyncInitializer, IAsyncDisposable
     /// <summary>Create the application schema the tests capture; the base fixture creates none.</summary>
     protected virtual Task BootstrapAsync(string connectionString) => Task.CompletedTask;
 
-    public async ValueTask DisposeAsync()
+    public virtual async ValueTask DisposeAsync()
     {
         if (_dataSource is not null)
         {
