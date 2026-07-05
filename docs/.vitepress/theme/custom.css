@@ -1,0 +1,398 @@
+@font-face {
+  font-family: 'Berkeley Mono';
+  src: url('./fonts/Berkeley Mono Variable.woff2') format('woff2-variations');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Code blocks, inline code, etc. */
+  --vp-font-family-mono: 'Berkeley Mono', ui-monospace, 'Menlo', 'Monaco',
+    'Consolas', 'Liberation Mono', 'Courier New', monospace;
+
+  /* Body text stays on the VitePress default (Inter); Berkeley Mono is
+     scoped to display elements below for the hybrid look. */
+}
+
+/* Hybrid look: Berkeley Mono for headings, hero, nav, and labels */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4,
+.vp-doc h5,
+.vp-doc h6,
+.VPHero .name,
+.VPHero .text,
+.VPFeature .title,
+.VPButton,
+.VPNavBarTitle .title,
+.VPNavBarMenuLink,
+.VPSidebarItem .text,
+.VPDocAsideOutline .outline-title,
+.VPDocAsideOutline .outline-link {
+  font-family: var(--vp-font-family-mono);
+}
+
+/* Monochrome light theme — "printed manual" paper look, ink on warm off-white */
+:root {
+  /* Backgrounds: warm paper instead of pure white */
+  --vp-c-bg: #f4f3ef;
+  --vp-c-bg-alt: #f4f3ef;
+  --vp-c-bg-elv: #faf9f6;
+  --vp-c-bg-soft: #eceae5;
+
+  /* Text: ink primary, gray secondary tiers */
+  --vp-c-text-1: #1c1c1c;
+  --vp-c-text-2: #4a4a4a;
+  --vp-c-text-3: #6e6e6e;
+
+  /* Borders and dividers: quiet rule lines */
+  --vp-c-divider: #d8d6d0;
+  --vp-c-border: #bab8b2;
+  --vp-c-gutter: #e3e1db;
+
+  /* Brand (links, active nav): deep amber — "red ink" accent on paper */
+  --vp-c-brand-1: #9a5410;
+  --vp-c-brand-2: #7c430c;
+  --vp-c-brand-3: #b8651a;
+  --vp-c-brand-soft: rgba(154, 84, 16, 0.1);
+
+  --vp-c-default-soft: rgba(28, 28, 28, 0.06);
+
+  /* Code blocks: darker paper tone */
+  --vp-code-block-bg: #e9e7e1;
+  --vp-code-bg: rgba(28, 28, 28, 0.07);
+  --vp-code-color: #1c1c1c;
+
+  /* Buttons: ink fill with paper text (inverse of dark mode) */
+  --vp-button-brand-bg: #1c1c1c;
+  --vp-button-brand-text: #f4f3ef;
+  --vp-button-brand-border: #1c1c1c;
+  --vp-button-brand-hover-bg: #3a3a3a;
+  --vp-button-brand-hover-text: #f4f3ef;
+  --vp-button-brand-hover-border: #3a3a3a;
+  --vp-button-brand-active-bg: #000000;
+  --vp-button-brand-active-text: #f4f3ef;
+  --vp-button-brand-active-border: #000000;
+
+  /* Home hero: amber → blue duotone, riso-print style */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(
+    120deg,
+    #9a5410 30%,
+    #0a5d8f
+  );
+
+  /* Callouts: blue = informational (tip/info), amber = caution (warning) */
+  --vp-custom-block-tip-border: rgba(10, 93, 143, 0.3);
+  --vp-custom-block-tip-bg: rgba(10, 93, 143, 0.07);
+  --vp-custom-block-tip-code-bg: rgba(10, 93, 143, 0.08);
+  --vp-custom-block-info-border: rgba(10, 93, 143, 0.3);
+  --vp-custom-block-info-bg: rgba(10, 93, 143, 0.07);
+  --vp-custom-block-info-code-bg: rgba(10, 93, 143, 0.08);
+  --vp-custom-block-warning-border: rgba(154, 84, 16, 0.35);
+  --vp-custom-block-warning-bg: rgba(154, 84, 16, 0.08);
+  --vp-custom-block-warning-code-bg: rgba(154, 84, 16, 0.09);
+
+  /* Badges: blue informational, amber caution */
+  --vp-badge-info-text: #0a5d8f;
+  --vp-badge-info-bg: rgba(10, 93, 143, 0.08);
+  --vp-badge-tip-text: #0a5d8f;
+  --vp-badge-tip-bg: rgba(10, 93, 143, 0.08);
+  --vp-badge-warning-text: #9a5410;
+  --vp-badge-warning-bg: rgba(154, 84, 16, 0.08);
+}
+
+/* Monochrome dark theme — softened contrast (~14:1) to avoid halation */
+.dark {
+  /* Backgrounds: near-black instead of pure black */
+  --vp-c-bg: #0d0d0d;
+  --vp-c-bg-alt: #0d0d0d;
+  --vp-c-bg-elv: #161616;
+  --vp-c-bg-soft: #1a1a1a;
+
+  /* Text: off-white primary, gray secondary tiers */
+  --vp-c-text-1: #e0e0e0;
+  --vp-c-text-2: #ababab;
+  --vp-c-text-3: #878787;
+
+  /* Borders and dividers: visible gray lines */
+  --vp-c-divider: #2a2a2a;
+  --vp-c-border: #3f3f3f;
+  --vp-c-gutter: #1c1c1c;
+
+  /* Brand (links, active nav): phosphor amber accent */
+  --vp-c-brand-1: #ffb454;
+  --vp-c-brand-2: #ffc370;
+  --vp-c-brand-3: #d98e2b;
+  --vp-c-brand-soft: rgba(255, 180, 84, 0.16);
+
+  --vp-c-default-soft: rgba(255, 255, 255, 0.08);
+
+  /* Code blocks */
+  --vp-code-block-bg: #141414;
+  --vp-code-bg: rgba(255, 255, 255, 0.08);
+  --vp-code-color: #e0e0e0;
+
+  /* Buttons: off-white fill with near-black text */
+  --vp-button-brand-bg: #e5e5e5;
+  --vp-button-brand-text: #0d0d0d;
+  --vp-button-brand-border: #e5e5e5;
+  --vp-button-brand-hover-bg: #cccccc;
+  --vp-button-brand-hover-text: #0d0d0d;
+  --vp-button-brand-hover-border: #cccccc;
+  --vp-button-brand-active-bg: #b3b3b3;
+  --vp-button-brand-active-text: #0d0d0d;
+  --vp-button-brand-active-border: #b3b3b3;
+
+  /* Home hero: amber → blue neon gradient */
+  --vp-home-hero-name-background: -webkit-linear-gradient(
+    120deg,
+    #ffb454 30%,
+    #59c2ff
+  );
+
+  /* Callouts: blue = informational (tip/info), amber = caution (warning) */
+  --vp-custom-block-tip-border: rgba(89, 194, 255, 0.3);
+  --vp-custom-block-tip-bg: rgba(89, 194, 255, 0.1);
+  --vp-custom-block-tip-code-bg: rgba(89, 194, 255, 0.1);
+  --vp-custom-block-info-border: rgba(89, 194, 255, 0.3);
+  --vp-custom-block-info-bg: rgba(89, 194, 255, 0.1);
+  --vp-custom-block-info-code-bg: rgba(89, 194, 255, 0.1);
+  --vp-custom-block-warning-border: rgba(255, 180, 84, 0.4);
+  --vp-custom-block-warning-bg: rgba(255, 180, 84, 0.1);
+  --vp-custom-block-warning-code-bg: rgba(255, 180, 84, 0.1);
+
+  /* Badges: blue informational, amber caution */
+  --vp-badge-info-text: #59c2ff;
+  --vp-badge-info-bg: rgba(89, 194, 255, 0.14);
+  --vp-badge-tip-text: #59c2ff;
+  --vp-badge-tip-bg: rgba(89, 194, 255, 0.14);
+  --vp-badge-warning-text: #ffb454;
+  --vp-badge-warning-bg: rgba(255, 180, 84, 0.14);
+}
+
+/* Underline links in body text so they stay distinguishable without color */
+.vp-doc a {
+  text-decoration: underline;
+}
+
+/* ---- Boxed layout: frame lines between regions, squared corners ---- */
+
+/* Neon glow for interactive elements: amber = primary, blue = secondary.
+   Two layers: tight bright halo + wide faint bloom. */
+:root {
+  --wb-accent-blue: #0a5d8f;
+  --wb-glow-amber: 0 0 4px rgba(154, 84, 16, 0.45), 0 0 16px rgba(154, 84, 16, 0.3);
+  --wb-glow-blue: 0 0 4px rgba(10, 93, 143, 0.45), 0 0 16px rgba(10, 93, 143, 0.3);
+}
+
+.dark {
+  --wb-accent-blue: #59c2ff;
+  --wb-glow-amber: 0 0 5px rgba(255, 180, 84, 0.6), 0 0 20px rgba(255, 180, 84, 0.35);
+  --wb-glow-blue: 0 0 5px rgba(89, 194, 255, 0.6), 0 0 20px rgba(89, 194, 255, 0.35);
+}
+
+.VPButton.VPButton {
+  transition: color 0.25s, border-color 0.25s, background-color 0.25s,
+    box-shadow 0.25s;
+}
+
+.VPButton.VPButton.brand:hover,
+.VPButton.VPButton.brand:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
+}
+
+.VPButton.VPButton.alt:hover,
+.VPButton.VPButton.alt:focus-visible {
+  border-color: var(--wb-accent-blue);
+  box-shadow: var(--wb-glow-blue);
+}
+
+/* Frame lines around the chrome */
+.VPNavBar {
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.VPSidebar {
+  border-right: 1px solid var(--vp-c-divider);
+}
+
+/* Code blocks: bordered panels with near-square corners */
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 2px;
+}
+
+/* Callouts and inline code: squared */
+.vp-doc .custom-block {
+  border-radius: 2px;
+}
+
+.vp-doc :not(pre) > code {
+  border-radius: 2px;
+}
+
+/* Home feature cards: bordered, squared */
+.VPFeature.VPFeature.VPFeature {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 2px;
+}
+
+/* Hero buttons: rectangles instead of pills */
+.VPButton.VPButton.medium,
+.VPButton.VPButton.big {
+  border-radius: 2px;
+}
+
+/* Badges: squared chips */
+.VPBadge {
+  border-radius: 2px;
+}
+
+/* Navbar search: visible pill again (theme sets --vp-c-bg-alt = page bg,
+   which erases the button's default background) */
+.VPNavBarSearchButton.VPNavBarSearchButton {
+  background-color: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 2px;
+  transition: border-color 0.25s;
+}
+
+.VPNavBarSearchButton.VPNavBarSearchButton:hover,
+.VPNavBarSearchButton.VPNavBarSearchButton:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
+}
+
+/* Text selection: amber tint */
+::selection {
+  background: rgba(154, 84, 16, 0.25);
+}
+
+.dark ::selection {
+  background: rgba(255, 180, 84, 0.3);
+}
+
+/* ---- Terminal details ---- */
+
+/* Markdown-flavored prompt prefix on section headings: the built-in
+   permalink anchor (#) made permanently visible in amber, so the prompt
+   IS the clickable anchor rather than duplicating it */
+.vp-doc h2 .header-anchor {
+  opacity: 1;
+  color: var(--vp-c-brand-1);
+}
+
+/* Sidebar group labels: control-panel style */
+.VPSidebarItem.VPSidebarItem.level-0 > .item > .text {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+/* ---- Hero pipeline column ---- */
+
+/* The hero "image" slot holds the live pipeline (HeroPipeline.vue),
+   not a logo — undo VitePress's logo-oriented sizing: the fixed 320px
+   square, the negative pull-up margins that put a logo above the title
+   on mobile, and the desktop translate offset. On mobile the pipeline
+   moves below the actions (order 3) instead. */
+.VPHome .VPHero .image {
+  order: 3;
+  margin: 40px 0 0;
+}
+
+.VPHome .VPHero .image-container {
+  display: flex;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  transform: none;
+}
+
+@media (min-width: 960px) {
+  .VPHome .VPHero .image {
+    order: 2;
+    margin: 0;
+  }
+
+  .VPHome .VPHero .image-container {
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding-left: 24px;
+  }
+}
+
+/* has-image centers the hero text below 960px (logo styling again) —
+   keep our left-aligned terminal look. Extra .main/.VPHero class hops
+   beat the scoped [data-v] rules that inject after this file. */
+.VPHome .VPHero.VPHero.has-image .container {
+  text-align: left;
+}
+
+.VPHome .VPHero.has-image .main .name,
+.VPHome .VPHero.has-image .main .text {
+  margin: 0;
+}
+
+.VPHome .VPHero.VPHero.has-image .actions {
+  justify-content: flex-start;
+}
+
+/* ---- Chrome polish ---- */
+
+/* Square scrollbars: page + code-block overflow */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vp-c-brand-1);
+}
+
+html {
+  scrollbar-color: var(--vp-c-divider) transparent;
+}
+
+/* Keyboard focus rings on the accent instead of browser default */
+:focus-visible {
+  outline: 1px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
+/* Code-block language label as a bordered chip */
+.vp-doc [class*='language-'] > span.lang {
+  border: 1px solid var(--vp-c-divider);
+  background-color: var(--vp-c-bg-soft);
+  padding: 0 6px;
+  border-radius: 2px;
+  color: var(--vp-c-text-2);
+}
+
+/* Doc tables: full grid to match the boxed layout */
+.vp-doc table {
+  border-collapse: collapse;
+}
+
+.vp-doc th,
+.vp-doc td {
+  border: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc th {
+  background-color: var(--vp-c-bg-soft);
+}

@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # External Slots
 
 Wallaby provisions one publication and one logical replication slot for **its own** capture. If the same

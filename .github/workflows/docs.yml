@@ -23,7 +23,21 @@ jobs:
         uses: actions/configure-pages@v6
 
       - name: Install dependencies
-        run: npm ci 
+        run: npm ci
+
+      # Berkeley Mono is licensed and git-ignored in this repo; it is injected
+      # from the private fonts repo at deploy time (EULA permits Web Font Use only)
+      - name: Fetch licensed font
+        uses: actions/checkout@v6
+        with:
+          repository: Hawxy/fonts
+          token: ${{ secrets.FONT_REPO_TOKEN }}
+          path: font-assets
+
+      - name: Install font
+        run: |
+          mkdir -p docs/.vitepress/theme/fonts
+          cp "font-assets/Berkeley Mono Variable.woff2" "docs/.vitepress/theme/fonts/"
 
       - name: Build docs
         run: |

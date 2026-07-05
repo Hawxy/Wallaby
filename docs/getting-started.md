@@ -1,7 +1,3 @@
----
-outline: deep
----
-
 # Getting Started
 
 Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
@@ -12,7 +8,7 @@ Wallaby streams row changes from Postgres logical replication, materializes them
 
 ```bash
 dotnet add package Wallaby
-dotnet add package Wallaby.Sinks.Meilisearch   # optionally add a pre-built sink
+dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 ```
 
 Wallaby requires .NET 10+.
