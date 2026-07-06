@@ -269,6 +269,28 @@
   box-shadow: var(--wb-glow-amber);
 }
 
+/* Button-style links in doc pages, applied via {.wb-btn} in markdown */
+.vp-doc a.wb-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 2px;
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+
+.vp-doc a.wb-btn:hover,
+.vp-doc a.wb-btn:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
+}
+
 /* Text selection: amber tint */
 ::selection {
   background: rgba(214, 95, 0, 0.22);
