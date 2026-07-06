@@ -9,6 +9,7 @@
   <ItemGroup>
     <PackageReference Include="TUnit" />
     <PackageReference Include="Shouldly" />
+    <PackageReference Include="Verify.TUnit" />
     <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
