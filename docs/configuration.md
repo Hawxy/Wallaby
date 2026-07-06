@@ -62,3 +62,22 @@ builder.Services.AddWallaby(cdc => /* ... */);
 // PostConfigure always runs last — handy for test hosts:
 builder.Services.PostConfigure<WallabyOptions>(o => o.SlotName = "tests_slot");
 ```
+
+## Reading configuration at startup
+
+When the builder needs services use the provider-included overload of `AddWallaby`:
+
+```csharp
+builder.Services.AddWallaby((sp, cdc) =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+
+    cdc.UseEntityFrameworkCore<AppDbContext>() // or any other provider
+       .UseConnectionString(config.GetConnectionString("App")!)
+       // ... sinks and mappings as usual ...
+});
+```
+
+The callback runs once, when the host first resolves Wallaby's services. Two consequences of the deferred timing: the
+callback receives the **root** provider (scoped services are unavailable), and configuration errors surface
+at host start instead of at registration.

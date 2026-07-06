@@ -61,28 +61,10 @@ replication slot, backfills the mapped tables, then streams live changes. Wallab
 
 Transforms receive a leased `DbContext` for enrichment lookups — see [Transforms](/transforms).
 
-### Reading configuration at startup
-
-When the builder needs services use the provider-included overload of `AddWallaby`:
-
-```csharp
-builder.Services.AddWallaby((sp, cdc) =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-
-    cdc.UseEntityFrameworkCore<AppDbContext>()
-       .UseConnectionString(config.GetConnectionString("App")!)
-       // ... sinks and mappings as usual ...
-});
-```
-
-The callback runs once, when the host first resolves Wallaby's services. Two consequences of the deferred timing: the
-callback receives the **root** provider (scoped services are unavailable), and configuration errors surface
-at host start instead of at registration.
-
 ::: tip
-`WallabyOptions` also participates in the standard options pattern, see
-[Configuration](/configuration#options-pattern).
+If the builder needs services at registration time (e.g. `IConfiguration`), use the
+`AddWallaby((sp, cdc) => ...)` overload — see
+[Reading configuration at startup](/configuration#reading-configuration-at-startup).
 :::
 
 ## What gets tracked
