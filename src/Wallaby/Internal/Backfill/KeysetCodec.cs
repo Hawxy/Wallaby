@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Wallaby.Internal.Materialization;
+using Wallaby.Providers;
 
 namespace Wallaby.Internal.Backfill;
 

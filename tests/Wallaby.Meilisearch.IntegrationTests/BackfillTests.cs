@@ -1,14 +1,15 @@
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
-public class BackfillTests(PostgresFixture pg, MeilisearchFixture meili)
+[ClassDataSource<TestModelPostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
+public class BackfillTests(TestModelPostgresFixture pg, MeilisearchFixture meili)
 {
     private WallabyTestHarness NewHarness(out string index, int chunkSize = 3)
     {

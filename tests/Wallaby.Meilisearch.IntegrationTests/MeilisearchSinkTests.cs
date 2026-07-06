@@ -3,14 +3,15 @@ using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
-public class MeilisearchSinkTests(PostgresFixture pg, MeilisearchFixture meili)
+[ClassDataSource<TestModelPostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
+public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixture meili)
 {
     private sealed record ProductRow(int Id, string Name);
 

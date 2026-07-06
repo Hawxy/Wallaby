@@ -9,10 +9,6 @@
   <ItemGroup>
     <PackageReference Include="TUnit" />
     <PackageReference Include="Shouldly" />
-    <PackageReference Include="NSubstitute" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.Testing" />
-    <PackageReference Include="Testcontainers" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,7 +17,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wallaby\Wallaby.csproj" />
-    <ProjectReference Include="..\Wallaby.TestModel\Wallaby.TestModel.csproj" />
     <ProjectReference Include="..\Wallaby.TestInfrastructure\Wallaby.TestInfrastructure.csproj" />
   </ItemGroup>
 

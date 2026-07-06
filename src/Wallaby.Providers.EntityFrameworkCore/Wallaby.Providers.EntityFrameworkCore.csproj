@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby.Providers.EntityFrameworkCore</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>EF Core storage provider for Wallaby: drives capture from your EF Core model — table/key discovery, entity materialization with value converters, DbContext-based transforms/enrichment, and DependsOn navigation fan-out.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.Meilisearch.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
+    <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby\Wallaby.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNet.ReproducibleBuilds">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+  </ItemGroup>
+
+  <Import Project="../../Package.Build.props" />
+
+</Project>

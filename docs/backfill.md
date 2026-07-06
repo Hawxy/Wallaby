@@ -10,14 +10,18 @@ gaps and no stale overwrites.
   (`AutoBackfillOnVersionChange`, default on). Bump it whenever you change a transform's output shape:
 
 ```csharp
-cdc.Map<Product>()
-   .ToSink("meili", "products")
-   .WithBackfillVersion("v3")   // bump → re-backfill + reindex just this entity
-   .UsingTransform(/* ... */);
+sink.Map<Product>()
+    .ToDestination("products")
+    .WithBackfillVersion("v3")   // bump → re-backfill + reindex just this entity
+    .UsingTransform(/* ... */);
 ```
 
 Each entity is versioned and backfilled independently, so reindexing one doesn't disturb others or the
 live stream.
+
+When an entity is mapped to **several sinks**, backfill state is still per table: bumping *any*
+mapping's version re-snapshots the table, and the snapshot flows through every sink mapped to it
+(idempotent upserts make the extra delivery harmless). 
 
 ## Manual backfill
 

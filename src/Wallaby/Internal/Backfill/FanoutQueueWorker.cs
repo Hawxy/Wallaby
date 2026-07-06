@@ -14,7 +14,7 @@ namespace Wallaby.Internal.Backfill;
 /// </summary>
 internal sealed class FanoutQueueWorker(
     IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger,
-    TimeSpan pollInterval, CdcStatus? status = null, WallabyInstrumentation? instrumentation = null)
+    TimeSpan pollInterval, WallabyStatus? status = null, WallabyInstrumentation? instrumentation = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 

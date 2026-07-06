@@ -24,14 +24,32 @@ export default defineConfig({
       {
         text: 'Usage',
         items: [
+          { text: 'Why Wallaby?', link: '/why-wallaby' },
           { text: 'Getting Started', link: '/getting-started' },
           { text: 'How It Works', link: '/how-it-works' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
-          { text: 'Multi-Tenancy', link: '/multi-tenancy' },
           { text: 'External Slots', link: '/external-slots' },
           { text: 'Testing', link: '/testing' },
+        ]
+      },
+      {
+        text: 'Storage Providers',
+        items: [
+          { text: 'Overview', link: '/providers/overview' },
+          {
+            text: 'EF Core', link: '/providers/entity-framework-core/',
+            items: [
+              { text: 'Multi-Tenancy', link: '/providers/entity-framework-core/multi-tenancy' },
+            ]
+          },
+          {
+            text: 'Marten', link: '/providers/marten/',
+            items: [
+              { text: 'Multi-Tenancy', link: '/providers/marten/multi-tenancy' },
+            ]
+          },
         ]
       },
       {

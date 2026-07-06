@@ -140,7 +140,7 @@ public class FanoutQueueWorkerTests
     [Test]
     public async Task Failed_pass_records_a_fanout_failure_and_a_healthy_pass_resets_it()
     {
-        var status = new CdcStatus();
+        var status = new WallabyStatus();
         using var stop = new CancellationTokenSource();
         var failuresSeenOnHealthyPass = -1;
 

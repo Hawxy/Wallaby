@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref } from 'vue';
 import { lsn, tickLsn } from './lsn';
+import { formatCount } from './flow/format';
+import { useFlowCycle, type FlowStep } from './flow/useFlowCycle';
+import FlowChip from './flow/FlowChip.vue';
+import FlowLink from './flow/FlowLink.vue';
 
 // Animated replacement for the "How It Works" flowchart: the full
 // delivery loop. A packet leaves postgres, is read, transformed and
@@ -23,14 +27,10 @@ const isBackfill = ref(false);
 // the WAL position this packet was read at; flushed catches up to it
 // only once the acknowledgement makes it back
 let inFlightLsn = '';
-let kickTimer: ReturnType<typeof setTimeout> | undefined;
-let cycleTimer: ReturnType<typeof setInterval> | undefined;
-let stepTimers: ReturnType<typeof setTimeout>[] = [];
 let cycleCount = 0;
 
-function runLiveCycle() {
-  isBackfill.value = false;
-  stepTimers = ([
+function liveSteps(): FlowStep[] {
+  return [
     [0, () => {
       tickLsn();
       inFlightLsn = lsn.value;
@@ -61,15 +61,14 @@ function runLiveCycle() {
       flash.value = 'pg';
     }],
     [4900, () => (flash.value = '')],
-  ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
+  ];
 }
 
 // backfill: snapshot rows join at read and flow through the same
 // transform + sink path, but no WAL position rides along — the loop
 // back to postgres stays quiet
-function runBackfillCycle() {
-  isBackfill.value = true;
-  stepTimers = ([
+function backfillSteps(): FlowStep[] {
+  return [
     [0, () => { flash.value = 'backfill'; pulse.value = 'bf'; }],
     [400, () => { flash.value = ''; lit.value = 'read'; pulse.value = ''; }],
     [700, () => (pulse.value = 'l2')],
@@ -82,101 +81,79 @@ function runBackfillCycle() {
       flash.value = 'sinks';
     }],
     [3200, () => (flash.value = '')],
-  ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
+  ];
 }
 
-function formatCount(n: number) {
-  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
-
-onMounted(() => {
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    // first packet after a short settle instead of a 5.5s empty stare
-    kickTimer = setTimeout(() => {
-      cycleCount = 1;
-      runLiveCycle();
-    }, 600);
-    cycleTimer = setInterval(() => {
-      cycleCount += 1;
-      if (cycleCount % 4 === 0) {
-        runBackfillCycle();
-      } else {
-        runLiveCycle();
-      }
-      // the live sequence ends at ~4.9s; the rest is a beat between
-      // packets — same ~600ms breather as the homepage widget
-    }, 5500);
-  }
-});
-
-onUnmounted(() => {
-  if (kickTimer) clearTimeout(kickTimer);
-  if (cycleTimer) clearInterval(cycleTimer);
-  stepTimers.forEach(clearTimeout);
+useFlowCycle({
+  kick: 600,
+  // the live sequence ends at ~4.9s; the rest is a beat between
+  // packets — same ~600ms breather as the homepage widget
+  interval: 5500,
+  cycle: () => {
+    cycleCount += 1;
+    isBackfill.value = cycleCount % 4 === 0;
+    return isBackfill.value ? backfillSteps() : liveSteps();
+  },
 });
 </script>
 
 <template>
   <div
     class="wb-pipe"
-    :class="{ 'is-backfill': isBackfill }"
     role="img"
     aria-label="Wallaby pipeline: Postgres logical replication streams committed transactions into read and materialize, then transform and route, then sinks. Once every sink accepts the batch, acknowledge and checkpoint advances the replication slot back in Postgres. Backfill snapshots tables in keyset chunks and feeds the rows into the same path."
   >
     <div class="wb-pipe-col">
-      <div class="wb-pipe-chip" :class="{ 'is-flash': flash === 'pg' }">
-        <div class="wb-pipe-title">postgres</div>
-        <div class="wb-pipe-sub">
-          wal @ <span class="wb-pipe-val">{{ lsn }}</span>
+      <FlowChip :flash="flash === 'pg'">
+        <div class="wb-chip-title">postgres</div>
+        <div class="wb-chip-sub">
+          wal @ <span class="wb-chip-val">{{ lsn }}</span>
         </div>
-        <div class="wb-pipe-sub">
-          flushed @ <span class="wb-pipe-val">{{ flushed }}</span>
+        <div class="wb-chip-sub">
+          flushed @ <span class="wb-chip-val">{{ flushed }}</span>
         </div>
-      </div>
+      </FlowChip>
 
-      <div class="wb-pipe-link" :class="{ 'is-pulsing': pulse === 'l1' }">
+      <FlowLink :pulsing="pulse === 'l1'" :blue="isBackfill">
         <span class="wb-pipe-link-label">logical replication</span>
-      </div>
+      </FlowLink>
 
       <div class="wb-pipe-branch">
-        <div class="wb-pipe-chip" :class="{ 'is-lit': lit === 'read' }">
-          <div class="wb-pipe-title">read + materialize</div>
-          <div class="wb-pipe-sub">committed tx ▸ change events</div>
-        </div>
-        <div
-          class="wb-pipe-chip is-backfill-chip"
-          :class="{ 'is-flash': flash === 'backfill' }"
-        >
-          <div class="wb-pipe-title">backfill</div>
-          <div class="wb-pipe-sub">keyset chunks</div>
-          <div class="wb-pipe-sub">snapshot rows</div>
-        </div>
+        <FlowChip :lit="lit === 'read'">
+          <div class="wb-chip-title">read + materialize</div>
+          <div class="wb-chip-sub">committed tx ▸ change events</div>
+        </FlowChip>
+        <FlowChip class="is-backfill-chip" :flash="flash === 'backfill'">
+          <div class="wb-chip-title">backfill</div>
+          <div class="wb-chip-sub">keyset chunks</div>
+          <div class="wb-chip-sub">snapshot rows</div>
+        </FlowChip>
         <div class="wb-pipe-hlink" :class="{ 'is-pulsing': pulse === 'bf' }"></div>
       </div>
 
-      <div class="wb-pipe-link" :class="{ 'is-pulsing': pulse === 'l2' }"></div>
+      <FlowLink :pulsing="pulse === 'l2'" :blue="isBackfill" />
 
-      <div class="wb-pipe-chip" :class="{ 'is-lit': lit === 'xform' }">
-        <div class="wb-pipe-title">transform + route</div>
-        <div class="wb-pipe-sub">shape documents ▸ batch</div>
-      </div>
+      <FlowChip :lit="lit === 'xform'">
+        <div class="wb-chip-title">transform + route</div>
+        <div class="wb-chip-sub">shape documents ▸ batch</div>
+      </FlowChip>
 
-      <div class="wb-pipe-link" :class="{ 'is-pulsing': pulse === 'l3' }"></div>
+      <FlowLink :pulsing="pulse === 'l3'" :blue="isBackfill" />
 
-      <div class="wb-pipe-chip" :class="{ 'is-flash': flash === 'sinks' }">
-        <div class="wb-pipe-title">sinks</div>
-        <div class="wb-pipe-sub">
-          <span class="wb-pipe-val">{{ formatCount(delivered) }}</span>
+      <FlowChip :flash="flash === 'sinks'">
+        <div class="wb-chip-title">sinks</div>
+        <div class="wb-chip-sub">
+          <span class="wb-chip-val">{{ formatCount(delivered) }}</span>
           changes delivered
         </div>
-      </div>
+      </FlowChip>
 
-      <div class="wb-pipe-link" :class="{ 'is-pulsing': pulse === 'l4' }"></div>
+      <FlowLink :pulsing="pulse === 'l4'" :blue="isBackfill" />
 
-      <div class="wb-pipe-chip" :class="{ 'is-lit': lit === 'ack' }">
-        <div class="wb-pipe-title">acknowledge + checkpoint</div>
-        <div class="wb-pipe-sub">confirm delivery ▸ advance slot</div>
-      </div>
+      <FlowChip :lit="lit === 'ack'">
+        <div class="wb-chip-title">acknowledge + checkpoint</div>
+        <div class="wb-chip-sub">confirm delivery ▸ advance slot</div>
+      </FlowChip>
     </div>
 
     <div class="wb-pipe-rail" :class="{ 'is-pulsing': pulse === 'rail' }">
@@ -191,6 +168,8 @@ onUnmounted(() => {
   width: fit-content;
   margin: 32px auto;
   font-family: var(--vp-font-family-mono);
+  /* processing chips decay back to gray lazily on this diagram */
+  --wb-chip-decay: 0.8s;
 }
 
 .wb-pipe-col {
@@ -199,66 +178,8 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.wb-pipe-chip {
+.wb-pipe .wb-chip {
   width: 260px;
-  padding: 10px 16px 11px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 2px;
-  background-color: var(--vp-code-block-bg);
-  /* asymmetric: light up fast (the active-state rules below), decay
-     lazily on the way back to gray */
-  transition: border-color 0.8s;
-}
-
-/* amber while the packet is being processed inside the chip */
-.wb-pipe-chip.is-lit {
-  border-color: var(--vp-c-brand-1);
-  transition: border-color 0.2s;
-}
-
-/* blue when the chip's data value updates — LSNs, delivered counter */
-.wb-pipe-chip.is-flash {
-  border-color: var(--wb-accent-blue);
-  transition: border-color 0.2s;
-}
-
-.wb-pipe-title {
-  font-size: 14px;
-  /* the .vp-doc 28px line-height bloats the chips and shifts the rail
-     off the chip midpoints */
-  line-height: 20px;
-  color: var(--vp-c-text-1);
-}
-
-.wb-pipe-sub {
-  margin-top: 2px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--vp-c-text-3);
-}
-
-.wb-pipe-val {
-  color: var(--wb-accent-blue);
-}
-
-/* vertical connector: hairline; a square dot travels down it as the
-   packet moves between stages */
-.wb-pipe-link {
-  position: relative;
-  width: 1px;
-  height: 28px;
-  background-color: var(--vp-c-divider);
-}
-
-.wb-pipe-link::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -2px;
-  width: 5px;
-  height: 5px;
-  background-color: var(--vp-c-brand-1);
-  opacity: 0;
 }
 
 .wb-pipe-link-label {
@@ -276,7 +197,7 @@ onUnmounted(() => {
   position: relative;
 }
 
-.wb-pipe-chip.is-backfill-chip {
+.wb-pipe .wb-chip.is-backfill-chip {
   position: absolute;
   top: 50%;
   right: calc(100% + 20px);
@@ -285,12 +206,12 @@ onUnmounted(() => {
   padding: 7px 12px 8px;
 }
 
-.wb-pipe-chip.is-backfill-chip .wb-pipe-title {
+.wb-chip.is-backfill-chip .wb-chip-title {
   font-size: 12px;
   line-height: 16px;
 }
 
-.wb-pipe-chip.is-backfill-chip .wb-pipe-sub {
+.wb-chip.is-backfill-chip .wb-chip-sub {
   font-size: 11px;
   line-height: 16px;
 }
@@ -351,33 +272,13 @@ onUnmounted(() => {
   color: var(--vp-c-text-3);
 }
 
-/* backfill packets are blue on the shared connectors too */
-.wb-pipe.is-backfill .wb-pipe-link::before {
-  background-color: var(--wb-accent-blue);
-}
-
 @media (prefers-reduced-motion: no-preference) {
-  .wb-pipe-link.is-pulsing::before {
-    animation: wb-pipe-drop 0.6s linear;
-  }
-
   .wb-pipe-hlink.is-pulsing::before {
     animation: wb-pipe-cross 0.4s linear;
   }
 
   .wb-pipe-rail.is-pulsing::after {
     animation: wb-pipe-rise 0.9s linear;
-  }
-}
-
-@keyframes wb-pipe-drop {
-  0% {
-    top: 0;
-    opacity: 1;
-  }
-  100% {
-    top: calc(100% - 5px);
-    opacity: 1;
   }
 }
 
@@ -410,22 +311,22 @@ onUnmounted(() => {
     margin: 24px 0 24px 118px;
   }
 
-  .wb-pipe-chip {
+  .wb-pipe .wb-chip {
     width: 200px;
     padding: 8px 12px 9px;
   }
 
   /* small enough that "acknowledge + checkpoint" doesn't wrap */
-  .wb-pipe-title {
+  .wb-pipe .wb-chip-title {
     font-size: 12px;
   }
 
-  .wb-pipe-sub {
+  .wb-pipe .wb-chip-sub {
     font-size: 11px;
     line-height: 16px;
   }
 
-  .wb-pipe-chip.is-backfill-chip {
+  .wb-chip.is-backfill-chip {
     right: calc(100% + 14px);
   }
 

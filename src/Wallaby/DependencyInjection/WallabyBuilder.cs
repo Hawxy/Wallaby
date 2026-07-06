@@ -1,8 +1,7 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
+using System.ComponentModel;
 using Wallaby.Abstractions;
-using Wallaby.Internal.Pipeline;
 using Wallaby.Internal.Replication;
+using Wallaby.Providers;
 using Wallaby.Sinks;
 
 namespace Wallaby.DependencyInjection;
@@ -10,7 +9,7 @@ namespace Wallaby.DependencyInjection;
 /// <summary>Fluent configuration for a Wallaby instance.</summary>
 public sealed class WallabyBuilder
 {
-    private readonly CdcConfiguration _configuration = new();
+    private readonly WallabyConfiguration _configuration = new();
 
     /// <summary>
     /// Configure options (slot/publication names, chunk size, auto-backfill, etc.). The action joins the
@@ -38,55 +37,71 @@ public sealed class WallabyBuilder
     }
 
     /// <summary>
-    /// Declare the EF Core <see cref="DbContext"/> that drives capture. Required whenever Wallaby streams
-    /// (any sink, <c>Map&lt;T&gt;()</c>, or <c>CaptureAllMappedTables()</c>) and to resolve
-    /// <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations. The consumer registers the context as
-    /// usual — a scoped <c>AddDbContext&lt;TContext&gt;()</c> is sufficient (Wallaby uses an
-    /// <see cref="IDbContextFactory{TContext}"/> if one is registered, otherwise a DI scope). Omit it entirely
-    /// for a provision-only worker that declares external slots by table name only.
+    /// Register a storage provider that derives a capture model and leases enrichment sessions.
+    /// Called by provider packages' registration extensions (e.g. <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>
+    /// from Wallaby.Providers.EntityFrameworkCore); consumers normally never call it directly. A provider is required
+    /// whenever Wallaby streams (any sink) and to
+    /// resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations; omit it for a
+    /// provision-only worker that declares external slots by table name only. Multiple providers may be
+    /// registered (their capture plans merge onto one slot/publication); names must be unique.
     /// </summary>
-    public WallabyBuilder UseContext<TContext>() where TContext : DbContext
+    public WallabyBuilder UseProvider(WallabyProviderRegistration registration)
     {
-        _configuration.ModelAccessor = DbContextResolver.ReadModel<TContext>;
-        _configuration.ContextLease = DbContextResolver.Lease<TContext>;
+        ArgumentNullException.ThrowIfNull(registration);
+        if (_configuration.Providers.Any(p => p.Name == registration.Name))
+        {
+            throw new WallabyConfigurationException(
+                $"A storage provider named '{registration.Name}' is already registered. Provider names must be unique.");
+        }
+        _configuration.Providers.Add(registration);
         return this;
     }
 
-    /// <summary>Track every mapped entity in the model (opt-in; default is explicit declaration).</summary>
-    public WallabyBuilder CaptureAllMappedTables()
+    /// <summary>
+    /// Override the named provider's enrichment sessions with a scope-key-aware provider (e.g.
+    /// context-per-tenant). Called by provider packages' scoped-context extensions (e.g.
+    /// <c>UseScopedDbContext</c>); used by mappings that declare <c>ScopedBy(...)</c>. The provider must be
+    /// registered (via <see cref="UseProvider"/>) before this is called.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public WallabyBuilder UseScopedEnrichmentSessions(
+        string providerName, Func<IServiceProvider, IEnrichmentSessionProvider> factory)
     {
-        _configuration.CaptureAllMapped = true;
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
+        ArgumentNullException.ThrowIfNull(factory);
+        var registration = _configuration.Providers.FirstOrDefault(p => p.Name == providerName)
+            ?? throw new WallabyConfigurationException(
+                $"UseScopedEnrichmentSessions(\"{providerName}\", ...) requires that provider to be registered first " +
+                "(e.g. call UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...)).");
+        registration.ScopedEnrichmentSessions = factory;
         return this;
     }
 
-    /// <summary>Register a sink instance (keyed by its <see cref="ISink.Name"/>).</summary>
-    public WallabyBuilder AddSink(ISink sink)
+    /// <summary>
+    /// Register a sink instance (keyed by its <see cref="ISink.Name"/>). Attach the entities it receives
+    /// via <see cref="WallabySinkBuilder.WithMappings"/> on the returned builder.
+    /// </summary>
+    public WallabySinkBuilder AddSink(ISink sink)
     {
-        _configuration.Sinks.Add(new SinkRegistration { Name = sink.Name, Factory = _ => sink });
-        return this;
+        var registration = new SinkRegistration { Name = sink.Name, Factory = _ => sink };
+        _configuration.Sinks.Add(registration);
+        return new WallabySinkBuilder(this, registration);
     }
 
-    /// <summary>Register a sink resolved from the container.</summary>
-    public WallabyBuilder AddSink(string name, Func<IServiceProvider, ISink> factory)
+    /// <summary>
+    /// Register a sink resolved from the container. Attach the entities it receives via
+    /// <see cref="WallabySinkBuilder.WithMappings"/> on the returned builder.
+    /// </summary>
+    public WallabySinkBuilder AddSink(string name, Func<IServiceProvider, ISink> factory)
     {
-        _configuration.Sinks.Add(new SinkRegistration { Name = name, Factory = factory });
-        return this;
+        var registration = new SinkRegistration { Name = name, Factory = factory };
+        _configuration.Sinks.Add(registration);
+        return new WallabySinkBuilder(this, registration);
     }
 
     /// <summary>Register an in-process delegate sink.</summary>
-    public WallabyBuilder AddDelegateSink(string name, Func<SinkBatch, CancellationToken, Task<DeliveryResult>> handler)
+    public WallabySinkBuilder AddDelegateSink(string name, Func<SinkBatch, CancellationToken, Task<DeliveryResult>> handler)
         => AddSink(new DelegateSink(name, handler));
-
-    /// <summary>
-    /// Build the enrichment <see cref="DbContext"/> handed to transforms from a row's scope key (e.g. tenant),
-    /// e.g. by selecting a tenant connection string or a context carrying the tenant for global query filters.
-    /// Used by mappings that declare <c>ScopedBy(...)</c>.
-    /// </summary>
-    public WallabyBuilder UseScopedContext(Func<object?, IServiceProvider, DbContext> factory)
-    {
-        _configuration.ScopedContextFactory = factory;
-        return this;
-    }
 
     /// <summary>
     /// Provision an additional pgoutput publication + logical replication slot for the declared tables.
@@ -138,45 +153,47 @@ public sealed class WallabyBuilder
         return this;
     }
 
-    /// <summary>Map an entity to a sink/destination via a transform.</summary>
-    public EntityMapBuilder<TEntity> Map<TEntity>() where TEntity : class
-    {
-        var registration = new MappingRegistration { EntityClrType = typeof(TEntity) };
-        _configuration.Mappings[typeof(TEntity)] = registration;
-        return new EntityMapBuilder<TEntity>(registration);
-    }
-
-    internal CdcConfiguration Build()
+    internal WallabyConfiguration Build()
     {
         // Structural validation only — option VALUES (the connection string, slot/publication names, sizes,
         // intervals) are not final until the options pipeline runs (Configure/binding/PostConfigure may still
-        // supply or change them), so those checks live in CdcOptionsValidator and surface on first WallabyOptions
+        // supply or change them), so those checks live in WallabyOptionsValidator and surface on first WallabyOptions
         // resolution.
 
-        // Capturing (any sink, Map<>(), or CaptureAllMappedTables()) requires a context + a sink. Without
-        // any of these, Wallaby runs in provision-only mode: it just provisions the declared external slots
-        // (no primary slot, no streaming), so neither a context nor a sink is required.
-        if (_configuration.CaptureIntended)
+        // Capturing (any sink) requires a provider. Without a sink, Wallaby runs in provision-only mode:
+        // it just provisions the declared external slots (no primary slot, no streaming), so no provider
+        // is required.
+        if (_configuration.CaptureIntended && _configuration.Providers.Count == 0)
         {
-            if (_configuration.ModelAccessor is null)
+            throw new WallabyConfigurationException(
+                "Capturing requires a storage provider. Register one with " +
+                "UseEntityFrameworkCore<TContext>() (from Wallaby.Providers.EntityFrameworkCore).");
+        }
+
+        // Sink names must be unique: mappings route by their owning sink's name, and the runtime keys the
+        // materialized sinks by name.
+        var sinkNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var sink in _configuration.Sinks)
+        {
+            if (!sinkNames.Add(sink.Name))
             {
                 throw new WallabyConfigurationException(
-                    "Capturing requires a DbContext. Declare it with UseContext<TContext>().");
-            }
-            if (_configuration.Sinks.Count == 0)
-            {
-                throw new WallabyConfigurationException(
-                    "At least one sink must be registered when capturing (e.g. AddMeilisearchSink/AddDelegateSink).");
+                    $"A sink named '{sink.Name}' is registered more than once. Sink names must be unique.");
             }
         }
 
-        foreach (var mapping in _configuration.Mappings.Values)
+        // A capture set with no mappings at all can't deliver anything and would create a publication
+        // with no tables. Fail here rather than at startup with a Postgres syntax error. (An individual
+        // sink without mappings is fine as long as another sink maps something.)
+        if (_configuration.CaptureIntended && !_configuration.AllMappings.Any())
         {
-            if (string.IsNullOrEmpty(mapping.SinkName))
-            {
-                throw new WallabyConfigurationException(
-                    $"Map<{mapping.EntityClrType.Name}>() is missing a sink. Call .ToSink(\"<name>\", ...).");
-            }
+            throw new WallabyConfigurationException(
+                "A sink is registered but no entities are mapped. Attach mappings to a sink via " +
+                "WithMappings(...), e.g. AddSink(...).WithMappings(sink => sink.Map<TEntity>()...).");
+        }
+
+        foreach (var mapping in _configuration.AllMappings)
+        {
             if (mapping.TransformFactory is null)
             {
                 throw new WallabyConfigurationException(
@@ -187,30 +204,54 @@ public sealed class WallabyBuilder
                 throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>().ScopedDestination(...) requires .ScopedBy(...) to provide the scope key.");
             }
-            if (mapping.ScopeKeySelector is not null && mapping.DestinationSelector is null && _configuration.ScopedContextFactory is null)
+            if (mapping.ExplicitProviderName is not null && mapping.TransformProviderName is not null &&
+                mapping.ExplicitProviderName != mapping.TransformProviderName)
+            {
+                throw new WallabyConfigurationException(
+                    $"Map<{mapping.EntityClrType.Name}>() is pinned to provider '{mapping.ExplicitProviderName}' via " +
+                    $"FromProvider(...), but its transform is typed for provider '{mapping.TransformProviderName}'. " +
+                    "Use that provider's UsingTransform overload or align the FromProvider name.");
+            }
+            if (mapping.ProviderName is not null &&
+                !_configuration.Providers.Any(p => p.Name == mapping.ProviderName))
+            {
+                throw new WallabyConfigurationException(
+                    $"Map<{mapping.EntityClrType.Name}>() is pinned to provider '{mapping.ProviderName}', which is not " +
+                    $"registered. Registered providers: {DescribeProviders()}.");
+            }
+            if (mapping.ScopeKeySelector is not null && mapping.DestinationSelector is null &&
+                !_configuration.Providers.Any(p => p.ScopedEnrichmentSessions is not null))
             {
                 throw new WallabyConfigurationException(
                     $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register UseScopedContext(...).");
             }
-            // Scoped destinations must resolve the scope key on deletes too, which needs full old-row values.
-            if (mapping.DestinationSelector is not null)
+        }
+
+        // All mappings of one entity type capture the same table, so they must resolve to one provider.
+        foreach (var group in _configuration.AllMappings.GroupBy(m => m.EntityClrType))
+        {
+            var pins = group.Select(m => m.ProviderName).OfType<string>().Distinct().ToList();
+            if (pins.Count > 1)
             {
-                _configuration.RequiresFullReplicaIdentity.Add(mapping.EntityClrType);
+                throw new WallabyConfigurationException(
+                    $"Map<{group.Key.Name}>() is declared under multiple sinks with conflicting provider pins " +
+                    $"{string.Join(" and ", pins.Select(p => $"'{p}'"))}. All mappings of one entity type share " +
+                    "a table and must resolve to the same storage provider.");
             }
         }
 
-        // ForEntity<T>() resolves against the EF model, so it needs a declared context. ForTable(...) does not.
-        if (_configuration.ModelAccessor is null &&
+        // ForEntity<T>() resolves against a provider's model, so it needs a declared provider. ForTable(...) does not.
+        if (_configuration.Providers.Count == 0 &&
             _configuration.ExternalSlots.Any(e => e.EntityTypes.Count > 0))
         {
             throw new WallabyConfigurationException(
-                "AddExternalSlot(...).ForEntity<T>() requires a DbContext to resolve the table. " +
-                "Declare one with UseContext<TContext>() or declare the table by name via ForTable(...).");
+                "AddExternalSlot(...).ForEntity<T>() requires a storage provider to resolve the table. " +
+                "Register one with UseEntityFrameworkCore<TContext>() or declare the table by name via ForTable(...).");
         }
 
         // External slots: names must be distinct from each other, and each must declare at least one table
         // (a pgoutput publication needs tables). Collisions with the PRIMARY slot/publication are checked by
-        // CdcOptionsValidator, since those names are not final until the options pipeline runs. The default
+        // WallabyOptionsValidator, since those names are not final until the options pipeline runs. The default
         // publication name here must match ExternalSlotResolver.
         var slotNames = new HashSet<string>(StringComparer.Ordinal);
         var publicationNames = new HashSet<string>(StringComparer.Ordinal);
@@ -235,4 +276,7 @@ public sealed class WallabyBuilder
 
         return _configuration;
     }
+
+    private string DescribeProviders()
+        => string.Join(", ", _configuration.Providers.Select(p => $"'{p.Name}'"));
 }

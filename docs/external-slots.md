@@ -9,22 +9,26 @@ tables.
 sync) as part of your normal deployment instead of requiring seperate management. **Wallaby never consumes from an external slot**,
 it just manages it for you.
 
+## Install (Optional)
+
+If you don't have (or need) a provider installed, simply install the core Wallaby package:
+
+```bash
+dotnet add package Wallaby
+```
+
 ## Declare a slot
 
 ```csharp
 builder.Services.AddWallaby(cdc =>
 {
-    cdc.UseContext<AppDbContext>()
-       .UseConnectionString(conn)
-       .AddMeilisearchSink("meili", m => { /* ... */ })
-       .Map<Product>().ToSink("meili", "products").UsingTransform(/* ... */)
-
+    cdc.
        // Provision a publication + slot for an external ELT tool.
        .AddExternalSlot("elt", s => s
             .WithPublication("elt_pub")          // optional; defaults to "elt_pub" (= "{slot}_pub")
             .ForTable("public", "orders")        // by schema-qualified name
             .ForTable("customers")               // schema defaults to "public"
-            .ForEntity<Product>());              // or by EF entity type (resolved to its table)
+            .ForEntity<Product>());              // or by EF/Marten entity type (resolved to its table)
 });
 ```
 
@@ -45,17 +49,17 @@ distinct from Wallaby's own slot/publication and from each other.
 
 ## Lifecycle & semantics
 
-- **Leader-only and idempotent.** External slots are created during the same self-config step as Wallaby's
+- **Leader-only and idempotent**: External slots are created during the same self-config step as Wallaby's
   own slot - on the leader, before streaming, on every leadership acquisition. Creating a missing slot or
   re-applying a publication is safe to repeat.
-- **Reconciled.** On each startup Wallaby reconciles the external publication's table set to your declared
+- **Reconciled**: On each startup Wallaby reconciles the external publication's table set to your declared
   list (`ALTER PUBLICATION ... ADD/DROP TABLE`). Wallaby **owns** the table set: a table added to the
   publication out-of-band is dropped on the next run. Manage membership through `AddExternalSlot`.
-- **Pre-existing slots are adopted (and validated).** If a slot with the declared name already exists,
+- **Pre-existing slots are adopted (and validated)**: If a slot with the declared name already exists,
   Wallaby reuses it rather than recreating it, and records it in `wallaby.slot_registry`. It **fails fast**
   if that slot isn't a pgoutput *logical* slot (e.g. a physical slot or one on a different output plugin),
   so a name clash with an unrelated slot surfaces as a clear startup error rather than a silent mismatch.
-- **Never auto-dropped.** Removing an `AddExternalSlot(...)` declaration does **not** drop the slot or
+- **Never auto-dropped**: Removing an `AddExternalSlot(...)` declaration does **not** drop the slot or
   publication. A retired slot must be removed yourself:
 
   ```sql
@@ -73,28 +77,7 @@ An external slot is created inactive and **pins WAL** the moment it exists. If n
 accumulates on the server. Only declare slots an external tool will actually read.
 :::
 
-## Provision-only mode
-
-A worker can use Wallaby **purely to provision external slots**.
-To do so, omit `UseContext<T>()` and declare only external slots. Wallaby will scaffold the slot and then idle:
-
-```csharp
-// Only provisions the ELT publication + slot, nothing is captured or streamed.
-builder.Services.AddWallaby(cdc => cdc
-    .UseConnectionString(conn)
-    .AddExternalSlot("elt", s => s
-        .WithPublication("elt_pub")
-        .ForTable("orders")
-        .ForTable("customers")));
-```
-
-::: tip
-Adding a sink or a `Map<T>()` later switches Wallaby into full capture mode, at that point
-you must also declare `UseContext<T>()` (and register the context factory).
-:::
-
 ## Scope
 
 Wallaby only *provisions* external slots, it does not consume them, monitor their lag, or manage roles
-and grants for the external tool. Only **pgoutput** consumers are supported (the `wal2json` /
-`test_decoding` plugins are out of scope).
+and grants for the external tool. Only **pgoutput** consumers are supported.

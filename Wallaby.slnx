@@ -7,18 +7,28 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Wallaby.AspNetCore.HealthChecks/Wallaby.AspNetCore.HealthChecks.csproj" />
+    <Project Path="src/Wallaby.Providers.EntityFrameworkCore/Wallaby.Providers.EntityFrameworkCore.csproj" />
+    <Project Path="src/Wallaby.Providers.Marten/Wallaby.Providers.Marten.csproj" />
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
     <Project Path="src/Wallaby.Testing/Wallaby.Testing.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wallaby.AotSmokeTest/Wallaby.AotSmokeTest.csproj" />
+    <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.IntegrationTests/Wallaby.Providers.EntityFrameworkCore.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.UnitTests/Wallaby.Providers.EntityFrameworkCore.UnitTests.csproj" />
     <Project Path="tests/Wallaby.IntegrationTests/Wallaby.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Providers.Marten.IntegrationTests/Wallaby.Providers.Marten.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Providers.Marten.UnitTests/Wallaby.Providers.Marten.UnitTests.csproj" />
     <Project Path="tests/Wallaby.Meilisearch.IntegrationTests/Wallaby.Meilisearch.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.TestInfrastructure.EntityFrameworkCore/Wallaby.TestInfrastructure.EntityFrameworkCore.csproj" />
+    <Project Path="tests/Wallaby.TestInfrastructure.Marten/Wallaby.TestInfrastructure.Marten.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
     <Project Path="tests/Wallaby.TestModel/Wallaby.TestModel.csproj" />
     <Project Path="tests/Wallaby.UnitTests/Wallaby.UnitTests.csproj" />
   </Folder>
   <Folder Name="/samples/">
+    <Project Path="samples/Sample.MartenWorkerApp/Sample.MartenWorkerApp.csproj" />
     <Project Path="samples/Sample.WorkerApp/Sample.WorkerApp.csproj" />
   </Folder>
   <Project Path="build/_build.csproj" />

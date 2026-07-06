@@ -72,8 +72,9 @@ public class SpillCodecTests
     }
 
     [Test]
-    public void Round_trips_arrays_via_json_fallback()
+    public void Round_trips_arrays_of_tagged_scalars()
     {
+        var guids = new[] { Guid.NewGuid(), Guid.NewGuid() };
         var change = new RawChange
         {
             RelationId = 1,
@@ -82,15 +83,42 @@ public class SpillCodecTests
             Action = ChangeAction.Insert,
             NewValues =
             [
-                new RawColumn { ColumnName = "tags", Value = new[] { "a", "b", "c" } },
+                new RawColumn { ColumnName = "tags", Value = new[] { "a", null, "c" } },
                 new RawColumn { ColumnName = "nums", Value = new[] { 1, 2, 3 } },
+                new RawColumn { ColumnName = "longs", Value = new[] { 9_999_999_999L } },
+                new RawColumn { ColumnName = "flags", Value = new[] { true, false } },
+                new RawColumn { ColumnName = "decs", Value = new[] { 1.50m, 2.25m } },
+                new RawColumn { ColumnName = "ids", Value = guids },
+                new RawColumn { ColumnName = "empty", Value = Array.Empty<string>() },
             ],
         };
 
         var r = RoundTrip(change).NewValues;
 
-        ((string[])r[0].Value!).ShouldBe(new[] { "a", "b", "c" }, ignoreOrder: true);
-        ((int[])r[1].Value!).ShouldBe(new[] { 1, 2, 3 }, ignoreOrder: true);
+        ((string?[])r[0].Value!).ShouldBe(new[] { "a", null, "c" });
+        ((int[])r[1].Value!).ShouldBe(new[] { 1, 2, 3 });
+        ((long[])r[2].Value!).ShouldBe(new[] { 9_999_999_999L });
+        ((bool[])r[3].Value!).ShouldBe(new[] { true, false });
+        ((decimal[])r[4].Value!).ShouldBe(new[] { 1.50m, 2.25m });
+        ((Guid[])r[5].Value!).ShouldBe(guids);
+        ((string[])r[6].Value!).ShouldBeEmpty();
+    }
+
+    [Test]
+    public void Round_trips_untagged_types_via_json_fallback()
+    {
+        var change = new RawChange
+        {
+            RelationId = 1,
+            Schema = "public",
+            TableName = "t",
+            Action = ChangeAction.Insert,
+            NewValues = [new RawColumn { ColumnName = "maybe_nums", Value = new int?[] { 1, null, 3 } }],
+        };
+
+        var r = RoundTrip(change).NewValues;
+
+        ((int?[])r[0].Value!).ShouldBe(new int?[] { 1, null, 3 });
     }
 
     [Test]

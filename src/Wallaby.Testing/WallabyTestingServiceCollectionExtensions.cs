@@ -19,10 +19,10 @@ public static class WallabyTestingServiceCollectionExtensions
 {
     /// <summary>
     /// Replace the sink registered under <paramref name="name"/> with <paramref name="replacement"/>.
-    /// Mapping destinations declared via <c>Map&lt;T&gt;().ToSink(name, destination)</c> are preserved —
-    /// batches keep routing by the registration name and arrive at the replacement with their original
-    /// <see cref="SinkRecord.Destination"/> values, so a <see cref="CaptureSink"/> sees exactly what the
-    /// production sink would have received.
+    /// The sink's attached mappings (its <c>WithMappings(...)</c> declarations, destinations included) are
+    /// preserved — batches keep routing by the registration name and arrive at the replacement with their
+    /// original <see cref="SinkRecord.Destination"/> values, so a <see cref="CaptureSink"/> sees exactly
+    /// what the production sink would have received.
     /// </summary>
     /// <param name="services">The service collection <c>AddWallaby</c> was called on.</param>
     /// <param name="name">The registration name of the sink to replace (e.g. <c>"meili"</c>).</param>
@@ -37,8 +37,9 @@ public static class WallabyTestingServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(replacement);
         return services.MutateConfiguration(nameof(ReplaceWallabySink), configuration =>
         {
-            var removed = configuration.Sinks.RemoveAll(s => s.Name == name);
-            if (removed == 0)
+            // Swap the factory in place so the registration keeps its attached mappings.
+            var registration = configuration.Sinks.FirstOrDefault(s => s.Name == name);
+            if (registration is null)
             {
                 var registered = configuration.Sinks.Count == 0
                     ? "(none)"
@@ -46,7 +47,7 @@ public static class WallabyTestingServiceCollectionExtensions
                 throw new InvalidOperationException(
                     $"No sink named '{name}' is registered with Wallaby. Registered sinks: {registered}.");
             }
-            configuration.Sinks.Add(new SinkRegistration { Name = name, Factory = _ => replacement });
+            registration.Factory = _ => replacement;
         });
     }
 
@@ -69,25 +70,25 @@ public static class WallabyTestingServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Apply <paramref name="mutate"/> to the registered <see cref="CdcConfiguration"/>: immediately when it
+    /// Apply <paramref name="mutate"/> to the registered <see cref="WallabyConfiguration"/>: immediately when it
     /// was registered as an instance (eager <c>AddWallaby</c>), or by decorating the registration's factory
     /// when it is deferred (provider-aware <c>AddWallaby</c>) so the mutation runs right after the
     /// application's configure callback. Repeated calls compose in call order.
     /// </summary>
     private static IServiceCollection MutateConfiguration(
-        this IServiceCollection services, string caller, Action<CdcConfiguration> mutate)
+        this IServiceCollection services, string caller, Action<WallabyConfiguration> mutate)
     {
         // Walk backwards: the LAST registration wins for singleton resolution. Keyed descriptors are skipped —
         // their ImplementationInstance/ImplementationFactory getters throw.
         for (var i = services.Count - 1; i >= 0; i--)
         {
             var descriptor = services[i];
-            if (descriptor.ServiceType != typeof(CdcConfiguration) || descriptor.IsKeyedService)
+            if (descriptor.ServiceType != typeof(WallabyConfiguration) || descriptor.IsKeyedService)
             {
                 continue;
             }
 
-            if (descriptor.ImplementationInstance is CdcConfiguration instance)
+            if (descriptor.ImplementationInstance is WallabyConfiguration instance)
             {
                 mutate(instance);
                 return services;
@@ -100,7 +101,7 @@ public static class WallabyTestingServiceCollectionExtensions
                 // exactly once (singleton).
                 services[i] = ServiceDescriptor.Singleton(sp =>
                 {
-                    var configuration = (CdcConfiguration)inner(sp);
+                    var configuration = (WallabyConfiguration)inner(sp);
                     mutate(configuration);
                     return configuration;
                 });
@@ -115,12 +116,12 @@ public static class WallabyTestingServiceCollectionExtensions
 
     private static void EnsureWallabyRegistered(IServiceCollection services, string caller)
     {
-        if (!services.Any(d => d.ServiceType == typeof(CdcConfiguration) && !d.IsKeyedService))
+        if (!services.Any(d => d.ServiceType == typeof(WallabyConfiguration) && !d.IsKeyedService))
         {
             throw NotRegistered(caller);
         }
     }
 
     private static InvalidOperationException NotRegistered(string caller) =>
-        new($"{caller} requires AddWallaby to have been called first — no CdcConfiguration registration was found.");
+        new($"{caller} requires AddWallaby to have been called first — no WallabyConfiguration registration was found.");
 }

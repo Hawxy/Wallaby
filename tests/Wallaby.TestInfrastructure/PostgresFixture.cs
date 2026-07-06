@@ -1,16 +1,15 @@
 using Npgsql;
 using Testcontainers.PostgreSql;
 using TUnit.Core.Interfaces;
-using Wallaby.TestModel;
 
 namespace Wallaby.TestInfrastructure;
 
 /// <summary>
 /// A shared Postgres container started with <c>wal_level=logical</c> so the library can create a
-/// pgoutput replication slot. The application schema (the <see cref="AppDbContext"/> tables) is created
-/// once on startup so tests can capture/replicate them. Shared across the test session to keep runs fast.
+/// pgoutput replication slot. Shared across the test session to keep runs fast. Derive from it to
+/// bootstrap an application schema (see the EF Core test model's <c>TestModelPostgresFixture</c>).
 /// </summary>
-public sealed class PostgresFixture : IAsyncInitializer, IAsyncDisposable
+public class PostgresFixture : IAsyncInitializer, IAsyncDisposable
 {
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:17")
         .WithCommand("-c", "wal_level=logical", "-c", "max_replication_slots=20", "-c", "max_wal_senders=20")
@@ -29,12 +28,13 @@ public sealed class PostgresFixture : IAsyncInitializer, IAsyncDisposable
     {
         await _container.StartAsync();
         _dataSource = NpgsqlDataSource.Create(ConnectionString);
-
-        await using var ctx = new AppDbContext(TestModelFactory.CreateOptions(ConnectionString));
-        await ctx.Database.EnsureCreatedAsync();
+        await BootstrapAsync(ConnectionString);
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>Create the application schema the tests capture; the base fixture creates none.</summary>
+    protected virtual Task BootstrapAsync(string connectionString) => Task.CompletedTask;
+
+    public virtual async ValueTask DisposeAsync()
     {
         if (_dataSource is not null)
         {

@@ -36,7 +36,8 @@ public record ChangeEvent(
 
 /// <summary>
 /// Strongly-typed view of a <see cref="ChangeEvent"/> for a known entity type, handed to
-/// <see cref="IWallabyTransform{TEntity}"/> implementations.
+/// provider-typed transform implementations (e.g. <c>IWallabyEfTransform&lt;TEntity&gt;</c> from
+/// Wallaby.Providers.EntityFrameworkCore).
 /// </summary>
 public sealed record ChangeEvent<TEntity>(
     ChangeAction Action,

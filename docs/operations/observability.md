@@ -27,7 +27,7 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.changes.received` | Counter | `wallaby.slot`, `wallaby.action`, `wallaby.source` | Materialized change events received (live and backfill). |
 | `wallaby.ingestion.lag` | Histogram (s) | `wallaby.slot` | Delay between a source transaction's commit and Wallaby receiving it. |
 | `wallaby.dependent.synthetic` | Counter | `wallaby.table` | Synthetic parent changes emitted inline by dependent-table fan-out (a wide fan-out's offloaded tail is counted by the `backfill.*` metrics instead). |
-| `wallaby.transform.duration` | Histogram (s) | `wallaby.entity` | Time spent invoking a mapping's transform for a batch. |
+| `wallaby.transform.duration` | Histogram (s) | `wallaby.entity`, `wallaby.sink` | Time spent invoking a mapping's transform for a batch. |
 | `wallaby.sink.delivery.duration` | Histogram (s) | `wallaby.sink`, `wallaby.delivery.outcome` | Duration of a single sink delivery attempt (its count by outcome gives attempts and retries). |
 | `wallaby.sink.records.delivered` | Counter | `wallaby.sink` | Records accepted by a sink. |
 | `wallaby.sink.delivery.failures` | Counter | `wallaby.sink`, `wallaby.delivery.outcome` | Failed deliveries (`retryable`/`permanent`). |
@@ -68,6 +68,6 @@ queries your transforms run appear nested under the `transform` (and `dependent.
 Metric attributes are deliberately low-cardinality: `wallaby.slot`, `wallaby.sink`, `wallaby.entity`,
 `wallaby.table`, `wallaby.action`, `wallaby.source`, and `wallaby.delivery.outcome`.
 
-Per-row values - tenant/scope keys, document ids, and per-tenant destinations - are **never** used as
-metric attributes (they would explode cardinality). `wallaby.destination` appears only as a **span**
+Per-row values such as tenant/scope keys, document ids, and per-tenant destinations are **never** used as
+metric attributes as they would explode cardinality. `wallaby.destination` appears only as a **span**
 attribute, where sampling keeps the cost bounded.

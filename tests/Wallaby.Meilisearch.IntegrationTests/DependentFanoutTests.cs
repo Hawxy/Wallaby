@@ -2,14 +2,15 @@ using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
-public class DependentFanoutTests(PostgresFixture pg, MeilisearchFixture meili)
+[ClassDataSource<TestModelPostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
+public class DependentFanoutTests(TestModelPostgresFixture pg, MeilisearchFixture meili)
 {
     private WallabyTestHarness NewHarness(out string index)
     {

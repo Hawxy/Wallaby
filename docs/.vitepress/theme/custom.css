@@ -34,74 +34,76 @@
   font-family: var(--vp-font-family-mono);
 }
 
-/* Monochrome light theme — "printed manual" paper look, ink on warm off-white */
+/* Light theme — "daylight phosphor": the dark neon terminal with the lights
+   on. Cool CRT-glass whites, same amber/blue accent pair at daylight voltage */
 :root {
-  /* Backgrounds: warm paper instead of pure white */
-  --vp-c-bg: #f4f3ef;
-  --vp-c-bg-alt: #f4f3ef;
-  --vp-c-bg-elv: #faf9f6;
-  --vp-c-bg-soft: #eceae5;
+  /* Backgrounds: cool glass instead of warm paper */
+  --vp-c-bg: #f3f5f8;
+  --vp-c-bg-alt: #f3f5f8;
+  --vp-c-bg-elv: #fbfcfe;
+  --vp-c-bg-soft: #e8ecf1;
 
-  /* Text: ink primary, gray secondary tiers */
-  --vp-c-text-1: #1c1c1c;
-  --vp-c-text-2: #4a4a4a;
-  --vp-c-text-3: #6e6e6e;
+  /* Text: cool ink primary, slate secondary tiers */
+  --vp-c-text-1: #15181e;
+  --vp-c-text-2: #454b55;
+  --vp-c-text-3: #697180;
 
-  /* Borders and dividers: quiet rule lines */
-  --vp-c-divider: #d8d6d0;
-  --vp-c-border: #bab8b2;
-  --vp-c-gutter: #e3e1db;
+  /* Borders and dividers: cool rule lines */
+  --vp-c-divider: #d2d8e0;
+  --vp-c-border: #a9b3c0;
+  --vp-c-gutter: #dee3ea;
 
-  /* Brand (links, active nav): deep amber — "red ink" accent on paper */
-  --vp-c-brand-1: #9a5410;
-  --vp-c-brand-2: #7c430c;
-  --vp-c-brand-3: #b8651a;
-  --vp-c-brand-soft: rgba(154, 84, 16, 0.1);
+  /* Brand (links, active nav): electric amber — daylight phosphor */
+  --vp-c-brand-1: #b04a00;
+  --vp-c-brand-2: #8e3b00;
+  --vp-c-brand-3: #d65f00;
+  --vp-c-brand-soft: rgba(214, 95, 0, 0.12);
 
-  --vp-c-default-soft: rgba(28, 28, 28, 0.06);
+  --vp-c-default-soft: rgba(21, 24, 30, 0.06);
 
-  /* Code blocks: darker paper tone */
-  --vp-code-block-bg: #e9e7e1;
-  --vp-code-bg: rgba(28, 28, 28, 0.07);
-  --vp-code-color: #1c1c1c;
+  /* Code blocks: cooler glass tone, light enough to keep comment
+     tokens above 4.5:1 */
+  --vp-code-block-bg: #f0f3f7;
+  --vp-code-bg: rgba(21, 24, 30, 0.07);
+  --vp-code-color: #15181e;
 
-  /* Buttons: ink fill with paper text (inverse of dark mode) */
-  --vp-button-brand-bg: #1c1c1c;
-  --vp-button-brand-text: #f4f3ef;
-  --vp-button-brand-border: #1c1c1c;
-  --vp-button-brand-hover-bg: #3a3a3a;
-  --vp-button-brand-hover-text: #f4f3ef;
-  --vp-button-brand-hover-border: #3a3a3a;
+  /* Buttons: ink fill with glass text (inverse of dark mode) */
+  --vp-button-brand-bg: #15181e;
+  --vp-button-brand-text: #f3f5f8;
+  --vp-button-brand-border: #15181e;
+  --vp-button-brand-hover-bg: #333a44;
+  --vp-button-brand-hover-text: #f3f5f8;
+  --vp-button-brand-hover-border: #333a44;
   --vp-button-brand-active-bg: #000000;
-  --vp-button-brand-active-text: #f4f3ef;
+  --vp-button-brand-active-text: #f3f5f8;
   --vp-button-brand-active-border: #000000;
 
-  /* Home hero: amber → blue duotone, riso-print style */
+  /* Home hero: electric amber → blue duotone */
   --vp-home-hero-name-color: transparent;
   --vp-home-hero-name-background: linear-gradient(
     150deg,
-    #9a5410 30%,
-    #0a5d8f
+    #d65f00 30%,
+    #0080cc
   );
 
   /* Callouts: blue = informational (tip/info), amber = caution (warning) */
-  --vp-custom-block-tip-border: rgba(10, 93, 143, 0.3);
-  --vp-custom-block-tip-bg: rgba(10, 93, 143, 0.07);
-  --vp-custom-block-tip-code-bg: rgba(10, 93, 143, 0.08);
-  --vp-custom-block-info-border: rgba(10, 93, 143, 0.3);
-  --vp-custom-block-info-bg: rgba(10, 93, 143, 0.07);
-  --vp-custom-block-info-code-bg: rgba(10, 93, 143, 0.08);
-  --vp-custom-block-warning-border: rgba(154, 84, 16, 0.35);
-  --vp-custom-block-warning-bg: rgba(154, 84, 16, 0.08);
-  --vp-custom-block-warning-code-bg: rgba(154, 84, 16, 0.09);
+  --vp-custom-block-tip-border: rgba(0, 114, 200, 0.3);
+  --vp-custom-block-tip-bg: rgba(0, 114, 200, 0.07);
+  --vp-custom-block-tip-code-bg: rgba(0, 114, 200, 0.08);
+  --vp-custom-block-info-border: rgba(0, 114, 200, 0.3);
+  --vp-custom-block-info-bg: rgba(0, 114, 200, 0.07);
+  --vp-custom-block-info-code-bg: rgba(0, 114, 200, 0.08);
+  --vp-custom-block-warning-border: rgba(214, 95, 0, 0.35);
+  --vp-custom-block-warning-bg: rgba(214, 95, 0, 0.08);
+  --vp-custom-block-warning-code-bg: rgba(214, 95, 0, 0.09);
 
   /* Badges: blue informational, amber caution */
-  --vp-badge-info-text: #0a5d8f;
-  --vp-badge-info-bg: rgba(10, 93, 143, 0.08);
-  --vp-badge-tip-text: #0a5d8f;
-  --vp-badge-tip-bg: rgba(10, 93, 143, 0.08);
-  --vp-badge-warning-text: #9a5410;
-  --vp-badge-warning-bg: rgba(154, 84, 16, 0.08);
+  --vp-badge-info-text: #0067b8;
+  --vp-badge-info-bg: rgba(0, 114, 200, 0.1);
+  --vp-badge-tip-text: #0067b8;
+  --vp-badge-tip-bg: rgba(0, 114, 200, 0.1);
+  --vp-badge-warning-text: #a34400;
+  --vp-badge-warning-bg: rgba(214, 95, 0, 0.1);
 }
 
 /* Monochrome dark theme — softened contrast (~14:1) to avoid halation */
@@ -183,9 +185,9 @@
 /* Neon glow for interactive elements: amber = primary, blue = secondary.
    Two layers: tight bright halo + wide faint bloom. */
 :root {
-  --wb-accent-blue: #0a5d8f;
-  --wb-glow-amber: 0 0 4px rgba(154, 84, 16, 0.45), 0 0 16px rgba(154, 84, 16, 0.3);
-  --wb-glow-blue: 0 0 4px rgba(10, 93, 143, 0.45), 0 0 16px rgba(10, 93, 143, 0.3);
+  --wb-accent-blue: #0072c8;
+  --wb-glow-amber: 0 0 4px rgba(214, 95, 0, 0.5), 0 0 18px rgba(214, 95, 0, 0.28);
+  --wb-glow-blue: 0 0 4px rgba(0, 114, 200, 0.5), 0 0 18px rgba(0, 114, 200, 0.28);
 }
 
 .dark {
@@ -267,9 +269,31 @@
   box-shadow: var(--wb-glow-amber);
 }
 
+/* Button-style links in doc pages, applied via {.wb-btn} in markdown */
+.vp-doc a.wb-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 2px;
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+
+.vp-doc a.wb-btn:hover,
+.vp-doc a.wb-btn:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
+}
+
 /* Text selection: amber tint */
 ::selection {
-  background: rgba(154, 84, 16, 0.25);
+  background: rgba(214, 95, 0, 0.22);
 }
 
 .dark ::selection {
@@ -372,6 +396,12 @@ html {
 :focus-visible {
   outline: 1px solid var(--vp-c-brand-1);
   outline-offset: 2px;
+}
+
+/* Search modal input: the surrounding search-bar border already shows
+   focus, so the global ring would draw a second box inside it */
+.VPLocalSearchBox .search-input:focus-visible {
+  outline: none;
 }
 
 /* Code-block language label as a bordered chip */

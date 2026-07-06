@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Nuke.Common;
 using Nuke.Common.CI;
@@ -15,7 +16,7 @@ using static Nuke.Common.Tools.DotNet.DotNetTasks;
     GitHubActionsImage.UbuntuLatest,
     OnPushBranches = ["main"],
     OnPullRequestBranches = ["main"],
-    InvokedTargets = [nameof(Test)])]
+    InvokedTargets = [nameof(Test), nameof(AotSmoke)])]
 [GitHubActions(
     "Manual Nuget Push",
     GitHubActionsImage.UbuntuLatest,
@@ -70,38 +71,43 @@ class Build : NukeBuild
             });
         });
     
+    Target AotSmoke => _ => _
+        .Executes(() =>
+        {
+            var project = Solution.AllProjects.Single(x => x.Name == "Wallaby.AotSmokeTest");
+            var output = ArtifactsDirectory / "aot-smoke";
+            DotNetPublish(_ => _
+                .SetProject(project)
+                .SetConfiguration("Release")
+                .SetOutput(output));
+
+            var exe = output / (OperatingSystem.IsWindows() ? "Wallaby.AotSmokeTest.exe" : "Wallaby.AotSmokeTest");
+            ProcessTasks.StartProcess(exe, workingDirectory: output).AssertZeroExitCode();
+        });
+
+    static readonly string[] PackableProjects =
+    [
+        "Wallaby",
+        "Wallaby.Providers.EntityFrameworkCore",
+        "Wallaby.Providers.Marten",
+        "Wallaby.Sinks.Meilisearch",
+        "Wallaby.AspNetCore.HealthChecks",
+        "Wallaby.Testing",
+    ];
+
     Target NugetPack => _ => _
         .DependsOn(Compile)
         .Executes(() =>
         {
-            var wallaby = Solution.AllProjects.Single(x=> x.Name == "Wallaby");
-            var wallabySink = Solution.AllProjects.Single(x=> x.Name == "Wallaby.Sinks.Meilisearch");
-            var wallabyHealthChecks = Solution.AllProjects.Single(x=> x.Name == "Wallaby.AspNetCore.HealthChecks");
-            var wallabyTesting = Solution.AllProjects.Single(x=> x.Name == "Wallaby.Testing");
-            
-            DotNetPack(_ => _
-                .SetProject(wallaby)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
-
-            DotNetPack(_ => _
-                .SetProject(wallabySink)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
-            
-            DotNetPack(_ => _
-                .SetProject(wallabyHealthChecks)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
-
-            DotNetPack(_ => _
-                .SetProject(wallabyTesting)
-                .SetConfiguration("Release")
-                .EnableContinuousIntegrationBuild()
-                .SetOutputDirectory(ArtifactsDirectory));
+            foreach (var name in PackableProjects)
+            {
+                var project = Solution.AllProjects.Single(x => x.Name == name);
+                DotNetPack(_ => _
+                    .SetProject(project)
+                    .SetConfiguration("Release")
+                    .EnableContinuousIntegrationBuild()
+                    .SetOutputDirectory(ArtifactsDirectory));
+            }
         });
     
     [Parameter("Nuget Api Key")] [Secret] readonly string NugetApiKey;

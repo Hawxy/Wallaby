@@ -3,16 +3,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.Providers.EntityFrameworkCore;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
+using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
 
 namespace Wallaby.Meilisearch.IntegrationTests;
 
 [NotInParallel]
-[ClassDataSource<PostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
-public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
+[ClassDataSource<TestModelPostgresFixture, MeilisearchFixture>(Shared = new[] { SharedType.PerTestSession, SharedType.PerTestSession })]
+public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili)
 {
     private TestDatabase Db => new(pg.ConnectionString);
 
@@ -25,18 +27,19 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
         services.AddWallaby(cdc =>
         {
-            cdc.UseContext<AppDbContext>()
+            cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(pg.ConnectionString)
                .ConfigureOptions(o =>
                {
                    o.SlotName = names.Slot;
                    o.PublicationName = names.Publication;
                    o.ChunkSize = 50;
-                   o.StandbyRetryInterval = TimeSpan.FromSeconds(1);
+                   o.Advanced.StandbyRetryInterval = TimeSpan.FromSeconds(1);
                })
                .AddMeilisearchSink("meili", m => { m.Host = meili.Host; m.ApiKey = meili.ApiKey; })
-               .Map<Product>()
-                   .ToSink("meili", destination: index)
+               .WithMappings(sink => sink
+                   .Map<Product>()
+                   .ToDestination(index)
                    .WithBackfillVersion(Guid.NewGuid().ToString("N")) // unique => isolates this test's backfill state
                    .UsingTransform((_, changes, _) =>
                    {
@@ -46,7 +49,7 @@ public class EndToEndTests(PostgresFixture pg, MeilisearchFixture meili)
                            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
                        return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   });
+                   }));
         });
         return services.BuildServiceProvider();
     }

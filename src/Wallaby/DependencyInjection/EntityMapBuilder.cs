@@ -1,15 +1,14 @@
+using System.ComponentModel;
 using System.Linq.Expressions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
-using Wallaby.Internal.Pipeline;
+using Wallaby.Providers;
 
 namespace Wallaby.DependencyInjection;
 
 /// <summary>
-/// Configures the routing for one entity type: which sink/destination it goes to, its document-id rule,
-/// its backfill version, and the transform that shapes its document. The transform holds all the
-/// enrichment/transformation logic; everything here is routing.
+/// Configures one entity mapping of a sink: its destination, document-id rule, backfill version, and the
+/// transform that shapes its document. The transform holds all the enrichment/transformation logic;
+/// everything here is routing.
 /// </summary>
 public sealed class EntityMapBuilder<TEntity> where TEntity : class
 {
@@ -17,10 +16,13 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     internal EntityMapBuilder(MappingRegistration registration) => _registration = registration;
 
-    /// <summary>Route this entity's documents to the named sink and (optional) destination/index.</summary>
-    public EntityMapBuilder<TEntity> ToSink(string sinkName, string? destination = null)
+    /// <summary>
+    /// Route this entity's documents to a destination within the sink (e.g. an index or topic). When
+    /// omitted, the sink's default destination applies.
+    /// </summary>
+    public EntityMapBuilder<TEntity> ToDestination(string destination)
     {
-        _registration.SinkName = sinkName;
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         _registration.Destination = destination;
         return this;
     }
@@ -43,8 +45,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Derive a per-row scope key (e.g. tenant id) from the change. The engine sub-groups the transform
-    /// batch by this key and supplies a scope-scoped enrichment <c>DbContext</c> (see <c>UseScopedContext</c>);
-    /// it also feeds <see cref="ScopedDestination"/>.
+    /// batch by this key and supplies a scope-scoped enrichment session (see the provider's scoped-context
+    /// registration, e.g. <c>UseScopedDbContext</c>); it also feeds <see cref="ScopedDestination"/>.
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedBy(Func<TEntity, object?> keySelector)
     {
@@ -75,39 +77,41 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
         return this;
     }
 
-    /// <summary>Use a transform instance.</summary>
-    public EntityMapBuilder<TEntity> UsingTransform(IWallabyTransform<TEntity> transform)
+    /// <summary>
+    /// Register the transform via a provider-built invoker. Provider packages call this from their typed
+    /// <c>UsingTransform</c> extensions (e.g. Wallaby.Providers.EntityFrameworkCore's DbContext-typed overloads);
+    /// use those instead of calling this directly. A provider-typed extension passes its
+    /// <paramref name="providerName"/> so the mapping resolves to the provider whose session type the
+    /// transform expects.
+    /// </summary>
+    public EntityMapBuilder<TEntity> UsingTransformInvoker(
+        Func<IServiceProvider, IWallabyTransformInvoker> factory, string? providerName = null)
     {
-        _registration.TransformFactory = _ => new TransformInvoker<TEntity>(transform);
-        return this;
-    }
-
-    /// <summary>Use a transform type resolved (or constructed) from the container.</summary>
-    public EntityMapBuilder<TEntity> UsingTransform<TTransform>()
-        where TTransform : class, IWallabyTransform<TEntity>
-    {
-        _registration.TransformFactory = sp =>
-            new TransformInvoker<TEntity>(ActivatorUtilities.GetServiceOrCreateInstance<TTransform>(sp));
-        return this;
-    }
-
-    /// <summary>Use an inline transform lambda (the trivial, no-class case).</summary>
-    public EntityMapBuilder<TEntity> UsingTransform(
-        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> handler)
-    {
-        _registration.TransformFactory = _ =>
-            new TransformInvoker<TEntity>(new DelegateTransform<TEntity>(handler));
+        ArgumentNullException.ThrowIfNull(factory);
+        _registration.TransformFactory = factory;
+        _registration.TransformProviderName = providerName;
         return this;
     }
 
     /// <summary>
-    /// Declare that changes to the table behind <paramref name="navigation"/> should fan out and re-emit
-    /// this entity. Use this when the transform reads data from related tables (a referenced principal,
-    /// a many-to-many skip-navigation's join table, or an owned side table) — otherwise those changes
-    /// would not reach the pipeline. The navigation expression is resolved against the EF Core model at
-    /// startup; it must point at a single one-hop navigation (no chains, no method calls).
+    /// Pin this mapping to the named storage provider. Only needed when more than one registered provider
+    /// models <typeparamref name="TEntity"/> and the transform's type doesn't already decide it — the usual
+    /// auto-resolution assigns each mapping to the sole provider that models its type.
     /// </summary>
-    public EntityMapBuilder<TEntity> DependsOn<TNav>(Expression<Func<TEntity, TNav>> navigation)
+    public EntityMapBuilder<TEntity> FromProvider(string providerName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
+        _registration.ExplicitProviderName = providerName;
+        return this;
+    }
+
+    /// <summary>
+    /// Declare a dependent navigation via a raw lambda. Provider packages call this from their typed
+    /// <c>DependsOn</c> extensions (e.g. Wallaby.Providers.EntityFrameworkCore's); use those instead of calling
+    /// this directly. The expression is resolved against the storage provider's model at startup.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public EntityMapBuilder<TEntity> DependsOnNavigation(LambdaExpression navigation)
     {
         ArgumentNullException.ThrowIfNull(navigation);
         _registration.DeclaredDependencies.Add(navigation);

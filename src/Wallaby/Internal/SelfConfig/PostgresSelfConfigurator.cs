@@ -6,14 +6,14 @@ using Wallaby.Model;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
-/// Default <see cref="ICdcSelfConfigurator"/>: validates the server, ensures the <c>wallaby</c> state
+/// Default <see cref="ISelfConfigurator"/>: validates the server, ensures the <c>wallaby</c> state
 /// schema, and creates/reconciles the publication and pgoutput replication slot derived from the
 /// captured model. Uses a normal (non-replication) connection.
 /// </summary>
 internal sealed class PostgresSelfConfigurator(
     NpgsqlDataSource dataSource,
     SelfConfigOptions options,
-    ILogger logger) : ICdcSelfConfigurator
+    ILogger logger) : ISelfConfigurator
 {
     private readonly ServerValidator _validator = new(logger);
     private readonly StateSchemaBootstrapper _stateSchema = new();

@@ -4,23 +4,20 @@ import PipelineFlow from './.vitepress/theme/PipelineFlow.vue'
 
 # How It Works
 
-Wallaby runs a single ordered pipeline per slot. It reads committed transactions from Postgres logical
-replication, materializes each row change into your mapped EF Core entity, transforms it into a document,
-and delivers it to your sinks. **Only after every sink accepts the batch** does it acknowledge the commit
-and advance the slot - that ordering is what gives at-least-once delivery, since a crash simply re-streams
-from the last acknowledged position.
-
-## The Pipeline
 
 <PipelineFlow />
 
-- **Read + Materialize**: decode each committed transaction and turn its row changes into typed
-  `ChangeEvent`s.
-- **Transform + Route**: group by mapping, run each [transform](/transforms) to shape documents, and slice
-  the result into batches of at most [`MaxBatchSize`](/getting-started#options).
-- **Sinks**: deliver each batch (with retry/backoff).
-- **Acknowledge + Checkpoint**: once everything is delivered, advance the replication slot and persist the
-  checkpoint.
+- **Read + Materialize**: stream committed transactions from the logical replication slot in commit
+  order, decode each row change, and materialize it into your mapped entity type through the registered [storage provider](/providers/overview).
+- **Transform + Route**: group a transaction's changes by entity mapping, run each [transform](/transforms)
+  to shape the output documents, resolve their destinations, and slice
+  the result into batches of at most [`MaxBatchSize`](/configuration#general-options).
+- **Sinks**: deliver each batch to its sink with retry/backoff. Independent sinks are written
+  concurrently; a batch that exhausts its retries halts the pipeline rather than being skipped.
+- **Acknowledge + Checkpoint**: only after **every** sink has accepted the transaction's batches,
+  acknowledge the commit, thus advancing the replication slot and persisting the checkpoint. That ordering is
+  what gives at-least-once delivery: a crash before the acknowledgement simply re-streams from the last
+  acknowledged position, and the sinks' idempotent upsert-by-id contract absorbs the redelivery.
 
 [Backfill](/backfill) (initial snapshots) and [dependent fan-out](/transforms#dependent-tables) (re-emitting
 an entity when a related table changes) run on the leader and feed rows through the **same** transform and

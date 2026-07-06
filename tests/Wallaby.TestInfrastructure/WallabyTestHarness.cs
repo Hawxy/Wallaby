@@ -1,29 +1,28 @@
 using System.Linq.Expressions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
-using Wallaby.Internal.Materialization;
 using Wallaby.Internal.Pipeline;
-using Wallaby.Testing;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
 using Wallaby.Model;
-using Wallaby.TestModel;
+using Wallaby.Providers;
+using Wallaby.Testing;
 
 namespace Wallaby.TestInfrastructure;
 
 /// <summary>
 /// Drives a CDC pipeline against a real Postgres for integration tests, removing the per-test boilerplate
-/// of self-config, pipeline wiring, backfill, lifecycle, and fault propagation.
+/// of self-config, pipeline wiring, backfill, lifecycle, and fault propagation. Provider-neutral: the
+/// storage provider comes in through the constructor's <see cref="IWallabyModelProvider"/>, and provider
+/// packages layer their typed configuration on top (e.g. the EF Core <c>ForTestModel</c>/<c>Map</c>/
+/// <c>Project</c> extension members in Wallaby.TestInfrastructure.EntityFrameworkCore).
 /// </summary>
 /// <remarks>
-/// Typical one-shot use:
+/// Typical one-shot use (with the EF Core test-model extensions):
 /// <code>
 /// await using var harness = WallabyTestHarness.ForTestModel(conn)
 ///     .AddSink(sink)
@@ -36,44 +35,39 @@ namespace Wallaby.TestInfrastructure;
 /// </remarks>
 public sealed class WallabyTestHarness : IAsyncDisposable
 {
-    private readonly string _connectionString;
     private readonly NpgsqlDataSource _dataSource;
-    private readonly Func<DbContext> _newContext;
+    private readonly IWallabyModelProvider _modelProvider;
     private readonly Dictionary<string, ISink> _sinks = [];
-    private readonly Dictionary<Type, EntityMapping> _mappings = [];
+    private readonly List<EntityMapping> _mappings = [];
     private readonly Dictionary<Type, string?> _backfillTypes = [];
     private readonly Dictionary<Type, List<LambdaExpression>> _declaredDependencies = [];
+    private readonly HashSet<Type> _capturedEntities = [];
     private bool _broadcast;
-    private Func<object?, DbContext>? _scopedContextFactory;
+    private IEnrichmentSessionProvider? _sessionProvider;
 
-    private IModel? _model;
-    private WallabyModel? _cdcModel;
-    private EntityMaterializer? _materializer;
+    private WallabyModel? _model;
+    private IRowMaterializer? _materializer;
 
     private CancellationTokenSource? _cts;
     private ITransactionSpill? _spill;
     private LogicalReplicationStream? _stream;
-    private CdcPipeline? _pipeline;
+    private WallabyPipeline? _pipeline;
     private WatermarkBackfillCoordinator? _coordinator;
     private DependentChangeResolver? _dependentResolver;
     private IFanoutQueueStore? _fanoutQueue;
     private Task? _pipelineTask;
 
-    public WallabyTestHarness(string connectionString, Func<DbContext> contextFactory, WallabyNames? names = null)
+    public WallabyTestHarness(string connectionString, IWallabyModelProvider modelProvider, WallabyNames? names = null)
     {
-        _connectionString = connectionString;
+        ConnectionString = connectionString;
         _dataSource = NpgsqlDataSource.Create(connectionString);
-        _newContext = contextFactory;
+        _modelProvider = modelProvider;
         Names = names ?? WallabyNames.Unique();
-        Db = new TestDatabase(connectionString);
     }
 
-    /// <summary>Create a harness wired to the shared <see cref="AppDbContext"/> test model.</summary>
-    public static WallabyTestHarness ForTestModel(string connectionString, WallabyNames? names = null)
-        => new(connectionString, () => new AppDbContext(TestModelFactory.CreateOptions(connectionString)), names);
+    public string ConnectionString { get; }
 
     public WallabyNames Names { get; }
-    public TestDatabase Db { get; }
 
     /// <summary>Telemetry holder threaded through the pipeline; attach a <c>MetricCollector</c>/<c>ActivityListener</c> for assertions.</summary>
     public WallabyInstrumentation Instrumentation { get; } = new();
@@ -112,7 +106,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>A backfill manager bound to this harness's database (for manual <c>RequestBackfillAsync</c>).</summary>
     public IWallabyBackfillManager BackfillManager
     {
-        get { EnsureModel(); return new DefaultBackfillManager(_cdcModel!, new PostgresBackfillStore(_dataSource)); }
+        get { EnsureModel(); return new DefaultBackfillManager(_model!, new PostgresBackfillStore(_dataSource)); }
     }
 
     // ---- configuration ----
@@ -138,60 +132,47 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         return this;
     }
 
-    /// <summary>Map an entity to a sink/destination via a full transform (with <see cref="DbContext"/> access).</summary>
-    public WallabyTestHarness Map<TEntity>(
-        string sink,
-        string? destination,
-        Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> transform,
-        bool backfill = false,
-        string? backfillVersion = null,
-        Func<TEntity, object?>? scopeKey = null,
-        Func<object?, string?>? scopedDestination = null)
-        where TEntity : class
+    /// <summary>
+    /// Declare an entity for capture without routing it (mappings declare theirs implicitly). Needed by
+    /// <see cref="Broadcast"/>-style tests, which have no mappings to derive the capture set from.
+    /// </summary>
+    public WallabyTestHarness Capture<TEntity>()
     {
-        _mappings[typeof(TEntity)] = new EntityMapping
-        {
-            EntityClrType = typeof(TEntity),
-            SinkName = sink,
-            Destination = destination,
-            BackfillVersion = backfillVersion,
-            Transform = new TransformInvoker<TEntity>(new DelegateTransform<TEntity>(transform)),
-            ScopeKeySelector = scopeKey is null ? null : change => change.Entity is TEntity e ? scopeKey(e) : null,
-            DestinationSelector = scopedDestination,
-        };
-        if (backfill)
-        {
-            _backfillTypes[typeof(TEntity)] = backfillVersion;
-        }
+        _capturedEntities.Add(typeof(TEntity));
         return this;
     }
 
-    /// <summary>Map an entity to a sink/destination via a simple per-row projection.</summary>
-    public WallabyTestHarness Project<TEntity>(
-        string sink, string? destination, Func<TEntity, WallabyDocument?> document, bool backfill = false, string? backfillVersion = null,
-        Func<TEntity, object?>? scopeKey = null, Func<object?, string?>? scopedDestination = null)
-        where TEntity : class
-        => Map<TEntity>(sink, destination, (_, changes, _) =>
-        {
-            var documents = new Dictionary<DocumentKey, WallabyDocument?>();
-            foreach (var change in changes)
-            {
-                documents[change.Key] = document(change.Entity!);
-            }
-            return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
-        }, backfill, backfillVersion, scopeKey, scopedDestination);
-
-    /// <summary>Build the enrichment <see cref="DbContext"/> from a row's scope key (for tenant tests).</summary>
-    public WallabyTestHarness UseScopedContext(Func<object?, DbContext> factory)
+    /// <summary>
+    /// Supply the enrichment sessions transforms lease their queries from. Provider extensions call this
+    /// (e.g. the EF Core <c>ForTestModel</c> factory registers a context-backed provider and
+    /// <c>UseScopedContext</c> overrides it with a scope-key-aware one).
+    /// </summary>
+    public WallabyTestHarness UseEnrichmentSessions(IEnrichmentSessionProvider sessionProvider)
     {
-        _scopedContextFactory = factory;
+        _sessionProvider = sessionProvider;
+        return this;
+    }
+
+    /// <summary>
+    /// Register a mapping built by a provider extension (which owns the transform invoker), mirroring the
+    /// production <c>WithMappings(sink => sink.Map&lt;TEntity&gt;()...)</c> registration. The same entity may
+    /// be mapped repeatedly (to different sinks); backfill versions are per type, last-wins.
+    /// </summary>
+    internal WallabyTestHarness AddMapping(EntityMapping mapping, bool backfill, string? backfillVersion)
+    {
+        _mappings.Add(mapping);
+        if (backfill)
+        {
+            _backfillTypes[mapping.EntityClrType] = backfillVersion;
+        }
         return this;
     }
 
     /// <summary>
     /// Declare a dependency: changes to the table behind <paramref name="navigation"/> should fan out
-    /// and re-emit <typeparamref name="TPrimary"/>. Mirrors the production
-    /// <c>EntityMapBuilder.DependsOn(...)</c> API.
+    /// and re-emit <typeparamref name="TPrimary"/>. Mirrors the production EF Core
+    /// <c>DependsOn(...)</c> mapping extension; the expression is resolved by the storage provider
+    /// when the capture plan is built.
     /// </summary>
     public WallabyTestHarness DependsOn<TPrimary, TNav>(Expression<Func<TPrimary, TNav>> navigation)
     {
@@ -214,7 +195,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
                 _dataSource,
                 new SelfConfigOptions { SlotName = Names.Slot, PublicationName = Names.Publication },
                 NullLogger.Instance)
-            .EnsureConfiguredAsync(_cdcModel!, ct);
+            .EnsureConfiguredAsync(_model!, ct);
     }
 
     /// <summary>Start the live pipeline (and backfill coordinator) in the background.</summary>
@@ -228,23 +209,33 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot);
-        _stream = new LogicalReplicationStream(_connectionString, Names.Slot, Names.Publication, _spill);
+        _stream = new LogicalReplicationStream(ConnectionString, Names.Slot, Names.Publication, _spill);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
 
-        IEnrichmentContextProvider contextProvider = _scopedContextFactory is { } scoped
-            ? new ScopedEnrichmentContextProvider((key, _) => scoped(key), NullServiceProvider.Instance)
-            : new DefaultEnrichmentContextProvider(_newContext);
-        IChangeRouter router = _broadcast
-            ? new BroadcastChangeRouter(_sinks.Keys.ToList())
-            : new MappingChangeRouter(_mappings, contextProvider, Instrumentation);
+        IChangeRouter router;
+        if (_broadcast)
+        {
+            router = new BroadcastChangeRouter(_sinks.Keys.ToList());
+        }
+        else
+        {
+            // Sessions are late-bound here so UseEnrichmentSessions/UseScopedContext compose in any order
+            // with the Map/Project calls that created the mappings.
+            var sessions = _sessionProvider ?? throw new InvalidOperationException(
+                "No enrichment session provider is registered. Create the harness through a provider " +
+                "factory (e.g. WallabyTestHarness.ForTestModel) or call UseEnrichmentSessions(...).");
+            router = new MappingChangeRouter(
+                _mappings.Select(m => m with { Sessions = sessions }).ToList(),
+                Instrumentation);
+        }
 
-        _dependentResolver = _cdcModel!.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_dataSource, _cdcModel, Instrumentation)
+        _dependentResolver = _model!.DependentBindings.Count > 0
+            ? new DependentChangeResolver(_dataSource, _model, Instrumentation)
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
-        _pipeline = new CdcPipeline(
+        _pipeline = new WallabyPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
@@ -272,7 +263,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             return 0;
         }
         // The interval is unused here — DrainFanoutAsync only invokes DrainOnceAsync, not the polling loop.
-        var worker = new FanoutQueueWorker(_fanoutQueue, _coordinator, _cdcModel!, NullLogger.Instance, TimeSpan.FromSeconds(1));
+        var worker = new FanoutQueueWorker(_fanoutQueue, _coordinator, _model!, NullLogger.Instance, TimeSpan.FromSeconds(1));
         return await worker.DrainOnceAsync(_cts.Token);
     }
 
@@ -286,7 +277,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         var tables = _backfillTypes
-            .Select(kv => (_cdcModel!.FindByClrType(kv.Key)!, version ?? kv.Value))
+            .Select(kv => (_model!.FindByClrType(kv.Key)!, version ?? kv.Value))
             .ToList();
 
         var scheduler = new BackfillScheduler(
@@ -379,30 +370,20 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     private void EnsureModel()
     {
-        if (_cdcModel is not null)
+        if (_model is not null)
         {
             return;
         }
 
-        using var context = _newContext();
-        _model = context.Model;
         var declared = _declaredDependencies.ToDictionary(
             kv => kv.Key,
             kv => (IReadOnlyList<LambdaExpression>)kv.Value);
-        _cdcModel = ModelToCdcModel.Build(_model, new CaptureSpec
+        var plan = _modelProvider.BuildCapturePlan(new CaptureSpec
         {
-            CaptureAllMapped = true,
+            DeclaredEntities = [.. _capturedEntities.Union(_mappings.Select(m => m.EntityClrType))],
             DeclaredDependencies = declared,
         });
-        _materializer = new EntityMaterializer(_model);
-    }
-    
-    private sealed class NullServiceProvider : IServiceProvider, IServiceScopeFactory, IServiceScope
-    {
-        public static readonly NullServiceProvider Instance = new();
-        public object? GetService(Type serviceType) => serviceType == typeof(IServiceScopeFactory) ? this : null;
-        public IServiceScope CreateScope() => this;
-        public IServiceProvider ServiceProvider => this;
-        public void Dispose() { }
+        _model = plan.Model;
+        _materializer = plan.Materializer;
     }
 }

@@ -1,6 +1,6 @@
 using Wallaby.Abstractions;
-using Wallaby.Internal.Materialization;
 using Wallaby.Model;
+using Wallaby.Providers;
 
 namespace Wallaby.Internal.Pipeline;
 
@@ -12,7 +12,7 @@ namespace Wallaby.Internal.Pipeline;
 /// always halts the pipeline
 /// </para>
 /// </summary>
-internal sealed class ChangeEventFactory(EntityMaterializer materializer)
+internal sealed class ChangeEventFactory(IRowMaterializer materializer)
 {
     public ChangeEvent? Create(RawChange change)
     {
@@ -30,7 +30,7 @@ internal sealed class ChangeEventFactory(EntityMaterializer materializer)
             IsBackfill: change.Action == ChangeAction.Read);
 
         return new ChangeEvent(
-            change.Action,
+            row.Action,
             metadata,
             row.Entity,
             row.Record,

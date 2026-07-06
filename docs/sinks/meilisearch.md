@@ -4,6 +4,12 @@ The `Wallaby.Sinks.Meilisearch` package keeps Meilisearch indexes continuously i
 Postgres tables. Upserts are written with a stable primary key (so updates are idempotent) and
 deletions remove by that same id.
 
+## Install
+
+```bash
+dotnet add package Wallaby.Sinks.Meilisearch
+```
+
 ## Register
 
 ```csharp
@@ -15,12 +21,14 @@ cdc.AddMeilisearchSink("meili", m =>
 });
 ```
 
-Then route mappings to it, using the destination as the **index name**:
+Then attach the entities it indexes, using the destination as the **index name**:
 
 ```csharp
-cdc.Map<Product>()
-   .ToSink("meili", destination: "products")
-   .UsingTransform(/* ... */);
+cdc.AddMeilisearchSink("meili", m => { /* ... */ })
+   .WithMappings(sink => sink
+       .Map<Product>()
+       .ToDestination("products")
+       .UsingTransform(/* ... */));
 ```
 
 ## Options
@@ -72,7 +80,7 @@ A few details:
 Set `ValidateConfiguredAttributes = false` to opt out and let Meilisearch accept whatever the transform emits.
 
 ::: tip
-Per-tenant indexes from [`ScopedDestination`](/multi-tenancy) are not supported at the moment. 
+Per-tenant indexes from [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) are not supported at the moment. 
 They're auto-created on first write with the sink's `PrimaryKey` and use Meilisearch defaults.
 
 If a way to customize this would be useful, open an issue.
@@ -98,4 +106,5 @@ after a crash is safe.
 
 ## Per-tenant indexes
 
-Route each tenant to its own index with `ScopedDestination` — see [Multi-tenancy](/multi-tenancy).
+Route each tenant to its own index with `ScopedDestination` — see multi-tenancy for
+[EF Core](/providers/entity-framework-core/multi-tenancy) or [Marten](/providers/marten/multi-tenancy).
