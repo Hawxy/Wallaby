@@ -1,8 +1,8 @@
 using Marten;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Pipeline;
-using Wallaby.Marten;
-using Wallaby.Marten.Internal;
+using Wallaby.Providers.Marten;
+using Wallaby.Providers.Marten.Internal;
 using Wallaby.TestInfrastructure;
 
 namespace Wallaby.TestInfrastructure.Marten;

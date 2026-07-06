@@ -22,7 +22,7 @@ const destActive = ref(false);
 
 // destination cycles with each batch; starts (and, under reduced
 // motion, stays) on the catch-all
-const destinations = ['anywhere', 'search index', 'vector db'];
+const destinations = ['anywhere', 'search index', 'vector db', 'http endpoint'];
 const destIndex = ref(0);
 
 let cycleCount = 0;

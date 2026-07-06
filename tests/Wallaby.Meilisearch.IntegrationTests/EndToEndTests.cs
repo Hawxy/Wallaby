@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
-using Wallaby.EntityFrameworkCore;
+using Wallaby.Providers.EntityFrameworkCore;
 using Wallaby.Meilisearch.IntegrationTests.Infrastructure;
 using Wallaby.Sinks.Meilisearch;
 using Wallaby.TestInfrastructure.EntityFrameworkCore;

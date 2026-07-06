@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
-using Wallaby.EntityFrameworkCore;
-using Wallaby.EntityFrameworkCore.Internal;
+using Wallaby.Providers.EntityFrameworkCore;
+using Wallaby.Providers.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;

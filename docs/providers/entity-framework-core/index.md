@@ -1,6 +1,6 @@
 # EF Core
 
-The `Wallaby.EntityFrameworkCore` package drives capture from your EF Core model: Wallaby watches the
+The `Wallaby.Providers.EntityFrameworkCore` package drives capture from your EF Core model: Wallaby watches the
 tables behind your mapped entities, materializes each row change back into your **entity types**, lets
 you transform/enrich them, and routes the resulting documents through the usual transform → sink
 pipeline.
@@ -8,7 +8,7 @@ pipeline.
 ## Install
 
 ```bash
-dotnet add package Wallaby.EntityFrameworkCore
+dotnet add package Wallaby.Providers.EntityFrameworkCore
 dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 ```
 
@@ -16,11 +16,11 @@ dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 
 Call `AddWallaby` to start and chain in your `DbContext` via `UseEntityFrameworkCore<TContext>()`. Wallaby will resolve your context regardless of if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
 
-You must also supply a connection string — via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding — so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
+You must also supply a connection string via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding. This is so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 
 ```csharp
 using Wallaby.Abstractions;
-using Wallaby.EntityFrameworkCore;
+using Wallaby.Providers.EntityFrameworkCore;
 using Wallaby.DependencyInjection;
 using Wallaby.Sinks.Meilisearch;
 
@@ -159,7 +159,7 @@ a million products). Wallaby keeps this bounded:
 - **Consolidated lookups.** All distinct keys changed for a dependent table in one transaction are resolved
   with a single `IN (…)` query per relationship.
 - **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/configuration#general-options) affected rows
-  are re-emitted inline; if more remain, the rest is handed to a *scoped backfill job* that re-snapshots
+  are re-emitted inline. If more remain, the rest is handed to a *scoped backfill job* that re-snapshots
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.
 - **On-demand processing.** The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
@@ -173,6 +173,25 @@ a million products). Wallaby keeps this bounded:
 The offloaded tail is therefore **eventually consistent**: for a wide fan-out, the bulk of the re-index
 lands shortly *after* the trigger commits rather than in commit order with it. Sinks must be idempotent
 (upsert by id) and support at-least-once delivery.
+
+## Replica identity in migrations
+
+Some captured tables need `REPLICA IDENTITY FULL` so previous rows appear in the changeset. This is required for
+mappings with a [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) (deletes must
+carry the scope key) and transforms that project from the change's old values. Self-config detects a
+missing replica identity at startup and logs the exact DDL, apply it through your EF migrations with
+the `MigrationBuilder` helpers:
+
+```csharp
+public partial class OrdersReplicaIdentity : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+        => migrationBuilder.SetReplicaIdentityFull("orders", schema: "sales");
+
+    protected override void Down(MigrationBuilder migrationBuilder)
+        => migrationBuilder.SetReplicaIdentityDefault("orders", schema: "sales");
+}
+```
 
 ## Next steps
 

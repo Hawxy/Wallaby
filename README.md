@@ -14,8 +14,8 @@ A **Meilisearch** sink is supported out of the box. Contributions for additional
 | Project                        | Purpose                                  |
 |--------------------------------|------------------------------------------|
 | `Wallaby`                      | Core package (provider-agnostic).        |
-| `Wallaby.EntityFrameworkCore`  | EF Core storage provider.                |
-| `Wallaby.Marten`               | Marten storage provider.                 |
+| `Wallaby.Providers.EntityFrameworkCore`  | EF Core storage provider.                |
+| `Wallaby.Providers.Marten`               | Marten storage provider.                 |
 | `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
 
 ## Quick start

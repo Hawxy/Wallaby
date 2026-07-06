@@ -1,6 +1,6 @@
 # Marten
 
-The `Wallaby.Marten` package drives capture from a [Marten](https://martendb.io) document store:
+The `Wallaby.Providers.Marten` package drives capture from a [Marten](https://martendb.io) document store:
 Wallaby watches Marten's document tables (`mt_doc_*`), rehydrates each change's JSONB body back into
 your document type through the store's own serializer, and routes the documents through the usual
 transform → sink pipeline. Soft deletes, conjoined multi-tenancy, and backfills all behave the way a
@@ -9,7 +9,7 @@ Marten consumer expects.
 ## Install
 
 ```bash
-dotnet add package Wallaby.Marten
+dotnet add package Wallaby.Providers.Marten
 dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 ```
 
@@ -18,10 +18,12 @@ dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 Chain `UseMarten()` after your usual `AddMarten` registration. Wallaby resolves the `IDocumentStore`
 from the container; use the `UseMarten(sp => ...)` overload for multiple stores.
 
+You must also supply a connection string via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding. This is so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
+
 ```csharp
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
-using Wallaby.Marten;
+using Wallaby.Providers.Marten;
 
 builder.Services.AddMarten(options =>
 {
@@ -110,7 +112,8 @@ Wallaby surfaces it as a **Delete event**: the sink document is removed, exactly
 Correspondingly, backfills skip rows where `mt_deleted = true`, and an **un-delete**
 (`session.UndoDeleteWhere<T>(...)`) re-emits the full document as an upsert.
 
-Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple, and Wallaby reads it from the old tuple instead. Self-config detects a missing replica identity at startup and logs the exact `ALTER TABLE ... REPLICA IDENTITY FULL` to include in your Marten migrations — or let Marten manage it for you, below.
+Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple. 
+If you're using soft deletes you should opt into the below.
 
 ## Managed replica identity
 
@@ -123,11 +126,11 @@ builder.Services.AddMarten(options => { /* ... */ })
     .ManageWallabyReplicaIdentity();
 ```
 
-Every captured table that needs `REPLICA IDENTITY FULL` — soft-deleted documents and mappings with a
-[`ScopedDestination`](/providers/marten/multi-tenancy) — is derived from the capture model and joins
+Every captured table that needs `REPLICA IDENTITY FULL`, such as soft-deleted documents and mappings with a
+[`ScopedDestination`](/providers/marten/multi-tenancy) are derived from the capture model and joins
 Marten's normal migration flow: applied by `ApplyAllDatabaseChangesOnStartup()` /
-`ApplyAllConfiguredChangesToDatabaseAsync()`, included in exported patches, and skipped once a table is
-already on full identity. The same call chains onto `AddMartenStore<TStore>(...)` for a separately
+`ApplyAllConfiguredChangesToDatabaseAsync()`, and included in exported patches. 
+The same call chains onto `AddMartenStore<TStore>(...)` for a separately
 registered document store.
 
 ::: tip
@@ -138,12 +141,12 @@ applied before Wallaby validates the tables.
 
 ## NativeAOT
 
-The core `Wallaby` and `Wallaby.Marten` packages are trim- and NativeAOT-compatible
+The core `Wallaby` and `Wallaby.Providers.Marten` packages are trim- and NativeAOT-compatible
 (`IsAotCompatible`). Running under `PublishAot` additionally needs the Marten store itself configured for AOT:
 
 - **Source-generated serialization**: configure Marten's `System.Text.Json` serializer with a
   source-generated `JsonSerializerContext` covering your document types, so Wallaby's rehydration  through the store's serializer needs no reflection.
-- **Root the Marten assembly**: Marten reflects over its own internals during store configuration, so  it cannot be trimmed yet, add `<TrimmerRootAssembly Include="Marten" />` to your app.
+- **Root the Marten assembly**: Marten reflects over its own internals during store configuration, so it cannot be trimmed yet, add `<TrimmerRootAssembly Include="Marten" />` to your app.
 
 One core caveat: when a very large transaction spills to disk/database, column values of common scalar and scalar-array types are encoded natively, but exotic column types fall back to reflection-based JSON — under NativeAOT that fallback fails the spill with a descriptive error. Marten's captured columns (`id`, `data`, `tenant_id`, `mt_deleted`, `mt_deleted_at`) are all natively encoded.
 

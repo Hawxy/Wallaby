@@ -6,21 +6,21 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Postgres Change Data Capture for .NET: self-configuring logical replication, transforms/enrichment, pluggable destinations, and watermark-coordinated backfill. Pair with a storage provider package such as Wallaby.EntityFrameworkCore.</Description>
+    <Description>Postgres Change Data Capture for .NET: self-configuring logical replication, transforms/enrichment, pluggable destinations, and watermark-coordinated backfill. Pair with a storage provider package such as Wallaby.Providers.EntityFrameworkCore.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Testing" />
-    <InternalsVisibleTo Include="Wallaby.Marten" />
+    <InternalsVisibleTo Include="Wallaby.Providers.Marten" />
     <InternalsVisibleTo Include="Wallaby.UnitTests" />
     <InternalsVisibleTo Include="Wallaby.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.Meilisearch.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure.EntityFrameworkCore" />
-    <InternalsVisibleTo Include="Wallaby.EntityFrameworkCore.UnitTests" />
-    <InternalsVisibleTo Include="Wallaby.EntityFrameworkCore.IntegrationTests" />
-    <InternalsVisibleTo Include="Wallaby.Marten.UnitTests" />
-    <InternalsVisibleTo Include="Wallaby.Marten.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.IntegrationTests" />
+    <InternalsVisibleTo Include="Wallaby.Providers.Marten.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.Providers.Marten.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure.Marten" />
     <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
   </ItemGroup>

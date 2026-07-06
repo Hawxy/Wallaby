@@ -12,7 +12,7 @@ cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant
 
 sink.Map<Order>()
     .ScopedBy(o => o.TenantId)                  // derive the scope key from the change
-    .UsingTransform<Order, OrderTransform>()           // transform receives the tenant-scoped DbContext
+    .UsingTransform<Order, OrderTransform>()    // transform receives the tenant-scoped DbContext
     .ScopedDestination(key => $"orders_{key}"); // per-tenant destination (optional)
 ```
 
@@ -39,5 +39,8 @@ right destination, and a default delete only carries the primary key. So `Scoped
 table to require **`REPLICA IDENTITY FULL`**. With full replica identity the old-row values carry
 the scope key on delete. Enrichment-only scoping (`ScopedBy` without `ScopedDestination`) has no such
 requirement, since non-delete changes carry the full new row.
+
+Apply the DDL through your EF migrations with
+[`SetReplicaIdentityFull(...)`](/providers/entity-framework-core/#replica-identity-in-migrations).
 
 

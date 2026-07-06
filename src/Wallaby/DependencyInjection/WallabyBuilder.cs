@@ -39,7 +39,7 @@ public sealed class WallabyBuilder
     /// <summary>
     /// Register a storage provider that derives a capture model and leases enrichment sessions.
     /// Called by provider packages' registration extensions (e.g. <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>
-    /// from Wallaby.EntityFrameworkCore); consumers normally never call it directly. A provider is required
+    /// from Wallaby.Providers.EntityFrameworkCore); consumers normally never call it directly. A provider is required
     /// whenever Wallaby streams (any sink) and to
     /// resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations; omit it for a
     /// provision-only worker that declares external slots by table name only. Multiple providers may be
@@ -167,7 +167,7 @@ public sealed class WallabyBuilder
         {
             throw new WallabyConfigurationException(
                 "Capturing requires a storage provider. Register one with " +
-                "UseEntityFrameworkCore<TContext>() (from Wallaby.EntityFrameworkCore).");
+                "UseEntityFrameworkCore<TContext>() (from Wallaby.Providers.EntityFrameworkCore).");
         }
 
         // Sink names must be unique: mappings route by their owning sink's name, and the runtime keys the

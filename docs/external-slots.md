@@ -9,6 +9,14 @@ tables.
 sync) as part of your normal deployment instead of requiring seperate management. **Wallaby never consumes from an external slot**,
 it just manages it for you.
 
+## Install (Optional)
+
+If you don't have (or need) a provider installed, simply install the core Wallaby package:
+
+```bash
+dotnet add package Wallaby
+```
+
 ## Declare a slot
 
 ```csharp

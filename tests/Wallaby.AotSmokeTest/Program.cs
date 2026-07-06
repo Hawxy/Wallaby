@@ -9,7 +9,7 @@ using Wallaby.Abstractions;
 using Wallaby.AotSmokeTest;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Replication;
-using Wallaby.Marten.Internal;
+using Wallaby.Providers.Marten.Internal;
 using Wallaby.Model;
 using Wallaby.Providers;
 using Weasel.Core;

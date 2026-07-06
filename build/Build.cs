@@ -88,8 +88,8 @@ class Build : NukeBuild
     static readonly string[] PackableProjects =
     [
         "Wallaby",
-        "Wallaby.EntityFrameworkCore",
-        "Wallaby.Marten",
+        "Wallaby.Providers.EntityFrameworkCore",
+        "Wallaby.Providers.Marten",
         "Wallaby.Sinks.Meilisearch",
         "Wallaby.AspNetCore.HealthChecks",
         "Wallaby.Testing",

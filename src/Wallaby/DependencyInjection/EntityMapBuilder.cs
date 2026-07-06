@@ -79,7 +79,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Register the transform via a provider-built invoker. Provider packages call this from their typed
-    /// <c>UsingTransform</c> extensions (e.g. Wallaby.EntityFrameworkCore's DbContext-typed overloads);
+    /// <c>UsingTransform</c> extensions (e.g. Wallaby.Providers.EntityFrameworkCore's DbContext-typed overloads);
     /// use those instead of calling this directly. A provider-typed extension passes its
     /// <paramref name="providerName"/> so the mapping resolves to the provider whose session type the
     /// transform expects.
@@ -107,7 +107,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Declare a dependent navigation via a raw lambda. Provider packages call this from their typed
-    /// <c>DependsOn</c> extensions (e.g. Wallaby.EntityFrameworkCore's); use those instead of calling
+    /// <c>DependsOn</c> extensions (e.g. Wallaby.Providers.EntityFrameworkCore's); use those instead of calling
     /// this directly. The expression is resolved against the storage provider's model at startup.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
