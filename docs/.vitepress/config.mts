@@ -24,6 +24,7 @@ export default defineConfig({
       {
         text: 'Usage',
         items: [
+          { text: 'Why Wallaby?', link: '/why-wallaby' },
           { text: 'Getting Started', link: '/getting-started' },
           { text: 'How It Works', link: '/how-it-works' },
           { text: 'Configuration', link: '/configuration' },
@@ -38,13 +39,13 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/providers/overview' },
           {
-            text: 'EF Core', link: '/providers/entity-framework-core',
+            text: 'EF Core', link: '/providers/entity-framework-core/',
             items: [
               { text: 'Multi-Tenancy', link: '/providers/entity-framework-core/multi-tenancy' },
             ]
           },
           {
-            text: 'Marten', link: '/providers/marten',
+            text: 'Marten', link: '/providers/marten/',
             items: [
               { text: 'Multi-Tenancy', link: '/providers/marten/multi-tenancy' },
             ]

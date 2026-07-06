@@ -54,15 +54,15 @@ overloads are available: an `IWallabyMartenTransform<T>` instance, a container-r
 
 ::: warning
 Wallaby builds its capture model at startup from the store's registered documents
-(`RegisterDocumentType<T>()`, `Schema.For<T>()`, …). Marten's usual lazy discovery — registering a
-document type the first time a session touches it — happens too late for capture, so a `Map<T>()` for
+(`RegisterDocumentType<T>()`, `Schema.For<T>()`, …). Marten's lazy discovery of registering a
+document type the first time a session touches it happens too late for capture, so a `Map<T>()` for
 an unregistered document fails fast with guidance.
 :::
 
 ## Class-based transforms
 
 For more complex transforms, or anything with dependencies, implement `IWallabyMartenTransform<TEntity>`
-as a class — it is resolved from the container. The leased `IQuerySession` supports enrichment lookups
+as a class. It is resolved from the container. The leased `IQuerySession` supports enrichment lookups
 against other documents:
 
 ```csharp
@@ -98,65 +98,36 @@ sink.Map<Order>()
 
 For each mapped document Wallaby captures the minimal column set: `id`, the `data` JSONB body,
 `tenant_id` for conjoined tenancy, and the `mt_deleted`/`mt_deleted_at` flags for soft-deleted
-documents. Marten's other metadata columns (`mt_version`, `mt_last_modified`, …) are ignored, and
-`ChangeEvent.Changes` is always `null` — change granularity is the whole document.
+documents. Marten's other metadata columns (`mt_version`, `mt_last_modified`, …) are ignored, and `ChangeEvent.Changes` is always `null` as change granularity is the whole document.
 
 The change's `Record` carries the id under your document's id member name, plus `TenantId` and
 `Deleted` when applicable.
 
 ## Soft deletes
 
-A soft delete (`session.Delete<T>(...)` on a `SoftDeleted()` document) flips `mt_deleted` in place —
-but consumers of a search index or read model almost never want "deleted but still there" documents.
+A soft delete (`session.Delete<T>(...)` on a `SoftDeleted()` document) flips `mt_deleted` in place, but consumers of a search index or read model almost never want "deleted but still there" documents.
 Wallaby surfaces it as a **Delete event**: the sink document is removed, exactly like a hard delete.
 Correspondingly, backfills skip rows where `mt_deleted = true`, and an **un-delete**
 (`session.UndoDeleteWhere<T>(...)`) re-emits the full document as an upsert.
 
-Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`,
-so for a TOASTed (large) body Postgres omits it from the new tuple, and Wallaby reads it from the old
-tuple instead. Self-config detects a missing replica identity at startup and logs the exact
-`ALTER TABLE ... REPLICA IDENTITY FULL` to run (set `RequireFullReplicaIdentity` to make it a hard
-failure instead).
+Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple, and Wallaby reads it from the old tuple instead. Self-config detects a missing replica identity at startup and logs the exact `ALTER TABLE ... REPLICA IDENTITY FULL` to include in your Marten migrations. 
 
-## Multi-tenancy (conjoined)
-
-For documents with conjoined tenancy the captured key is `[tenant_id, id]`, and `ScopedByTenant()` +
-`UseTenantSessions()` scope transforms and destinations per tenant — see
-[Multi-tenancy](/providers/marten/multi-tenancy).
-
-## Combining providers
-
-Marten can be combined with another storage provider in the same Wallaby instance, sharing a single
-replication slot — see the [providers overview](/providers/overview#combining-providers).
 
 ## NativeAOT
 
 The core `Wallaby` and `Wallaby.Marten` packages are trim- and NativeAOT-compatible
-(`IsAotCompatible`). Running under `PublishAot` additionally needs the Marten store itself configured
-for AOT:
+(`IsAotCompatible`). Running under `PublishAot` additionally needs the Marten store itself configured for AOT:
 
-- **Pre-generated code**: Marten's runtime Roslyn codegen doesn't work under NativeAOT — use
-  `TypeLoadMode.Static` with types generated ahead of time (`dotnet run -- codegen write`).
 - **Source-generated serialization**: configure Marten's `System.Text.Json` serializer with a
-  source-generated `JsonSerializerContext` covering your document types, so Wallaby's rehydration
-  through the store's serializer needs no reflection.
-- **Root the Marten assembly**: Marten reflects over its own internals during store configuration, so
-  it cannot be trimmed yet — add `<TrimmerRootAssembly Include="Marten" />` to your app until Marten's
-  tier-1 AOT mode lands.
+  source-generated `JsonSerializerContext` covering your document types, so Wallaby's rehydration  through the store's serializer needs no reflection.
+- **Root the Marten assembly**: Marten reflects over its own internals during store configuration, so  it cannot be trimmed yet, add `<TrimmerRootAssembly Include="Marten" />` to your app.
 
-One core caveat: when a very large transaction spills to disk/database, column values of common scalar
-and scalar-array types are encoded natively, but exotic column types fall back to reflection-based
-JSON — under NativeAOT that fallback fails the spill with a descriptive error. Marten's captured
-columns (`id`, `data`, `tenant_id`, `mt_deleted`, `mt_deleted_at`) are all natively encoded.
-
-The Meilisearch sink is not yet AOT-compatible.
+One core caveat: when a very large transaction spills to disk/database, column values of common scalar and scalar-array types are encoded natively, but exotic column types fall back to reflection-based JSON — under NativeAOT that fallback fails the spill with a descriptive error. Marten's captured columns (`id`, `data`, `tenant_id`, `mt_deleted`, `mt_deleted_at`) are all natively encoded.
 
 ## Limitations (v1)
 
-- **`DependsOn(...)` is not supported** — documents are self-contained; there are no related tables to
-  fan out from.
+- **`DependsOn(...)` is not supported**: documents are self-contained; there are no related tables to fan out from.
 - **`ChangeEvent.Changes` is always `null`** (no JSON diffing).
-- **Document hierarchies** (subclass documents sharing the root table) are not capturable and fail
-  fast when mapped.
+- **Document hierarchies** (subclass documents sharing the root table) are not capturable and fail fast when mapped.
 - Strong-typed identifiers and `Duplicate(...)`d fields are not mapped into `Record`.
 - Separate-database tenancy is not supported (conjoined and single tenancy are).

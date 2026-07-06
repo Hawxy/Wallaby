@@ -13,13 +13,13 @@ const providers = [
     title: 'efcore provider',
     sub: 'relational storage',
     label: 'EFCore Setup →',
-    link: '/providers/entity-framework-core',
+    link: '/providers/entity-framework-core/',
   },
   {
     title: 'marten provider',
     sub: 'document storage',
     label: 'Marten Setup →',
-    link: '/providers/marten',
+    link: '/providers/marten/',
   },
 ];
 

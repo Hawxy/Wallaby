@@ -4,13 +4,9 @@ import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
 
 # Getting Started
 
-Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
-**entities or documents**, lets you transform/enrich them, and routes the resulting documents to pluggable
-**sinks** (destinations).
-
 ## Server prerequisites
 
-Your Postgres server must already have:
+Your Postgres 14+ server must already have:
 
 - **`wal_level = logical`** set in `postgresql.conf`  required for logical replication.
 - A role with the **`REPLICATION`** attribute (or superuser) for the connection string you give Wallaby.
@@ -27,7 +23,7 @@ pgoutput consumer:
 
 <ConfigPicker />
 
-::: tip Mixing providers
+::: tip Mixing Providers
 The EF Core and Marten providers can run side by side in one Wallaby instance, sharing a single
 replication slot — see the [providers overview](/providers/overview#combining-providers).
 :::
@@ -41,7 +37,5 @@ It's highly recommended to deploy Wallaby as a separate service, not as an integ
 - [How it works](/how-it-works) - the capture pipeline end to end.
 - [Configuration](/configuration) - All configuration options
 - [Transforms](/transforms) - shaping and enriching documents.
-- [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
 - [Backfill](/backfill) - initial snapshots and version-triggered reindex.
-- Multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) or [Marten](/providers/marten/multi-tenancy) - per-row scoped contexts and destinations.
 - [Observability](/operations/observability) - OpenTelemetry metrics and traces.

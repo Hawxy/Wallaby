@@ -16,7 +16,7 @@ dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 
 Call `AddWallaby` to start and chain in your `DbContext` via `UseEntityFrameworkCore<TContext>()`. Wallaby will resolve your context regardless of if it's registered with either `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
 
-You must also supply a connection string — via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#the-options-pattern) such as configuration binding — so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
+You must also supply a connection string — via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding — so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 
 ```csharp
 using Wallaby.Abstractions;
@@ -82,7 +82,7 @@ at host start instead of at registration.
 
 ::: tip
 `WallabyOptions` also participates in the standard options pattern, see
-[Configuration](/configuration#the-options-pattern).
+[Configuration](/configuration#options-pattern).
 :::
 
 ## What gets tracked
@@ -153,7 +153,7 @@ sink.Map<Product>()
 ## Dependent tables
 
 When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
-own. Declare the relationship with `DependsOn(...)` — an [EF Core provider](/providers/entity-framework-core)
+own. Declare the relationship with `DependsOn(...)` — an [EF Core provider](/providers/entity-framework-core/)
 mapping extension — so Wallaby captures the related table and fans its changes out to synthetic updates
 of your entity:
 
@@ -176,7 +176,7 @@ a million products). Wallaby keeps this bounded:
 
 - **Consolidated lookups.** All distinct keys changed for a dependent table in one transaction are resolved
   with a single `IN (…)` query per relationship.
-- **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/configuration#options) affected rows
+- **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/configuration#general-options) affected rows
   are re-emitted inline; if more remain, the rest is handed to a *scoped backfill job* that re-snapshots
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.

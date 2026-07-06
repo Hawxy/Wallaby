@@ -20,8 +20,8 @@ sink.Map<Product>()
 ```
 
 For more complex transforms, or anything with dependencies, implement your provider's transform
-interface as a class — [`IWallabyEfTransform<T>`](/providers/entity-framework-core#class-based-transforms)
-(EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten#class-based-transforms) (Marten) — and
+interface as a class — [`IWallabyEfTransform<T>`](/providers/entity-framework-core/#class-based-transforms)
+(EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) — and
 register it with `UsingTransform<TEntity, TTransform>()`; the class is resolved from the container.
 
 ## Internals

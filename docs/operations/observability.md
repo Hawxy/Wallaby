@@ -68,6 +68,6 @@ queries your transforms run appear nested under the `transform` (and `dependent.
 Metric attributes are deliberately low-cardinality: `wallaby.slot`, `wallaby.sink`, `wallaby.entity`,
 `wallaby.table`, `wallaby.action`, `wallaby.source`, and `wallaby.delivery.outcome`.
 
-Per-row values - tenant/scope keys, document ids, and per-tenant destinations - are **never** used as
-metric attributes (they would explode cardinality). `wallaby.destination` appears only as a **span**
+Per-row values such as tenant/scope keys, document ids, and per-tenant destinations are **never** used as
+metric attributes as they would explode cardinality. `wallaby.destination` appears only as a **span**
 attribute, where sampling keeps the cost bounded.

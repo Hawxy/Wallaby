@@ -6,9 +6,9 @@ checkpointing, backfills, and sink delivery, while a provider contributes the ca
 
 Two providers are available:
 
-- **[EF Core](/providers/entity-framework-core)**: Captures the tables behind your `DbContext`'s
+- **[EF Core](/providers/entity-framework-core/)**: Captures the tables behind your `DbContext`'s
   entity mappings; transforms receive a leased `DbContext`.
-- **[Marten](/providers/marten)**: Captures Marten document tables and rehydrates each change through
+- **[Marten](/providers/marten/)**: Captures Marten document tables and rehydrates each change through
   the store's own serializer; transforms receive a leased `IQuerySession`.
 
 ## Combining providers
