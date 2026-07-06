@@ -1,3 +1,7 @@
+<script setup>
+import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
+</script>
+
 # Getting Started
 
 Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
@@ -17,27 +21,11 @@ Wallaby validates these on startup and fails fast with an actionable error if so
 ## Choose your configuration
 
 Wallaby is configured through `AddWallaby`, with a **storage provider** supplying the model of what to
-capture. Pick the setup that matches your application:
+capture and a **sink** as an output destination. Pick the setup that fits your application. Optionally, if you don't want Wallaby to capture
+anything itself, let it provision and maintain publications and replication slots for an external
+pgoutput consumer:
 
-### Entity Framework Core
-
-Your tables are modeled by an EFCore `DbContext`, see:
-
-[EFCore Setup →](/providers/entity-framework-core){.wb-btn}
-
-### Marten
-
-Your data lives in a [Marten](https://martendb.io) document store, see:
-
-[Marten Setup →](/providers/marten){.wb-btn}
-
-### External slots (provision-only)
-
-You don't want Wallaby to capture anything itself, instead you want it to provision and maintain
-publications and replication slots for an external pgoutput consumer such as Airbyte, Debezium, or
-Fivetran, as part of your normal deployment.
-
-[External Slots →](/external-slots){.wb-btn}
+<ConfigPicker />
 
 ::: tip Mixing providers
 The EF Core and Marten providers can run side by side in one Wallaby instance, sharing a single

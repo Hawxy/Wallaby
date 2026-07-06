@@ -6,7 +6,7 @@ deletions remove by that same id.
 
 ## Install
 
-```csharp
+```bash
 dotnet add package Wallaby.Sinks.Meilisearch
 ```
 

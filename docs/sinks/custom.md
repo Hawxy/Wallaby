@@ -3,6 +3,10 @@
 A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere — an HTTP API,
 Kafka, another database, a cache.
 
+::: tip
+We're always looking for new sink contributions. Feel free to open a pull request for review.
+:::
+
 ## Interface
 
 ```csharp
