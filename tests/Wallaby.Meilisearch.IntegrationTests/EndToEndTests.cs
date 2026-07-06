@@ -34,7 +34,7 @@ public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili
                    o.SlotName = names.Slot;
                    o.PublicationName = names.Publication;
                    o.ChunkSize = 50;
-                   o.StandbyRetryInterval = TimeSpan.FromSeconds(1);
+                   o.Advanced.StandbyRetryInterval = TimeSpan.FromSeconds(1);
                })
                .AddMeilisearchSink("meili", m => { m.Host = meili.Host; m.ApiKey = meili.ApiKey; })
                .WithMappings(sink => sink

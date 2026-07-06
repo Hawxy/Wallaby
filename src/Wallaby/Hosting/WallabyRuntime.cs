@@ -58,7 +58,7 @@ internal sealed class WallabyRuntime
 
         // Grows the retry delay (with jitter, capped) when leadership acquisition or a leader session keeps
         // failing, so a persistent error backs off instead of spamming at a fixed interval.
-        var backoff = new RetryBackoff(_options.LeaderRetryInterval);
+        var backoff = new RetryBackoff(_options.Advanced.LeaderRetryInterval);
 
         while (!ct.IsCancellationRequested)
         {
@@ -82,7 +82,7 @@ internal sealed class WallabyRuntime
                 _status.ResetLeaderFailures();
                 _status.ResetFanoutFailures();
                 _logger.Standby(_options.SlotName);
-                await DelaySafeAsync(_options.StandbyRetryInterval, ct);
+                await DelaySafeAsync(_options.Advanced.StandbyRetryInterval, ct);
                 continue;
             }
 

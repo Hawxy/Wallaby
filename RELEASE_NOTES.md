@@ -58,7 +58,13 @@ lives in the new **`Wallaby.EntityFrameworkCore`** package, and Marten support s
    A mapping can no longer reference a missing sink — that class of startup/runtime error is gone
    structurally.
 
-Everything else — sinks, options, backfill, external slots, health checks, `Wallaby.Testing` — is
+9. Rarely-tuned options moved under `WallabyOptions.Advanced`: `StandbyRetryInterval`,
+   `LeaderRetryInterval`, `LeaderHeartbeatInterval`, `KeepaliveInterval`, `FanoutPollInterval`,
+   `CheckpointSaveInterval`, and `MaxBufferedChangesPerTransaction`. Set them via
+   `o.Advanced.KeepaliveInterval = ...`; configuration binding uses a nested `"Advanced"` section.
+   Defaults are unchanged.
+
+Everything else — sinks, backfill, external slots, health checks, `Wallaby.Testing` — is
 unchanged.
 
 ## New: Marten storage provider (`Wallaby.Marten`)

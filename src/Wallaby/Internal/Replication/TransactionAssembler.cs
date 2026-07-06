@@ -129,7 +129,7 @@ internal sealed class TransactionAssembler(ITransactionSpill spill, int maxBuffe
         {
             throw new InvalidOperationException(
                 $"A non-streamed transaction buffered more than MaxBufferedChangesPerTransaction " +
-                $"({maxBufferedChangesPerTransaction}) changes. Increase WallabyOptions.MaxBufferedChangesPerTransaction, " +
+                $"({maxBufferedChangesPerTransaction}) changes. Increase WallabyOptions.Advanced.MaxBufferedChangesPerTransaction, " +
                 "or lower the server's logical_decoding_work_mem so large transactions stream and spill.");
         }
     }

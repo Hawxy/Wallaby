@@ -50,11 +50,11 @@ internal sealed class LeaderSession(
 
         await using var stream = new LogicalReplicationStream(
             dataSource.ConnectionString, options.SlotName, options.PublicationName, spill,
-            options.MaxBufferedChangesPerTransaction);
+            options.Advanced.MaxBufferedChangesPerTransaction);
         var changeEventFactory = new ChangeEventFactory(components.Materializer);
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
-            options.SlotName, logger, options.MaxBatchSize, options.KeepaliveInterval, components.Coordinator,
+            options.SlotName, logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
             components.DependentResolver, components.FanoutQueue, instrumentation, status);
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
@@ -90,7 +90,7 @@ internal sealed class LeaderSession(
         var fanoutTask = components.FanoutQueue is not null
             ? Task.Run(async () =>
             {
-                try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, logger, options.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
+                try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, logger, options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {

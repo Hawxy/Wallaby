@@ -99,7 +99,7 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
         {
             o.SlotName = names.Slot;
             o.PublicationName = names.Publication;
-            o.StandbyRetryInterval = TimeSpan.FromSeconds(1);
+            o.Advanced.StandbyRetryInterval = TimeSpan.FromSeconds(1);
         });
         services.ReplaceWallabySink("capture", capture);
         return services.BuildServiceProvider();

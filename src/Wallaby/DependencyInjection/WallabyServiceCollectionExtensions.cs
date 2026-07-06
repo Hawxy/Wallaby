@@ -113,7 +113,7 @@ public static class WallabyServiceCollectionExtensions
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(
                 sp.GetRequiredService<WallabyDataSource>().Source,
-                sp.GetRequiredService<WallabyOptions>().LeaderHeartbeatInterval));
+                sp.GetRequiredService<WallabyOptions>().Advanced.LeaderHeartbeatInterval));
 
         // Capture runtime — registered unconditionally as lazy factories; only the hosted-service dispatch
         // below (or a consumer resolving IWallabyBackfillManager) materializes it. The providers and the

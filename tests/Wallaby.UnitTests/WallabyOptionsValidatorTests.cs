@@ -58,10 +58,10 @@ public class WallabyOptionsValidatorTests
     public void Negative_checkpoint_save_interval_fails()
     {
         var options = ValidOptions();
-        options.CheckpointSaveInterval = TimeSpan.FromSeconds(-1);
+        options.Advanced.CheckpointSaveInterval = TimeSpan.FromSeconds(-1);
         Validate(options).Failed.ShouldBeTrue();
 
-        options.CheckpointSaveInterval = TimeSpan.Zero;
+        options.Advanced.CheckpointSaveInterval = TimeSpan.Zero;
         Validate(options).Succeeded.ShouldBeTrue();
     }
 

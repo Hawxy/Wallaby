@@ -1,6 +1,6 @@
 # Configuration
 
-## Large transaction handling
+## Large Transaction Handling
 
 Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's `logical_decoding_work_mem`
 (default 64 MB) is streamed before commit and spilled out of memory, then processed in `MaxBatchSize` pages. This ensures a 
@@ -15,7 +15,7 @@ You have a number of choices as to where streamed transactions spill:
   factory is handed a `SpillContext` (the source data source, slot name, and service provider) once per leader
   session and should return a fresh instance. Your backend should spill to a durable/external store, not buffer in-memory.
 
-## Options
+## General Options
 
 `ConfigureOptions(o => ...)` exposes:
 
@@ -29,18 +29,26 @@ You have a number of choices as to where streamed transactions spill:
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
+| `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
+| `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
+| `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
+
+### Advanced Options
+
+Internal tuning knobs live under `o.Advanced`. These defaults should work for 99% of deployments. 
+You shouldn't modify these unless you know what you're doing:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
 | `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
 | `LeaderHeartbeatInterval` | `10s` | How often the leader verifies it still holds the cluster lock while streaming. If the lock's connection dropped (so Postgres auto-released it), the leader steps down within roughly this interval and re-elects. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
 | `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/transforms#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
-| `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection). The slot's `confirmed_flush_lsn` remains the authoritative resume position, so a seconds-stale checkpoint is safe — a stale value only widens a detected gap. `0` writes on every acknowledged transaction. |
-| `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
-| `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
-| `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
+| `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
 
-## The Options pattern
+## Options Pattern
 
 `WallabyOptions` participates in the standard [options pipeline](https://learn.microsoft.com/dotnet/core/extensions/options),
 so the usual mechanisms compose with the builder's `ConfigureOptions(...)`:

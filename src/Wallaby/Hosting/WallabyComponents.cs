@@ -118,8 +118,8 @@ internal sealed class WallabyComponents
                     ExternalSlots = ExternalSlotResolver.Resolve(config.ExternalSlots, providers.ModelProviders),
                 },
                 logger),
-            Checkpoints = options.CheckpointSaveInterval > TimeSpan.Zero
-                ? new ThrottledCheckpointStore(checkpointsDirect, options.CheckpointSaveInterval)
+            Checkpoints = options.Advanced.CheckpointSaveInterval > TimeSpan.Zero
+                ? new ThrottledCheckpointStore(checkpointsDirect, options.Advanced.CheckpointSaveInterval)
                 : checkpointsDirect,
             CheckpointsDirect = checkpointsDirect,
             BackfillStore = backfillStore,

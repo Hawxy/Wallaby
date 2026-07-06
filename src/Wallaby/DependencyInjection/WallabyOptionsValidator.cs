@@ -38,25 +38,25 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("MaxBatchSize must be between 1 and 100000.");
         }
-        if (options.MaxBufferedChangesPerTransaction <= 0)
+        if (options.Advanced.MaxBufferedChangesPerTransaction <= 0)
         {
-            failures.Add("MaxBufferedChangesPerTransaction must be greater than zero.");
+            failures.Add("Advanced.MaxBufferedChangesPerTransaction must be greater than zero.");
         }
-        if (options.KeepaliveInterval <= TimeSpan.Zero)
+        if (options.Advanced.KeepaliveInterval <= TimeSpan.Zero)
         {
-            failures.Add("KeepaliveInterval must be greater than zero.");
+            failures.Add("Advanced.KeepaliveInterval must be greater than zero.");
         }
-        if (options.LeaderHeartbeatInterval <= TimeSpan.Zero)
+        if (options.Advanced.LeaderHeartbeatInterval <= TimeSpan.Zero)
         {
-            failures.Add("LeaderHeartbeatInterval must be greater than zero.");
+            failures.Add("Advanced.LeaderHeartbeatInterval must be greater than zero.");
         }
-        if (options.FanoutPollInterval <= TimeSpan.Zero)
+        if (options.Advanced.FanoutPollInterval <= TimeSpan.Zero)
         {
-            failures.Add("FanoutPollInterval must be greater than zero.");
+            failures.Add("Advanced.FanoutPollInterval must be greater than zero.");
         }
-        if (options.CheckpointSaveInterval < TimeSpan.Zero)
+        if (options.Advanced.CheckpointSaveInterval < TimeSpan.Zero)
         {
-            failures.Add("CheckpointSaveInterval must be zero or greater.");
+            failures.Add("Advanced.CheckpointSaveInterval must be zero or greater.");
         }
         if (options.SinkRetry is null)
         {
