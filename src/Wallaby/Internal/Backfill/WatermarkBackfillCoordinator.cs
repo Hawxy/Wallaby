@@ -16,6 +16,10 @@ namespace Wallaby.Internal.Backfill;
 /// concurrent change keys between the watermarks and emits the deduplicated snapshot rows at the high
 /// watermark — guaranteeing no gaps and that live changes always win for overlapping keys.
 /// <para>
+/// Chunks are pipelined: while the live pipeline delivers one chunk, the loop already reads the next
+/// (its progress still persists in emission order), so snapshot reads overlap transform/sink delivery.
+/// </para>
+/// <para>
 /// The same chunk loop also runs <em>scoped</em> backfills (<see cref="BackfillScopeAsync"/>) that restrict
 /// the snapshot to the rows affected by a dependent fan-out, which is how a wide fan-out's tail is
 /// re-indexed asynchronously without stalling the live stream.
@@ -108,6 +112,14 @@ internal sealed class WatermarkBackfillCoordinator(
         var sessionRows = 0L;
         var lastProgressLog = sessionStart;
 
+        // The chunk whose high watermark is emitted but whose delivery the pipeline hasn't finished. The
+        // next chunk is read while it settles, overlapping the snapshot read with transform/sink delivery.
+        // Safe because the protocol is stream-ordered, not wall-clock-ordered: each window's low watermark
+        // precedes its concurrent live changes in the stream regardless of when the snapshot read ran, and
+        // the coordinator already fans live keys into every active window. Costs at most two chunks in memory.
+        (PendingWindow Window, BackfillChunk Chunk, long ChunkStart)? inFlight = null;
+        PendingWindow? current = null;
+
         _instr.BackfillStarted();
         try
         {
@@ -118,58 +130,74 @@ internal sealed class WatermarkBackfillCoordinator(
             while (!ct.IsCancellationRequested)
             {
                 var chunkStart = WallabyInstrumentation.StartTimer();
-                var window = new PendingWindow
+                current = new PendingWindow
                 {
                     QualifiedTable = qualifiedTable,
                     Token = Guid.NewGuid().ToString("N"),
                 };
-                _byToken[window.Token] = window;
+                _byToken[current.Token] = current;
 
-                try
+                await EmitWatermarkAsync(emitter, WallabySchema.WatermarkLowPrefix, current.Token, ct);
+                var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
+                current.Buffer = chunk.Rows;
+                await EmitWatermarkAsync(emitter, WallabySchema.WatermarkHighPrefix, current.Token, ct);
+                cursor = chunk.NextCursor;
+
+                // Settle the previous chunk before waiting on this one, so progress persists in emission order.
+                if (inFlight is { } previous)
                 {
-                    await EmitWatermarkAsync(emitter, WallabySchema.WatermarkLowPrefix, window.Token, ct);
-                    var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
-                    window.Buffer = chunk.Rows;
-                    await EmitWatermarkAsync(emitter, WallabySchema.WatermarkHighPrefix, window.Token, ct);
-
-                    await window.Completed.Task.WaitAsync(ct);
-
-                    rowsCopied += chunk.Rows.Count;
-                    sessionRows += chunk.Rows.Count;
-                    cursor = chunk.NextCursor;
-                    await saveProgress(cursor, rowsCopied, chunk.HasMore, ct);
-
-                    _instr.RecordBackfillRows(qualifiedTable, chunk.Rows.Count);
-                    _instr.RecordBackfillChunkDuration(qualifiedTable, chunkStart);
-
-                    if (Stopwatch.GetElapsedTime(lastProgressLog) >= ProgressLogInterval)
-                    {
-                        var rate = (long)(sessionRows / Stopwatch.GetElapsedTime(sessionStart).TotalSeconds);
-                        logger.BackfillProgress(qualifiedTable, rowsCopied, rate);
-                        lastProgressLog = Stopwatch.GetTimestamp();
-                    }
-
-                    if (!chunk.HasMore)
-                    {
-                        break;
-                    }
+                    await SettleAsync(previous);
+                    inFlight = null;
                 }
-                finally
+
+                if (!chunk.HasMore)
                 {
-                    // On success the pipeline already evicted this window via TryTakeHighWindow (a no-op here).
-                    // On fault/cancel (a chunk read or watermark emit failed, or the wait was cancelled) evict
-                    // the orphaned window so it can't leak in _byToken (with its buffered rows) or be re-paired
-                    // against a replayed high watermark in a later leadership session. 
-                    _byToken.TryRemove(window.Token, out _);
+                    await SettleAsync((current, chunk, chunkStart));
+                    current = null;
+                    break;
                 }
+
+                inFlight = (current, chunk, chunkStart);
+                current = null;
             }
         }
         finally
         {
+            // On success the pipeline evicted each window via TryTakeHighWindow (no-ops here). On fault/cancel
+            // (a chunk read or watermark emit failed, or a wait was cancelled) evict whatever is still
+            // registered so an orphaned window can't leak in _byToken (with its buffered rows) or be re-paired
+            // against a replayed high watermark in a later leadership session.
+            if (current is not null)
+            {
+                _byToken.TryRemove(current.Token, out _);
+            }
+            if (inFlight is { } orphaned)
+            {
+                _byToken.TryRemove(orphaned.Window.Token, out _);
+            }
             _instr.BackfillCompleted();
         }
 
         return rowsCopied;
+
+        async Task SettleAsync((PendingWindow Window, BackfillChunk Chunk, long ChunkStart) entry)
+        {
+            await entry.Window.Completed.Task.WaitAsync(ct);
+
+            rowsCopied += entry.Chunk.Rows.Count;
+            sessionRows += entry.Chunk.Rows.Count;
+            await saveProgress(entry.Chunk.NextCursor, rowsCopied, entry.Chunk.HasMore, ct);
+
+            _instr.RecordBackfillRows(qualifiedTable, entry.Chunk.Rows.Count);
+            _instr.RecordBackfillChunkDuration(qualifiedTable, entry.ChunkStart);
+
+            if (Stopwatch.GetElapsedTime(lastProgressLog) >= ProgressLogInterval)
+            {
+                var rate = (long)(sessionRows / Stopwatch.GetElapsedTime(sessionStart).TotalSeconds);
+                logger.BackfillProgress(qualifiedTable, rowsCopied, rate);
+                lastProgressLog = Stopwatch.GetTimestamp();
+            }
+        }
     }
 
     // Transactional=true so the message commits with its own auto-commit transaction, preserving

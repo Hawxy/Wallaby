@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Marten;
@@ -56,12 +57,11 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
             return true;
         }
 
-        var json = ReadData(plan, change);
+        var data = ReadData(plan, change);
         object entity;
         try
         {
-            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-            entity = _serializer.FromJson(plan.DocumentType, stream);
+            entity = Deserialize(plan.DocumentType, data);
         }
         catch (Exception ex)
         {
@@ -129,8 +129,12 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         return ValueCoercion.ToClr(raw.Value, clrType);
     }
 
-    /// <summary>The document JSON: the new tuple's <c>data</c>, or the old tuple's when unchanged TOAST kept it off the wire.</summary>
-    private string ReadData(MartenTablePlan plan, RawChange change)
+    /// <summary>
+    /// The document JSON — a <c>string</c> or UTF-8 <c>byte[]</c>, kept in its wire form so
+    /// <see cref="Deserialize"/> can avoid transcoding: the new tuple's <c>data</c>, or the old tuple's
+    /// when unchanged TOAST kept it off the wire.
+    /// </summary>
+    private static object ReadData(MartenTablePlan plan, RawChange change)
     {
         var column = Find(change.NewValues, "data");
         if (column is { IsUnchangedToast: false })
@@ -150,15 +154,38 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
             "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set).");
     }
 
-    private static string AsJson(MartenTablePlan plan, object? value)
+    private static object AsJson(MartenTablePlan plan, object? value)
         => value switch
         {
-            string json => json,
-            byte[] bytes => Encoding.UTF8.GetString(bytes),
+            string or byte[] => value,
             _ => throw new InvalidOperationException(
                 $"The 'data' column for '{plan.Table.QualifiedName}' produced " +
                 $"'{value?.GetType().Name ?? "null"}' instead of JSON text."),
         };
+
+    private object Deserialize(Type documentType, object data)
+    {
+        if (data is byte[] bytes)
+        {
+            using var stream = new MemoryStream(bytes, 0, bytes.Length, writable: false);
+            return _serializer.FromJson(documentType, stream);
+        }
+
+        // The wire value is a string on every built-in path; FromJson only accepts a Stream, so encode
+        // into a pooled buffer — a fresh byte[] per row would put large documents straight on the LOH.
+        var json = (string)data;
+        var buffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(json));
+        try
+        {
+            var length = Encoding.UTF8.GetBytes(json, buffer);
+            using var stream = new MemoryStream(buffer, 0, length, writable: false);
+            return _serializer.FromJson(documentType, stream);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
 
     private static bool WasDeleted(MartenTablePlan plan, IReadOnlyList<RawColumn> oldValues)
         => plan.SoftDeleted && Find(oldValues, plan.DeletedColumnName)?.Value is true;

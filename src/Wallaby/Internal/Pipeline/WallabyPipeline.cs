@@ -61,49 +61,24 @@ internal sealed class WallabyPipeline(
         var rollupTransactions = 0L;
         var rollupChanges = 0L;
 
+        // One keepalive guard for the whole run; each transaction's processing (when the stream isn't
+        // being read, so Npgsql can't answer the server's keepalives) is bracketed with Begin/End below.
+        await using var keepalive = stream.StartKeepalive(keepaliveInterval, ct);
+
         await foreach (var transaction in stream.ReadAsync(ct))
         {
-            // Keep the connection alive while we process this transaction (the stream isn't being read,
-            // so Npgsql can't answer the server's keepalives). Disposed before the next read resumes.
-            await using var keepalive = stream.StartKeepalive(keepaliveInterval, ct);
-
-            var lagSeconds = transaction.CommitTimestamp is { } commitTs
-                ? Math.Max(0, (DateTimeOffset.UtcNow - commitTs).TotalSeconds)
-                : -1;
-
-            using var activity = _instr.StartTransaction();
-            if (activity is not null)
+            long processed;
+            keepalive.BeginTransaction();
+            try
             {
-                activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
-                activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
-                activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-                activity.SetTag("wallaby.txn.size", transaction.IsStreamed ? -1 : transaction.Changes.Count);
-                if (lagSeconds >= 0)
-                {
-                    activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
-                }
+                processed = await ProcessTransactionAsync(transaction, ct);
             }
-
-            _instr.RecordIngestionLag(slotName, lagSeconds);
-
-            // A streamed (large) transaction's changes live in the spill, not in memory — process them in
-            // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
-            var processed = transaction.IsStreamed
-                ? await ProcessStreamedAsync(transaction, ct)
-                : await ProcessInMemoryAsync(transaction, ct);
-
-            using (var ackActivity = _instr.StartAck())
+            finally
             {
-                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
-                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-                await stream.AcknowledgeAsync(transaction.EndLsn, ct);
-                LastAcknowledgedLsn = transaction.EndLsn;
-                await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
-                status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
+                // Barrier: no keepalive send may be in flight when the enumerator resumes reading
+                // (or is disposed on unwind).
+                await keepalive.EndTransactionAsync();
             }
-
-            // The committed transaction (batch) is fully delivered to sinks and acknowledged to the server.
-            logger.BatchProcessed(slotName, processed, transaction.EndLsn);
 
             rollupTransactions++;
             rollupChanges += processed;
@@ -116,6 +91,50 @@ internal sealed class WallabyPipeline(
                 rollupStart = Stopwatch.GetTimestamp();
             }
         }
+    }
+
+    // Process one committed transaction end-to-end: materialize, route, deliver, then acknowledge to the
+    // server and record the checkpoint. Returns the number of changes processed.
+    private async Task<int> ProcessTransactionAsync(CommittedTransaction transaction, CancellationToken ct)
+    {
+        var lagSeconds = transaction.CommitTimestamp is { } commitTs
+            ? Math.Max(0, (DateTimeOffset.UtcNow - commitTs).TotalSeconds)
+            : -1;
+
+        using var activity = _instr.StartTransaction();
+        if (activity is not null)
+        {
+            activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
+            activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
+            activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
+            activity.SetTag("wallaby.txn.size", transaction.IsStreamed ? -1 : transaction.Changes.Count);
+            if (lagSeconds >= 0)
+            {
+                activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
+            }
+        }
+
+        _instr.RecordIngestionLag(slotName, lagSeconds);
+
+        // A streamed (large) transaction's changes live in the spill, not in memory — process them in
+        // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
+        var processed = transaction.IsStreamed
+            ? await ProcessStreamedAsync(transaction, ct)
+            : await ProcessInMemoryAsync(transaction, ct);
+
+        using (var ackActivity = _instr.StartAck())
+        {
+            ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
+            ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
+            await stream.AcknowledgeAsync(transaction.EndLsn, ct);
+            LastAcknowledgedLsn = transaction.EndLsn;
+            await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
+            status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
+        }
+
+        // The committed transaction (batch) is fully delivered to sinks and acknowledged to the server.
+        logger.BatchProcessed(slotName, processed, transaction.EndLsn);
+        return processed;
     }
 
     // Normal transaction: materialize the in-memory changes, dispatch them (with watermark/backfill handling),

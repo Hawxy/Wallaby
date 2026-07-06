@@ -72,16 +72,16 @@ internal sealed class LogicalReplicationStream(
     }
 
     /// <summary>
-    /// Begin sending periodic status updates so the connection stays alive while a transaction is being
-    /// processed — i.e. while the consumer isn't pulling from the stream, so Npgsql can't answer the
-    /// server's keepalives. Scope it to one transaction's processing: the replication enumerator is
-    /// suspended then (no concurrent socket read), so sending is safe; dispose it before reading resumes.
+    /// Create the keepalive guard for a pipeline run: a single timer loop that sends a status update on
+    /// each tick falling inside a <see cref="KeepaliveGuard.BeginTransaction"/>/<see
+    /// cref="KeepaliveGuard.EndTransactionAsync"/> window — i.e. while a transaction is being processed,
+    /// when the consumer isn't pulling from the stream and Npgsql can't answer the server's keepalives.
     /// The update reports the last <see cref="AcknowledgeAsync"/> position (it never calls
     /// <c>SetReplicationStatus</c>), so <c>confirmed_flush_lsn</c> is not advanced past durable delivery.
-    /// Disposing stops the ticks and lets an in-flight send finish; cancelling <paramref name="ct"/>
-    /// (shutdown/lost lock) also aborts an in-flight send, so teardown can't be blocked by a wedged connection.
+    /// Cancelling <paramref name="abort"/> (shutdown/lost lock) aborts an in-flight send, so teardown
+    /// can't be blocked by a wedged connection.
     /// </summary>
-    public IAsyncDisposable StartKeepalive(TimeSpan interval, CancellationToken ct) => new Keepalive(this, interval, ct);
+    public KeepaliveGuard StartKeepalive(TimeSpan interval, CancellationToken abort) => new(this, interval, abort);
 
     private async Task SendKeepaliveAsync(CancellationToken abort)
     {
@@ -102,29 +102,84 @@ internal sealed class LogicalReplicationStream(
         _statusLock.Dispose();
     }
 
-    private sealed class Keepalive : IAsyncDisposable
+    /// <summary>
+    /// One long-lived timer loop per pipeline run — the per-transaction hot path is just a flag write on
+    /// begin and an uncontended gate acquire on end, with no timer/task churn per transaction. Sending is
+    /// only safe while the replication enumerator is suspended (no concurrent socket read), which is
+    /// exactly the Begin/End window; <see cref="EndTransactionAsync"/> is the barrier that lets reading
+    /// resume.
+    /// </summary>
+    internal sealed class KeepaliveGuard : IAsyncDisposable
     {
-        private readonly CancellationTokenSource _cts;
+        private readonly LogicalReplicationStream _stream;
+        private readonly CancellationToken _abort;
+        private readonly PeriodicTimer _timer;
         private readonly Task _loop;
+        // Serializes keepalive sends against EndTransactionAsync, so processing never hands the
+        // connection back to the enumerator while a send is in flight.
+        private readonly SemaphoreSlim _gate = new(1, 1);
+        private volatile bool _processing;
 
-        public Keepalive(LogicalReplicationStream stream, TimeSpan interval, CancellationToken ct)
+        internal KeepaliveGuard(LogicalReplicationStream stream, TimeSpan interval, CancellationToken abort)
         {
-            _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _loop = RunAsync(stream, interval, _cts.Token, ct);
+            _stream = stream;
+            _abort = abort;
+            _timer = new PeriodicTimer(interval);
+            _loop = RunAsync();
         }
 
-        private static async Task RunAsync(
-            LogicalReplicationStream stream, TimeSpan interval, CancellationToken tick, CancellationToken abort)
+        /// <summary>Mark a transaction as being processed: ticks now send status updates.</summary>
+        public void BeginTransaction() => _processing = true;
+
+        /// <summary>
+        /// Mark processing finished. A barrier: on return no send is in flight and none will start until
+        /// the next <see cref="BeginTransaction"/>, so the caller can resume reading the stream. An
+        /// in-flight send on a healthy connection is never torn mid-write; on abort it is cancelled and
+        /// this returns (the caller's next stream operation observes the same token).
+        /// </summary>
+        public async ValueTask EndTransactionAsync()
+        {
+            _processing = false;
+            try
+            {
+                await _gate.WaitAsync(_abort);
+                _gate.Release();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        private async Task RunAsync()
         {
             try
             {
-                using var timer = new PeriodicTimer(interval);
-                while (await timer.WaitForNextTickAsync(tick))
+                while (await _timer.WaitForNextTickAsync(_abort))
                 {
-                    // The send aborts only on the outer (shutdown/lost-lock) token — a normal dispose
-                    // between transactions cancels just the tick wait, so an in-flight send on a healthy
-                    // connection is never torn mid-write.
-                    await stream.SendKeepaliveAsync(abort);
+                    if (!_processing)
+                    {
+                        continue;
+                    }
+
+                    await _gate.WaitAsync(_abort);
+                    try
+                    {
+                        // Re-check under the gate: EndTransactionAsync may have won it in between, and
+                        // the enumerator may be reading again — sending now would race the socket read.
+                        if (_processing)
+                        {
+                            await _stream.SendKeepaliveAsync(_abort);
+                        }
+                    }
+                    catch (Exception) when (!_abort.IsCancellationRequested)
+                    {
+                        // A failed send means the connection is broken; the pipeline's next read/ack
+                        // surfaces it. Keep ticking rather than silently dying for the rest of the run.
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -135,16 +190,16 @@ internal sealed class LogicalReplicationStream(
 
         public async ValueTask DisposeAsync()
         {
-            await _cts.CancelAsync();
+            _timer.Dispose(); // pending and future ticks return false, so the loop exits cleanly
             try
             {
-                await _loop; // ensure no keepalive send is in flight before reading resumes
+                await _loop; // ensure no keepalive send is in flight before teardown proceeds
             }
             catch
             {
                 // The loop swallows cancellation; ignore anything else during teardown.
             }
-            _cts.Dispose();
+            _gate.Dispose();
         }
     }
 }

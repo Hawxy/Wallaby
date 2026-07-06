@@ -17,8 +17,10 @@ internal sealed class SinkDeliveryException(string sinkName, string error, Excep
 
 /// <summary>
 /// Groups routed documents by sink (preserving commit order) and delivers each group as a
-/// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. A permanent failure (or
-/// exhausted retries) halts the pipeline. Sinks are delivered sequentially in v1; per-sink ordering is preserved.
+/// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. Sinks are independent,
+/// so their batches are delivered concurrently; per-sink ordering is preserved (one batch per sink, records
+/// in commit order). A permanent failure (or exhausted retries) on any sink halts the pipeline — after
+/// every in-flight delivery has settled, so no batch is abandoned mid-write.
 /// </summary>
 internal sealed class SinkDispatcher
 {
@@ -54,65 +56,82 @@ internal sealed class SinkDispatcher
 
     public async Task DispatchAsync(IReadOnlyList<RoutedDocument> routed, CancellationToken ct)
     {
-        foreach (var (sinkName, records) in GroupBySinkPreservingOrder(routed))
+        var groups = GroupBySinkPreservingOrder(routed);
+        if (groups.Count == 1)
         {
-            // Defensive: mappings are attached to a registered sink by construction, so a routed name is
-            // always registered — unless a custom router produced a stray name.
-            if (!_sinks.TryGetValue(sinkName, out var sink))
-            {
-                throw new SinkDeliveryException(sinkName, "no sink is registered with this name", inner: null);
-            }
+            await DeliverGroupAsync(groups[0].SinkName, groups[0].Records, ct);
+            return;
+        }
 
-            var batch = new SinkBatch(sinkName, records);
-            using var activity = _instr.StartSinkDelivery();
-            if (activity is not null)
-            {
-                activity.SetTag(WallabyInstrumentation.SinkTag, sinkName);
-                activity.SetTag(WallabyInstrumentation.DestinationTag, records.Count > 0 ? records[0].Destination : null);
-                activity.SetTag("wallaby.batch.size", records.Count);
-            }
+        // Sinks are independent: fan the groups out concurrently so a batch's ack latency is the slowest
+        // sink, not the sum. WhenAll settles every delivery before propagating the first failure, so no
+        // sink is abandoned mid-write when another faults.
+        var tasks = new Task[groups.Count];
+        for (var i = 0; i < groups.Count; i++)
+        {
+            tasks[i] = DeliverGroupAsync(groups[i].SinkName, groups[i].Records, ct);
+        }
+        await Task.WhenAll(tasks);
+    }
 
-            try
+    private async Task DeliverGroupAsync(string sinkName, List<SinkRecord> records, CancellationToken ct)
+    {
+        // Defensive: mappings are attached to a registered sink by construction, so a routed name is
+        // always registered — unless a custom router produced a stray name.
+        if (!_sinks.TryGetValue(sinkName, out var sink))
+        {
+            throw new SinkDeliveryException(sinkName, "no sink is registered with this name", inner: null);
+        }
+
+        var batch = new SinkBatch(sinkName, records);
+        using var activity = _instr.StartSinkDelivery();
+        if (activity is not null)
+        {
+            activity.SetTag(WallabyInstrumentation.SinkTag, sinkName);
+            activity.SetTag(WallabyInstrumentation.DestinationTag, records.Count > 0 ? records[0].Destination : null);
+            activity.SetTag("wallaby.batch.size", records.Count);
+        }
+
+        try
+        {
+            await _retry.ExecuteAsync(async static (state, token) =>
             {
-                await _retry.ExecuteAsync(async static (state, token) =>
+                var attemptStart = WallabyInstrumentation.StartTimer();
+                var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
+                var name = state.SinkBatch.SinkName;
+                var outcome = result.Status switch
                 {
-                    var attemptStart = WallabyInstrumentation.StartTimer();
-                    var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
-                    var name = state.SinkBatch.SinkName;
-                    var outcome = result.Status switch
-                    {
-                        DeliveryStatus.Success => WallabyInstrumentation.DeliverySuccess,
-                        DeliveryStatus.RetryableFailure => WallabyInstrumentation.DeliveryRetryable,
-                        _ => WallabyInstrumentation.DeliveryPermanent,
-                    };
-                    state.Instr.RecordSinkAttempt(name, outcome, attemptStart, state.SinkBatch.Records.Count);
-                    switch (result.Status)
-                    {
-                        case DeliveryStatus.Success:
-                            state.Status?.RecordSinkDelivered(name, DateTimeOffset.UtcNow);
-                            return;
-                        case DeliveryStatus.RetryableFailure:
-                            state.Activity?.AddEvent(new ActivityEvent("retry"));
-                            throw new SinkRetryableException(name, result.Error ?? "(unspecified)", result.Exception);
-                        default:
-                            throw new SinkDeliveryException(name, result.Error ?? "(unspecified)", result.Exception);
-                    }
-                }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity), ct);
-            }
-            catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
-            {
-                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                activity?.AddException(ex);
-                throw;
-            }
+                    DeliveryStatus.Success => WallabyInstrumentation.DeliverySuccess,
+                    DeliveryStatus.RetryableFailure => WallabyInstrumentation.DeliveryRetryable,
+                    _ => WallabyInstrumentation.DeliveryPermanent,
+                };
+                state.Instr.RecordSinkAttempt(name, outcome, attemptStart, state.SinkBatch.Records.Count);
+                switch (result.Status)
+                {
+                    case DeliveryStatus.Success:
+                        state.Status?.RecordSinkDelivered(name, DateTimeOffset.UtcNow);
+                        return;
+                    case DeliveryStatus.RetryableFailure:
+                        state.Activity?.AddEvent(new ActivityEvent("retry"));
+                        throw new SinkRetryableException(name, result.Error ?? "(unspecified)", result.Exception);
+                    default:
+                        throw new SinkDeliveryException(name, result.Error ?? "(unspecified)", result.Exception);
+                }
+            }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity), ct);
+        }
+        catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
+            throw;
         }
     }
 
-    private static IEnumerable<(string SinkName, List<SinkRecord> Records)> GroupBySinkPreservingOrder(
+    private static List<(string SinkName, List<SinkRecord> Records)> GroupBySinkPreservingOrder(
         IReadOnlyList<RoutedDocument> routed)
     {
         var groups = new Dictionary<string, List<SinkRecord>>();
-        var order = new List<string>();
+        var order = new List<(string, List<SinkRecord>)>();
 
         foreach (var item in routed)
         {
@@ -120,14 +139,11 @@ internal sealed class SinkDispatcher
             {
                 list = [];
                 groups[item.SinkName] = list;
-                order.Add(item.SinkName);
+                order.Add((item.SinkName, list));
             }
             list.Add(item.Record);
         }
 
-        foreach (var name in order)
-        {
-            yield return (name, groups[name]);
-        }
+        return order;
     }
 }

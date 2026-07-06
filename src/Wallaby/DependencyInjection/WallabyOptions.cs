@@ -9,7 +9,10 @@ public sealed class WallabyOptions
     /// <summary>Publication name.</summary>
     public string PublicationName { get; set; } = "wallaby_cdc_pub";
 
-    /// <summary>Backfill keyset page size. Chunk rows are held in memory, so capped at 100,000.</summary>
+    /// <summary>
+    /// Backfill keyset page size. Chunk rows are held in memory — up to two chunks at once (the one being
+    /// delivered plus the prefetched next) — so capped at 100,000.
+    /// </summary>
     public int ChunkSize { get; set; } = 500;
 
     /// <summary>

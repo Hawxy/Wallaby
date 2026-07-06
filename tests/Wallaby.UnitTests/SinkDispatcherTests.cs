@@ -71,6 +71,57 @@ public class SinkDispatcherTests
         attempts.ShouldBe(1);
     }
 
+    private static IReadOnlyList<RoutedDocument> OneRecordPerSink(params string[] sinkNames) =>
+        [.. sinkNames.Select(name => new RoutedDocument(
+            name, new SinkRecord(Destination: null, "1", Document: new WallabyDocument { ["x"] = 1 }, IsDeletion: false, Meta)))];
+
+    [Test]
+    public async Task Independent_sinks_are_delivered_concurrently()
+    {
+        // Each sink completes only after the other has started; sequential delivery would time out here.
+        var aStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["a"] = new DelegateSink("a", async (_, _) =>
+            {
+                aStarted.SetResult();
+                await bStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                return DeliveryResult.Success;
+            }),
+            ["b"] = new DelegateSink("b", async (_, _) =>
+            {
+                bStarted.SetResult();
+                await aStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                return DeliveryResult.Success;
+            }),
+        };
+
+        await new SinkDispatcher(sinks).DispatchAsync(OneRecordPerSink("a", "b"), CancellationToken.None);
+    }
+
+    [Test]
+    public async Task A_failing_sink_does_not_abandon_the_other_sinks_delivery()
+    {
+        var delivered = false;
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["ok"] = new DelegateSink("ok", async (_, _) =>
+            {
+                await Task.Delay(50);
+                delivered = true;
+                return DeliveryResult.Success;
+            }),
+            ["bad"] = new DelegateSink("bad", (_, _) => Task.FromResult(DeliveryResult.Permanent("boom"))),
+        };
+
+        await Should.ThrowAsync<Exception>(
+            async () => await new SinkDispatcher(sinks).DispatchAsync(OneRecordPerSink("ok", "bad"), CancellationToken.None));
+
+        // WhenAll settles every delivery before the failure propagates.
+        delivered.ShouldBeTrue();
+    }
+
     [Test]
     public async Task Successful_delivery_passes_records_to_the_sink()
     {
