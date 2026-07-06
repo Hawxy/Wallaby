@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref } from 'vue';
 import { withBase } from 'vitepress';
 import { lsn, tickLsn } from './lsn';
+import { useFlowCycle, type FlowStep } from './flow/useFlowCycle';
+import FlowChip from './flow/FlowChip.vue';
+import FlowLink from './flow/FlowLink.vue';
 
 // "Choose your configuration" picker: postgres fans out over a bus into
 // two lanes — the capture lane (providers box → sinks box) and the
@@ -13,13 +16,13 @@ const providers = [
     title: 'efcore provider',
     sub: 'relational storage',
     label: 'EFCore Setup →',
-    link: '/providers/entity-framework-core/',
+    link: '/providers/entity-framework-core',
   },
   {
     title: 'marten provider',
     sub: 'document storage',
     label: 'Marten Setup →',
-    link: '/providers/marten/',
+    link: '/providers/marten',
   },
 ];
 
@@ -47,47 +50,38 @@ const flash = ref('');
 // which connector segment the packet is on
 const pulse = ref('');
 
-let kickTimer: ReturnType<typeof setTimeout> | undefined;
-let cycleTimer: ReturnType<typeof setInterval> | undefined;
-let stepTimers: ReturnType<typeof setTimeout>[] = [];
 // providers alternate which sink they deliver to across rounds
 let round = 0;
+let started = false;
 
 // stem (0.5s) → bus toward a lane (0.35s) → drop into the box (0.5s) →
 // chip processes (amber ~0.75s) → drop to the lane's destination →
 // destination flashes blue as the delivery lands
-function runCycle() {
-  const t = target.value;
-  const provider = t < 2;
-  const sink = (t + round) % 2;
-  stepTimers = ([
-    [0, () => { tickLsn(); flash.value = 'src'; pulse.value = 'stem'; }],
-    [400, () => (flash.value = '')],
-    [500, () => (pulse.value = provider ? 'bus-left' : 'bus-right')],
-    [850, () => (pulse.value = provider ? 'drop-left' : 'drop-right')],
-    [1350, () => { pulse.value = ''; lit.value = provider ? 'p' + t : 'ext'; }],
-    [2100, () => { lit.value = ''; pulse.value = provider ? 'drop-sinks' : 'drop-consumer'; }],
-    [2600, () => { pulse.value = ''; flash.value = provider ? 's' + sink : 'consumer'; }],
-    [3000, () => (flash.value = '')],
-  ] as [number, () => void][]).map(([ms, fn]) => setTimeout(fn, ms));
-}
-
-onMounted(() => {
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    // first packet after a short settle instead of a 3.6s empty stare
-    kickTimer = setTimeout(runCycle, 500);
-    cycleTimer = setInterval(() => {
+useFlowCycle({
+  kick: 500,
+  interval: 3600,
+  cycle: (): FlowStep[] => {
+    if (started) {
       target.value = (target.value + 1) % 3;
       if (target.value === 0) round += 1;
-      runCycle();
-    }, 3600);
-  }
-});
-
-onUnmounted(() => {
-  if (kickTimer) clearTimeout(kickTimer);
-  if (cycleTimer) clearInterval(cycleTimer);
-  stepTimers.forEach(clearTimeout);
+    }
+    started = true;
+    const t = target.value;
+    const provider = t < 2;
+    const sink = (t + round) % 2;
+    return [
+      [0, () => { tickLsn(); flash.value = 'src'; pulse.value = 'stem'; }],
+      [400, () => (flash.value = '')],
+      [500, () => (pulse.value = provider ? 'bus-left' : 'bus-right')],
+      [850, () => (pulse.value = provider ? 'drop-left' : 'drop-right')],
+      [1350, () => { pulse.value = ''; lit.value = provider ? 'p' + t : 'ext'; }],
+      [2100, () => { lit.value = ''; pulse.value = provider ? 'drop-sinks' : 'drop-consumer'; }],
+      // destination holds blue as long as the provider held amber, so
+      // the delivery doesn't read as more fleeting than the processing
+      [2600, () => { pulse.value = ''; flash.value = provider ? 's' + sink : 'consumer'; }],
+      [3350, () => (flash.value = '')],
+    ];
+  },
 });
 </script>
 
@@ -96,13 +90,13 @@ onUnmounted(() => {
     <!-- the source chip and connectors are decoration (fake telemetry);
          the boxes below carry the real content and links -->
     <div class="wb-config-top" aria-hidden="true">
-      <div class="wb-config-chip is-src" :class="{ 'is-flash': flash === 'src' }">
-        <div class="wb-config-title">postgres</div>
-        <div class="wb-config-sub">
-          wal @ <span class="wb-config-val">{{ lsn }}</span>
+      <FlowChip class="is-src" :flash="flash === 'src'">
+        <div class="wb-chip-title">postgres</div>
+        <div class="wb-chip-sub">
+          wal @ <span class="wb-chip-val">{{ lsn }}</span>
         </div>
-      </div>
-      <div class="wb-config-stem" :class="{ 'is-pulsing': pulse === 'stem' }"></div>
+      </FlowChip>
+      <FlowLink :pulsing="pulse === 'stem'" />
       <div
         class="wb-config-bus"
         :class="{ 'is-left': pulse === 'bus-left', 'is-right': pulse === 'bus-right' }"
@@ -113,74 +107,55 @@ onUnmounted(() => {
          row 1 and 3, providers/external on row 2, sinks/consumer on
          row 4 -->
     <div class="wb-config-grid">
-      <div
-        class="wb-config-drop"
-        :class="{ 'is-pulsing': pulse === 'drop-left' }"
-        aria-hidden="true"
-      ></div>
-      <div
-        class="wb-config-drop"
-        :class="{ 'is-pulsing': pulse === 'drop-right' }"
-        aria-hidden="true"
-      ></div>
+      <FlowLink class="wb-config-drop" :pulsing="pulse === 'drop-left'" aria-hidden="true" />
+      <FlowLink class="wb-config-drop" :pulsing="pulse === 'drop-right'" aria-hidden="true" />
 
       <div class="wb-config-group is-providers">
         <div class="wb-config-group-label">providers</div>
         <div class="wb-config-group-grid">
-          <div
+          <FlowChip
             v-for="(p, i) in providers"
             :key="p.title"
-            class="wb-config-chip is-option"
-            :class="{ 'is-lit': lit === 'p' + i }"
+            class="is-option"
+            :lit="lit === 'p' + i"
           >
-            <div class="wb-config-title">{{ p.title }}</div>
-            <div class="wb-config-sub">{{ p.sub }}</div>
+            <div class="wb-chip-title">{{ p.title }}</div>
+            <div class="wb-chip-sub">{{ p.sub }}</div>
             <a class="wb-btn" :href="withBase(p.link)">{{ p.label }}</a>
-          </div>
+          </FlowChip>
         </div>
       </div>
 
-      <div class="wb-config-chip is-option is-ext" :class="{ 'is-lit': lit === 'ext' }">
-        <div class="wb-config-title">external slots</div>
-        <div class="wb-config-sub">provision publications + slots for an external consumer</div>
+      <FlowChip class="is-option is-ext" :lit="lit === 'ext'">
+        <div class="wb-chip-title">external slots</div>
+        <div class="wb-chip-sub">provision publications + slots, no capture</div>
         <a class="wb-btn" :href="withBase('/external-slots')">External Slots →</a>
-      </div>
+      </FlowChip>
 
-      <div
-        class="wb-config-drop"
-        :class="{ 'is-pulsing': pulse === 'drop-sinks' }"
-        aria-hidden="true"
-      ></div>
-      <div
-        class="wb-config-drop"
-        :class="{ 'is-pulsing': pulse === 'drop-consumer' }"
-        aria-hidden="true"
-      ></div>
+      <FlowLink class="wb-config-drop" :pulsing="pulse === 'drop-sinks'" aria-hidden="true" />
+      <FlowLink class="wb-config-drop" :pulsing="pulse === 'drop-consumer'" aria-hidden="true" />
 
       <div class="wb-config-group is-sinks">
         <div class="wb-config-group-label">sinks</div>
         <div class="wb-config-group-grid">
-          <div
+          <FlowChip
             v-for="(s, i) in sinks"
             :key="s.title"
-            class="wb-config-chip is-option"
-            :class="{ 'is-flash': flash === 's' + i }"
+            class="is-option"
+            :flash="flash === 's' + i"
           >
-            <div class="wb-config-title">{{ s.title }}</div>
-            <div class="wb-config-sub">{{ s.sub }}</div>
+            <div class="wb-chip-title">{{ s.title }}</div>
+            <div class="wb-chip-sub">{{ s.sub }}</div>
             <a class="wb-btn" :href="withBase(s.link)">{{ s.label }}</a>
-          </div>
+          </FlowChip>
         </div>
       </div>
 
-      <div
-        class="wb-config-chip is-option is-consumer"
-        :class="{ 'is-flash': flash === 'consumer' }"
-      >
-        <div class="wb-config-title">pgoutput consumer</div>
-        <div class="wb-config-sub">Airbyte / Fivetran / etc</div>
-        <div class="wb-config-sub">reads the slot directly</div>
-      </div>
+      <FlowChip class="is-option is-consumer" :flash="flash === 'consumer'">
+        <div class="wb-chip-title">pgoutput consumer</div>
+        <div class="wb-chip-sub">Airbyte / Fivetran / etc</div>
+        <div class="wb-chip-sub">reads the slot directly</div>
+      </FlowChip>
     </div>
   </div>
 </template>
@@ -190,6 +165,12 @@ onUnmounted(() => {
   max-width: 680px;
   margin: 32px auto;
   font-family: var(--vp-font-family-mono);
+  /* shorter hops than the vertical diagrams */
+  --wb-link-travel: 0.5s;
+}
+
+.wb-config .wb-link {
+  height: 24px;
 }
 
 .wb-config-top {
@@ -198,59 +179,22 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.wb-config-chip {
-  padding: 10px 16px 11px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 2px;
-  background-color: var(--vp-code-block-bg);
-  transition: border-color 0.4s;
-}
-
-.wb-config-chip.is-src {
+.wb-chip.is-src {
   width: 200px;
 }
 
-/* amber while the chip "processes" the packet */
-.wb-config-chip.is-lit {
-  border-color: var(--vp-c-brand-1);
-  transition: border-color 0.2s;
-}
-
-/* blue as the chip's data updates — the LSN moves, a delivery lands */
-.wb-config-chip.is-flash {
-  border-color: var(--wb-accent-blue);
-  transition: border-color 0.2s;
-}
-
-.wb-config-chip.is-option {
+.wb-chip.is-option {
   display: flex;
   flex-direction: column;
 }
 
-.wb-config-title {
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--vp-c-text-1);
-}
-
-.wb-config-sub {
-  margin-top: 2px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--vp-c-text-3);
-}
-
-.wb-config-sub:last-of-type {
+.wb-config .wb-chip-sub:last-of-type {
   margin-bottom: 12px;
-}
-
-.wb-config-val {
-  color: var(--wb-accent-blue);
 }
 
 /* embedded buttons: compact form of the global .wb-btn, pinned to the
    chip bottom so siblings line up */
-.wb-config-chip .wb-btn {
+.wb-chip .wb-btn {
   display: block;
   margin-top: auto;
   padding: 5px 10px;
@@ -277,26 +221,6 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-}
-
-/* stem: hairline from postgres down to the bus */
-.wb-config-stem {
-  position: relative;
-  width: 1px;
-  height: 24px;
-  background-color: var(--vp-c-divider);
-}
-
-.wb-config-stem::before,
-.wb-config-drop::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -2px;
-  width: 5px;
-  height: 5px;
-  background-color: var(--vp-c-brand-1);
-  opacity: 0;
 }
 
 /* bus: horizontal rail from the capture lane's center to the external
@@ -331,38 +255,17 @@ onUnmounted(() => {
   column-gap: 16px;
 }
 
-/* drops: hairlines between the bus, boxes, and destinations */
 .wb-config-drop {
-  position: relative;
   justify-self: center;
-  width: 1px;
-  height: 24px;
-  background-color: var(--vp-c-divider);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .wb-config-stem.is-pulsing::before,
-  .wb-config-drop.is-pulsing::before {
-    animation: wb-config-drop-anim 0.5s linear;
-  }
-
   .wb-config-bus.is-left::before {
     animation: wb-config-cross-left 0.35s linear;
   }
 
   .wb-config-bus.is-right::before {
     animation: wb-config-cross-right 0.35s linear;
-  }
-}
-
-@keyframes wb-config-drop-anim {
-  0% {
-    top: 0;
-    opacity: 1;
-  }
-  100% {
-    top: calc(100% - 5px);
-    opacity: 1;
   }
 }
 
@@ -413,11 +316,11 @@ onUnmounted(() => {
     order: 2;
   }
 
-  .wb-config-chip.is-ext {
+  .wb-chip.is-ext {
     order: 3;
   }
 
-  .wb-config-chip.is-consumer {
+  .wb-chip.is-consumer {
     order: 4;
   }
 }

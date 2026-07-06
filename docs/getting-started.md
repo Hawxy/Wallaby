@@ -25,7 +25,7 @@ pgoutput consumer:
 
 ::: tip Mixing Providers
 The EF Core and Marten providers can run side by side in one Wallaby instance, sharing a single
-replication slot — see the [providers overview](/providers/overview#combining-providers).
+replication slot - see the [providers overview](/providers/overview#combining-providers).
 :::
 
 ## Deployment
