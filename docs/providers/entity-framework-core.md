@@ -126,6 +126,30 @@ A transform that queries `db` reads *current* database state, which may be newer
 project from the `ChangeEvent` instead and use `REPLICA IDENTITY FULL`.
 :::
 
+### Class-based transforms
+
+For more complex transforms, or anything with dependencies, implement `IWallabyEfTransform<TEntity>`
+as a class — it is resolved from the container:
+
+```csharp
+public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyEfTransform<Product>
+{
+    public async Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> TransformAsync(
+        DbContext db, IReadOnlyList<ChangeEvent<Product>> changes, CancellationToken ct)
+    {
+        var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
+        foreach (var c in changes)
+            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name, ["rrp"] = await pricing.RrpAsync(c.Entity!.Id, ct) };
+        return docs;
+    }
+}
+
+// register:
+sink.Map<Product>()
+    .ToDestination("products")
+    .UsingTransform<Product, ProductSearchTransform>();
+```
+
 ## Dependent tables
 
 When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
@@ -174,5 +198,5 @@ lands shortly *after* the trigger commits rather than in commit order with it. S
 - [Transforms](/transforms) - shaping and enriching documents.
 - [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
 - [Backfill](/backfill) - initial snapshots and version-triggered reindex.
-- [Multi-tenancy](/multi-tenancy) - per-row scoped contexts and destinations.
+- [Multi-tenancy](/providers/entity-framework-core/multi-tenancy) - per-row scoped contexts and destinations.
 - [Observability](/operations/observability) - OpenTelemetry metrics and traces.

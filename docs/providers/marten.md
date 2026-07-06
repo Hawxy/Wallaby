@@ -59,6 +59,41 @@ document type the first time a session touches it — happens too late for captu
 an unregistered document fails fast with guidance.
 :::
 
+## Class-based transforms
+
+For more complex transforms, or anything with dependencies, implement `IWallabyMartenTransform<TEntity>`
+as a class — it is resolved from the container. The leased `IQuerySession` supports enrichment lookups
+against other documents:
+
+```csharp
+public sealed class OrderSearchTransform : IWallabyMartenTransform<Order>
+{
+    public async Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> TransformAsync(
+        IQuerySession session, IReadOnlyList<ChangeEvent<Order>> changes, CancellationToken ct)
+    {
+        var customerIds = changes.Select(c => c.Entity!.CustomerId).Distinct().ToList();
+        var customers = await session.Query<Customer>()
+            .Where(c => customerIds.Contains(c.Id))
+            .ToListAsync(ct);
+        var names = customers.ToDictionary(c => c.Id, c => c.Name);
+
+        var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
+        foreach (var c in changes)
+            docs[c.Key] = new WallabyDocument
+            {
+                ["number"] = c.Entity!.Number,
+                ["customer"] = names.GetValueOrDefault(c.Entity!.CustomerId),
+            };
+        return docs;
+    }
+}
+
+// register:
+sink.Map<Order>()
+    .ToDestination("orders")
+    .UsingTransform<Order, OrderSearchTransform>();
+```
+
 ## What gets captured
 
 For each mapped document Wallaby captures the minimal column set: `id`, the `data` JSONB body,
@@ -85,23 +120,9 @@ failure instead).
 
 ## Multi-tenancy (conjoined)
 
-For documents with conjoined tenancy the captured key is `[tenant_id, id]`, so equal ids across
-tenants stay distinct end to end. Scope a mapping by tenant with `ScopedByTenant()`:
-
-```csharp
-cdc.UseMarten()
-   .UseTenantSessions();                            // lease store.QuerySession(tenantId) per tenant
-
-sink.Map<Order>()
-    .ScopedByTenant()
-    .ScopedDestination(tenant => $"orders-{tenant}")   // optional index-per-tenant
-    .UsingTransform(/* ... */);
-```
-
-The engine sub-groups each transform batch per tenant, `UseTenantSessions()` hands the transform a
-same-tenant `IQuerySession`, and `ScopedDestination` routes per tenant — including deletes, whose
-tenant comes from the key columns. Only conjoined (and single) tenancy is supported; separate-database
-tenancy is not.
+For documents with conjoined tenancy the captured key is `[tenant_id, id]`, and `ScopedByTenant()` +
+`UseTenantSessions()` scope transforms and destinations per tenant — see
+[Multi-tenancy](/providers/marten/multi-tenancy).
 
 ## Combining providers
 

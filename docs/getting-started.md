@@ -43,5 +43,5 @@ It's highly recommended to deploy Wallaby as a separate service, not as an integ
 - [Transforms](/transforms) - shaping and enriching documents.
 - [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
 - [Backfill](/backfill) - initial snapshots and version-triggered reindex.
-- [Multi-tenancy](/multi-tenancy) - per-row scoped contexts and destinations.
+- Multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) or [Marten](/providers/marten/multi-tenancy) - per-row scoped contexts and destinations.
 - [Observability](/operations/observability) - OpenTelemetry metrics and traces.

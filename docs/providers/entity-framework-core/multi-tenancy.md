@@ -1,4 +1,4 @@
-# Multi-tenancy (per-row scoping)
+# Multi-tenancy (EF Core)
 
 Sometimes the enrichment `DbContext` and/or destination must be derived from the **changed row's own
 data**. The canonical case is multi-tenancy: a row carries a `TenantId`, enrichment must run against a

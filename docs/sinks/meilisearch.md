@@ -80,7 +80,7 @@ A few details:
 Set `ValidateConfiguredAttributes = false` to opt out and let Meilisearch accept whatever the transform emits.
 
 ::: tip
-Per-tenant indexes from [`ScopedDestination`](/multi-tenancy) are not supported at the moment. 
+Per-tenant indexes from [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) are not supported at the moment. 
 They're auto-created on first write with the sink's `PrimaryKey` and use Meilisearch defaults.
 
 If a way to customize this would be useful, open an issue.
@@ -106,4 +106,5 @@ after a crash is safe.
 
 ## Per-tenant indexes
 
-Route each tenant to its own index with `ScopedDestination` — see [Multi-tenancy](/multi-tenancy).
+Route each tenant to its own index with `ScopedDestination` — see multi-tenancy for
+[EF Core](/providers/entity-framework-core/multi-tenancy) or [Marten](/providers/marten/multi-tenancy).

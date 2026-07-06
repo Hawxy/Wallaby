@@ -29,7 +29,6 @@ export default defineConfig({
           { text: 'Configuration', link: '/configuration' },
           { text: 'Transforms', link: '/transforms' },
           { text: 'Backfill', link: '/backfill' },
-          { text: 'Multi-Tenancy', link: '/multi-tenancy' },
           { text: 'External Slots', link: '/external-slots' },
           { text: 'Testing', link: '/testing' },
         ]
@@ -38,8 +37,18 @@ export default defineConfig({
         text: 'Storage Providers',
         items: [
           { text: 'Overview', link: '/providers/overview' },
-          { text: 'EF Core', link: '/providers/entity-framework-core' },
-          { text: 'Marten', link: '/providers/marten' },
+          {
+            text: 'EF Core', link: '/providers/entity-framework-core',
+            items: [
+              { text: 'Multi-Tenancy', link: '/providers/entity-framework-core/multi-tenancy' },
+            ]
+          },
+          {
+            text: 'Marten', link: '/providers/marten',
+            items: [
+              { text: 'Multi-Tenancy', link: '/providers/marten/multi-tenancy' },
+            ]
+          },
         ]
       },
       {

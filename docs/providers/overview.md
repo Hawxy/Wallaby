@@ -47,8 +47,9 @@ Each mapped entity type resolves to the provider that models it:
 ## Enrichment sessions
 
 Transforms are handed the session type native to their mapping's provider, a `DbContext` for EF Core
-mappings, an `IQuerySession` for Marten mappings. Tenant-scoped session leasing (see [Multi-tenancy](/multi-tenancy)) is likewise per
-provider.
+mappings, an `IQuerySession` for Marten mappings. Tenant-scoped session leasing is likewise per
+provider — see multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) and
+[Marten](/providers/marten/multi-tenancy).
 
 [External slots](/external-slots) are provider-independent and can be declared alongside any
 combination of the above, or on their own in provision-only mode.

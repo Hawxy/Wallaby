@@ -19,27 +19,10 @@ sink.Map<Product>()
     });
 ```
 
-For more complex transforms, or anything with dependencies, implement `IWallabyEfTransform<TEntity>`
-(from `Wallaby.EntityFrameworkCore`) as a class:
-
-```csharp
-public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyEfTransform<Product>
-{
-    public async Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> TransformAsync(
-        DbContext db, IReadOnlyList<ChangeEvent<Product>> changes, CancellationToken ct)
-    {
-        var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
-        foreach (var c in changes)
-            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name, ["rrp"] = await pricing.RrpAsync(c.Entity!.Id, ct) };
-        return docs;
-    }
-}
-
-// register:
-sink.Map<Product>()
-    .ToDestination("products")
-    .UsingTransform<Product, ProductSearchTransform>();
-```
+For more complex transforms, or anything with dependencies, implement your provider's transform
+interface as a class — [`IWallabyEfTransform<T>`](/providers/entity-framework-core#class-based-transforms)
+(EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten#class-based-transforms) (Marten) — and
+register it with `UsingTransform<TEntity, TTransform>()`; the class is resolved from the container.
 
 ## Internals
 
@@ -85,4 +68,6 @@ Each `ChangeEvent<TEntity>` exposes:
 ## Per-row scoping
 
 When the enrichment context or the destination depends on the row's own data (e.g. a `TenantId`), see
-[Multi-tenancy](/multi-tenancy) for `ScopedBy` / `UseScopedDbContext` / `ScopedDestination`.
+multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) (`ScopedBy` /
+`UseScopedDbContext` / `ScopedDestination`) or [Marten](/providers/marten/multi-tenancy)
+(`ScopedByTenant` / `UseTenantSessions`).
