@@ -37,8 +37,9 @@ public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili
                    o.StandbyRetryInterval = TimeSpan.FromSeconds(1);
                })
                .AddMeilisearchSink("meili", m => { m.Host = meili.Host; m.ApiKey = meili.ApiKey; })
-               .Map<Product>()
-                   .ToSink("meili", destination: index)
+               .WithMappings(sink => sink
+                   .Map<Product>()
+                   .ToDestination(index)
                    .WithBackfillVersion(Guid.NewGuid().ToString("N")) // unique => isolates this test's backfill state
                    .UsingTransform((_, changes, _) =>
                    {
@@ -48,7 +49,7 @@ public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili
                            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
                        return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   });
+                   }));
         });
         return services.BuildServiceProvider();
     }

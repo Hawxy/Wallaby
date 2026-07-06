@@ -66,11 +66,16 @@ whenever a standby takes over leadership. Make it idempotent. If it throws, the 
 
 ```csharp
 // An instance:
-cdc.AddSink(new MySink(...));
+cdc.AddSink(new MySink(...))
+   .WithMappings(sink => sink.Map<Product>().UsingTransform(/* ... */));
 
 // Resolved from the container:
-cdc.AddSink("my-sink", sp => new MySink(sp.GetRequiredService<HttpClient>()));
+cdc.AddSink("my-sink", sp => new MySink(sp.GetRequiredService<HttpClient>()))
+   .WithMappings(sink => sink.Map<Product>().UsingTransform(/* ... */));
 ```
+
+`AddSink` returns a sink-scoped builder: declare the entities the sink receives in `WithMappings(...)`,
+or continue the chain via its `Wallaby` property for a sink registered without mappings.
 
 ## The delegate sink
 

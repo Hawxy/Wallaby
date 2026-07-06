@@ -33,6 +33,24 @@ public class PipelineTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task An_entity_mapped_to_two_sinks_is_delivered_to_both_with_each_transforms_shape()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        var search = harness.AddCaptureSink("search");
+        var audit = harness.AddCaptureSink("audit");
+        harness.Project<Product>("search", "products", p => new WallabyDocument { ["name"] = p.Name });
+        harness.Project<Product>("audit", "product-log", p => new WallabyDocument { ["title"] = p.Name.ToUpperInvariant() });
+        await harness.SelfConfigureAsync();
+
+        var categoryId = await harness.Db.AddCategoryAsync();
+        await harness.Db.AddProductAsync(categoryId, "dual");
+
+        await harness.RunUntilAsync(() =>
+            search.Records.Any(r => r.Destination == "products" && r.Document?.GetValueOrDefault("name") as string == "dual") &&
+            audit.Records.Any(r => r.Destination == "product-log" && r.Document?.GetValueOrDefault("title") as string == "DUAL"));
+    }
+
+    [Test]
     public async Task Restart_resumes_from_confirmed_flush_lsn_without_loss_or_duplication()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();

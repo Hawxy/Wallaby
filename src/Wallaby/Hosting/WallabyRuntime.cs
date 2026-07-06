@@ -300,28 +300,43 @@ internal sealed class WallabyRuntime
         _model = _providers.MergedPlan.Model;
         _materializer = _providers.MergedPlan.Materializer;
 
-        var mappings = new Dictionary<Type, EntityMapping>();
-        var backfillTables = new List<(CapturedTable, string?)>();
-        foreach (var registration in _config.Mappings.Values)
+        var mappings = new List<EntityMapping>();
+        // Backfill state is per table: a table mapped to several sinks appears once, with the composite
+        // of its mappings' declared versions as the version key.
+        var backfillByTable = new Dictionary<string, (CapturedTable Table, List<string> Versions)>(StringComparer.Ordinal);
+        foreach (var sink in _config.Sinks)
         {
-            var captured = _model.FindByClrType(registration.EntityClrType)
-                ?? throw new WallabyConfigurationException(
-                    $"Mapped entity '{registration.EntityClrType.FullName}' is not captured. Ensure it is declared and mapped to a table.");
-
-            mappings[registration.EntityClrType] = new EntityMapping
+            foreach (var registration in sink.Mappings)
             {
-                EntityClrType = registration.EntityClrType,
-                SinkName = registration.SinkName,
-                Destination = registration.Destination,
-                BackfillVersion = registration.BackfillVersion,
-                Transform = registration.TransformFactory!(_services),
-                Sessions = _providers.ProviderByMappedType[registration.EntityClrType].Sessions,
-                DocumentIdSelector = registration.DocumentIdSelector,
-                ScopeKeySelector = registration.ScopeKeySelector,
-                DestinationSelector = registration.DestinationSelector,
-            };
-            backfillTables.Add((captured, registration.BackfillVersion));
+                var captured = _model.FindByClrType(registration.EntityClrType)
+                    ?? throw new WallabyConfigurationException(
+                        $"Mapped entity '{registration.EntityClrType.FullName}' is not captured. Ensure it is declared and mapped to a table.");
+
+                mappings.Add(new EntityMapping
+                {
+                    EntityClrType = registration.EntityClrType,
+                    SinkName = sink.Name,
+                    Destination = registration.Destination,
+                    Transform = registration.TransformFactory!(_services),
+                    Sessions = _providers.ProviderByMappedType[registration.EntityClrType].Sessions,
+                    DocumentIdSelector = registration.DocumentIdSelector,
+                    ScopeKeySelector = registration.ScopeKeySelector,
+                    DestinationSelector = registration.DestinationSelector,
+                });
+
+                if (!backfillByTable.TryGetValue(captured.QualifiedName, out var entry))
+                {
+                    backfillByTable[captured.QualifiedName] = entry = (captured, []);
+                }
+                if (registration.BackfillVersion is not null)
+                {
+                    entry.Versions.Add(registration.BackfillVersion);
+                }
+            }
         }
+        var backfillTables = backfillByTable.Values
+            .Select(v => (v.Table, BackfillVersioning.Compose(v.Versions)))
+            .ToList();
 
         _sinks = _config.Sinks.ToDictionary(s => s.Name, s => s.Factory(_services));
 

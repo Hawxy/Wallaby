@@ -39,8 +39,9 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
                .UseConnectionString(pg.ConnectionString)
                // Production-style sink the test will replace; throws if a batch ever reaches it.
                .AddDelegateSink("meili", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
-               .Map<Product>()
-                   .ToSink("meili", destination: "products")
+               .WithMappings(sink => sink
+                   .Map<Product>()
+                   .ToDestination("products")
                    .UsingTransform((_, changes, _) =>
                    {
                        var docs = new Dictionary<DocumentKey, WallabyDocument?>();
@@ -49,7 +50,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
                            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
                        return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   });
+                   }));
         });
 
         // Post-AddWallaby overrides — the WebApplicationFactory.ConfigureTestServices ordering.
@@ -113,8 +114,9 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
             cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
                .AddDelegateSink("meili", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
-               .Map<Product>()
-                   .ToSink("meili", destination: "products")
+               .WithMappings(sink => sink
+                   .Map<Product>()
+                   .ToDestination("products")
                    .UsingTransform((_, changes, _) =>
                    {
                        var docs = new Dictionary<DocumentKey, WallabyDocument?>();
@@ -123,7 +125,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
                            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
                        return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   });
+                   }));
         });
 
         // ConfigureTestServices ordering: overrides registered after the (deferred) AddWallaby.
@@ -240,8 +242,8 @@ public class WallabyTestingExtensionTests
             .UseEntityFrameworkCore<AppDbContext>()
             .UseConnectionString("Host=localhost;Database=unused")
             .AddDelegateSink("real", (_, _) => Task.FromResult(DeliveryResult.Success))
-            .Map<Product>()
-                .ToSink("real")
+            .WithMappings(sink => sink
+                .Map<Product>()
                 .UsingTransform((_, changes, _) =>
                 {
                     var docs = new Dictionary<DocumentKey, WallabyDocument?>();
@@ -250,6 +252,6 @@ public class WallabyTestingExtensionTests
                         docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                     }
                     return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                });
+                }));
     }
 }

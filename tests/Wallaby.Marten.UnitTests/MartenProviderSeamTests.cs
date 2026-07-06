@@ -11,18 +11,18 @@ namespace Wallaby.Marten.UnitTests;
 /// </summary>
 public class MartenProviderSeamTests
 {
-    private static WallabyBuilder CapturingBuilder()
+    private static (WallabyBuilder Builder, WallabySinkBuilder Sink) CapturingBuilder()
     {
         var builder = new WallabyBuilder();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
-        builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
-        return builder;
+        var sink = builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
+        return (builder, sink);
     }
 
     [Test]
     public void UseMarten_satisfies_the_provider_requirement()
     {
-        var builder = CapturingBuilder();
+        var (builder, _) = CapturingBuilder();
         builder.UseMarten();
 
         var config = builder.Build();
@@ -36,7 +36,7 @@ public class MartenProviderSeamTests
     [Test]
     public void Registering_Marten_twice_fails_fast()
     {
-        var builder = CapturingBuilder();
+        var (builder, _) = CapturingBuilder();
         builder.UseMarten();
 
         Should.Throw<WallabyConfigurationException>(() => builder.UseMarten());
@@ -45,7 +45,7 @@ public class MartenProviderSeamTests
     [Test]
     public void UseTenantSessions_requires_UseMarten_first()
     {
-        var builder = CapturingBuilder();
+        var (builder, _) = CapturingBuilder();
 
         Should.Throw<WallabyConfigurationException>(() => builder.UseTenantSessions());
     }
@@ -53,7 +53,7 @@ public class MartenProviderSeamTests
     [Test]
     public void UseTenantSessions_targets_the_Marten_registration()
     {
-        var builder = CapturingBuilder();
+        var (builder, _) = CapturingBuilder();
         builder.UseMarten();
         builder.UseTenantSessions();
 
@@ -65,15 +65,15 @@ public class MartenProviderSeamTests
     [Test]
     public void UsingTransform_pins_the_mapping_to_the_Marten_provider()
     {
-        var builder = CapturingBuilder();
+        var (builder, sink) = CapturingBuilder();
         builder.UseMarten();
-        builder.Map<Doc>().ToSink("sink").UsingTransform((_, changes, _) =>
+        sink.WithMappings(s => s.Map<Doc>().UsingTransform((_, changes, _) =>
             Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
-                changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null)));
+                changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null))));
 
         var config = builder.Build();
 
-        config.Mappings[typeof(Doc)].ProviderName.ShouldBe("Marten");
+        config.AllMappings.Single().ProviderName.ShouldBe("Marten");
     }
 
     private sealed class Doc

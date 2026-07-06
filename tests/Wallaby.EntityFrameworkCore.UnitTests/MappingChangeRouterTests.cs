@@ -48,8 +48,7 @@ public class MappingChangeRouterTests
             Transform = transform ?? new PassthroughTransform(),
             Sessions = sessionProvider,
         };
-        return new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping });
+        return new MappingChangeRouter([mapping]);
     }
 
     private static ChangeEvent Change(ChangeAction action, int id)

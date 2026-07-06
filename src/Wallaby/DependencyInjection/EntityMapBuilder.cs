@@ -6,9 +6,9 @@ using Wallaby.Providers;
 namespace Wallaby.DependencyInjection;
 
 /// <summary>
-/// Configures the routing for one entity type: which sink/destination it goes to, its document-id rule,
-/// its backfill version, and the transform that shapes its document. The transform holds all the
-/// enrichment/transformation logic; everything here is routing.
+/// Configures one entity mapping of a sink: its destination, document-id rule, backfill version, and the
+/// transform that shapes its document. The transform holds all the enrichment/transformation logic;
+/// everything here is routing.
 /// </summary>
 public sealed class EntityMapBuilder<TEntity> where TEntity : class
 {
@@ -16,10 +16,13 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     internal EntityMapBuilder(MappingRegistration registration) => _registration = registration;
 
-    /// <summary>Route this entity's documents to the named sink and (optional) destination/index.</summary>
-    public EntityMapBuilder<TEntity> ToSink(string sinkName, string? destination = null)
+    /// <summary>
+    /// Route this entity's documents to a destination within the sink (e.g. an index or topic). When
+    /// omitted, the sink's default destination applies.
+    /// </summary>
+    public EntityMapBuilder<TEntity> ToDestination(string destination)
     {
-        _registration.SinkName = sinkName;
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         _registration.Destination = destination;
         return this;
     }

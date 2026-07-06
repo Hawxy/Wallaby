@@ -1,12 +1,13 @@
 using Wallaby.Abstractions;
+using Wallaby.Internal.Pipeline;
 
-namespace Wallaby.Internal.Pipeline;
+namespace Wallaby.TestInfrastructure;
 
 /// <summary>
-/// A simple router that sends every change to every registered sink, using the change's primary key as
-/// the document id and the change's current values (<see cref="ChangeEvent.Record"/>) as the document
-/// payload. Used before mapping/transform-based routing is configured (and as a default for sinks
-/// without a transform).
+/// A router that sends every change to every registered sink, using the change's primary key as the
+/// document id and the change's current values (<see cref="ChangeEvent.Record"/>) as the document
+/// payload — no mappings or transforms. Backs the harness's <see cref="WallabyTestHarness.Broadcast"/>
+/// mode, which lets pipeline tests observe raw captured rows.
 /// </summary>
 internal sealed class BroadcastChangeRouter(IReadOnlyList<string> sinkNames) : IChangeRouter
 {

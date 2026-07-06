@@ -25,8 +25,8 @@ public class AddWallabyRegistrationTests
         cdc.UseEntityFrameworkCore<AppDbContext>()
            .UseConnectionString(connectionString)
            .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
-           .Map<Product>()
-               .ToSink("sink")
+           .WithMappings(sink => sink
+               .Map<Product>()
                .UsingTransform((_, changes, _) =>
                {
                    var docs = new Dictionary<DocumentKey, WallabyDocument?>();
@@ -35,7 +35,7 @@ public class AddWallabyRegistrationTests
                        docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                    }
                    return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-               });
+               }));
     }
 
     private static ServiceCollection NewServices()
@@ -160,7 +160,7 @@ public class AddWallabyRegistrationTests
             .UseEntityFrameworkCore<AppDbContext>()
             .UseConnectionString(ConnectionString)
             .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
-            .Map<Product>()); // structurally invalid: no .ToSink(...)
+            .WithMappings(sink => sink.Map<Product>())); // structurally invalid: no .UsingTransform(...)
 
         await using var provider = services.BuildServiceProvider(); // registration itself is fine
 

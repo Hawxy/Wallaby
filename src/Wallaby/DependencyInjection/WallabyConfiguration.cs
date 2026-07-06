@@ -6,18 +6,22 @@ using Wallaby.Providers;
 
 namespace Wallaby.DependencyInjection;
 
-/// <summary>A registered sink: its name and a factory that resolves the instance from the container.</summary>
+/// <summary>A registered sink: its name, a factory that resolves the instance, and its attached mappings.</summary>
 internal sealed class SinkRegistration
 {
     public required string Name { get; init; }
-    public required Func<IServiceProvider, ISink> Factory { get; init; }
+
+    /// <summary>Resolves the sink instance. Settable so Wallaby.Testing can swap in a test double in place.</summary>
+    public required Func<IServiceProvider, ISink> Factory { get; set; }
+
+    /// <summary>The entity mappings attached via <c>WithMappings(...)</c>. An empty list is a valid sink.</summary>
+    public List<MappingRegistration> Mappings { get; } = [];
 }
 
-/// <summary>A registered entity→sink mapping plus the factory for its transform invoker.</summary>
+/// <summary>An entity mapping attached to a sink, plus the factory for its transform invoker.</summary>
 internal sealed class MappingRegistration
 {
     public required Type EntityClrType { get; init; }
-    public string SinkName { get; set; } = "";
     public string? Destination { get; set; }
     public string? BackfillVersion { get; set; }
     public Func<IServiceProvider, IWallabyTransformInvoker>? TransformFactory { get; set; }
@@ -85,8 +89,9 @@ internal sealed class WallabyConfiguration
     public List<Action<WallabyOptions>> OptionsActions { get; } = [];
 
     public List<SinkRegistration> Sinks { get; } = [];
-    public Dictionary<Type, MappingRegistration> Mappings { get; } = [];
-    public HashSet<Type> RequiresFullReplicaIdentity { get; } = [];
+
+    /// <summary>Every mapping across all sinks, in sink-then-declaration order.</summary>
+    public IEnumerable<MappingRegistration> AllMappings => Sinks.SelectMany(s => s.Mappings);
 
     /// <summary>External pgoutput publication+slot pairs to provision for third-party consumers (e.g. ELT).</summary>
     public List<ExternalSlotRegistration> ExternalSlots { get; } = [];
@@ -107,11 +112,11 @@ internal sealed class WallabyConfiguration
     public List<WallabyProviderRegistration> Providers { get; } = [];
 
     /// <summary>
-    /// True when the consumer declared anything that requires the streaming pipeline (a sink or a mapping).
-    /// When false, Wallaby runs in provision-only mode: it only creates the declared external slots and
-    /// never opens a primary slot or streams.
+    /// True when the consumer declared anything that requires the streaming pipeline (a sink; mappings
+    /// only exist attached to one). When false, Wallaby runs in provision-only mode: it only creates the
+    /// declared external slots and never opens a primary slot or streams.
     /// </summary>
-    public bool CaptureIntended => Sinks.Count > 0 || Mappings.Count > 0;
+    public bool CaptureIntended => Sinks.Count > 0;
 
     /// <summary>
     /// Build the <see cref="CaptureSpec"/> for one provider: the declared entities, replica-identity flags,
@@ -120,24 +125,33 @@ internal sealed class WallabyConfiguration
     /// </summary>
     public CaptureSpec ToCaptureSpec(string providerName, IReadOnlyDictionary<Type, string> affinities)
     {
+        // A type mapped to several sinks appears once: entities dedupe, dependencies merge.
         var declaredEntities = new List<Type>();
         var requiresFullReplicaIdentity = new HashSet<Type>();
-        var declaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
-        foreach (var mapping in Mappings.Values)
+        var declaredDependencies = new Dictionary<Type, List<LambdaExpression>>();
+        foreach (var mapping in AllMappings)
         {
             if (affinities[mapping.EntityClrType] != providerName)
             {
                 continue;
             }
 
-            declaredEntities.Add(mapping.EntityClrType);
-            if (RequiresFullReplicaIdentity.Contains(mapping.EntityClrType))
+            if (!declaredEntities.Contains(mapping.EntityClrType))
+            {
+                declaredEntities.Add(mapping.EntityClrType);
+            }
+            // A scoped destination must resolve the scope key on deletes too, which needs full old-row values.
+            if (mapping.DestinationSelector is not null)
             {
                 requiresFullReplicaIdentity.Add(mapping.EntityClrType);
             }
             if (mapping.DeclaredDependencies.Count > 0)
             {
-                declaredDependencies[mapping.EntityClrType] = mapping.DeclaredDependencies;
+                if (!declaredDependencies.TryGetValue(mapping.EntityClrType, out var dependencies))
+                {
+                    declaredDependencies[mapping.EntityClrType] = dependencies = [];
+                }
+                dependencies.AddRange(mapping.DeclaredDependencies);
             }
         }
 
@@ -145,7 +159,8 @@ internal sealed class WallabyConfiguration
         {
             DeclaredEntities = declaredEntities,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
-            DeclaredDependencies = declaredDependencies,
+            DeclaredDependencies = declaredDependencies.ToDictionary(
+                d => d.Key, d => (IReadOnlyList<LambdaExpression>)d.Value),
         };
     }
 }

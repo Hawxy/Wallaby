@@ -48,7 +48,6 @@ public static class WallabyTestHarnessEfCoreExtensions
                 EntityClrType = typeof(TEntity),
                 SinkName = sink,
                 Destination = destination,
-                BackfillVersion = backfillVersion,
                 Transform = new EfCoreTransformInvoker<TEntity>(new DelegateTransform<TEntity>(transform)),
                 Sessions = null!, // late-bound by the harness at StartAsync (UseScopedContext may still override)
                 ScopeKeySelector = scopeKey is null ? null : change => change.Entity is TEntity e ? scopeKey(e) : null,

@@ -90,10 +90,9 @@ services
     .ReplaceWallabySink("meili", sink);
 ```
 
-`ReplaceWallabySink` swaps the sink registered under that name for your replacement. Routing is keyed by
-the **registration name**, so every `Map<T>().ToSink("meili", destination)` keeps working — the capture
-sink receives exactly the records the production sink would have, with their original
-`SinkRecord.Destination` values. Replacing the sink also prevents the original's `ISinkInitializer` from
+`ReplaceWallabySink` swaps the sink registered under that name for your replacement — the sink's
+`WithMappings(...)` mappings stay attached, so the capture sink receives exactly the records the
+production sink would have, with their original `SinkRecord.Destination` values. Replacing the sink also prevents the original's `ISinkInitializer` from
 running, so no connection to the real destination is ever attempted. Unknown names throw with the list of
 registered sinks.
 

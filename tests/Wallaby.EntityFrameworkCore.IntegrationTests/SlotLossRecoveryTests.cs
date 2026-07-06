@@ -82,8 +82,9 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
             cdc.UseEntityFrameworkCore<AppDbContext>()
                .UseConnectionString(pg.ConnectionString)
                .AddDelegateSink("capture", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
-               .Map<Product>()
-                   .ToSink("capture", destination: "products")
+               .WithMappings(sink => sink
+                   .Map<Product>()
+                   .ToDestination("products")
                    .UsingTransform((_, changes, _) =>
                    {
                        var docs = new Dictionary<DocumentKey, WallabyDocument?>();
@@ -92,7 +93,7 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
                            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                        }
                        return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   });
+                   }));
         });
         services.ConfigureWallabyOptions(o =>
         {

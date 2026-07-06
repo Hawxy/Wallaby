@@ -13,7 +13,6 @@ internal sealed record EntityMapping
     public required Type EntityClrType { get; init; }
     public required string SinkName { get; init; }
     public string? Destination { get; init; }
-    public string? BackfillVersion { get; init; }
     public required IWallabyTransformInvoker Transform { get; init; }
 
     /// <summary>

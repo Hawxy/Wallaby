@@ -61,7 +61,7 @@ internal sealed class ResolvedProviderSet
         var modelProviders = config.Providers
             .Select(registration => (registration.Name, Provider: registration.ModelProvider(services)))
             .ToList();
-        var affinities = ProviderAffinityResolver.Resolve(config.Mappings.Values, modelProviders);
+        var affinities = ProviderAffinityResolver.Resolve(config.AllMappings, modelProviders);
 
         var providers = new List<ResolvedProvider>(config.Providers.Count);
         foreach (var (registration, (_, modelProvider)) in config.Providers.Zip(modelProviders))

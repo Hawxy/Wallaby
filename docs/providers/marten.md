@@ -35,15 +35,16 @@ builder.Services.AddWallaby(cdc =>
     cdc.UseMarten()
        .UseConnectionString(conn)
        .AddMeilisearchSink("meili", m => { /* ... */ })
-       .Map<Order>()
-            .ToSink("meili", destination: "orders")
+       .WithMappings(sink => sink
+            .Map<Order>()
+            .ToDestination("orders")
             .UsingTransform((session, changes, ct) =>
             {
                 var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
                 foreach (var c in changes)
                     docs[c.Key] = new WallabyDocument { ["number"] = c.Entity!.Number, ["total"] = c.Entity!.Total };
                 return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-            });
+            }));
 });
 ```
 
@@ -89,12 +90,12 @@ tenants stay distinct end to end. Scope a mapping by tenant with `ScopedByTenant
 
 ```csharp
 cdc.UseMarten()
-   .UseTenantSessions()                             // lease store.QuerySession(tenantId) per tenant
-   .Map<Order>()
-        .ToSink("meili")
-        .ScopedByTenant()
-        .ScopedDestination(tenant => $"orders-{tenant}")   // optional index-per-tenant
-        .UsingTransform(/* ... */);
+   .UseTenantSessions();                            // lease store.QuerySession(tenantId) per tenant
+
+sink.Map<Order>()
+    .ScopedByTenant()
+    .ScopedDestination(tenant => $"orders-{tenant}")   // optional index-per-tenant
+    .UsingTransform(/* ... */);
 ```
 
 The engine sub-groups each transform batch per tenant, `UseTenantSessions()` hands the transform a

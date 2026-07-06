@@ -33,8 +33,9 @@ builder.Services.AddWallaby(cdc =>
            m.ApiKey = meiliKey;
        })
        // Project each product into a flat search document; bump the version to force a reindex.
-       .Map<Product>()
-            .ToSink("meili", destination: "products")
+       .WithMappings(sink => sink
+            .Map<Product>()
+            .ToDestination("products")
             .WithBackfillVersion("v1")
             .UsingTransform((_, changes, _) =>
             {
@@ -50,7 +51,7 @@ builder.Services.AddWallaby(cdc =>
                     };
                 }
                 return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
-            });
+            }));
 });
 
 using var host = builder.Build();

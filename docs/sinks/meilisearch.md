@@ -21,12 +21,14 @@ cdc.AddMeilisearchSink("meili", m =>
 });
 ```
 
-Then route mappings to it, using the destination as the **index name**:
+Then attach the entities it indexes, using the destination as the **index name**:
 
 ```csharp
-cdc.Map<Product>()
-   .ToSink("meili", destination: "products")
-   .UsingTransform(/* ... */);
+cdc.AddMeilisearchSink("meili", m => { /* ... */ })
+   .WithMappings(sink => sink
+       .Map<Product>()
+       .ToDestination("products")
+       .UsingTransform(/* ... */));
 ```
 
 ## Options

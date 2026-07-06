@@ -19,10 +19,10 @@ public static class WallabyTestingServiceCollectionExtensions
 {
     /// <summary>
     /// Replace the sink registered under <paramref name="name"/> with <paramref name="replacement"/>.
-    /// Mapping destinations declared via <c>Map&lt;T&gt;().ToSink(name, destination)</c> are preserved —
-    /// batches keep routing by the registration name and arrive at the replacement with their original
-    /// <see cref="SinkRecord.Destination"/> values, so a <see cref="CaptureSink"/> sees exactly what the
-    /// production sink would have received.
+    /// The sink's attached mappings (its <c>WithMappings(...)</c> declarations, destinations included) are
+    /// preserved — batches keep routing by the registration name and arrive at the replacement with their
+    /// original <see cref="SinkRecord.Destination"/> values, so a <see cref="CaptureSink"/> sees exactly
+    /// what the production sink would have received.
     /// </summary>
     /// <param name="services">The service collection <c>AddWallaby</c> was called on.</param>
     /// <param name="name">The registration name of the sink to replace (e.g. <c>"meili"</c>).</param>
@@ -37,8 +37,9 @@ public static class WallabyTestingServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(replacement);
         return services.MutateConfiguration(nameof(ReplaceWallabySink), configuration =>
         {
-            var removed = configuration.Sinks.RemoveAll(s => s.Name == name);
-            if (removed == 0)
+            // Swap the factory in place so the registration keeps its attached mappings.
+            var registration = configuration.Sinks.FirstOrDefault(s => s.Name == name);
+            if (registration is null)
             {
                 var registered = configuration.Sinks.Count == 0
                     ? "(none)"
@@ -46,7 +47,7 @@ public static class WallabyTestingServiceCollectionExtensions
                 throw new InvalidOperationException(
                     $"No sink named '{name}' is registered with Wallaby. Registered sinks: {registered}.");
             }
-            configuration.Sinks.Add(new SinkRegistration { Name = name, Factory = _ => replacement });
+            registration.Factory = _ => replacement;
         });
     }
 

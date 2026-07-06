@@ -8,15 +8,15 @@ It is the single place all enrichment/shaping happens.
 For trivial shaping, pass a lambda:
 
 ```csharp
-cdc.Map<Product>()
-   .ToSink("meili", "products")
-   .UsingTransform((_, changes, _) =>
-   {
-       var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
-       foreach (var c in changes)
-           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
-       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-   });
+sink.Map<Product>()
+    .ToDestination("products")
+    .UsingTransform((_, changes, _) =>
+    {
+        var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
+        foreach (var c in changes)
+            docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
+        return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
+    });
 ```
 
 For more complex transforms, or anything with dependencies, implement `IWallabyTransform<TEntity>`
@@ -36,8 +36,8 @@ public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyTr
 }
 
 // register:
-cdc.Map<Product>()
-    .ToSink("meili", "products")
+sink.Map<Product>()
+    .ToDestination("products")
     .UsingTransform<Product, ProductSearchTransform>();
 ```
 

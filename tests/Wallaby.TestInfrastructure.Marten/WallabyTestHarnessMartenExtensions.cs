@@ -39,7 +39,6 @@ public static class WallabyTestHarnessMartenExtensions
                 EntityClrType = typeof(TEntity),
                 SinkName = sink,
                 Destination = destination,
-                BackfillVersion = backfillVersion,
                 Transform = new MartenTransformInvoker<TEntity>(new DelegateTransform<TEntity>(transform)),
                 Sessions = null!, // late-bound by the harness at StartAsync (UseTenantSessions may still override)
                 ScopeKeySelector = scopeKey,

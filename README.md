@@ -31,8 +31,9 @@ builder.Services.AddWallaby(cdc =>
        .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
 
        // Mapping = routing only. The transform does the data shaping.
-       .Map<Product>()
-            .ToSink("meili", destination: "products")
+       .WithMappings(sink => sink
+            .Map<Product>()
+            .ToDestination("products")
             .WithBackfillVersion("v1")           // bump to force a reindex/backfill
             .UsingTransform((db, changes, ct) =>
             {
@@ -40,7 +41,7 @@ builder.Services.AddWallaby(cdc =>
                 foreach (var c in changes)
                     docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
                 return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-            });
+            }));
 });
 ```
 

@@ -60,8 +60,7 @@ public class MappingChangeRouterTelemetryTests
             Transform = new StubTransform(),
             Sessions = sessionProvider,
         };
-        var router = new MappingChangeRouter(
-            new Dictionary<Type, EntityMapping> { [typeof(Product)] = mapping }, instr);
+        var router = new MappingChangeRouter([mapping], instr);
 
         var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
         var change = new ChangeEvent(

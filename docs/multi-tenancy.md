@@ -8,11 +8,12 @@ a per-tenant destination (e.g. an index per tenant).
 ## API
 
 ```csharp
-cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)))
-   .Map<Order>()
-       .ScopedBy(o => o.TenantId)                  // derive the scope key from the change
-       .UsingTransform<Order, OrderTransform>()           // transform receives the tenant-scoped DbContext
-       .ScopedDestination(key => $"orders_{key}"); // per-tenant destination (optional)
+cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)));
+
+sink.Map<Order>()
+    .ScopedBy(o => o.TenantId)                  // derive the scope key from the change
+    .UsingTransform<Order, OrderTransform>()           // transform receives the tenant-scoped DbContext
+    .ScopedDestination(key => $"orders_{key}"); // per-tenant destination (optional)
 ```
 
 - **`ScopedBy(o => o.TenantId)`** extracts a scope key from each change's entity. When the key isn't a CLR
@@ -22,7 +23,7 @@ cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant
   it at a tenant connection string, or hand the context the tenant so a global query filter applies. `services`
   is a DI scope that disposes together with the returned context, so scoped services are safe to resolve.
 - **`ScopedDestination(key => ...)`** computes the destination per scope key. Without it, the scope only
-  affects the enrichment context and the fixed `ToSink(...)` destination is used.
+  affects the enrichment context and the fixed `ToDestination(...)` value (or the sink default) is used.
 
 Each is opt-in and independent; with neither, behavior is exactly as normal (one shared context per batch).
 

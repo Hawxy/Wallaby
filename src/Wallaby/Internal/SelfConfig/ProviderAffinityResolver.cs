@@ -4,36 +4,37 @@ using Wallaby.Providers;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
-/// Assigns each mapping to a storage provider at startup. With one registered provider everything resolves
-/// to it directly (its own model errors surface unchanged). With several, a mapping pinned via a
-/// provider-typed <c>UsingTransform</c> or <c>FromProvider(...)</c> must be modeled by that provider;
-/// otherwise the providers' models are probed via <see cref="IWallabyModelProvider.Handles"/> and exactly
-/// one claimant must exist — none or several fails fast with the fixes spelled out.
+/// Assigns each mapped entity type to a storage provider at startup. With one registered provider
+/// everything resolves to it directly (its own model errors surface unchanged). With several, a type
+/// pinned via a provider-typed <c>UsingTransform</c> or <c>FromProvider(...)</c> on any of its mappings
+/// must be modeled by that provider; otherwise the providers' models are probed via
+/// <see cref="IWallabyModelProvider.Handles"/> and exactly one claimant must exist — none or several
+/// fails fast with the fixes spelled out. A type mapped to several sinks resolves once: all its mappings
+/// share a table, so they share a provider (conflicting pins are rejected at build time).
 /// </summary>
 internal static class ProviderAffinityResolver
 {
     public static IReadOnlyDictionary<Type, string> Resolve(
-        IReadOnlyCollection<MappingRegistration> mappings,
+        IEnumerable<MappingRegistration> mappings,
         IReadOnlyList<(string Name, IWallabyModelProvider Provider)> providers)
     {
         var affinities = new Dictionary<Type, string>();
-        foreach (var mapping in mappings)
+        foreach (var group in mappings.GroupBy(m => m.EntityClrType))
         {
-            affinities[mapping.EntityClrType] = providers.Count == 1
+            affinities[group.Key] = providers.Count == 1
                 ? providers[0].Name
-                : ResolveOne(mapping, providers);
+                : ResolveOne(group.Key, group.Select(m => m.ProviderName).FirstOrDefault(n => n is not null), providers);
         }
         return affinities;
     }
 
     private static string ResolveOne(
-        MappingRegistration mapping, IReadOnlyList<(string Name, IWallabyModelProvider Provider)> providers)
+        Type type, string? pinnedName, IReadOnlyList<(string Name, IWallabyModelProvider Provider)> providers)
     {
-        var type = mapping.EntityClrType;
-        if (mapping.ProviderName is not null)
+        if (pinnedName is not null)
         {
             // The builder validated the name is registered; here the pinned provider must actually model the type.
-            var (name, provider) = providers.First(p => p.Name == mapping.ProviderName);
+            var (name, provider) = providers.First(p => p.Name == pinnedName);
             if (!provider.Handles(type))
             {
                 throw new WallabyConfigurationException(

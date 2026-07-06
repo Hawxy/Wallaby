@@ -56,6 +56,8 @@ internal sealed class SinkDispatcher
     {
         foreach (var (sinkName, records) in GroupBySinkPreservingOrder(routed))
         {
+            // Defensive: mappings are attached to a registered sink by construction, so a routed name is
+            // always registered — unless a custom router produced a stray name.
             if (!_sinks.TryGetValue(sinkName, out var sink))
             {
                 throw new SinkDeliveryException(sinkName, "no sink is registered with this name", inner: null);

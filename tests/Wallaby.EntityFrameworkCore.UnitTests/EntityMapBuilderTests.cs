@@ -26,18 +26,18 @@ public class EntityMapBuilderTests
         var builder = new WallabyBuilder();
         builder.UseEntityFrameworkCore<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
-        builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
+        var sink = builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
         // ScopedBy is only valid when something consumes the key — here a scoped enrichment context.
         builder.UseScopedDbContext((_, _) =>
             new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Database=db;Username=u;Password=p")));
-        builder.Map<Product>()
-            .ToSink("sink", "products")
+        sink.WithMappings(s => s.Map<Product>()
+            .ToDestination("products")
             .UsingTransform((_, _, _) =>
                 Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(new Dictionary<DocumentKey, WallabyDocument?>()))
-            .ScopedBy(c => c.Record.GetValueOrDefault("TenantId"));
+            .ScopedBy(c => c.Record.GetValueOrDefault("TenantId")));
 
         var config = builder.Build();
-        var selector = config.Mappings[typeof(Product)].ScopeKeySelector;
+        var selector = config.AllMappings.Single().ScopeKeySelector;
 
         selector.ShouldNotBeNull();
         var key = selector!(Insert(1, new Dictionary<string, object?> { ["TenantId"] = "tenant-a" }));

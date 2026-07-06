@@ -38,7 +38,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private readonly NpgsqlDataSource _dataSource;
     private readonly IWallabyModelProvider _modelProvider;
     private readonly Dictionary<string, ISink> _sinks = [];
-    private readonly Dictionary<Type, EntityMapping> _mappings = [];
+    private readonly List<EntityMapping> _mappings = [];
     private readonly Dictionary<Type, string?> _backfillTypes = [];
     private readonly Dictionary<Type, List<LambdaExpression>> _declaredDependencies = [];
     private readonly HashSet<Type> _capturedEntities = [];
@@ -155,11 +155,12 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     /// <summary>
     /// Register a mapping built by a provider extension (which owns the transform invoker), mirroring the
-    /// production <c>Map&lt;TEntity&gt;()...UsingTransformInvoker(...)</c> registration.
+    /// production <c>WithMappings(sink => sink.Map&lt;TEntity&gt;()...)</c> registration. The same entity may
+    /// be mapped repeatedly (to different sinks); backfill versions are per type, last-wins.
     /// </summary>
     internal WallabyTestHarness AddMapping(EntityMapping mapping, bool backfill, string? backfillVersion)
     {
-        _mappings[mapping.EntityClrType] = mapping;
+        _mappings.Add(mapping);
         if (backfill)
         {
             _backfillTypes[mapping.EntityClrType] = backfillVersion;
@@ -225,7 +226,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
                 "No enrichment session provider is registered. Create the harness through a provider " +
                 "factory (e.g. WallabyTestHarness.ForTestModel) or call UseEnrichmentSessions(...).");
             router = new MappingChangeRouter(
-                _mappings.ToDictionary(kv => kv.Key, kv => kv.Value with { Sessions = sessions }),
+                _mappings.Select(m => m with { Sessions = sessions }).ToList(),
                 Instrumentation);
         }
 
@@ -379,7 +380,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             kv => (IReadOnlyList<LambdaExpression>)kv.Value);
         var plan = _modelProvider.BuildCapturePlan(new CaptureSpec
         {
-            DeclaredEntities = [.. _capturedEntities.Union(_mappings.Keys)],
+            DeclaredEntities = [.. _capturedEntities.Union(_mappings.Select(m => m.EntityClrType))],
             DeclaredDependencies = declared,
         });
         _model = plan.Model;

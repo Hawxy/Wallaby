@@ -20,15 +20,19 @@ document tables:
 ```csharp
 cdc.UseEntityFrameworkCore<AppDbContext>()
    .UseMarten()
-   .Map<Product>().ToSink("meili").UsingTransform(/* DbContext transform */)
-   .Map<Order>().ToSink("meili").UsingTransform(/* IQuerySession transform */);
+   .AddMeilisearchSink("meili", m => { /* ... */ })
+   .WithMappings(sink =>
+   {
+       sink.Map<Product>().UsingTransform(/* DbContext transform */);
+       sink.Map<Order>().UsingTransform(/* IQuerySession transform */);
+   });
 ```
 
 Slot/publication names, batching, backfill versions, and sinks are all configured once and shared between providers.
 
 ## How mappings resolve to a provider
 
-Each `Map<T>()` resolves to the provider that models `T`:
+Each mapped entity type resolves to the provider that models it:
 
 - If exactly one registered provider models the type, that provider wins — nothing to configure.
 - If both model it, a provider-typed `UsingTransform` overload breaks the tie: each provider's
@@ -37,6 +41,8 @@ Each `Map<T>()` resolves to the provider that models `T`:
   `"Marten"`).
 - Remaining ambiguity, or a `FromProvider` pin that contradicts the transform's provider will fail
   fast at startup with guidance.
+- A type mapped under several sinks resolves once — all its mappings share one table, so a pin on any
+  of them decides for all (conflicting pins fail fast).
 
 ## Enrichment sessions
 

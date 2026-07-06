@@ -39,9 +39,10 @@ builder.Services.AddWallaby(cdc =>
        })
        .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
 
-       // specify mapping and then configure the transform and destination
-       .Map<Product>()
-            .ToSink("meili", destination: "products")
+       // declare the entities this sink receives, each with its transform and destination
+       .WithMappings(sink => sink
+            .Map<Product>()
+            .ToDestination("products")
             .WithBackfillVersion("v1")
             .UsingTransform((_, changes, _) =>
             {
@@ -49,7 +50,7 @@ builder.Services.AddWallaby(cdc =>
                 foreach (var c in changes)
                     docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name, ["price"] = c.Entity!.Price };
                 return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-            });
+            }));
 });
 
 await builder.Build().RunAsync();
@@ -86,9 +87,11 @@ at host start instead of at registration.
 
 ## What gets tracked
 
-Only entities you **declare** are captured and added to the publication: `Map<T>()` declares a table
-*and* routes it to a sink. Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured
-automatically. Captured tables must have a primary key.
+Only entities you **declare** are captured and added to the publication: `Map<T>()` inside a sink's
+`WithMappings(...)` declares a table *and* routes it to that sink. Tables a mapping
+[`DependsOn`](/transforms#dependent-tables) are captured automatically. Captured tables must have a
+primary key. The same entity may be mapped under several sinks — it is captured once and each sink's
+mapping runs its own transform.
 
 ## Transforms
 
@@ -96,26 +99,26 @@ automatically. Captured tables must have a primary key.
 
 The `db` argument is a scoped `DbContext` you can query to flatten or enrichment an aggregate:
 ```csharp
-cdc.Map<Order>()
-   .ToSink("meili", "orders")
-   .UsingTransform(async (db, changes, ct) =>
-   {
-       var ids = changes.Select(c => c.GetPrimaryKey<int>()).ToList();
-       var orders = await db.Set<Order>()
-           .Where(o => ids.Contains(o.Id))
-           .Include(o => o.Customer)
-           .Include(o => o.Lines)
-           .ToListAsync(ct);
+sink.Map<Order>()
+    .ToDestination("orders")
+    .UsingTransform(async (db, changes, ct) =>
+    {
+        var ids = changes.Select(c => c.GetPrimaryKey<int>()).ToList();
+        var orders = await db.Set<Order>()
+            .Where(o => ids.Contains(o.Id))
+            .Include(o => o.Customer)
+            .Include(o => o.Lines)
+            .ToListAsync(ct);
 
-       var docs = new Dictionary<DocumentKey, WallabyDocument?>(orders.Count);
-       foreach (var o in orders)
-           docs[new DocumentKey(o.Id)] = new WallabyDocument
-           {
-               ["customer"] = o.Customer?.Name,
-               ["lineCount"] = o.Lines.Count,
-           };
-       return docs;
-   });
+        var docs = new Dictionary<DocumentKey, WallabyDocument?>(orders.Count);
+        foreach (var o in orders)
+            docs[new DocumentKey(o.Id)] = new WallabyDocument
+            {
+                ["customer"] = o.Customer?.Name,
+                ["lineCount"] = o.Lines.Count,
+            };
+        return docs;
+    });
 ```
 
 ::: tip
@@ -131,11 +134,11 @@ mapping extension — so Wallaby captures the related table and fans its changes
 of your entity:
 
 ```csharp
-cdc.Map<Product>()
-   .ToSink("meili", "products")
-   .DependsOn(p => p.Category)   // a referenced principal
-   .DependsOn(p => p.Labels)     // a many-to-many / skip-navigation join table
-   .UsingTransform(/* reads Category + Labels */);
+sink.Map<Product>()
+    .ToDestination("products")
+    .DependsOn(p => p.Category)   // a referenced principal
+    .DependsOn(p => p.Labels)     // a many-to-many / skip-navigation join table
+    .UsingTransform(/* reads Category + Labels */);
 ```
 
 The navigation is resolved against the EF model at startup; it must be a single one-hop navigation.

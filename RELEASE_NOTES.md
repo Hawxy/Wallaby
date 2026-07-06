@@ -42,6 +42,22 @@ lives in the new **`Wallaby.EntityFrameworkCore`** package, and Marten support s
 7. `CaptureAllMappedTables()` is removed. Capture is always declared explicitly: `Map<T>()` each
    table you want routed (dependent tables still come in via `DependsOn(...)`).
 
+8. Mappings are now declared on their sink. `AddSink`/`AddMeilisearchSink` return a sink-scoped
+   builder — declare the sink's entities in a `WithMappings(...)` callback, where `Map<T>()` replaces
+   the old builder-level `Map<T>().ToSink("name", dest)` (the destination moves to the optional
+   `.ToDestination(dest)`):
+
+   ```csharp
+   cdc.AddMeilisearchSink("meili", m => { /* ... */ })
+      .WithMappings(sink => sink
+          .Map<Product>()
+          .ToDestination("products")
+          .UsingTransform(/* ... */));
+   ```
+
+   A mapping can no longer reference a missing sink — that class of startup/runtime error is gone
+   structurally.
+
 Everything else — sinks, options, backfill, external slots, health checks, `Wallaby.Testing` — is
 unchanged.
 
@@ -78,6 +94,19 @@ preserved across both providers' tables.
 - Mappings on different providers lease enrichment sessions independently within a batch (an EF
   transform gets its `DbContext` while a Marten transform gets its `IQuerySession` in the same
   transaction).
+
+## New: map one entity to multiple sinks
+
+The same entity type can now be mapped under several sinks (at most once per sink). The table is
+captured once; each sink's mapping runs its own transform, so different destinations can receive
+differently shaped documents from one change.
+
+- All mappings of a type share a table, so they resolve to one storage provider — a `FromProvider`/
+  provider-typed-transform pin on any of them decides for all, and conflicting pins fail fast.
+- Backfill state stays per table: bumping any mapping's `WithBackfillVersion` re-snapshots the table
+  to **all** its sinks (idempotent upserts converge). Adding a new sink's mapping to an
+  already-backfilled table does not re-backfill by itself — give it a fresh version or request a
+  backfill via `IWallabyBackfillManager`.
 
 ## New: trimming + NativeAOT support (core and Marten)
 
