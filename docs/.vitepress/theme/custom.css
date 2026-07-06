@@ -374,6 +374,12 @@ html {
   outline-offset: 2px;
 }
 
+/* Search modal input: the surrounding search-bar border already shows
+   focus, so the global ring would draw a second box inside it */
+.VPLocalSearchBox .search-input:focus-visible {
+  outline: none;
+}
+
 /* Code-block language label as a bordered chip */
 .vp-doc [class*='language-'] > span.lang {
   border: 1px solid var(--vp-c-divider);

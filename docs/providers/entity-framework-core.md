@@ -90,10 +90,80 @@ Only entities you **declare** are captured and added to the publication: `Map<T>
 *and* routes it to a sink. Tables a mapping [`DependsOn`](/transforms#dependent-tables) are captured
 automatically. Captured tables must have a primary key.
 
-## Combining providers
+## Transforms
 
-EF Core can be combined with another storage provider in the same Wallaby instance, sharing a single
-replication slot — see the [providers overview](/providers/overview#combining-providers).
+### Enrichment via the DbContext
+
+The `db` argument is a scoped `DbContext` you can query to flatten or enrichment an aggregate:
+```csharp
+cdc.Map<Order>()
+   .ToSink("meili", "orders")
+   .UsingTransform(async (db, changes, ct) =>
+   {
+       var ids = changes.Select(c => c.GetPrimaryKey<int>()).ToList();
+       var orders = await db.Set<Order>()
+           .Where(o => ids.Contains(o.Id))
+           .Include(o => o.Customer)
+           .Include(o => o.Lines)
+           .ToListAsync(ct);
+
+       var docs = new Dictionary<DocumentKey, WallabyDocument?>(orders.Count);
+       foreach (var o in orders)
+           docs[new DocumentKey(o.Id)] = new WallabyDocument
+           {
+               ["customer"] = o.Customer?.Name,
+               ["lineCount"] = o.Lines.Count,
+           };
+       return docs;
+   });
+```
+
+::: tip
+A transform that queries `db` reads *current* database state, which may be newer than the change's LSN. If you must observe the exact post-change snapshot, 
+project from the `ChangeEvent` instead and use `REPLICA IDENTITY FULL`.
+:::
+
+## Dependent tables
+
+When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
+own. Declare the relationship with `DependsOn(...)` — an [EF Core provider](/providers/entity-framework-core)
+mapping extension — so Wallaby captures the related table and fans its changes out to synthetic updates
+of your entity:
+
+```csharp
+cdc.Map<Product>()
+   .ToSink("meili", "products")
+   .DependsOn(p => p.Category)   // a referenced principal
+   .DependsOn(p => p.Labels)     // a many-to-many / skip-navigation join table
+   .UsingTransform(/* reads Category + Labels */);
+```
+
+The navigation is resolved against the EF model at startup; it must be a single one-hop navigation.
+A change to `categories` or the `product_labels` join table then re-emits the affected products through
+the same transform.
+
+### Scaling fan-out
+
+A single change to a principal row can affect a large number of dependents (e.g. renaming a category with
+a million products). Wallaby keeps this bounded:
+
+- **Consolidated lookups.** All distinct keys changed for a dependent table in one transaction are resolved
+  with a single `IN (…)` query per relationship.
+- **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/configuration#options) affected rows
+  are re-emitted inline; if more remain, the rest is handed to a *scoped backfill job* that re-snapshots
+  them asynchronously. This lets the trigger
+  transaction be acknowledged immediately, so a huge fan-out never stalls replication.
+- **On-demand processing.** The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
+  the instant a job is enqueued so the tail is picked up promptly. A periodic
+  [`FanoutPollInterval`](/configuration#options) (default 30s) is only a safety-net fallback.
+- **Coalescing.** Repeated changes to the same principal collapse into a single pending re-snapshot.
+- **Same-transaction de-duplication.** If a primary row is changed *and* one of its dependents changes in
+  the same transaction, the row is emitted once (its own change wins — the transform already re-reads the
+  dependent from current state).
+
+The offloaded tail is therefore **eventually consistent**: for a wide fan-out, the bulk of the re-index
+lands shortly *after* the trigger commits rather than in commit order with it. Sinks must be idempotent
+(upsert by id) and support at-least-once delivery.
 
 ## Next steps
 
