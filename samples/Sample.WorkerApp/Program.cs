@@ -31,12 +31,8 @@ builder.Services.AddWallaby(cdc =>
            m.Host = meiliHost;
            m.ApiKey = meiliKey;
        })
-       // Class-based transform, resolved from the container; bump the version to force a reindex.
-       .WithMappings(sink => sink
-            .Map<Product>()
-            .ToDestination("products")
-            .WithBackfillVersion("v1")
-            .UsingTransform<Product, ProductSearchTransform>());
+       // Use Apply<T> to consolidate your mapping configuration (see ProductSearchMapping).
+       .WithMappings(sink => sink.Apply<ProductSearchMapping>());
 });
 
 using var host = builder.Build();

@@ -57,4 +57,19 @@ public sealed class SinkMappingBuilder
         _sink.Mappings.Add(registration);
         return new EntityMapBuilder<TEntity>(registration);
     }
+
+    /// <summary>
+    /// Apply a mapping configuration class — equivalent to <see cref="Map{TEntity}"/> followed by the
+    /// class's <c>Configure(...)</c> calls. Returns this builder so applications chain.
+    /// </summary>
+    public SinkMappingBuilder Apply<TMapping>() where TMapping : IWallabyEntityMapping, new()
+        => Apply(new TMapping());
+
+    /// <summary>Apply a mapping configuration instance (for mappings with constructor arguments).</summary>
+    public SinkMappingBuilder Apply(IWallabyEntityMapping mapping)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        mapping.Apply(this);
+        return this;
+    }
 }
