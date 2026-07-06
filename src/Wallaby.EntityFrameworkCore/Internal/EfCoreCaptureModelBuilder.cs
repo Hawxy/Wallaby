@@ -81,10 +81,18 @@ internal static class EfCoreCaptureModelBuilder
                 continue;
             }
 
+            // The same navigation may be declared by several of the entity's mappings (one per sink);
+            // it fans out once. Dedupe by the resolved shape: dependent table + lookup columns.
+            var seen = new HashSet<(string Schema, string Table, string Lookup)>();
             foreach (var expr in expressions)
             {
                 var resolution = DependencyAnalyzer.Analyze(entityType, expr);
                 var depTable = GetOrAddDependentTable(byQualifiedName, resolution.DependentEntityType);
+                var lookup = string.Join(",", resolution.Lookup.Select(l => $"{l.DependentColumn}>{l.PrimaryColumn}"));
+                if (!seen.Add((depTable.Schema, depTable.TableName, lookup)))
+                {
+                    continue;
+                }
                 bindings.Add(new DependentBinding
                 {
                     PrimaryTable = primaryTable,

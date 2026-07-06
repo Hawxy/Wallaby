@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Wallaby.EntityFrameworkCore.Internal;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Providers;
@@ -93,6 +94,33 @@ public class EfCoreCaptureModelBuilderTests
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
         Should.Throw<WallabyConfigurationException>(() => { EfCoreCaptureModelBuilder.Build(ctx.Model, Declared(typeof(EfCoreCaptureModelBuilderTests))); });
+    }
+
+    [Test]
+    public async Task A_navigation_declared_by_several_mappings_binds_once()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+
+        // Two sinks mapping Product each declare DependsOn(p => p.Category); the third expression is a
+        // different navigation and must survive the dedupe.
+        var spec = new CaptureSpec
+        {
+            DeclaredEntities = [typeof(Product)],
+            DeclaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>
+            {
+                [typeof(Product)] =
+                [
+                    (Expression<Func<Product, Category?>>)(p => p.Category),
+                    (Expression<Func<Product, Category?>>)(p => p.Category),
+                    (Expression<Func<Product, List<Label>>>)(p => p.Labels),
+                ],
+            },
+        };
+
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, spec);
+
+        model.DependentBindings.Count.ShouldBe(2);
+        model.DependentBindings.Count(b => b.DependentTable.EntityClrType == typeof(Category)).ShouldBe(1);
     }
 
     [Test]
