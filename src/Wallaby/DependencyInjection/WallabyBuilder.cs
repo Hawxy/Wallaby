@@ -182,6 +182,16 @@ public sealed class WallabyBuilder
             }
         }
 
+        // A capture set with no mappings at all can't deliver anything and would create a publication
+        // with no tables. Fail here rather than at startup with a Postgres syntax error. (An individual
+        // sink without mappings is fine as long as another sink maps something.)
+        if (_configuration.CaptureIntended && !_configuration.AllMappings.Any())
+        {
+            throw new WallabyConfigurationException(
+                "A sink is registered but no entities are mapped. Attach mappings to a sink via " +
+                "WithMappings(...), e.g. AddSink(...).WithMappings(sink => sink.Map<TEntity>()...).");
+        }
+
         foreach (var mapping in _configuration.AllMappings)
         {
             if (mapping.TransformFactory is null)

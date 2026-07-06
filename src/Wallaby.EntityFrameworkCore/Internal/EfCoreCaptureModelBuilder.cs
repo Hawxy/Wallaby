@@ -27,12 +27,8 @@ internal static class EfCoreCaptureModelBuilder
 
     private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromDeclared(IModel model, CaptureSpec spec)
     {
-        if (spec.DeclaredEntities.Count == 0)
-        {
-            throw new WallabyConfigurationException(
-                "No tables were declared for capture. Map each table with Map<T>().");
-        }
-
+        // An empty spec builds an empty model: with several providers registered, one of them may simply
+        // have no mapped entities. "No mappings at all" is rejected once, at WallabyBuilder.Build().
         var primaries = new List<(IEntityType, CapturedTable)>(spec.DeclaredEntities.Count);
         foreach (var clrType in spec.DeclaredEntities.Distinct())
         {

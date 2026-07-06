@@ -81,11 +81,16 @@ public class EfCoreCaptureModelBuilderTests
     }
 
     [Test]
-    public async Task No_declaration_fails_fast()
+    public async Task An_empty_spec_builds_an_empty_model()
     {
+        // With several providers registered, one may have no mapped entities; "no mappings at all" is
+        // rejected once, at WallabyBuilder.Build().
         await using var ctx = TestModelFactory.CreateModelOnlyContext();
 
-        Should.Throw<WallabyConfigurationException>(() => { EfCoreCaptureModelBuilder.Build(ctx.Model, Declared()); });
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, Declared());
+
+        model.Tables.ShouldBeEmpty();
+        model.DependentBindings.ShouldBeEmpty();
     }
 
     [Test]

@@ -106,7 +106,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         var transformStart = WallabyInstrumentation.StartTimer();
                         // A transform exception always propagates and halts the pipeline
                         var documents = await mapping.Transform.InvokeAsync(session, subset, ct);
-                        _instr.RecordTransformDuration(entityName, transformStart);
+                        _instr.RecordTransformDuration(entityName, mapping.SinkName, transformStart);
 
                         foreach (var change in subset)
                         {

@@ -172,11 +172,14 @@ public sealed class WallabyInstrumentation : IDisposable
 
     // ---- transform ----
 
-    internal void RecordTransformDuration(string entity, long startTimestamp)
+    internal void RecordTransformDuration(string entity, string sink, long startTimestamp)
     {
         if (_transformDuration.Enabled)
         {
-            _transformDuration.Record(ElapsedSeconds(startTimestamp), new KeyValuePair<string, object?>(EntityTag, entity));
+            // Tagged by sink too: an entity mapped to several sinks runs one transform per mapping, and
+            // their durations must stay distinguishable.
+            _transformDuration.Record(
+                ElapsedSeconds(startTimestamp), new TagList { { EntityTag, entity }, { SinkTag, sink } });
         }
     }
 

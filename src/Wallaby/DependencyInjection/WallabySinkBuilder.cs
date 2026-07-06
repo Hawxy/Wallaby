@@ -23,20 +23,20 @@ public sealed class WallabySinkBuilder
     /// that entity's documents here. Repeated calls are additive. Returns the parent builder so the
     /// Wallaby chain continues.
     /// </summary>
-    public WallabyBuilder WithMappings(Action<SinkEntityMapBuilder> map)
+    public WallabyBuilder WithMappings(Action<SinkMappingBuilder> map)
     {
         ArgumentNullException.ThrowIfNull(map);
-        map(new SinkEntityMapBuilder(_sink));
+        map(new SinkMappingBuilder(_sink));
         return _parent;
     }
 }
 
 /// <summary>Declares the entity mappings of one sink (the argument of <see cref="WallabySinkBuilder.WithMappings"/>).</summary>
-public sealed class SinkEntityMapBuilder
+public sealed class SinkMappingBuilder
 {
     private readonly SinkRegistration _sink;
 
-    internal SinkEntityMapBuilder(SinkRegistration sink) => _sink = sink;
+    internal SinkMappingBuilder(SinkRegistration sink) => _sink = sink;
 
     /// <summary>
     /// Map an entity to this sink: declares the entity's table for capture and configures how its documents

@@ -9,14 +9,17 @@ namespace Wallaby.EntityFrameworkCore.UnitTests;
 
 public class ExternalSlotConfigTests
 {
-    // A capturing builder: a sink + a declared context, so the external-slot validation runs alongside a
-    // primary slot/publication (exercises the collision-with-primary checks).
+    // A capturing builder: a sink with a mapping + a declared context, so the external-slot validation
+    // runs alongside a primary slot/publication (exercises the collision-with-primary checks).
     private static WallabyBuilder MinimalBuilder()
     {
         var builder = new WallabyBuilder();
         builder.UseEntityFrameworkCore<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
-        builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
+        builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
+            .WithMappings(s => s.Map<Product>().UsingTransform((_, changes, _) =>
+                Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+                    changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null))));
         return builder;
     }
 

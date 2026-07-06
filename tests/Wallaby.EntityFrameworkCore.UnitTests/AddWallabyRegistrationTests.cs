@@ -38,6 +38,12 @@ public class AddWallabyRegistrationTests
                }));
     }
 
+    // The smallest structurally valid mapping, for tests that only exercise the options pipeline.
+    private static void MinimalMapping(SinkMappingBuilder sink) => sink
+        .Map<Product>()
+        .UsingTransform((_, changes, _) => Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+            changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null)));
+
     private static ServiceCollection NewServices()
     {
         var services = new ServiceCollection();
@@ -131,7 +137,8 @@ public class AddWallabyRegistrationTests
         // succeeds and the absence is a validation failure at first resolution.
         services.AddWallaby(cdc => cdc
             .UseEntityFrameworkCore<AppDbContext>()
-            .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)));
+            .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
+            .WithMappings(MinimalMapping));
 
         await using var provider = services.BuildServiceProvider();
 
@@ -144,7 +151,8 @@ public class AddWallabyRegistrationTests
         var services = NewServices();
         services.AddWallaby(cdc => cdc
             .UseEntityFrameworkCore<AppDbContext>()
-            .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))); // no UseConnectionString
+            .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)) // no UseConnectionString
+            .WithMappings(MinimalMapping));
         services.PostConfigure<WallabyOptions>(o => o.ConnectionString = ConnectionString);
 
         await using var provider = services.BuildServiceProvider();

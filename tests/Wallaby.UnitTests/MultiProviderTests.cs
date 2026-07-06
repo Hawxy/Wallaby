@@ -464,6 +464,15 @@ public class MultiProviderTests
     }
 
     [Test]
+    public void A_sink_without_any_mappings_fails_at_build()
+    {
+        var (builder, _) = CapturingBuilder(Registration(new FakeModelProvider("A", (typeof(Alpha), "alpha"))));
+
+        Should.Throw<WallabyConfigurationException>(() => builder.Build())
+            .Message.ShouldContain("no entities are mapped");
+    }
+
+    [Test]
     public async Task A_type_mapped_to_two_sinks_routes_through_each_mappings_transform()
     {
         var sessions = new FakeSessionProvider();

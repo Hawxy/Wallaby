@@ -73,8 +73,11 @@ public class MappingChangeRouterTelemetryTests
         var routed = await router.RouteAsync([change], CancellationToken.None);
 
         routed.Count.ShouldBe(1);
-        duration.GetMeasurementSnapshot().ShouldNotBeEmpty();
+        var measurement = duration.GetMeasurementSnapshot().ShouldHaveSingleItem();
+        measurement.Tags["wallaby.entity"].ShouldBe("Product");
+        measurement.Tags["wallaby.sink"].ShouldBe("sink");
         captured.ShouldNotBeNull();
         captured!.GetTagItem("wallaby.entity").ShouldBe("Product");
+        captured.GetTagItem("wallaby.sink").ShouldBe("sink");
     }
 }

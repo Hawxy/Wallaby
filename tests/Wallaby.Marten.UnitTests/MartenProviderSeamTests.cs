@@ -19,11 +19,18 @@ public class MartenProviderSeamTests
         return (builder, sink);
     }
 
+    // The smallest structurally valid mapping, for tests that only assert registration facts.
+    private static void MapDoc(WallabySinkBuilder sink) => sink.WithMappings(s => s
+        .Map<Doc>()
+        .UsingTransform((_, changes, _) => Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+            changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null))));
+
     [Test]
     public void UseMarten_satisfies_the_provider_requirement()
     {
-        var (builder, _) = CapturingBuilder();
+        var (builder, sink) = CapturingBuilder();
         builder.UseMarten();
+        MapDoc(sink);
 
         var config = builder.Build();
 
@@ -53,9 +60,10 @@ public class MartenProviderSeamTests
     [Test]
     public void UseTenantSessions_targets_the_Marten_registration()
     {
-        var (builder, _) = CapturingBuilder();
+        var (builder, sink) = CapturingBuilder();
         builder.UseMarten();
         builder.UseTenantSessions();
+        MapDoc(sink);
 
         var config = builder.Build();
 
