@@ -5,7 +5,7 @@ data**. The canonical case is multi-tenancy: a row carries a `TenantId`, enrichm
 context scoped to that tenant (a tenant connection, or a global query filter), and the result must land in
 a per-tenant destination (e.g. an index per tenant).
 
-## API
+## Scoped DbContext
 
 ```csharp
 cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)));

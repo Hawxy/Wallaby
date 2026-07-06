@@ -53,7 +53,7 @@ public class MappingChangeRouterTests
 
     private static ChangeEvent Change(ChangeAction action, int id)
     {
-        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
+        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
         return new ChangeEvent(
             action, meta, new Product { Id = id, Name = "x" },
             new Dictionary<string, object?>(), Changes: null, new object[] { id })

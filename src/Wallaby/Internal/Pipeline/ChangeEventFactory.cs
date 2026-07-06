@@ -24,6 +24,7 @@ internal sealed class ChangeEventFactory(IRowMaterializer materializer)
         var metadata = new ChangeMetadata(
             change.Schema,
             change.TableName,
+            row.Action,
             change.CommitTimestamp,
             change.CommitLsn,
             change.CommitIdx,

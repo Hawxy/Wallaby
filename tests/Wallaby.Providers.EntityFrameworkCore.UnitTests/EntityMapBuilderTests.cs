@@ -15,7 +15,7 @@ public class EntityMapBuilderTests
 {
     private static ChangeEvent Insert(int id, IReadOnlyDictionary<string, object?> record)
     {
-        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
+        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
         return new ChangeEvent(ChangeAction.Insert, meta, new Product { Id = id, Name = "x" },
             record, Changes: null, new object[] { id }) { EntityClrType = typeof(Product) };
     }

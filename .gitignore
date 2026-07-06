@@ -487,3 +487,5 @@ docs/.vitepress/cache
 docs/.vitepress/theme/fonts/
 *.ttf
 *.woff2
+# Verify snapshot mismatches
+*.received.*
