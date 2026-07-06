@@ -34,6 +34,16 @@ const sinks = [
     link: '/sinks/meilisearch',
   },
   {
+    title: 'http',
+    sub: 'POST to any endpoint',
+    label: 'HTTP →',
+    link: '/sinks/http',
+  },
+  {
+    title: 'opensearch',
+    sub: 'coming soon',
+  },
+  {
     title: 'custom',
     sub: 'your own delivery target',
     label: 'Custom Sinks →',
@@ -41,11 +51,14 @@ const sinks = [
   },
 ];
 
+// deliveries rotate across the real sinks, skipping the placeholder
+const liveSinks = sinks.flatMap((s, i) => (s.link ? [i] : []));
+
 // 0/1 = provider path, 2 = external slots path; rotates each cycle
 const target = ref(0);
 // chip processing the packet (amber): '' | 'p0' | 'p1' | 'ext'
 const lit = ref('');
-// chip whose data just updated (blue): '' | 'src' | 's0' | 's1' | 'consumer'
+// chip whose data just updated (blue): '' | 'src' | 's<index>' | 'consumer'
 const flash = ref('');
 // which connector segment the packet is on
 const pulse = ref('');
@@ -68,7 +81,7 @@ useFlowCycle({
     started = true;
     const t = target.value;
     const provider = t < 2;
-    const sink = (t + round) % 2;
+    const sink = liveSinks[(t + round) % liveSinks.length];
     return [
       [0, () => { tickLsn(); flash.value = 'src'; pulse.value = 'stem'; }],
       [400, () => (flash.value = '')],
@@ -142,11 +155,12 @@ useFlowCycle({
             v-for="(s, i) in sinks"
             :key="s.title"
             class="is-option"
+            :class="{ 'is-soon': !s.link }"
             :flash="flash === 's' + i"
           >
             <div class="wb-chip-title">{{ s.title }}</div>
             <div class="wb-chip-sub">{{ s.sub }}</div>
-            <a class="wb-btn" :href="withBase(s.link)">{{ s.label }}</a>
+            <a v-if="s.link" class="wb-btn" :href="withBase(s.link)">{{ s.label }}</a>
           </FlowChip>
         </div>
       </div>
@@ -200,6 +214,15 @@ useFlowCycle({
   padding: 5px 10px;
   font-size: 12px;
   text-align: center;
+}
+
+/* placeholder chip: dashed outline, muted title, no button */
+.wb-chip.is-soon {
+  border-style: dashed;
+}
+
+.wb-chip.is-soon .wb-chip-title {
+  color: var(--vp-c-text-3);
 }
 
 /* group boxes: a frame around the provider and sink chips */

@@ -36,23 +36,16 @@ builder.Services.AddWallaby(cdc =>
 {
     cdc.UseMarten()
        .UseConnectionString(conn)
+
+        // Sink configuration below - example
        .AddMeilisearchSink("meili", m => { /* ... */ })
        .WithMappings(sink => sink
             .Map<Order>()
             .ToDestination("orders")
-            .UsingTransform((session, changes, ct) =>
-            {
-                var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
-                foreach (var c in changes)
-                    docs[c.Key] = new WallabyDocument { ["number"] = c.Entity!.Number, ["total"] = c.Entity!.Total };
-                return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-            }));
+            .UsingTransform(/** **/);
 });
 ```
 
-Transforms receive a leased Marten `IQuerySession` for enrichment lookups. Three `UsingTransform`
-overloads are available: an `IWallabyMartenTransform<T>` instance, a container-resolved
-`UsingTransform<TEntity, TTransform>()`, or the inline lambda above.
 
 ::: warning
 Wallaby builds its capture model at startup from the store's registered documents
@@ -61,7 +54,13 @@ document type the first time a session touches it happens too late for capture, 
 an unregistered document fails fast with guidance.
 :::
 
-## Class-based transforms
+## Transforms
+
+Transforms receive a Marten `IQuerySession` for enrichment lookups. Three `UsingTransform`
+overloads are available: one taking a standalone `IWallabyMartenTransform<T>` instance, a container-resolved
+`UsingTransform<TEntity, TTransform>()`, or an inline lambda.
+
+### Class-based transforms
 
 For more complex transforms, or anything with dependencies, implement `IWallabyMartenTransform<TEntity>`
 as a class. It is resolved from the container. The leased `IQuerySession` supports enrichment lookups
