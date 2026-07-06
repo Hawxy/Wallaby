@@ -4,12 +4,12 @@ using Wallaby.Abstractions;
 namespace Wallaby.EntityFrameworkCore;
 
 /// <summary>
-/// Adapts a lambda to <see cref="IWallabyTransform{TEntity}"/> for the trivial cases that don't
+/// Adapts a lambda to <see cref="IWallabyEfTransform{TEntity}"/> for the trivial cases that don't
 /// warrant a dedicated class (e.g. projecting straight from the change with no enrichment).
 /// </summary>
 public sealed class DelegateTransform<TEntity>(
     Func<DbContext, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> handler)
-    : IWallabyTransform<TEntity>
+    : IWallabyEfTransform<TEntity>
     where TEntity : class
 {
     /// <inheritdoc />

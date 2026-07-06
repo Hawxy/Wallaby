@@ -29,7 +29,7 @@ lives in the new **`Wallaby.EntityFrameworkCore`** package, and Marten support s
 
 3. `UseScopedContext(...)` is now `UseScopedDbContext(...)` (same signature).
 
-4. `IWallabyTransform<TEntity>` and `DelegateTransform<TEntity>` moved from `Wallaby.Abstractions`
+4. `IWallabyEfTransform<TEntity>` and `DelegateTransform<TEntity>` moved from `Wallaby.Abstractions`
    to the `Wallaby.EntityFrameworkCore` namespace/package. The `TransformAsync(DbContext, ...)`
    signature is unchanged — transform bodies need no edits, only a `using` update.
 

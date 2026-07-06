@@ -5,10 +5,10 @@ using Wallaby.Providers;
 namespace Wallaby.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// Wraps a strongly-typed <see cref="IWallabyTransform{TEntity}"/> as an <see cref="IWallabyTransformInvoker"/>,
+/// Wraps a strongly-typed <see cref="IWallabyEfTransform{TEntity}"/> as an <see cref="IWallabyTransformInvoker"/>,
 /// downcasting the leased session to the <see cref="DbContext"/> the transform expects.
 /// </summary>
-internal sealed class EfCoreTransformInvoker<TEntity>(IWallabyTransform<TEntity> transform)
+internal sealed class EfCoreTransformInvoker<TEntity>(IWallabyEfTransform<TEntity> transform)
     : IWallabyTransformInvoker
     where TEntity : class
 {

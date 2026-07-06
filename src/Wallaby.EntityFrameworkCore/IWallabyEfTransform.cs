@@ -16,7 +16,7 @@ namespace Wallaby.EntityFrameworkCore;
 /// </para>
 /// </remarks>
 /// <typeparam name="TEntity">The mapped entity type for the source table.</typeparam>
-public interface IWallabyTransform<TEntity>
+public interface IWallabyEfTransform<TEntity>
     where TEntity : class
 {
     /// <summary>

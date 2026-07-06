@@ -14,7 +14,7 @@ public static class EfCoreEntityMapBuilderExtensions
 
     /// <summary>Use a transform instance.</summary>
     public static EntityMapBuilder<TEntity> UsingTransform<TEntity>(
-        this EntityMapBuilder<TEntity> map, IWallabyTransform<TEntity> transform)
+        this EntityMapBuilder<TEntity> map, IWallabyEfTransform<TEntity> transform)
         where TEntity : class
     {
         ArgumentNullException.ThrowIfNull(transform);
@@ -24,7 +24,7 @@ public static class EfCoreEntityMapBuilderExtensions
     /// <summary>Use a transform type resolved (or constructed) from the container.</summary>
     public static EntityMapBuilder<TEntity> UsingTransform<TEntity, TTransform>(this EntityMapBuilder<TEntity> map)
         where TEntity : class
-        where TTransform : class, IWallabyTransform<TEntity>
+        where TTransform : class, IWallabyEfTransform<TEntity>
         => map.UsingTransformInvoker(sp =>
             new EfCoreTransformInvoker<TEntity>(ActivatorUtilities.GetServiceOrCreateInstance<TTransform>(sp)), ProviderName);
 

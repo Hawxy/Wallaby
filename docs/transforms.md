@@ -19,11 +19,11 @@ sink.Map<Product>()
     });
 ```
 
-For more complex transforms, or anything with dependencies, implement `IWallabyTransform<TEntity>`
+For more complex transforms, or anything with dependencies, implement `IWallabyEfTransform<TEntity>`
 (from `Wallaby.EntityFrameworkCore`) as a class:
 
 ```csharp
-public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyTransform<Product>
+public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyEfTransform<Product>
 {
     public async Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> TransformAsync(
         DbContext db, IReadOnlyList<ChangeEvent<Product>> changes, CancellationToken ct)
