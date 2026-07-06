@@ -99,6 +99,11 @@ cdc.AddDelegateSink("audit", async (batch, ct) =>
 
 ## Example
 
+::: tip
+A production-ready HTTP sink ships as [`Wallaby.Sinks.Http`](/sinks/http) — batched envelopes, HMAC
+signing, and `IHttpClientFactory` integration. The example below stays as a minimal teaching shape.
+:::
+
 ```csharp
 public sealed class HttpSink(HttpClient http) : ISink
 {

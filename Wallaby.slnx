@@ -9,6 +9,7 @@
     <Project Path="src/Wallaby.AspNetCore.HealthChecks/Wallaby.AspNetCore.HealthChecks.csproj" />
     <Project Path="src/Wallaby.Providers.EntityFrameworkCore/Wallaby.Providers.EntityFrameworkCore.csproj" />
     <Project Path="src/Wallaby.Providers.Marten/Wallaby.Providers.Marten.csproj" />
+    <Project Path="src/Wallaby.Sinks.Http/Wallaby.Sinks.Http.csproj" />
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
     <Project Path="src/Wallaby.Testing/Wallaby.Testing.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
@@ -21,6 +22,8 @@
     <Project Path="tests/Wallaby.Providers.Marten.IntegrationTests/Wallaby.Providers.Marten.IntegrationTests.csproj" />
     <Project Path="tests/Wallaby.Providers.Marten.UnitTests/Wallaby.Providers.Marten.UnitTests.csproj" />
     <Project Path="tests/Wallaby.Meilisearch.IntegrationTests/Wallaby.Meilisearch.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.Http.IntegrationTests/Wallaby.Sinks.Http.IntegrationTests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.Http.UnitTests/Wallaby.Sinks.Http.UnitTests.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure.EntityFrameworkCore/Wallaby.TestInfrastructure.EntityFrameworkCore.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure.Marten/Wallaby.TestInfrastructure.Marten.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />

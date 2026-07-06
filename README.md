@@ -7,7 +7,7 @@ EF Core entities or Marten documents, lets you **transform/enrich** them, and ro
 documents to pluggable **destinations** (sinks). It **self-configures** the publication and replication
 slot from your model, supports **backfill** operations, and is **cluster-safe** via leader election.
 
-A **Meilisearch** sink is supported out of the box. Contributions for additional sinks is welcome.
+**Meilisearch** and **HTTP/webhook** sinks are supported out of the box. Contributions for additional sinks is welcome.
 
 ## Packages
 
@@ -16,6 +16,7 @@ A **Meilisearch** sink is supported out of the box. Contributions for additional
 | `Wallaby`                      | Core package (provider-agnostic).        |
 | `Wallaby.Providers.EntityFrameworkCore`  | EF Core storage provider.                |
 | `Wallaby.Providers.Marten`               | Marten storage provider.                 |
+| `Wallaby.Sinks.Http`           | HTTP/webhook destination sink.           |
 | `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
 
 ## Quick start

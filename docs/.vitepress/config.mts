@@ -56,6 +56,7 @@ export default defineConfig({
         text: 'Sinks',
         items: [
           { text: 'Meilisearch', link: '/sinks/meilisearch' },
+          { text: 'HTTP (Webhook)', link: '/sinks/http' },
           { text: 'Custom', link: '/sinks/custom' },
         ]
       },

@@ -197,7 +197,7 @@ public partial class OrdersReplicaIdentity : Migration
 
 - [Configuration](/configuration) - All configuration options
 - [Transforms](/transforms) - shaping and enriching documents.
-- [Meilisearch sink](/sinks/meilisearch) and [custom sinks](/sinks/custom).
+- [Meilisearch](/sinks/meilisearch), [HTTP](/sinks/http), and [custom](/sinks/custom) sinks.
 - [Backfill](/backfill) - initial snapshots and version-triggered reindex.
 - [Multi-tenancy](/providers/entity-framework-core/multi-tenancy) - per-row scoped contexts and destinations.
 - [Observability](/operations/observability) - OpenTelemetry metrics and traces.
