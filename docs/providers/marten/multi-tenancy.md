@@ -29,6 +29,10 @@ sink.Map<Order>()
 Backfills flow through the same router, so per-tenant sessions and destinations apply to backfilled
 documents too.
 
+A mapping with a scoped destination flags its table for `REPLICA IDENTITY FULL`;
+[`ManageWallabyReplicaIdentity()`](/providers/marten/#managed-replica-identity) lets Marten's
+migrations own that DDL.
+
 ## Limitations
 
 Only conjoined (and single) tenancy is supported; separate-database tenancy is not.

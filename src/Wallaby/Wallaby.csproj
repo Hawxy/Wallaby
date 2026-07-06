@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Testing" />
+    <InternalsVisibleTo Include="Wallaby.Marten" />
     <InternalsVisibleTo Include="Wallaby.UnitTests" />
     <InternalsVisibleTo Include="Wallaby.IntegrationTests" />
     <InternalsVisibleTo Include="Wallaby.Meilisearch.IntegrationTests" />

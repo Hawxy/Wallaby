@@ -110,8 +110,31 @@ Wallaby surfaces it as a **Delete event**: the sink document is removed, exactly
 Correspondingly, backfills skip rows where `mt_deleted = true`, and an **un-delete**
 (`session.UndoDeleteWhere<T>(...)`) re-emits the full document as an upsert.
 
-Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple, and Wallaby reads it from the old tuple instead. Self-config detects a missing replica identity at startup and logs the exact `ALTER TABLE ... REPLICA IDENTITY FULL` to include in your Marten migrations. 
+Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple, and Wallaby reads it from the old tuple instead. Self-config detects a missing replica identity at startup and logs the exact `ALTER TABLE ... REPLICA IDENTITY FULL` to include in your Marten migrations — or let Marten manage it for you, below.
 
+## Managed replica identity
+
+Since Marten already manages its own schema, Wallaby can hand it the replica-identity DDL too.
+Chain the schema feature onto your `AddMarten` registration:
+
+```csharp
+builder.Services.AddMarten(options => { /* ... */ })
+    .ApplyAllDatabaseChangesOnStartup()
+    .ManageWallabyReplicaIdentity();
+```
+
+Every captured table that needs `REPLICA IDENTITY FULL` — soft-deleted documents and mappings with a
+[`ScopedDestination`](/providers/marten/multi-tenancy) — is derived from the capture model and joins
+Marten's normal migration flow: applied by `ApplyAllDatabaseChangesOnStartup()` /
+`ApplyAllConfiguredChangesToDatabaseAsync()`, included in exported patches, and skipped once a table is
+already on full identity. The same call chains onto `AddMartenStore<TStore>(...)` for a separately
+registered document store.
+
+::: tip
+With [`RequireFullReplicaIdentity`](/configuration#general-options) set, pair this with
+`ApplyAllDatabaseChangesOnStartup()` and register `AddMarten` **before** `AddWallaby` so the DDL is
+applied before Wallaby validates the tables.
+:::
 
 ## NativeAOT
 
