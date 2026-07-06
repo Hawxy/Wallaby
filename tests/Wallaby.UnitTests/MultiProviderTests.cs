@@ -565,7 +565,7 @@ public class MultiProviderTests
 
     private static ChangeEvent Change(Type type, int id)
     {
-        var meta = new ChangeMetadata("public", "t", DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
+        var meta = new ChangeMetadata("public", "t", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
         return new ChangeEvent(
             ChangeAction.Insert, meta, Entity: id, new Dictionary<string, object?>(), Changes: null, [id])
         {

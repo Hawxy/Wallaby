@@ -62,7 +62,7 @@ public class MappingChangeRouterTelemetryTests
         };
         var router = new MappingChangeRouter([mapping], instr);
 
-        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
         var change = new ChangeEvent(
             ChangeAction.Insert, meta, new Product { Id = 1, Name = "a" },
             new Dictionary<string, object?>(), Changes: null, new object[] { 1 })

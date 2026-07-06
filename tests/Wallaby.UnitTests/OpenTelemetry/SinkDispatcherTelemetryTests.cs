@@ -9,7 +9,7 @@ namespace Wallaby.UnitTests.OpenTelemetry;
 
 public class SinkDispatcherTelemetryTests
 {
-    private static readonly ChangeMetadata Meta = new("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+    private static readonly ChangeMetadata Meta = new("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
 
     private static IReadOnlyList<RoutedDocument> OneRecord() =>
         [new RoutedDocument("sink", new SinkRecord(Destination: "products", "1", Document: new WallabyDocument { ["x"] = 1 }, IsDeletion: false, Meta))];

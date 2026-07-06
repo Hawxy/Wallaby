@@ -15,7 +15,7 @@ const providers = [
   {
     title: 'efcore provider',
     sub: 'relational storage',
-    label: 'EFCore Setup →',
+    label: 'EF Core Setup →',
     link: '/providers/entity-framework-core',
   },
   {

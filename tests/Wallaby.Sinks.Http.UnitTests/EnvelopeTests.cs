@@ -30,6 +30,7 @@ public class EnvelopeTests
         root.GetProperty("sink").GetString().ShouldBe(SinkName);
         root.GetProperty("sentAt").GetDateTimeOffset().ShouldBeInRange(
             DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
+        root.TryGetProperty("annotations", out _).ShouldBeFalse();
 
         var records = root.GetProperty("records").EnumerateArray().ToList();
         records.Count.ShouldBe(2);
@@ -37,12 +38,15 @@ public class EnvelopeTests
         var upsert = records[0];
         upsert.GetProperty("operation").GetString().ShouldBe("upsert");
         upsert.GetProperty("id").GetString().ShouldBe("42");
+        upsert.GetProperty("idempotencyKey").GetString().ShouldBe("271828:3:products:42");
         upsert.GetProperty("destination").GetString().ShouldBe("products");
         upsert.GetProperty("document").GetProperty("name").GetString().ShouldBe("Kangaroo");
         upsert.GetProperty("document").GetProperty("price").GetDecimal().ShouldBe(19.95m);
 
         var metadata = upsert.GetProperty("metadata");
-        metadata.GetProperty("table").GetString().ShouldBe("public.products");
+        metadata.GetProperty("schema").GetString().ShouldBe("public");
+        metadata.GetProperty("table").GetString().ShouldBe("products");
+        metadata.GetProperty("action").GetString().ShouldBe("insert");
         metadata.GetProperty("commitLsn").GetString().ShouldBe("271828");
         metadata.GetProperty("commitIdx").GetInt32().ShouldBe(3);
         metadata.GetProperty("commitTimestamp").GetDateTimeOffset().ShouldBe(timestamp);
@@ -51,6 +55,8 @@ public class EnvelopeTests
         var delete = records[1];
         delete.GetProperty("operation").GetString().ShouldBe("delete");
         delete.GetProperty("id").GetString().ShouldBe("43");
+        delete.GetProperty("idempotencyKey").GetString().ShouldBe("12345:0:products:43");
+        delete.GetProperty("metadata").GetProperty("action").GetString().ShouldBe("delete");
         delete.TryGetProperty("document", out _).ShouldBeFalse();
     }
 
@@ -58,10 +64,15 @@ public class EnvelopeTests
     public async Task Backfill_record_omits_the_commit_timestamp()
     {
         var envelope = await CaptureEnvelopeAsync(Batch(
-            Upsert("1", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0))));
+            Upsert("1", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, action: ChangeAction.Read))));
 
-        var metadata = envelope.RootElement.GetProperty("records")[0].GetProperty("metadata");
+        var record = envelope.RootElement.GetProperty("records")[0];
+        // Stable across backfill runs: keyed by row, not by (lsn, idx) — those are 0 for every backfill read.
+        record.GetProperty("idempotencyKey").GetString().ShouldBe("backfill:products:1");
+
+        var metadata = record.GetProperty("metadata");
         metadata.GetProperty("isBackfill").GetBoolean().ShouldBeTrue();
+        metadata.GetProperty("action").GetString().ShouldBe("read");
         metadata.GetProperty("commitLsn").GetString().ShouldBe("0");
         metadata.TryGetProperty("commitTimestamp", out _).ShouldBeFalse();
     }
@@ -72,8 +83,22 @@ public class EnvelopeTests
         var envelope = await CaptureEnvelopeAsync(Batch(
             Upsert("1", new Dictionary<string, object?>(), destination: null)));
 
-        envelope.RootElement.GetProperty("records")[0]
-            .GetProperty("destination").ValueKind.ShouldBe(JsonValueKind.Null);
+        var record = envelope.RootElement.GetProperty("records")[0];
+        record.GetProperty("destination").ValueKind.ShouldBe(JsonValueKind.Null);
+        // Without a destination, the key falls back to the qualified table for its scope.
+        record.GetProperty("idempotencyKey").GetString().ShouldBe("12345:0:public.products:1");
+    }
+
+    [Test]
+    public async Task Annotations_are_echoed_at_the_envelope_level()
+    {
+        var envelope = await CaptureEnvelopeAsync(
+            Batch(Upsert("1", new Dictionary<string, object?>())),
+            o => o.Annotations = new Dictionary<string, string> { ["env"] = "prod", ["region"] = "au" });
+
+        var annotations = envelope.RootElement.GetProperty("annotations");
+        annotations.GetProperty("env").GetString().ShouldBe("prod");
+        annotations.GetProperty("region").GetString().ShouldBe("au");
     }
 
     [Test]

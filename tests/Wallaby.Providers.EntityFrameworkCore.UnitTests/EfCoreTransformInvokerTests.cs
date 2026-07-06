@@ -17,7 +17,7 @@ public class EfCoreTransformInvokerTests
 
         var change = new ChangeEvent(
             ChangeAction.Update,
-            new ChangeMetadata("public", "categories", null, 0, 0, IsBackfill: false),
+            new ChangeMetadata("public", "categories", ChangeAction.Insert, null, 0, 0, IsBackfill: false),
             Entity: new Category { Name = "not-a-product" },
             Record: new Dictionary<string, object?>(),
             Changes: null,

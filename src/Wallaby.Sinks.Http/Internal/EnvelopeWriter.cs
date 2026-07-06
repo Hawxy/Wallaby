@@ -21,6 +21,7 @@ internal static class EnvelopeWriter
         IReadOnlyList<SinkRecord> records,
         int offset,
         int count,
+        IReadOnlyDictionary<string, string>? annotations,
         JsonSerializerOptions? serializerOptions)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -29,6 +30,15 @@ internal static class EnvelopeWriter
         writer.WriteStartObject();
         writer.WriteString("sink", sinkName);
         writer.WriteString("sentAt", DateTimeOffset.UtcNow);
+        if (annotations is { Count: > 0 })
+        {
+            writer.WriteStartObject("annotations");
+            foreach (var annotation in annotations)
+            {
+                writer.WriteString(annotation.Key, annotation.Value);
+            }
+            writer.WriteEndObject();
+        }
         writer.WriteStartArray("records");
         for (var i = offset; i < offset + count; i++)
         {
@@ -46,6 +56,7 @@ internal static class EnvelopeWriter
         writer.WriteStartObject();
         writer.WriteString("operation", record.IsDeletion ? "delete" : "upsert");
         writer.WriteString("id", record.DocumentId);
+        writer.WriteString("idempotencyKey", IdempotencyKey(record));
         if (record.Destination is null)
         {
             writer.WriteNull("destination");
@@ -65,10 +76,31 @@ internal static class EnvelopeWriter
         writer.WriteEndObject();
     }
 
+    /// <summary>
+    /// An opaque per-record deduplication key. Unique per delivered change; separate backfill runs of the
+    /// same row intentionally share a key (backfill is upsert-only, so replays are harmless).
+    /// </summary>
+    private static string IdempotencyKey(SinkRecord record)
+    {
+        var metadata = record.Metadata;
+        var scope = record.Destination ?? metadata.QualifiedTableName;
+        return metadata.IsBackfill
+            ? $"backfill:{scope}:{record.DocumentId}"
+            : $"{metadata.CommitLsn}:{metadata.CommitIdx}:{scope}:{record.DocumentId}";
+    }
+
     private static void WriteMetadata(Utf8JsonWriter writer, ChangeMetadata metadata)
     {
         writer.WriteStartObject("metadata");
-        writer.WriteString("table", metadata.QualifiedTableName);
+        writer.WriteString("schema", metadata.TableSchema);
+        writer.WriteString("table", metadata.TableName);
+        writer.WriteString("action", metadata.Action switch
+        {
+            ChangeAction.Insert => "insert",
+            ChangeAction.Update => "update",
+            ChangeAction.Delete => "delete",
+            _ => "read",
+        });
         // As a string: the ulong LSN can exceed the safe-integer range of JavaScript consumers.
         writer.WriteString("commitLsn", metadata.CommitLsn.ToString(CultureInfo.InvariantCulture));
         writer.WriteNumber("commitIdx", metadata.CommitIdx);

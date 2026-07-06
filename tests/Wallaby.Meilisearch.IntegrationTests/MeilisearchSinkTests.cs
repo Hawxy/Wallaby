@@ -126,7 +126,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         });
         var sink = new MeilisearchSink("meili", options);
 
-        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
         // The document carries "name" but not the configured filterable "category".
         var record = new SinkRecord("products_validated", "1", new WallabyDocument { ["name"] = "alpha" }, IsDeletion: false, meta);
 
@@ -162,7 +162,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         });
         var sink = new MeilisearchSink("meili", options);
 
-        var meta = new ChangeMetadata("public", "products", DateTimeOffset.UtcNow, 1, 0, false);
+        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
         // The document carries "name" but not the granular filterable "category".
         var record = new SinkRecord("products_granular", "1", new WallabyDocument { ["name"] = "alpha" }, IsDeletion: false, meta);
 

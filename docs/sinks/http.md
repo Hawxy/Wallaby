@@ -42,6 +42,7 @@ builder.Services.AddWallaby(cdc =>
 | `HttpClientName` | `wallaby.sinks.http.<name>` | The `IHttpClientFactory` named client used for delivery. |
 | `SigningSecret` | `null` | Enables HMAC-SHA256 [body signing](#verifying-signatures). |
 | `Compression` | `None` | [Request-body compression](#compression): `Gzip` or `Brotli`. |
+| `Annotations` | `null` | Static key/values echoed at the top of every envelope. |
 | `MaxRecordsPerRequest` | `500` | Larger batches are split into sequential requests (commit order preserved). |
 | `TimeoutMs` | `30000` | Per-request timeout; composes with any timeout on the named client. |
 | `SerializerOptions` | `null` | Serializer for non-scalar document values — see [NativeAOT](#nativeaot). |
@@ -70,10 +71,13 @@ Each request is a JSON envelope; `records` preserves commit order:
     {
       "operation": "upsert",
       "id": "42",
+      "idempotencyKey": "27271208:0:products:42",
       "destination": "products",
       "document": { "name": "Kangaroo plush", "price": 19.95 },
       "metadata": {
-        "table": "public.products",
+        "schema": "public",
+        "table": "products",
+        "action": "insert",
         "commitLsn": "27271208",
         "commitIdx": 0,
         "commitTimestamp": "2026-07-06T03:12:45.100Z",
@@ -83,23 +87,36 @@ Each request is a JSON envelope; `records` preserves commit order:
     {
       "operation": "delete",
       "id": "43",
+      "idempotencyKey": "27271208:1:products:43",
       "destination": "products",
-      "metadata": { "table": "public.products", "commitLsn": "27271208", "commitIdx": 1, "isBackfill": false }
+      "metadata": {
+        "schema": "public", "table": "products", "action": "delete",
+        "commitLsn": "27271208", "commitIdx": 1, "isBackfill": false
+      }
     }
   ]
 }
 ```
 
 - `operation` is `upsert` (apply `document` under `id`) or `delete` (remove `id`); a delete carries no `document`.
+- `idempotencyKey` is an opaque string unique to each delivered change — store it to
+  [reject redelivered duplicates](#delivery-semantics). Backfill rows share their key across backfill runs
+  (backfill is upsert-only, so replays are harmless).
 - `destination` is the mapping's `ToDestination(...)` value (or a [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) result); `null` when the mapping declares none.
+- `metadata.action` is what the change meant in the source model: `insert`, `update`, `delete`, or `read`
+  (a backfill row). Providers may substitute meaning — e.g. Marten surfaces a soft-delete `UPDATE` as
+  `delete` — so it can differ from the raw WAL operation.
 - `commitLsn` is a string — the value can exceed the safe-integer range of JavaScript consumers. Backfill
   records have `commitLsn: "0"` and omit `commitTimestamp`.
+- With `Annotations` configured, the envelope carries an `annotations` object with those key/values
+  alongside `sink` and `sentAt`.
 
 ## Delivery semantics
 
 Delivery is **at-least-once**: a crash can redeliver a batch your receiver already processed, so apply
 records idempotently — upsert by `id`, delete by `id`, and treat a delete for an unknown id as success.
-`(commitLsn, commitIdx)` orders live changes if you need receiver-side deduplication.
+If your receiver has side effects beyond state (e.g. sends an email per record), store each record's
+`idempotencyKey` and skip keys you have seen; `(commitLsn, commitIdx)` orders live changes.
 
 The response status classifies the outcome:
 

@@ -31,6 +31,12 @@ public sealed class HttpSinkOptions
     public HttpSinkCompression Compression { get; set; } = HttpSinkCompression.None;
 
     /// <summary>
+    /// Static key/value pairs echoed at the top level of every envelope — useful for receivers fed by
+    /// several pipelines or environments (e.g. <c>{"env": "prod"}</c>).
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Annotations { get; set; }
+
+    /// <summary>
     /// Maximum records per request. Larger batches are split into sequential requests, preserving
     /// commit order.
     /// </summary>

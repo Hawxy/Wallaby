@@ -59,15 +59,16 @@ internal static class SinkTestHelpers
         return new HttpSink(SinkName, options, factory);
     }
 
-    public static ChangeMetadata Meta(int commitIdx = 0, bool backfill = false, DateTimeOffset? timestamp = null, ulong lsn = 12345)
-        => new("public", "products", timestamp, lsn, commitIdx, backfill);
+    public static ChangeMetadata Meta(int commitIdx = 0, bool backfill = false, DateTimeOffset? timestamp = null,
+        ulong lsn = 12345, ChangeAction action = ChangeAction.Insert)
+        => new("public", "products", action, timestamp, lsn, commitIdx, backfill);
 
     public static SinkRecord Upsert(string id, IReadOnlyDictionary<string, object?> document,
         string? destination = "products", ChangeMetadata? metadata = null)
         => new(destination, id, document, false, metadata ?? Meta());
 
     public static SinkRecord Delete(string id, ChangeMetadata? metadata = null)
-        => new("products", id, null, true, metadata ?? Meta());
+        => new("products", id, null, true, metadata ?? Meta(action: ChangeAction.Delete));
 
     public static SinkBatch Batch(params SinkRecord[] records) => new(SinkName, records);
 }

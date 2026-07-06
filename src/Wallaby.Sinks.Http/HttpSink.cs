@@ -66,7 +66,8 @@ public sealed class HttpSink : ISink
             byte[] payload;
             try
             {
-                payload = EnvelopeWriter.Write(batch.SinkName, records, offset, count, _options.SerializerOptions);
+                payload = EnvelopeWriter.Write(
+                    batch.SinkName, records, offset, count, _options.Annotations, _options.SerializerOptions);
             }
             catch (Exception ex)
             {

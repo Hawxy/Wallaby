@@ -80,7 +80,10 @@ public class EndToEndTests(TestModelPostgresFixture pg)
             var upsert = receiver.Latest(id.ToString(), "upsert")!.Value;
             upsert.GetProperty("destination").GetString().ShouldBe("products");
             upsert.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
-            upsert.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("public.products");
+            upsert.GetProperty("idempotencyKey").GetString().ShouldNotBeNullOrEmpty();
+            upsert.GetProperty("metadata").GetProperty("schema").GetString().ShouldBe("public");
+            upsert.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("products");
+            upsert.GetProperty("metadata").GetProperty("action").GetString().ShouldBe("insert");
 
             await Db.DeleteProductAsync(id);
             await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "delete") is not null);
