@@ -117,6 +117,11 @@ sink.Map<Product>()
     .UsingTransform<Product, ProductSearchTransform>();
 ```
 
+::: tip
+The registration itself can also live outside `AddWallaby` as a
+[mapping class](/transforms#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
+:::
+
 ## Dependent tables
 
 When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their

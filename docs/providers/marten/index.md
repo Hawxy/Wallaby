@@ -95,6 +95,11 @@ sink.Map<Order>()
     .UsingTransform<Order, OrderSearchTransform>();
 ```
 
+::: tip
+The registration itself can also live outside `AddWallaby` as a
+[mapping class](/transforms#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
+:::
+
 ## What gets captured
 
 For each mapped document Wallaby captures the minimal column set: `id`, the `data` JSONB body,

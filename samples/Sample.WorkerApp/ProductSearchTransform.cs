@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore;
 
 namespace Sample.WorkerApp;
@@ -25,4 +26,13 @@ public sealed class ProductSearchTransform(ILogger<ProductSearchTransform> logge
         }
         return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
     }
+}
+
+/// <summary>Routes product changes to the "products" index; bump the version to force a reindex.</summary>
+public sealed class ProductSearchMapping : IWallabyEntityMapping<Product>
+{
+    public void Configure(EntityMapBuilder<Product> map) => map
+        .ToDestination("products")
+        .WithBackfillVersion("v1")
+        .UsingTransform<Product, ProductSearchTransform>();
 }

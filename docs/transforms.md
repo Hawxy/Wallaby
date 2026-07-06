@@ -24,6 +24,31 @@ interface as a class — [`IWallabyEfTransform<T>`](/providers/entity-framework-
 (EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) — and
 register it with `UsingTransform<TEntity, TTransform>()`; the class is resolved from the container.
 
+## Mapping classes
+
+Inline mappings grow the `AddWallaby` callback by a block per entity per sink and can make your `Program.cs` unwieldy. Move each mapping into a
+class implementing `IWallabyEntityMapping<TEntity>` - typically alongside the transform it wires up -
+and apply it by type:
+
+```csharp
+public sealed class ProductSearchMapping : IWallabyEntityMapping<Product>
+{
+    public void Configure(EntityMapBuilder<Product> map) => map
+        .ToDestination("products")
+        .WithBackfillVersion("v1")
+        .UsingTransform<Product, ProductSearchTransform>();
+}
+```
+
+```csharp
+.WithMappings(sink => sink
+    .Apply<ProductSearchMapping>()
+    .Apply<CategorySearchMapping>());
+```
+
+For a mapping that needs constructor arguments, pass a configured instance:
+`sink.Apply(new ProductSearchMapping(indexName))`.
+
 ## Internals
 
 Transforms are **batch-invoked**: you receive all the insert/update/read changes for the entity in a commit (or a
