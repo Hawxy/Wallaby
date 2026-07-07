@@ -50,8 +50,12 @@ builder.Services.AddWallaby(cdc =>
 
 ## Tests
 
-The test suite requires docker to run and can be executed via `.\build.ps1 Test`
-
+Each package has one test project under `tests/` (`Wallaby.Tests`, `Wallaby.Providers.*.Tests`,
+`Wallaby.Sinks.*.Tests`) with `Unit/` and `Integration/` folders inside; namespaces follow the folders.
 All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Postgres container) live in
 `tests/Wallaby.TestInfrastructure`.
+
+- Everything (what CI runs; integration tests need Docker): `dotnet test` or `.\build.ps1 Test`
+- One package: `dotnet run -c Release --project tests/Wallaby.Providers.EntityFrameworkCore.Tests`
+- Unit tests only (no Docker): append `-- --treenode-filter "/*/*.Unit*/*/*"`
 

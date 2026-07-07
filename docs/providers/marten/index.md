@@ -7,20 +7,18 @@ description: "Capturing Marten document changes: JSONB rehydration through the s
 The `Wallaby.Providers.Marten` package drives capture from a [Marten](https://martendb.io) document store:
 Wallaby watches Marten's document tables (`mt_doc_*`), rehydrates each change's JSONB body back into
 your document type through the store's own serializer, and routes the documents through the usual
-transform → sink pipeline. Soft deletes, conjoined multi-tenancy, and backfills all behave the way a
-Marten consumer expects.
+transform → sink pipeline. 
 
 ## Install
 
 ```bash
 dotnet add package Wallaby.Providers.Marten
-dotnet add package Wallaby.Sinks.Meilisearch #optionally add a sink
 ```
 
 ## Register
 
 Chain `UseMarten()` after your usual `AddMarten` registration. Wallaby resolves the `IDocumentStore`
-from the container; use the `UseMarten(sp => ...)` overload for multiple stores.
+from the container. Optionally use the `UseMarten(sp => ...)` overload for multiple stores.
 
 You must also supply a connection string via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding. This is so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 

@@ -5,18 +5,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.EntityFrameworkCore" />
-    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.Marten" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="TUnit.Core" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wallaby\Wallaby.csproj" />
     <ProjectReference Include="..\..\src\Wallaby.Testing\Wallaby.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Providers.EntityFrameworkCore\Wallaby.Providers.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Providers.Marten\Wallaby.Providers.Marten.csproj" />
   </ItemGroup>
 
 </Project>

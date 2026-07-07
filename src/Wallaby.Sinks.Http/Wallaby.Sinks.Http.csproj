@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Wallaby.Sinks.Http.UnitTests" />
+    <InternalsVisibleTo Include="Wallaby.Sinks.Http.Tests" />
   </ItemGroup>
 
   <ItemGroup>

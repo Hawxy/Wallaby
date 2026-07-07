@@ -16,19 +16,12 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Wallaby.AotSmokeTest/Wallaby.AotSmokeTest.csproj" />
-    <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.IntegrationTests/Wallaby.Providers.EntityFrameworkCore.IntegrationTests.csproj" />
-    <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.UnitTests/Wallaby.Providers.EntityFrameworkCore.UnitTests.csproj" />
-    <Project Path="tests/Wallaby.IntegrationTests/Wallaby.IntegrationTests.csproj" />
-    <Project Path="tests/Wallaby.Providers.Marten.IntegrationTests/Wallaby.Providers.Marten.IntegrationTests.csproj" />
-    <Project Path="tests/Wallaby.Providers.Marten.UnitTests/Wallaby.Providers.Marten.UnitTests.csproj" />
-    <Project Path="tests/Wallaby.Meilisearch.IntegrationTests/Wallaby.Meilisearch.IntegrationTests.csproj" />
-    <Project Path="tests/Wallaby.Sinks.Http.IntegrationTests/Wallaby.Sinks.Http.IntegrationTests.csproj" />
-    <Project Path="tests/Wallaby.Sinks.Http.UnitTests/Wallaby.Sinks.Http.UnitTests.csproj" />
-    <Project Path="tests/Wallaby.TestInfrastructure.EntityFrameworkCore/Wallaby.TestInfrastructure.EntityFrameworkCore.csproj" />
-    <Project Path="tests/Wallaby.TestInfrastructure.Marten/Wallaby.TestInfrastructure.Marten.csproj" />
+    <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.Tests/Wallaby.Providers.EntityFrameworkCore.Tests.csproj" />
+    <Project Path="tests/Wallaby.Providers.Marten.Tests/Wallaby.Providers.Marten.Tests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.Http.Tests/Wallaby.Sinks.Http.Tests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.Meilisearch.Tests/Wallaby.Sinks.Meilisearch.Tests.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
-    <Project Path="tests/Wallaby.TestModel/Wallaby.TestModel.csproj" />
-    <Project Path="tests/Wallaby.UnitTests/Wallaby.UnitTests.csproj" />
+    <Project Path="tests/Wallaby.Tests/Wallaby.Tests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Sample.MartenWorkerApp/Sample.MartenWorkerApp.csproj" />

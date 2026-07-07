@@ -10,9 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Wallaby.Providers.Marten.UnitTests" />
-    <InternalsVisibleTo Include="Wallaby.Providers.Marten.IntegrationTests" />
-    <InternalsVisibleTo Include="Wallaby.TestInfrastructure.Marten" />
+    <InternalsVisibleTo Include="Wallaby.Providers.Marten.Tests" />
+    <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
   </ItemGroup>
 
