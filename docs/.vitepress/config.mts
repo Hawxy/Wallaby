@@ -28,8 +28,8 @@ export default defineConfig({
     plugins: [llmstxt({ domain: 'https://wallabycdc.net' })]
   },
   head: [
-    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/Wallaby/favicon-32.png' }],
-    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/Wallaby/favicon-16.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/favicon-16.png' }],
   ],
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
