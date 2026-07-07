@@ -5,14 +5,14 @@ description: "Tenant-scoped DbContexts and per-tenant destinations derived from 
 # Multi-tenancy (EF Core)
 
 Sometimes the enrichment `DbContext` and/or destination must be derived from the **changed row's own
-data**. The canonical case is multi-tenancy: a row carries a `TenantId`, enrichment must run against a
-context scoped to that tenant (a tenant connection, or a global query filter), and the result must land in
+data**. The usual case is multi-tenancy: a row carries a `TenantId`, enrichment must run against a
+context scoped to that tenant (a tenant connection, or a global query filter), and the result might land in
 a per-tenant destination (e.g. an index per tenant).
 
 ## Scoped DbContext
 
 ```csharp
-cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(OptionsForTenant(scopeKey)));
+cdc.UseScopedDbContext((scopeKey, services) => new AppDbContext(scopeKey));
 
 sink.Map<Order>()
     .ScopedBy(o => o.TenantId)                  // derive the scope key from the change
@@ -20,16 +20,16 @@ sink.Map<Order>()
     .ScopedDestination(key => $"orders_{key}"); // per-tenant destination (optional)
 ```
 
-- **`ScopedBy(o => o.TenantId)`** extracts a scope key from each change's entity. When the key isn't a CLR
+- **`ScopedBy(o => o.TenantId)`**: extracts a scope key from each change's entity. When the key isn't a CLR
   property of the entity, e.g. a shadow `tenant_id` column added by a multi-tenancy library, use the
   `ChangeEvent` overload instead: `ScopedBy(c => c.Record["TenantId"])`.
-- **`UseScopedDbContext((key, services) => ...)`** builds the enrichment `DbContext` for a scope key - point
+- **`UseScopedDbContext((key, services) => ...)`**: builds the enrichment `DbContext` for a scope key - point
   it at a tenant connection string, or hand the context the tenant so a global query filter applies. `services`
   is a DI scope that disposes together with the returned context, so scoped services are safe to resolve.
-- **`ScopedDestination(key => ...)`** computes the destination per scope key. Without it, the scope only
-  affects the enrichment context and the fixed `ToDestination(...)` value (or the sink default) is used.
+- **`ScopedDestination(key => ...)`**: instead of delivering the data to a fixed destination, this computes the destination per scope key. 
+  Useful if your destination sink needs to be sliced by tenant (ie an index per tenant).
 
-Each is opt-in and independent; with neither, behavior is exactly as normal (one shared context per batch).
+Both context & destination slicing is optional. If neither is set, the `ScopedBy` call will be ignored.
 
 ## Internals
 
