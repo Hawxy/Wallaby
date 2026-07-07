@@ -1,3 +1,7 @@
+---
+description: "Conjoined multi-tenancy with Marten: tenant ids captured in document keys, ScopedByTenant, and tenant-scoped query sessions."
+---
+
 # Multi-tenancy (Marten)
 
 Marten's **conjoined** multi-tenancy stores every tenant's documents in one table with a `tenant_id`

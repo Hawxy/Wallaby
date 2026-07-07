@@ -1,3 +1,7 @@
+---
+description: "A tour of Wallaby's pipeline: logical replication, row materialization, transforms, sink delivery, checkpointing, and backfill."
+---
+
 <script setup>
 import PipelineFlow from './.vitepress/theme/PipelineFlow.vue'
 </script>

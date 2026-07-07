@@ -9,6 +9,8 @@ slot from your model, supports **backfill** operations, and is **cluster-safe** 
 
 **Meilisearch** and **HTTP/webhook** sinks are supported out of the box. Contributions for additional sinks is welcome.
 
+📖 **Full documentation: [wallabycdc.net](https://wallabycdc.net/)**
+
 ## Packages
 
 | Project                        | Purpose                                  |

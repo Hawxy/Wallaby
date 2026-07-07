@@ -1,3 +1,7 @@
+---
+description: "End-to-end pipeline testing with the Wallaby.Testing package: real logical replication, production transforms, and captured sink output."
+---
+
 # Testing
 
 The `Wallaby.Testing` package helps you test your CDC pipeline **end-to-end**: write rows through your

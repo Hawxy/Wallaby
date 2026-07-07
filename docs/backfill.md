@@ -1,3 +1,7 @@
+---
+description: "Loading existing rows into destinations: automatic backfill of new tables, version-triggered reindexing, and gap-free merging with live changes."
+---
+
 # Backfill
 
 Backfill loads existing rows into a destination. It runs concurrently with the realtime publish and merges with it so there are no

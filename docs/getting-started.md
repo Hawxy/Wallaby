@@ -1,3 +1,7 @@
+---
+description: "Postgres prerequisites, package selection, and first-run configuration for adding Wallaby CDC to a .NET service."
+---
+
 <script setup>
 import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
 </script>

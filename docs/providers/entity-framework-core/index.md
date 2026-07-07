@@ -1,3 +1,7 @@
+---
+description: "Capturing changes through your EF Core model: registration, enrichment transforms, dependent tables, and replica identity migrations."
+---
+
 # EF Core
 
 The `Wallaby.Providers.EntityFrameworkCore` package drives capture from your EF Core model: Wallaby watches the

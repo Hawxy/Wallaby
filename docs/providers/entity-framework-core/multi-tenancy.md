@@ -1,3 +1,7 @@
+---
+description: "Tenant-scoped DbContexts and per-tenant destinations derived from the changed row's own data in the EF Core provider."
+---
+
 # Multi-tenancy (EF Core)
 
 Sometimes the enrichment `DbContext` and/or destination must be derived from the **changed row's own

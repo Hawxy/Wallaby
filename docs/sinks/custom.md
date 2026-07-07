@@ -1,3 +1,7 @@
+---
+description: "Implementing ISink to deliver change batches to any destination, and the delivery contract a sink must honor."
+---
+
 # Custom Sinks
 
 A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere — an HTTP API,

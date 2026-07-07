@@ -1,3 +1,7 @@
+---
+description: "Keeping Meilisearch indexes continuously in sync with Postgres tables via idempotent upserts and deletes."
+---
+
 # Meilisearch Sink
 
 The `Wallaby.Sinks.Meilisearch` package keeps Meilisearch indexes continuously in sync with your

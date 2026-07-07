@@ -1,3 +1,7 @@
+---
+description: "The OpenTelemetry metrics and traces built into Wallaby and how to add them to your application's telemetry pipeline."
+---
+
 # Observability
 
 Wallaby is instrumented with **OpenTelemetry metrics and traces** using the built-in .NET

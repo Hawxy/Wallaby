@@ -1,3 +1,7 @@
+---
+description: "Turning entity changes into destination documents: lambda and class-based transforms, mapping classes, batch semantics, and document ids."
+---
+
 # Transforms
 
 A **transform** turns the changes for one entity type into the documents you want in a destination.

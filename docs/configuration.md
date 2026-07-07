@@ -1,3 +1,7 @@
+---
+description: "Wallaby's configuration options and how to set them, from slot and publication names to batching, retries, and large-transaction handling."
+---
+
 # Configuration
 
 ## Large Transaction Handling

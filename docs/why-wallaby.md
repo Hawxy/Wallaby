@@ -1,3 +1,7 @@
+---
+description: "Why change data capture beats publish-on-write for keeping search indexes and read models in sync, and what Wallaby handles for you."
+---
+
 # Why Wallaby?
 
 The typical way to keep a search index or read model in sync is to publish a message whenever the

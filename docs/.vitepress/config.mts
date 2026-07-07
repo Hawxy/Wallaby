@@ -1,10 +1,32 @@
 import { defineConfig } from 'vitepress'
+import llmstxt from 'vitepress-plugin-llms'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: "Wallaby",
   description: "Postgres CDC Engine for .NET",
   base: '/',
+  cleanUrls: true,
+  sitemap: {
+    hostname: 'https://wallabycdc.net'
+  },
+  // Canonical + Open Graph tags on every page.
+  transformPageData(pageData) {
+    const path = pageData.relativePath.replace(/index\.md$/, '').replace(/\.md$/, '')
+    const canonical = `https://wallabycdc.net/${path}`
+    pageData.frontmatter.head ??= []
+    pageData.frontmatter.head.push(
+      ['link', { rel: 'canonical', href: canonical }],
+      ['meta', { property: 'og:url', content: canonical }],
+      ['meta', { property: 'og:type', content: 'website' }],
+      ['meta', { property: 'og:site_name', content: 'Wallaby' }],
+      ['meta', { property: 'og:title', content: pageData.title ? `${pageData.title} | Wallaby` : 'Wallaby' }],
+      ['meta', { property: 'og:description', content: pageData.description || 'Postgres CDC Engine for .NET' }],
+    )
+  },
+  vite: {
+    plugins: [llmstxt({ domain: 'https://wallabycdc.net' })]
+  },
   head: [
     ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/Wallaby/favicon-32.png' }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/Wallaby/favicon-16.png' }],

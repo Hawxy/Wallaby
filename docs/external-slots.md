@@ -1,3 +1,7 @@
+---
+description: "Provisioning and maintaining publications and replication slots for external pgoutput consumers like Airbyte, Debezium, or Fivetran."
+---
+
 # External Slots
 
 Wallaby provisions one publication and one logical replication slot for **its own** capture. If the same

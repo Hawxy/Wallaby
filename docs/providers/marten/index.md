@@ -1,3 +1,7 @@
+---
+description: "Capturing Marten document changes: JSONB rehydration through the store's serializer, soft deletes, multi-tenancy, and backfills."
+---
+
 # Marten
 
 The `Wallaby.Providers.Marten` package drives capture from a [Marten](https://martendb.io) document store:

@@ -1,4 +1,5 @@
 ---
+description: "Postgres change data capture for .NET: stream row changes through typed transforms into search indexes, webhooks, and custom sinks."
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 

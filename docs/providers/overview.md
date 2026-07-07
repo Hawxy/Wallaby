@@ -1,3 +1,7 @@
+---
+description: "What a storage provider contributes and how to choose between the EF Core and Marten providers."
+---
+
 # Overview
 
 A storage provider tells Wallaby *what* to capture and *how* to turn raw row changes back into your

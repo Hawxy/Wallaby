@@ -1,4 +1,5 @@
 ---
+description: "ASP.NET Core health check for the Wallaby background service across leader and standby nodes."
 outline: deep
 ---
 

@@ -1,0 +1,6 @@
+Content-Signal: search=yes, ai-input=yes
+
+User-agent: *
+Allow: /
+
+Sitemap: https://wallabycdc.net/sitemap.xml

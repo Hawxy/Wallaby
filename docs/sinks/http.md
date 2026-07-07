@@ -1,3 +1,7 @@
+---
+description: "POSTing change batches to any HTTP endpoint as a JSON envelope, with named-client auth, HMAC signing, and idempotency keys."
+---
+
 # HTTP Sink
 
 The `Wallaby.Sinks.Http` package POSTs batches of changes to any HTTP endpoint as a JSON envelope of
