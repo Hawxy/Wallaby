@@ -28,7 +28,7 @@ The only thing to note is that CDC captures *state changes*, not intent. If cons
 domain event carrying business meaning, a message bus is still the right tool. Wallaby covers the cases
 where the goal is "the data changed, keep the downstream copy in sync".
 
-# How It Works
+## How It Works
 
 <PipelineFlow />
 
