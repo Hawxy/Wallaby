@@ -1,10 +1,8 @@
 using Wallaby.Abstractions;
-using Wallaby.Providers.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Providers;
-using Wallaby.TestModel;
 
-namespace Wallaby.Providers.EntityFrameworkCore.Tests.Unit;
+namespace Wallaby.Tests.Unit;
 
 /// <summary>
 /// Routing semantics for a single batch (one transaction's changes, or one dispatched slice). The key
@@ -13,20 +11,7 @@ namespace Wallaby.Providers.EntityFrameworkCore.Tests.Unit;
 /// </summary>
 public class MappingChangeRouterTests
 {
-    /// <summary>Emits one document per change (so every non-delete becomes an upsert).</summary>
-    private sealed class PassthroughTransform : IWallabyTransformInvoker
-    {
-        public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
-            object session, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
-        {
-            var documents = new Dictionary<DocumentKey, WallabyDocument?>();
-            foreach (var change in changes)
-            {
-                documents[change.Key] = new WallabyDocument { ["id"] = change.Key.ToString() };
-            }
-            return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
-        }
-    }
+    private sealed class Doc;
 
     /// <summary>A transform that always throws — to exercise the halt-on-transform-failure behavior.</summary>
     private sealed class ThrowingTransform : IWallabyTransformInvoker
@@ -37,30 +22,9 @@ public class MappingChangeRouterTests
     }
 
     private static MappingChangeRouter Router(IWallabyTransformInvoker? transform = null)
-    {
-        var sessionProvider = new DbContextEnrichmentSessionProvider(
-            () => new AppDbContext(TestModelFactory.CreateOptions("Host=localhost;Username=u;Password=p;Database=d")));
-        var mapping = new EntityMapping
-        {
-            EntityClrType = typeof(Product),
-            SinkName = "sink",
-            Destination = "products",
-            Transform = transform ?? new PassthroughTransform(),
-            Sessions = sessionProvider,
-        };
-        return new MappingChangeRouter([mapping]);
-    }
+        => new([TestChanges.Mapping(typeof(Doc), transform ?? new RecordingTransform(), new FakeSessionProvider())]);
 
-    private static ChangeEvent Change(ChangeAction action, int id)
-    {
-        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
-        return new ChangeEvent(
-            action, meta, new Product { Id = id, Name = "x" },
-            new Dictionary<string, object?>(), Changes: null, new object[] { id })
-        {
-            EntityClrType = typeof(Product),
-        };
-    }
+    private static ChangeEvent Change(ChangeAction action, int id) => TestChanges.Change(typeof(Doc), id, action);
 
     [Test]
     public async Task Insert_then_delete_of_one_key_routes_a_single_deletion()

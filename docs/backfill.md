@@ -58,15 +58,15 @@ Chunk delivery and cursor persistence are two steps, so there is a small window 
 *after* a chunk was applied to the sinks but *before* its cursor was saved. The next leader resumes from
 the last saved cursor and re-emits that chunk. This is the intended at-least-once behavior: sinks
 upsert/delete by document id, so redelivered rows converge to the same state and nothing is lost — see
-[How it works](/how-it-works).
+[How it works](/why-wallaby#how-it-works).
 
 ## Scoped (fan-out) backfill
 
-The same engine also re-snapshots a *subset* of a table's rows on demand. When a [dependent fan-out](/transforms#dependent-tables)
+The same engine also re-snapshots a *subset* of a table's rows on demand. When a [dependent fan-out](/providers/entity-framework-core/#dependent-tables)
 is wider than one page, its tail is enqueued as a **scoped backfill job** (filtered to the affected keys)
 that runs asynchronously on the leader — so the triggering transaction is acknowledged immediately instead
 of blocking on a huge re-index. These jobs coalesce per (table, key set), are chunked and resumable just
-like a full backfill, and emit through the same transform/sink path. See [Transforms → Scaling fan-out](/transforms#scaling-fan-out).
+like a full backfill, and emit through the same transform/sink path. See [EF Core → Scaling fan-out](/providers/entity-framework-core/#scaling-fan-out).
 
 ## Tuning & safety
 

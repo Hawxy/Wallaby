@@ -48,11 +48,10 @@ export default defineConfig({
         items: [
           { text: 'Why Wallaby?', link: '/why-wallaby' },
           { text: 'Getting Started', link: '/getting-started' },
-          { text: 'How It Works', link: '/how-it-works' },
-          { text: 'Configuration', link: '/configuration' },
-          { text: 'Transforms', link: '/transforms' },
+          { text: 'Mappings', link: '/mappings' },
           { text: 'Backfill', link: '/backfill' },
           { text: 'External Slots', link: '/external-slots' },
+          { text: 'Configuration', link: '/configuration' },
           { text: 'Testing', link: '/testing' },
         ]
       },

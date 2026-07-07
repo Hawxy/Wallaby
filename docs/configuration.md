@@ -28,7 +28,7 @@ You have a number of choices as to where streamed transactions spill:
 | `ConnectionString` | *(required)* | Postgres connection string for replication, state, locks, and backfill reads. `UseConnectionString(...)` is shorthand for setting it. |
 | `SlotName` / `PublicationName` | `wallaby_cdc_slot` / `wallaby_cdc_pub` | Names Wallaby creates/uses. |
 | `ChunkSize` | `500` | Backfill keyset page size (1–100 000; chunk rows are held in memory). |
-| `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/transforms#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
+| `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/providers/entity-framework-core/#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
 | `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
@@ -48,9 +48,9 @@ You shouldn't modify these unless you know what you're doing:
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
 | `LeaderHeartbeatInterval` | `10s` | How often the leader verifies it still holds the cluster lock while streaming. If the lock's connection dropped (so Postgres auto-released it), the leader steps down within roughly this interval and re-elects. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
-| `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/transforms#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
+| `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/providers/entity-framework-core/#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
-| `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
+| `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/why-wallaby#slot-loss-gap-detection).|
 
 ## Options Pattern
 

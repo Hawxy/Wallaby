@@ -1,14 +1,38 @@
 ---
-description: "Turning entity changes into destination documents: lambda and class-based transforms, mapping classes, batch semantics, and document ids."
+description: "Entity mappings: routing an entity to a sink destination — transforms, mapping classes, document ids, backfill versions, and batch semantics."
 ---
 
-# Transforms
+# Mappings
+
+An **entity mapping** is Wallaby's unit of routing: it declares how one entity type is captured,
+transformed and delivered to one destination in a sink. Mappings are
+declared per sink inside `WithMappings(...)`:
+
+```csharp
+sink.Map<Product>()               // the entity to capture, routed to this sink
+    .ToDestination("products")    // where documents land within the sink
+    .WithBackfillVersion("v1")    // bump to reindex when the output shape changes
+    .UsingTransform(/* ... */);   // shapes changes into documents
+```
+
+A mapping's components:
+
+- **Entity** — `Map<T>()` declares the backing table for capture *and* routes its changes to the
+  enclosing sink. The same entity may be mapped under several sinks as it is captured once and each
+  mapping runs its own transform.
+- **Destination** — `ToDestination(...)` names where documents land within the sink: a search index,
+  a table, an endpoint route — whatever the sink maps it to.
+- **Transform** — `UsingTransform(...)` turns a batch of entity changes into destination documents;
+  the single place all enrichment/shaping happens. See [below](#transforms).
+- **Backfill version** — `WithBackfillVersion(...)` re-snapshots the table when the version changes,
+  so destinations are rebuilt whenever the output shape changes. See [Backfill](/backfill).
+- **Provider extensions** — [`DependsOn(...)`](/providers/entity-framework-core/#dependent-tables)
+  re-emits an entity when a related table changes, and [per-row scoping](#per-row-scoping) routes
+  each row through tenant-specific contexts and destinations.
+
+## Transforms
 
 A **transform** turns the changes for one entity type into the documents you want in a destination.
-It is the single place all enrichment/shaping happens.
-
-## Configuration
-
 For trivial shaping, pass a lambda:
 
 ```csharp
@@ -89,10 +113,6 @@ Each `ChangeEvent<TEntity>` exposes:
 | `PrimaryKey` / `Key` | The source primary key, and its `DocumentKey`. |
 | `GetPrimaryKey<TKey>()` | The single-column key cast to `TKey`. |
 | `Metadata` | `Action`, `IsBackfill`, `CommitTimestamp`, `CommitLsn`, table name. |
-
-## Document id and backfill version
-
-- `KeyedBy(p => p.Code)` overrides the document id (defaults to the source primary key).
 
 ## Per-row scoping
 

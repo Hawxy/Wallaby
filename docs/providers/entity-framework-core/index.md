@@ -48,7 +48,7 @@ builder.Services.AddWallaby(cdc =>
 await builder.Build().RunAsync();
 ```
 
-Transforms receive a leased `DbContext` for enrichment lookups — see [Transforms](/transforms).
+Transforms receive a leased `DbContext` for enrichment lookups — see [Mappings](/mappings).
 
 ::: tip
 If the builder needs services at registration time (e.g. `IConfiguration`), use the
@@ -60,7 +60,7 @@ If the builder needs services at registration time (e.g. `IConfiguration`), use 
 
 Only entities you **declare** are captured and added to the publication: `Map<T>()` inside a sink's
 `WithMappings(...)` declares a table *and* routes it to that sink. Tables a mapping
-[`DependsOn`](/transforms#dependent-tables) are captured automatically. Captured tables must have a
+[`DependsOn`](#dependent-tables) are captured automatically. Captured tables must have a
 primary key. The same entity may be mapped under several sinks — it is captured once and each sink's
 mapping runs its own transform.
 
@@ -123,7 +123,7 @@ sink.Map<Product>()
 
 ::: tip
 The registration itself can also live outside `AddWallaby` as a
-[mapping class](/transforms#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
+[mapping class](/mappings#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
 :::
 
 ## Dependent tables
@@ -189,7 +189,7 @@ public partial class OrdersReplicaIdentity : Migration
 ## Next steps
 
 - [Configuration](/configuration) - All configuration options
-- [Transforms](/transforms) - shaping and enriching documents.
+- [Mappings](/mappings) - routing entities to destinations, shaping and enriching documents.
 - [Meilisearch](/sinks/meilisearch), [HTTP](/sinks/http), and [custom](/sinks/custom) sinks.
 - [Backfill](/backfill) - initial snapshots and version-triggered reindex.
 - [Multi-tenancy](/providers/entity-framework-core/multi-tenancy) - per-row scoped contexts and destinations.

@@ -4,6 +4,7 @@ using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Sinks;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.Tests.Unit.OpenTelemetry;
 
@@ -111,23 +112,7 @@ public class SinkDispatcherTelemetryTests
     {
         var instr = new WallabyInstrumentation();
         using var failures = new MetricCollector<long>(instr.Meter, "wallaby.sink.delivery.failures");
-
-        Activity? captured = null;
-        using var listener = new ActivityListener
-        {
-            // Scope to THIS instrumentation's source instance — ActivityListeners are process-global and
-            // match by name, so a name filter would capture sink.deliver spans from tests running in parallel.
-            ShouldListenTo = source => ReferenceEquals(source, instr.ActivitySource),
-            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity =>
-            {
-                if (activity.OperationName == "sink.deliver")
-                {
-                    captured = activity;
-                }
-            },
-        };
-        ActivitySource.AddActivityListener(listener);
+        using var activities = new ActivityCapture(instr);
 
         var sinks = new Dictionary<string, ISink>
         {
@@ -138,6 +123,7 @@ public class SinkDispatcherTelemetryTests
             async () => await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None));
 
         failures.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(1L);
+        var captured = activities.Last("sink.deliver");
         captured.ShouldNotBeNull();
         captured!.Status.ShouldBe(ActivityStatusCode.Error);
         captured.GetTagItem("wallaby.sink").ShouldBe("sink");

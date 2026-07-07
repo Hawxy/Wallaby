@@ -1,8 +1,5 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
-using Wallaby.Diagnostics;
 using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
@@ -28,14 +25,7 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         var capture = harness.AddCaptureSink();
         harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
 
-        var spans = new ConcurrentBag<string>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == WallabyInstrumentation.ActivitySourceName,
-            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => spans.Add(activity.OperationName),
-        };
-        ActivitySource.AddActivityListener(listener);
+        using var activities = new ActivityCapture(harness.Instrumentation);
 
         await harness.SelfConfigureAsync();
         var categoryId = await harness.Db.AddCategoryAsync();
@@ -54,7 +44,7 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         }
 
         // 12 changes in one transaction with MaxBatchSize 5 => at least 3 sink.deliver batches (5 + 5 + 2).
-        spans.Count(n => n == "sink.deliver").ShouldBeGreaterThanOrEqualTo(3);
+        activities.OperationNames.Count(n => n == "sink.deliver").ShouldBeGreaterThanOrEqualTo(3);
         capture.For("products").Select(r => r.DocumentId).Distinct().Count().ShouldBe(12);
     }
 

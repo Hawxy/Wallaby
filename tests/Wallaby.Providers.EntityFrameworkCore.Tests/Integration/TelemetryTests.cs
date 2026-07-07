@@ -1,7 +1,4 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
-using Wallaby.Diagnostics;
 using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestModel;
@@ -21,14 +18,7 @@ public class TelemetryTests(TestModelPostgresFixture pg)
         using var changes = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.changes.received");
         using var lag = new MetricCollector<double>(harness.Instrumentation.Meter, "wallaby.ingestion.lag");
 
-        var spanNames = new ConcurrentBag<string>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == WallabyInstrumentation.ActivitySourceName,
-            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => spanNames.Add(activity.OperationName),
-        };
-        ActivitySource.AddActivityListener(listener);
+        using var activities = new ActivityCapture(harness.Instrumentation);
 
         await harness.SelfConfigureAsync();
 
@@ -43,8 +33,8 @@ public class TelemetryTests(TestModelPostgresFixture pg)
         lag.GetMeasurementSnapshot().ShouldNotBeEmpty();
 
         // A transaction root span and a sink-delivery span were emitted.
-        spanNames.ShouldContain("transaction");
-        spanNames.ShouldContain("sink.deliver");
+        activities.OperationNames.ShouldContain("transaction");
+        activities.OperationNames.ShouldContain("sink.deliver");
     }
 
     // Backfill metrics (wallaby.backfill.rows / wallaby.backfill.active) are asserted by

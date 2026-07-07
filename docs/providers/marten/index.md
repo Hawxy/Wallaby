@@ -99,7 +99,7 @@ sink.Map<Order>()
 
 ::: tip
 The registration itself can also live outside `AddWallaby` as a
-[mapping class](/transforms#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
+[mapping class](/mappings#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
 :::
 
 ## What gets captured

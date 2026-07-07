@@ -39,12 +39,10 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Creates_publication_slot_and_state_schema()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
+        var names = WallabyNames.Unique();
         var model = BuildTestModel();
 
-        var result = await CreateConfigurator(slot, pub).EnsureConfiguredAsync(model, CancellationToken.None);
+        var result = await CreateConfigurator(names.Slot, names.Publication).EnsureConfiguredAsync(model, CancellationToken.None);
 
         result.PublicationCreated.ShouldBeTrue();
         result.SlotCreated.ShouldBeTrue();
@@ -54,17 +52,17 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         await conn.OpenAsync();
 
         (await PgExec.ScalarLongAsync(conn,
-            "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", pub))).ShouldBe(1L);
+            "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", names.Publication))).ShouldBe(1L);
 
         var plugin = await PgExec.ScalarStringAsync(conn,
-            "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", slot));
+            "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", names.Slot));
         plugin.ShouldBe("pgoutput");
 
         // 6 declared (categories, products, customers, labels, sales.orders, sales.order_lines) plus
         // the product_labels join table pulled in by the Labels DependsOn.
         (await PgExec.ScalarLongAsync(conn,
             "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p AND schemaname IN ('public', 'sales')",
-            default, ("p", pub))).ShouldBe(7L);
+            default, ("p", names.Publication))).ShouldBe(7L);
 
         // State tables exist.
         foreach (var table in new[] { "wallaby.checkpoint", "wallaby.backfill_state", "wallaby.slot_registry", "wallaby.fanout_queue" })
@@ -80,19 +78,17 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
 
         // Slot registry row recorded.
         (await PgExec.ScalarLongAsync(conn,
-            "SELECT count(*) FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", slot))).ShouldBe(1L);
+            "SELECT count(*) FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", names.Slot))).ShouldBe(1L);
     }
 
     [Test]
     public async Task Re_running_is_idempotent()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
+        var names = WallabyNames.Unique();
         var model = BuildTestModel();
 
-        var first = await CreateConfigurator(slot, pub).EnsureConfiguredAsync(model, CancellationToken.None);
-        var second = await CreateConfigurator(slot, pub).EnsureConfiguredAsync(model, CancellationToken.None);
+        var first = await CreateConfigurator(names.Slot, names.Publication).EnsureConfiguredAsync(model, CancellationToken.None);
+        var second = await CreateConfigurator(names.Slot, names.Publication).EnsureConfiguredAsync(model, CancellationToken.None);
 
         first.PublicationCreated.ShouldBeTrue();
         first.SlotCreated.ShouldBeTrue();
@@ -103,19 +99,17 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Provisions_external_slot_and_publication_without_consuming_it()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
-        var extSlot = $"elt_slot_{suffix}";
-        var extPub = $"elt_pub_{suffix}";
+        var names = WallabyNames.Unique();
+        var extSlot = names.Named("elt_slot");
+        var extPub = names.Named("elt_pub");
         var model = BuildTestModel();
 
         var configurator = new PostgresSelfConfigurator(
             pg.DataSource,
             new SelfConfigOptions
             {
-                SlotName = slot,
-                PublicationName = pub,
+                SlotName = names.Slot,
+                PublicationName = names.Publication,
                 ExternalSlots =
                 [
                     new ExternalSlotSpec(extSlot, extPub, [("public", "products"), ("public", "customers")]),
@@ -150,23 +144,23 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
             (await PgExec.ScalarStringAsync(conn,
                 "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
             (await PgExec.ScalarStringAsync(conn,
-                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", slot))).ShouldBe("primary");
+                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", names.Slot))).ShouldBe("primary");
         }
         finally
         {
-            await DropSlotsAndPublicationsAsync(slot, pub, extSlot, extPub);
+            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
         }
     }
 
     [Test]
     public async Task Provision_only_creates_external_slot_without_a_primary()
     {
-        var suffix = Guid.NewGuid().ToString("N");
+        var names = WallabyNames.Unique();
         // Primary names are supplied but must be IGNORED by the provision-only path (proves no primary slot).
-        var primarySlot = $"cdc_primary_{suffix}";
-        var primaryPub = $"cdc_primary_pub_{suffix}";
-        var extSlot = $"elt_slot_{suffix}";
-        var extPub = $"elt_pub_{suffix}";
+        var primarySlot = names.Named("cdc_primary");
+        var primaryPub = names.Named("cdc_primary_pub");
+        var extSlot = names.Named("elt_slot");
+        var extPub = names.Named("elt_pub");
 
         var configurator = new PostgresSelfConfigurator(
             pg.DataSource,
@@ -218,19 +212,17 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task External_slot_is_idempotent_and_reconciles_tables()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
-        var extSlot = $"elt_slot_{suffix}";
-        var extPub = $"elt_pub_{suffix}";
+        var names = WallabyNames.Unique();
+        var extSlot = names.Named("elt_slot");
+        var extPub = names.Named("elt_pub");
         var model = BuildTestModel();
 
         PostgresSelfConfigurator Make(params (string Schema, string Table)[] tables) => new(
             pg.DataSource,
             new SelfConfigOptions
             {
-                SlotName = slot,
-                PublicationName = pub,
+                SlotName = names.Slot,
+                PublicationName = names.Publication,
                 ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, tables)],
             },
             NullLogger.Instance);
@@ -268,18 +260,16 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         }
         finally
         {
-            await DropSlotsAndPublicationsAsync(slot, pub, extSlot, extPub);
+            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
         }
     }
 
     [Test]
     public async Task Adopts_a_preexisting_pgoutput_slot_and_records_it()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
-        var extSlot = $"elt_slot_{suffix}";
-        var extPub = $"elt_pub_{suffix}";
+        var names = WallabyNames.Unique();
+        var extSlot = names.Named("elt_slot");
+        var extPub = names.Named("elt_pub");
         var model = BuildTestModel();
 
         try
@@ -296,8 +286,8 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
                 pg.DataSource,
                 new SelfConfigOptions
                 {
-                    SlotName = slot,
-                    PublicationName = pub,
+                    SlotName = names.Slot,
+                    PublicationName = names.Publication,
                     ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products")])],
                 },
                 NullLogger.Instance);
@@ -315,18 +305,16 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         }
         finally
         {
-            await DropSlotsAndPublicationsAsync(slot, pub, extSlot, extPub);
+            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
         }
     }
 
     [Test]
     public async Task Rejects_a_preexisting_slot_with_the_wrong_type()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
-        var extSlot = $"elt_slot_{suffix}";
-        var extPub = $"elt_pub_{suffix}";
+        var names = WallabyNames.Unique();
+        var extSlot = names.Named("elt_slot");
+        var extPub = names.Named("elt_pub");
         var model = BuildTestModel();
 
         try
@@ -343,8 +331,8 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
                 pg.DataSource,
                 new SelfConfigOptions
                 {
-                    SlotName = slot,
-                    PublicationName = pub,
+                    SlotName = names.Slot,
+                    PublicationName = names.Publication,
                     ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products")])],
                 },
                 NullLogger.Instance);
@@ -354,7 +342,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         }
         finally
         {
-            await DropSlotsAndPublicationsAsync(slot, pub, extSlot, extPub);
+            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
         }
     }
 

@@ -38,8 +38,8 @@ It's highly recommended to deploy Wallaby as a separate service, not as an integ
 
 ## Next steps
 
-- [How it works](/how-it-works) - the capture pipeline end to end.
+- [How it works](/why-wallaby#how-it-works) - the capture pipeline end to end.
 - [Configuration](/configuration) - All configuration options
-- [Transforms](/transforms) - shaping and enriching documents.
+- [Mappings](/mappings) - routing entities to destinations, shaping and enriching documents.
 - [Backfill](/backfill) - initial snapshots and version-triggered reindex.
 - [Observability](/operations/observability) - OpenTelemetry metrics and traces.

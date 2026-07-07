@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore;
@@ -42,15 +41,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
                .WithMappings(sink => sink
                    .Map<Product>()
                    .ToDestination("products")
-                   .UsingTransform((_, changes, _) =>
-                   {
-                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
-                       foreach (var c in changes)
-                       {
-                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
-                       }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   }));
+                   .UsingTransform(TestTransforms.ProductNames));
         });
 
         // Post-AddWallaby overrides — the WebApplicationFactory.ConfigureTestServices ordering.
@@ -62,35 +53,19 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("meili", capture);
 
-        var provider = services.BuildServiceProvider();
-        foreach (var hosted in provider.GetServices<IHostedService>())
-        {
-            await hosted.StartAsync(CancellationToken.None);
-        }
+        await using var node = await WallabyTestNode.StartAsync(services);
+        await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
-        try
-        {
-            await WallabyReadiness.WaitForStreamingAsync(provider);
+        var categoryId = await Db.AddCategoryAsync();
+        var id = await Db.AddProductAsync(categoryId, $"testing_{names.Suffix}");
 
-            var categoryId = await Db.AddCategoryAsync();
-            var id = await Db.AddProductAsync(categoryId, $"testing_{names.Suffix}");
+        await capture.WaitForDocumentsAsync([id.ToString()]);
 
-            await capture.WaitForDocumentsAsync([id.ToString()]);
-
-            var latest = capture.LatestByDocumentId(destination: "products");
-            var record = latest[id.ToString()];
-            record.IsDeletion.ShouldBeFalse();
-            record.Destination.ShouldBe("products");
-            record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
-        }
-        finally
-        {
-            foreach (var hosted in provider.GetServices<IHostedService>())
-            {
-                await hosted.StopAsync(CancellationToken.None);
-            }
-            await provider.DisposeAsync();
-        }
+        var latest = capture.LatestByDocumentId(destination: "products");
+        var record = latest[id.ToString()];
+        record.IsDeletion.ShouldBeFalse();
+        record.Destination.ShouldBe("products");
+        record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
     }
 
     [Test]
@@ -117,15 +92,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
                .WithMappings(sink => sink
                    .Map<Product>()
                    .ToDestination("products")
-                   .UsingTransform((_, changes, _) =>
-                   {
-                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
-                       foreach (var c in changes)
-                       {
-                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
-                       }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   }));
+                   .UsingTransform(TestTransforms.ProductNames));
         });
 
         // ConfigureTestServices ordering: overrides registered after the (deferred) AddWallaby.
@@ -137,33 +104,17 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("meili", capture);
 
-        var provider = services.BuildServiceProvider();
-        foreach (var hosted in provider.GetServices<IHostedService>())
-        {
-            await hosted.StartAsync(CancellationToken.None);
-        }
+        await using var node = await WallabyTestNode.StartAsync(services);
+        await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
-        try
-        {
-            await WallabyReadiness.WaitForStreamingAsync(provider);
+        var categoryId = await Db.AddCategoryAsync();
+        var id = await Db.AddProductAsync(categoryId, $"deferred_{names.Suffix}");
 
-            var categoryId = await Db.AddCategoryAsync();
-            var id = await Db.AddProductAsync(categoryId, $"deferred_{names.Suffix}");
+        await capture.WaitForDocumentsAsync([id.ToString()]);
 
-            await capture.WaitForDocumentsAsync([id.ToString()]);
-
-            var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
-            record.IsDeletion.ShouldBeFalse();
-            record.Document!["name"].ShouldBe($"deferred_{names.Suffix}");
-        }
-        finally
-        {
-            foreach (var hosted in provider.GetServices<IHostedService>())
-            {
-                await hosted.StopAsync(CancellationToken.None);
-            }
-            await provider.DisposeAsync();
-        }
+        var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
+        record.IsDeletion.ShouldBeFalse();
+        record.Document!["name"].ShouldBe($"deferred_{names.Suffix}");
     }
 }
 
@@ -244,14 +195,6 @@ public class WallabyTestingExtensionTests
             .AddDelegateSink("real", (_, _) => Task.FromResult(DeliveryResult.Success))
             .WithMappings(sink => sink
                 .Map<Product>()
-                .UsingTransform((_, changes, _) =>
-                {
-                    var docs = new Dictionary<DocumentKey, WallabyDocument?>();
-                    foreach (var c in changes)
-                    {
-                        docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
-                    }
-                    return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                }));
+                .UsingTransform(TestTransforms.ProductNames));
     }
 }

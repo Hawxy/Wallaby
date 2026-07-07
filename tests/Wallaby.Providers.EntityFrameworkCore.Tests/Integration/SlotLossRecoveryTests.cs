@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
@@ -32,20 +31,12 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
         // Node 1: stream one product so a checkpoint exists.
         var firstCapture = new CaptureSink();
         int categoryId, firstId;
-        await using (var provider = BuildNode(names, firstCapture))
+        await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, firstCapture)))
         {
-            await StartAsync(provider);
-            try
-            {
-                await WallabyReadiness.WaitForStreamingAsync(provider);
-                categoryId = await Db.AddCategoryAsync();
-                firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
-                await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
-            }
-            finally
-            {
-                await StopAsync(provider);
-            }
+            await WallabyReadiness.WaitForStreamingAsync(node.Services);
+            categoryId = await Db.AddCategoryAsync();
+            firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+            await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
         }
 
         // Destroy the slot and commit a change while none exists — without repair it would never stream.
@@ -54,25 +45,17 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
 
         // Node 2: leadership recreates the slot, detects the checkpoint gap, and re-backfills.
         var secondCapture = new CaptureSink();
-        await using (var provider = BuildNode(names, secondCapture))
+        await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, secondCapture)))
         {
-            await StartAsync(provider);
-            try
-            {
-                await secondCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
+            await secondCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
 
-                var latest = secondCapture.LatestByDocumentId(destination: "products");
-                latest[missedId.ToString()].Document!["name"].ShouldBe($"missed_{names.Suffix}");
-                provider.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
-            }
-            finally
-            {
-                await StopAsync(provider);
-            }
+            var latest = secondCapture.LatestByDocumentId(destination: "products");
+            latest[missedId.ToString()].Document!["name"].ShouldBe($"missed_{names.Suffix}");
+            node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
         }
     }
 
-    private ServiceProvider BuildNode(WallabyNames names, CaptureSink capture)
+    private ServiceCollection BuildServices(WallabyNames names, CaptureSink capture)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -85,15 +68,7 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
                .WithMappings(sink => sink
                    .Map<Product>()
                    .ToDestination("products")
-                   .UsingTransform((_, changes, _) =>
-                   {
-                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
-                       foreach (var c in changes)
-                       {
-                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
-                       }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   }));
+                   .UsingTransform(TestTransforms.ProductNames));
         });
         services.ConfigureWallabyOptions(o =>
         {
@@ -102,23 +77,7 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
             o.Advanced.StandbyRetryInterval = TimeSpan.FromSeconds(1);
         });
         services.ReplaceWallabySink("capture", capture);
-        return services.BuildServiceProvider();
-    }
-
-    private static async Task StartAsync(ServiceProvider provider)
-    {
-        foreach (var hosted in provider.GetServices<IHostedService>())
-        {
-            await hosted.StartAsync(CancellationToken.None);
-        }
-    }
-
-    private static async Task StopAsync(ServiceProvider provider)
-    {
-        foreach (var hosted in provider.GetServices<IHostedService>())
-        {
-            await hosted.StopAsync(CancellationToken.None);
-        }
+        return services;
     }
 
     // The prior node's replication connection can linger briefly after StopAsync; retry until the server

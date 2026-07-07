@@ -25,14 +25,12 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Insert_update_delete_produce_correct_raw_changes()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var slot = $"cdc_slot_{suffix}";
-        var pub = $"cdc_pub_{suffix}";
+        var names = WallabyNames.Unique();
 
         // 1) Create slot + publication (captures from now on).
         var configurator = new PostgresSelfConfigurator(
             pg.DataSource,
-            new SelfConfigOptions { SlotName = slot, PublicationName = pub },
+            new SelfConfigOptions { SlotName = names.Slot, PublicationName = names.Publication },
             NullLogger.Instance);
         await configurator.EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None);
 
@@ -68,8 +66,8 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         // 3) Stream and collect the product changes.
         var collected = new List<RawChange>();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, slot);
-        await using var stream = new LogicalReplicationStream(pg.ConnectionString, slot, pub, spill);
+        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+        await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
         try
         {
             await foreach (var txn in stream.ReadAsync(cts.Token))

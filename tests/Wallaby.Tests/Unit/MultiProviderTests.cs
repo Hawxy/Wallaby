@@ -78,47 +78,6 @@ public class MultiProviderTests
         }
     }
 
-    private sealed class FakeSession(FakeSessionProvider owner) : IEnrichmentSession
-    {
-        public object Session => owner;
-        public ValueTask DisposeAsync()
-        {
-            owner.Disposals++;
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class FakeSessionProvider : IEnrichmentSessionProvider
-    {
-        public int Leases { get; private set; }
-        public int Disposals { get; set; }
-        public bool IsScoped => false;
-
-        public IEnrichmentSession Lease(object? scopeKey)
-        {
-            Leases++;
-            return new FakeSession(this);
-        }
-    }
-
-    /// <summary>Transform that records the session each invocation received and upserts every change.</summary>
-    private sealed class RecordingTransform : IWallabyTransformInvoker
-    {
-        public List<object> Sessions { get; } = [];
-
-        public Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>> InvokeAsync(
-            object session, IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
-        {
-            Sessions.Add(session);
-            var documents = new Dictionary<DocumentKey, WallabyDocument?>();
-            foreach (var change in changes)
-            {
-                documents[change.Key] = new WallabyDocument { ["id"] = change.Key.ToString() };
-            }
-            return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
-        }
-    }
-
     private sealed class NullServiceProvider : IServiceProvider
     {
         public static readonly NullServiceProvider Instance = new();
@@ -480,12 +439,12 @@ public class MultiProviderTests
         var second = new RecordingTransform();
         var router = new MappingChangeRouter(
         [
-            Mapping(typeof(Alpha), first, sessions) with { SinkName = "s1", Destination = "d1" },
-            Mapping(typeof(Alpha), second, sessions) with { SinkName = "s2", Destination = "d2" },
+            TestChanges.Mapping(typeof(Alpha), first, sessions) with { SinkName = "s1", Destination = "d1" },
+            TestChanges.Mapping(typeof(Alpha), second, sessions) with { SinkName = "s2", Destination = "d2" },
         ]);
 
         var routed = await router.RouteAsync(
-            [Change(typeof(Alpha), 1), Change(typeof(Alpha), 2)], CancellationToken.None);
+            [TestChanges.Change(typeof(Alpha), 1), TestChanges.Change(typeof(Alpha), 2)], CancellationToken.None);
 
         routed.Select(r => r.SinkName).Distinct().ShouldBe(["s1", "s2"], ignoreOrder: true);
         routed.Count.ShouldBe(4); // 2 changes × 2 mappings
@@ -525,12 +484,13 @@ public class MultiProviderTests
         var bTransform = new RecordingTransform();
         var router = new MappingChangeRouter(
         [
-            Mapping(typeof(Alpha), aTransform, aSessions),
-            Mapping(typeof(Beta), bTransform, bSessions),
+            TestChanges.Mapping(typeof(Alpha), aTransform, aSessions),
+            TestChanges.Mapping(typeof(Beta), bTransform, bSessions),
         ]);
 
         var routed = await router.RouteAsync(
-            [Change(typeof(Alpha), 1), Change(typeof(Beta), 2), Change(typeof(Alpha), 3)], CancellationToken.None);
+            [TestChanges.Change(typeof(Alpha), 1), TestChanges.Change(typeof(Beta), 2), TestChanges.Change(typeof(Alpha), 3)],
+            CancellationToken.None);
 
         routed.Count.ShouldBe(3);
         aSessions.Leases.ShouldBe(1);
@@ -547,29 +507,13 @@ public class MultiProviderTests
         var sessions = new FakeSessionProvider();
         var router = new MappingChangeRouter(
         [
-            Mapping(typeof(Alpha), new RecordingTransform(), sessions),
-            Mapping(typeof(Beta), new RecordingTransform(), sessions),
+            TestChanges.Mapping(typeof(Alpha), new RecordingTransform(), sessions),
+            TestChanges.Mapping(typeof(Beta), new RecordingTransform(), sessions),
         ]);
 
-        await router.RouteAsync([Change(typeof(Alpha), 1), Change(typeof(Beta), 2)], CancellationToken.None);
+        await router.RouteAsync([TestChanges.Change(typeof(Alpha), 1), TestChanges.Change(typeof(Beta), 2)], CancellationToken.None);
 
         sessions.Leases.ShouldBe(1);
         sessions.Disposals.ShouldBe(1);
-    }
-
-    private static EntityMapping Mapping(Type type, IWallabyTransformInvoker transform, FakeSessionProvider sessions)
-        => new()
-        {
-            EntityClrType = type, SinkName = "sink", Destination = "dest", Transform = transform, Sessions = sessions,
-        };
-
-    private static ChangeEvent Change(Type type, int id)
-    {
-        var meta = new ChangeMetadata("public", "t", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false);
-        return new ChangeEvent(
-            ChangeAction.Insert, meta, Entity: id, new Dictionary<string, object?>(), Changes: null, [id])
-        {
-            EntityClrType = type,
-        };
     }
 }

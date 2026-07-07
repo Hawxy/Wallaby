@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
@@ -22,7 +20,7 @@ public class EndToEndTests(TestModelPostgresFixture pg)
 
     private TestDatabase Db => new(pg.ConnectionString);
 
-    private ServiceProvider BuildNode(WallabyNames names, string endpoint)
+    private ServiceCollection BuildServices(WallabyNames names, string endpoint)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -46,17 +44,9 @@ public class EndToEndTests(TestModelPostgresFixture pg)
                    .Map<Product>()
                    .ToDestination("products")
                    .WithBackfillVersion(Guid.NewGuid().ToString("N")) // unique => isolates this test's backfill state
-                   .UsingTransform((_, changes, _) =>
-                   {
-                       var docs = new Dictionary<DocumentKey, WallabyDocument?>();
-                       foreach (var c in changes)
-                       {
-                           docs[c.Key] = new WallabyDocument { ["name"] = c.Entity!.Name };
-                       }
-                       return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(docs);
-                   }));
+                   .UsingTransform(TestTransforms.ProductNames));
         });
-        return services.BuildServiceProvider();
+        return services;
     }
 
     [Test]
@@ -65,38 +55,23 @@ public class EndToEndTests(TestModelPostgresFixture pg)
         var names = WallabyNames.Unique();
         await using var receiver = new WebhookReceiver(SigningSecret);
 
-        var provider = BuildNode(names, receiver.Endpoint);
-        foreach (var hosted in provider.GetServices<IHostedService>())
-        {
-            await hosted.StartAsync(CancellationToken.None);
-        }
+        await using var node = await WallabyTestNode.StartAsync(BuildServices(names, receiver.Endpoint));
 
-        try
-        {
-            var categoryId = await Db.AddCategoryAsync();
-            var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
+        var categoryId = await Db.AddCategoryAsync();
+        var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
 
-            await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "upsert") is not null);
-            var upsert = receiver.Latest(id.ToString(), "upsert")!.Value;
-            upsert.GetProperty("destination").GetString().ShouldBe("products");
-            upsert.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
-            upsert.GetProperty("idempotencyKey").GetString().ShouldNotBeNullOrEmpty();
-            upsert.GetProperty("metadata").GetProperty("schema").GetString().ShouldBe("public");
-            upsert.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("products");
-            upsert.GetProperty("metadata").GetProperty("action").GetString().ShouldBe("insert");
+        await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "upsert") is not null);
+        var upsert = receiver.Latest(id.ToString(), "upsert")!.Value;
+        upsert.GetProperty("destination").GetString().ShouldBe("products");
+        upsert.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
+        upsert.GetProperty("idempotencyKey").GetString().ShouldNotBeNullOrEmpty();
+        upsert.GetProperty("metadata").GetProperty("schema").GetString().ShouldBe("public");
+        upsert.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("products");
+        upsert.GetProperty("metadata").GetProperty("action").GetString().ShouldBe("insert");
 
-            await Db.DeleteProductAsync(id);
-            await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "delete") is not null);
+        await Db.DeleteProductAsync(id);
+        await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "delete") is not null);
 
-            receiver.SawInvalidSignature.ShouldBeFalse();
-        }
-        finally
-        {
-            foreach (var hosted in provider.GetServices<IHostedService>())
-            {
-                await hosted.StopAsync(CancellationToken.None);
-            }
-            await provider.DisposeAsync();
-        }
+        receiver.SawInvalidSignature.ShouldBeFalse();
     }
 }
