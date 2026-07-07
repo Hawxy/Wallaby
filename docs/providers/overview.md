@@ -38,21 +38,21 @@ Slot/publication names, batching, backfill versions, and sinks are all configure
 
 Each mapped entity type resolves to the provider that models it:
 
-- If exactly one registered provider models the type, that provider wins — nothing to configure.
+- If exactly one registered provider models the type, that provider wins - nothing to configure.
 - If both model it, a provider-typed `UsingTransform` overload breaks the tie: each provider's
   overloads pin the mapping to that provider.
 - Pin explicitly with `Map<T>().FromProvider(...)` (provider names: `"EntityFrameworkCore"`,
   `"Marten"`).
 - Remaining ambiguity, or a `FromProvider` pin that contradicts the transform's provider will fail
   fast at startup with guidance.
-- A type mapped under several sinks resolves once — all its mappings share one table, so a pin on any
+- A type mapped under several sinks resolves once - all its mappings share one table, so a pin on any
   of them decides for all (conflicting pins fail fast).
 
 ## Enrichment sessions
 
 Transforms are handed the session type native to their mapping's provider, a `DbContext` for EF Core
 mappings, an `IQuerySession` for Marten mappings. Tenant-scoped session leasing is likewise per
-provider — see multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) and
+provider - see multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) and
 [Marten](/providers/marten/multi-tenancy).
 
 [External slots](/external-slots) are provider-independent and can be declared alongside any

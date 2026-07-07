@@ -63,7 +63,7 @@ builder.Services.Configure<WallabyOptions>(builder.Configuration.GetSection("Wal
 
 builder.Services.AddWallaby(cdc => /* ... */);
 
-// PostConfigure always runs last — handy for test hosts:
+// PostConfigure always runs last - handy for test hosts:
 builder.Services.PostConfigure<WallabyOptions>(o => o.SlotName = "tests_slot");
 ```
 

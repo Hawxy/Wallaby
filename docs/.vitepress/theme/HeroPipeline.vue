@@ -6,12 +6,12 @@ import { useFlowCycle, type FlowStep } from './flow/useFlowCycle';
 import FlowChip from './flow/FlowChip.vue';
 import FlowLink from './flow/FlowLink.vue';
 
-// The hero "image": a live vertical pipeline — postgres (WAL position)
+// The hero "image": a live vertical pipeline - postgres (WAL position)
 // → wallaby (stages + slot status) → rotating destination (delivered
 // counter). Every 3s a packet flows through and the numbers update in
 // step with it. Telemetry is fake, so the whole widget is hidden from
 // assistive tech.
-const delivered = ref(1184); // deterministic start — SSR hydration
+const delivered = ref(1184); // deterministic start - SSR hydration
 const pulsingTop = ref(false);
 const pulsingBottom = ref(false);
 // 0 = idle, 1..3 = decode/transform/deliver lighting up in sequence
@@ -29,8 +29,8 @@ let cycleCount = 0;
 
 // One packet flowing through, with the numbers telling the same story:
 // the WAL advances as the packet leaves postgres (0.6s travel per
-// connector), wallaby "processes" it — the stage words light up in
-// sequence — and the delivered counter bumps when the packet lands.
+// connector), wallaby "processes" it - the stage words light up in
+// sequence - and the delivered counter bumps when the packet lands.
 useFlowCycle({
   kick: 500,
   interval: 3000,
@@ -136,7 +136,7 @@ useFlowCycle({
 }
 
 /* destination swap: the old word wipes out left-to-right, the new one
-   wipes in behind it — steps() keeps the sweep chunky, in character.
+   wipes in behind it - steps() keeps the sweep chunky, in character.
    Only ever triggered by the batch timer, which reduced-motion skips. */
 .wb-flow-dest {
   display: inline-block;

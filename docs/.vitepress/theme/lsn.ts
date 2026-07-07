@@ -3,7 +3,7 @@ import { ref } from 'vue';
 // The homepage's fake WAL position. It only advances when the hero
 // pipeline runs its pulse choreography (tickLsn at packet launch), so
 // the position, the moving packet, and the delivered counter always
-// tell one story. Deterministic start — SSR hydration.
+// tell one story. Deterministic start - SSR hydration.
 let hi = 0x16;
 let lo = 0xb3762a94;
 

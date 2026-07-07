@@ -26,7 +26,7 @@ sink.Map<Order>()
 - **`ScopedByTenant()`** scopes the mapping by the change's tenant.
 - **`UseTenantSessions()`** hands each transform invocation a same-tenant `IQuerySession`
   (`store.QuerySession(tenantId)`), so enrichment queries only see that tenant's documents.
-- **`ScopedDestination(tenant => ...)`** routes per tenant — including deletes, whose tenant comes
+- **`ScopedDestination(tenant => ...)`** routes per tenant - including deletes, whose tenant comes
   from the key columns. Without it, the fixed `ToDestination(...)` value (or the sink default) is used.
 
 Backfills flow through the same router, so per-tenant sessions and destinations apply to backfilled

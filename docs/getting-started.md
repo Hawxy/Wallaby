@@ -12,7 +12,7 @@ import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
 
 Your Postgres 14+ server must already have:
 
-- **`wal_level = logical`** set in `postgresql.conf`  required for logical replication.
+- **`wal_level = logical`** set in `postgresql.conf` - required for logical replication.
 - A role with the **`REPLICATION`** attribute (or superuser) for the connection string you give Wallaby.
 - Headroom in `max_replication_slots` and `max_wal_senders` (at least one slot/sender per Wallaby cluster).
 
@@ -38,8 +38,8 @@ It's highly recommended to deploy Wallaby as a separate service, not as an integ
 
 ## Next steps
 
-- [How it works](/why-wallaby#how-it-works) - the capture pipeline end to end.
-- [Configuration](/configuration) - All configuration options
-- [Mappings](/mappings) - routing entities to destinations, shaping and enriching documents.
-- [Backfill](/backfill) - initial snapshots and version-triggered reindex.
-- [Observability](/operations/observability) - OpenTelemetry metrics and traces.
+- [How it works](/why-wallaby#how-it-works): the capture pipeline end to end.
+- [Configuration](/configuration): all configuration options.
+- [Mappings](/mappings): routing entities to destinations, shaping and enriching documents.
+- [Backfill](/backfill): initial snapshots and version-triggered reindex.
+- [Observability](/operations/observability): OpenTelemetry metrics and traces.

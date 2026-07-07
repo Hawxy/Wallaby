@@ -7,8 +7,8 @@ import FlowChip from './flow/FlowChip.vue';
 import FlowLink from './flow/FlowLink.vue';
 
 // "Choose your configuration" picker: postgres fans out over a bus into
-// two lanes — the capture lane (providers box → sinks box) and the
-// provision-only lane (external slots → pgoutput consumer) — with the
+// two lanes - the capture lane (providers box → sinks box) and the
+// provision-only lane (external slots → pgoutput consumer) - with the
 // setup buttons embedded in the chips. A packet flows down a different
 // path each cycle.
 const providers = [
@@ -314,7 +314,7 @@ useFlowCycle({
   }
 }
 
-/* narrow screens: the lanes don't fit side by side — stack the boxes
+/* narrow screens: the lanes don't fit side by side - stack the boxes
    lane by lane and let the lit borders alone carry the motion */
 @media (max-width: 639px) {
   .wb-config-top,

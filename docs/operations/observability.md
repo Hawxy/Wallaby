@@ -36,16 +36,16 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.sink.records.delivered` | Counter | `wallaby.sink` | Records accepted by a sink. |
 | `wallaby.sink.delivery.failures` | Counter | `wallaby.sink`, `wallaby.delivery.outcome` | Failed deliveries (`retryable`/`permanent`). |
 | `wallaby.sink.delivery.lag` | ObservableGauge (s) | `wallaby.sink` | Seconds since each sink last accepted a batch. Climbs while a sink is stuck retrying (or the pipeline is halted), so alert on it per sink. Absent until a sink's first delivery. |
-| `wallaby.fanout.queue.depth` | ObservableGauge | — | Scoped fan-out jobs currently due (`Requested`/`InProgress`), sampled once per drain pass on the leader. A persistently growing depth means fan-out is falling behind its triggers. |
+| `wallaby.fanout.queue.depth` | ObservableGauge | - | Scoped fan-out jobs currently due (`Requested`/`InProgress`), sampled once per drain pass on the leader. A persistently growing depth means fan-out is falling behind its triggers. |
 | `wallaby.backfill.rows` | Counter | `wallaby.table` | Rows copied during backfill. |
-| `wallaby.backfill.active` | UpDownCounter | — | Tables currently being backfilled. |
+| `wallaby.backfill.active` | UpDownCounter | - | Tables currently being backfilled. |
 | `wallaby.backfill.chunk.duration` | Histogram (s) | `wallaby.table` | Time to read and emit one backfill chunk. |
 
 The main questions you'll want to ask are:
 
-- **What's our throughput?**, which can be seen via `rate(wallaby.changes.received)`; 
-- **Are we keeping up?** which is tracked via `wallaby.ingestion.lag`;
-- **Is every sink healthy?** which is tracked via `wallaby.sink.delivery.lag` (per sink);
+- **What's our throughput?** Watch `rate(wallaby.changes.received)`.
+- **Are we keeping up?** Track `wallaby.ingestion.lag`.
+- **Is every sink healthy?** Track `wallaby.sink.delivery.lag` (per sink).
 
 .NET runtime metrics should also be monitored to ensure CPU and memory usage is acceptable.
 

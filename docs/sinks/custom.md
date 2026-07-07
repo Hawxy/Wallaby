@@ -4,7 +4,7 @@ description: "Implementing ISink to deliver change batches to any destination, a
 
 # Custom Sinks
 
-A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere — an HTTP API,
+A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere - an HTTP API,
 Kafka, another database, a cache.
 
 ::: tip
@@ -39,8 +39,8 @@ Classify the outcome so the dispatcher can react:
 
 ```csharp
 return DeliveryResult.Success;                       // batch accepted
-return DeliveryResult.Retry("503 from upstream");    // transient — retried with backoff
-return DeliveryResult.Permanent("schema rejected");  // non-retryable — halts the pipeline
+return DeliveryResult.Retry("503 from upstream");    // transient - retried with backoff
+return DeliveryResult.Permanent("schema rejected");  // non-retryable - halts the pipeline
 ```
 
 Retryable failures are retried with exponential backoff and jitter. A permanent failure (or exhausted

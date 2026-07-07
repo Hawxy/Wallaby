@@ -34,7 +34,7 @@
   font-family: var(--vp-font-family-mono);
 }
 
-/* Light theme — "daylight phosphor": the dark neon terminal with the lights
+/* Light theme - "daylight phosphor": the dark neon terminal with the lights
    on. Cool CRT-glass whites, same amber/blue accent pair at daylight voltage */
 :root {
   /* Backgrounds: cool glass instead of warm paper */
@@ -53,7 +53,7 @@
   --vp-c-border: #a9b3c0;
   --vp-c-gutter: #dee3ea;
 
-  /* Brand (links, active nav): electric amber — daylight phosphor */
+  /* Brand (links, active nav): electric amber - daylight phosphor */
   --vp-c-brand-1: #b04a00;
   --vp-c-brand-2: #8e3b00;
   --vp-c-brand-3: #d65f00;
@@ -106,7 +106,7 @@
   --vp-badge-warning-bg: rgba(214, 95, 0, 0.1);
 }
 
-/* Monochrome dark theme — softened contrast (~14:1) to avoid halation */
+/* Monochrome dark theme - softened contrast (~14:1) to avoid halation */
 .dark {
   /* Backgrounds: near-black instead of pure black */
   --vp-c-bg: #0d0d0d;
@@ -320,7 +320,7 @@
 /* ---- Hero pipeline column ---- */
 
 /* The hero "image" slot holds the live pipeline (HeroPipeline.vue),
-   not a logo — undo VitePress's logo-oriented sizing: the fixed 320px
+   not a logo - undo VitePress's logo-oriented sizing: the fixed 320px
    square, the negative pull-up margins that put a logo above the title
    on mobile, and the desktop translate offset. On mobile the pipeline
    moves below the actions (order 3) instead. */
@@ -351,7 +351,7 @@
   }
 }
 
-/* has-image centers the hero text below 960px (logo styling again) —
+/* has-image centers the hero text below 960px (logo styling again) -
    keep our left-aligned terminal look. Extra .main/.VPHero class hops
    beat the scoped [data-v] rules that inject after this file. */
 .VPHome .VPHero.VPHero.has-image .container {

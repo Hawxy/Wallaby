@@ -26,8 +26,8 @@ generic host if required.
 
 Registered as **`wallaby`** (tag `wallaby`). It reports:
 
-- **Unhealthy** - When the CDC background service has **terminated** (faulted out of its hosted loop).
-- **Healthy** - In every other state: a **leader** streaming changes, a **standby** waiting to take over,
+- **Unhealthy**: When the CDC background service has **terminated** (faulted out of its hosted loop).
+- **Healthy**: In every other state: a **leader** streaming changes, a **standby** waiting to take over,
   or a node still **starting**.
 
 The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
@@ -39,8 +39,8 @@ Live replication keeps flowing, so the node stays Healthy, but the value is wort
 
 A climbing `consecutiveLeaderFailures` means the leader is crash-looping: sessions keep dying before a
 single transaction is fully delivered and acknowledged (e.g. a sink permanently rejecting a batch). The
-counter only resets on real progress or a clean step-down — not just because a failing session ran for a
-while first — so it is a reliable alerting signal even when each session streams briefly before failing.
+counter only resets on real progress or a clean step-down - not just because a failing session ran for a
+while first - so it is a reliable alerting signal even when each session streams briefly before failing.
 
 ::: WARNING
 The `data` dictionary can include exception text. Don't expose a detailed `/health` response on a public

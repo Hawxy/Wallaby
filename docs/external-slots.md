@@ -71,9 +71,9 @@ distinct from Wallaby's own slot/publication and from each other.
   DROP PUBLICATION elt_pub;
   ```
 
-- **Slot headroom.** Wallaby's startup validation accounts for every slot it will create (its own plus all
+- **Slot headroom**: Wallaby's startup validation accounts for every slot it will create (its own plus all
   external ones) and fails fast with `max_replication_slots` guidance if there isn't room.
-- **Bookkeeping.** Each provisioned slot is recorded in `wallaby.slot_registry`; external slots are marked
+- **Bookkeeping**: Each provisioned slot is recorded in `wallaby.slot_registry`; external slots are marked
   `kind = 'external'` (Wallaby's own slot is `'primary'`).
 
 ::: warning

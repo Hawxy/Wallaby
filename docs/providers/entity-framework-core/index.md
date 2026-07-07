@@ -48,11 +48,11 @@ builder.Services.AddWallaby(cdc =>
 await builder.Build().RunAsync();
 ```
 
-Transforms receive a leased `DbContext` for enrichment lookups — see [Mappings](/mappings).
+Transforms receive a leased `DbContext` for enrichment lookups - see [Mappings](/mappings).
 
 ::: tip
 If the builder needs services at registration time (e.g. `IConfiguration`), use the
-`AddWallaby((sp, cdc) => ...)` overload — see
+`AddWallaby((sp, cdc) => ...)` overload - see
 [Reading configuration at startup](/configuration#reading-configuration-at-startup).
 :::
 
@@ -61,7 +61,7 @@ If the builder needs services at registration time (e.g. `IConfiguration`), use 
 Only entities you **declare** are captured and added to the publication: `Map<T>()` inside a sink's
 `WithMappings(...)` declares a table *and* routes it to that sink. Tables a mapping
 [`DependsOn`](#dependent-tables) are captured automatically. Captured tables must have a
-primary key. The same entity may be mapped under several sinks — it is captured once and each sink's
+primary key. The same entity may be mapped under several sinks - it is captured once and each sink's
 mapping runs its own transform.
 
 ## Transforms
@@ -100,7 +100,7 @@ project from the `ChangeEvent` instead and use `REPLICA IDENTITY FULL`.
 ### Class-based transforms
 
 For more complex transforms, or anything with dependencies, implement `IWallabyEfTransform<TEntity>`
-as a class — it is resolved from the container:
+as a class - it is resolved from the container:
 
 ```csharp
 public sealed class ProductSearchTransform(IPricingService pricing) : IWallabyEfTransform<Product>
@@ -149,18 +149,18 @@ the same transform.
 A single change to a principal row can affect a large number of dependents (e.g. renaming a category with
 a million products). Wallaby keeps this bounded:
 
-- **Consolidated lookups.** All distinct keys changed for a dependent table in one transaction are resolved
+- **Consolidated lookups**: All distinct keys changed for a dependent table in one transaction are resolved
   with a single `IN (…)` query per relationship.
-- **Inline first page, offloaded tail.** The first [`MaxBatchSize`](/configuration#general-options) affected rows
+- **Inline first page, offloaded tail**: The first [`MaxBatchSize`](/configuration#general-options) affected rows
   are re-emitted inline. If more remain, the rest is handed to a *scoped backfill job* that re-snapshots
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.
-- **On-demand processing.** The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
+- **On-demand processing**: The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
   the instant a job is enqueued so the tail is picked up promptly. A periodic
   [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a safety-net fallback.
-- **Coalescing.** Repeated changes to the same principal collapse into a single pending re-snapshot.
-- **Same-transaction de-duplication.** If a primary row is changed *and* one of its dependents changes in
-  the same transaction, the row is emitted once (its own change wins — the transform already re-reads the
+- **Coalescing**: Repeated changes to the same principal collapse into a single pending re-snapshot.
+- **Same-transaction de-duplication**: If a primary row is changed *and* one of its dependents changes in
+  the same transaction, the row is emitted once (its own change wins - the transform already re-reads the
   dependent from current state).
 
 The offloaded tail is therefore **eventually consistent**: for a wide fan-out, the bulk of the re-index
@@ -188,9 +188,9 @@ public partial class OrdersReplicaIdentity : Migration
 
 ## Next steps
 
-- [Configuration](/configuration) - All configuration options
-- [Mappings](/mappings) - routing entities to destinations, shaping and enriching documents.
+- [Configuration](/configuration): all configuration options.
+- [Mappings](/mappings): routing entities to destinations, shaping and enriching documents.
 - [Meilisearch](/sinks/meilisearch), [HTTP](/sinks/http), and [custom](/sinks/custom) sinks.
-- [Backfill](/backfill) - initial snapshots and version-triggered reindex.
-- [Multi-tenancy](/providers/entity-framework-core/multi-tenancy) - per-row scoped contexts and destinations.
-- [Observability](/operations/observability) - OpenTelemetry metrics and traces.
+- [Backfill](/backfill): initial snapshots and version-triggered reindex.
+- [Multi-tenancy](/providers/entity-framework-core/multi-tenancy): per-row scoped contexts and destinations.
+- [Observability](/operations/observability): OpenTelemetry metrics and traces.

@@ -12,7 +12,7 @@ on the documents that would have been delivered.
 dotnet add package Wallaby.Testing
 ```
 
-The package depends only on core Wallaby, so it carries no test-framework or host opinions — it works
+The package depends only on core Wallaby, so it carries no test-framework or host opinions - it works
 with TUnit, xUnit or NUnit, and with `WebApplicationFactory`, `HostApplicationBuilder` or a plain
 `ServiceCollection`.
 
@@ -75,7 +75,7 @@ test flaky. `LatestByDocumentId()` gives you the stable end-state view, which al
 snapshot testing tools like [Verify](https://github.com/VerifyTests/Verify).
 :::
 
-Deletions show up as records with `IsDeletion = true` — both *tombstones* (your transform returned a
+Deletions show up as records with `IsDeletion = true` - both *tombstones* (your transform returned a
 `null` document) and *hard deletes* (the row was deleted; routed by key without invoking the transform).
 
 ## Overriding the app's registration
@@ -94,7 +94,7 @@ services
     .ReplaceWallabySink("meili", sink);
 ```
 
-`ReplaceWallabySink` swaps the sink registered under that name for your replacement — the sink's
+`ReplaceWallabySink` swaps the sink registered under that name for your replacement - the sink's
 `WithMappings(...)` mappings stay attached, so the capture sink receives exactly the records the
 production sink would have, with their original `SinkRecord.Destination` values. Replacing the sink also prevents the original's `ISinkInitializer` from
 running, so no connection to the real destination is ever attempted. Unknown names throw with the list of

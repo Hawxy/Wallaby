@@ -1,32 +1,32 @@
 ---
-description: "Entity mappings: routing an entity to a sink destination — transforms, mapping classes, document ids, backfill versions, and batch semantics."
+description: "Entity mappings: routing an entity to a sink destination - transforms, mapping classes, document ids, backfill versions, and batch semantics."
 ---
 
 # Mappings
 
 An **entity mapping** is Wallaby's unit of routing: it declares how one entity type is captured,
-transformed and delivered to one destination in a sink. Mappings are
+transformed and delivered to the destination in a sink. Mappings are
 declared per sink inside `WithMappings(...)`:
 
 ```csharp
-sink.Map<Product>()               // the entity to capture, routed to this sink
-    .ToDestination("products")    // where documents land within the sink
-    .WithBackfillVersion("v1")    // bump to reindex when the output shape changes
-    .UsingTransform(/* ... */);   // shapes changes into documents
+sink.Map<Product>()
+    .ToDestination("products") 
+    .WithBackfillVersion("v1") 
+    .UsingTransform(/* ... */);
 ```
 
-A mapping's components:
+A mapping's core components:
 
-- **Entity** — `Map<T>()` declares the backing table for capture *and* routes its changes to the
-  enclosing sink. The same entity may be mapped under several sinks as it is captured once and each
+- **Entity**: `Map<T>()` declares the backing table for capture *and* routes its changes to the
+  enclosing sink. The same entity may be mapped under several sinks as each
   mapping runs its own transform.
-- **Destination** — `ToDestination(...)` names where documents land within the sink: a search index,
-  a table, an endpoint route — whatever the sink maps it to.
-- **Transform** — `UsingTransform(...)` turns a batch of entity changes into destination documents;
-  the single place all enrichment/shaping happens. See [below](#transforms).
-- **Backfill version** — `WithBackfillVersion(...)` re-snapshots the table when the version changes,
+- **Destination**: `ToDestination(...)` names where documents land within the sink: a search index,
+  a table, an endpoint route - whatever the sink maps it to.
+- **Transform**: `UsingTransform(...)` specifies how a batch of entity changes into the destination documents.
+  See [below](#transforms).
+- **Backfill version**: `WithBackfillVersion(...)` re-snapshots the table when the version changes,
   so destinations are rebuilt whenever the output shape changes. See [Backfill](/backfill).
-- **Provider extensions** — [`DependsOn(...)`](/providers/entity-framework-core/#dependent-tables)
+- **Provider extensions**: [`DependsOn(...)`](/providers/entity-framework-core/#dependent-tables)
   re-emits an entity when a related table changes, and [per-row scoping](#per-row-scoping) routes
   each row through tenant-specific contexts and destinations.
 
@@ -48,15 +48,14 @@ sink.Map<Product>()
 ```
 
 For more complex transforms, or anything with dependencies, implement your provider's transform
-interface as a class — [`IWallabyEfTransform<T>`](/providers/entity-framework-core/#class-based-transforms)
-(EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) — and
+interface as a class - [`IWallabyEfTransform<T>`](/providers/entity-framework-core/#class-based-transforms)
+(EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) - and
 register it with `UsingTransform<TEntity, TTransform>()`; the class is resolved from the container.
 
 ## Mapping classes
 
 Inline mappings grow the `AddWallaby` callback by a block per entity per sink and can make your `Program.cs` unwieldy. Move each mapping into a
-class implementing `IWallabyEntityMapping<TEntity>` - typically alongside the transform it wires up -
-and apply it by type:
+class implementing `IWallabyEntityMapping<TEntity>`. This is also convient if you want to store your mappings alongside the transform it wires up:
 
 ```csharp
 public sealed class ProductSearchMapping : IWallabyEntityMapping<Product>
@@ -67,6 +66,7 @@ public sealed class ProductSearchMapping : IWallabyEntityMapping<Product>
         .UsingTransform<Product, ProductSearchTransform>();
 }
 ```
+Apply it by type:
 
 ```csharp
 .WithMappings(sink => sink
@@ -90,8 +90,8 @@ the mapping's id rule. Your transform only sees inserts, updates, and backfill r
 
 ## Documents
 
-A document is a `WallabyDocument` - a field bag keyed by destination field name. It derives from
-`Dictionary<string, object?>`, so it supports the usual initializer syntax:
+A document is a `WallabyDocument`, simply a field bag keyed by destination field name. It derives from
+`Dictionary<string, object?>`, so it supports the usual initializer syntax alongside a slightly more fluent one:
 
 ```csharp
 var doc = new WallabyDocument { ["name"] = product.Name, ["price"] = product.Price };

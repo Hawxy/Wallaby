@@ -49,7 +49,7 @@ builder.Services.AddWallaby(cdc =>
 | `Annotations` | `null` | Static key/values echoed at the top of every envelope. |
 | `MaxRecordsPerRequest` | `500` | Larger batches are split into sequential requests (commit order preserved). |
 | `TimeoutMs` | `30000` | Per-request timeout; composes with any timeout on the named client. |
-| `SerializerOptions` | `null` | Serializer for non-scalar document values — see [NativeAOT](#nativeaot). |
+| `SerializerOptions` | `null` | Serializer for non-scalar document values - see [NativeAOT](#nativeaot). |
 
 ## Authentication
 
@@ -103,14 +103,14 @@ Each request is a JSON envelope; `records` preserves commit order:
 ```
 
 - `operation` is `upsert` (apply `document` under `id`) or `delete` (remove `id`); a delete carries no `document`.
-- `idempotencyKey` is an opaque string unique to each delivered change — store it to
+- `idempotencyKey` is an opaque string unique to each delivered change - store it to
   [reject redelivered duplicates](#delivery-semantics). Backfill rows share their key across backfill runs
   (backfill is upsert-only, so replays are harmless).
 - `destination` is the mapping's `ToDestination(...)` value (or a [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) result); `null` when the mapping declares none.
 - `metadata.action` is what the change meant in the source model: `insert`, `update`, `delete`, or `read`
-  (a backfill row). Providers may substitute meaning — e.g. Marten surfaces a soft-delete `UPDATE` as
-  `delete` — so it can differ from the raw WAL operation.
-- `commitLsn` is a string — the value can exceed the safe-integer range of JavaScript consumers. Backfill
+  (a backfill row). Providers may substitute meaning - e.g. Marten surfaces a soft-delete `UPDATE` as
+  `delete` - so it can differ from the raw WAL operation.
+- `commitLsn` is a string - the value can exceed the safe-integer range of JavaScript consumers. Backfill
   records have `commitLsn: "0"` and omit `commitTimestamp`.
 - With `Annotations` configured, the envelope carries an `annotations` object with those key/values
   alongside `sink` and `sentAt`.
@@ -118,7 +118,7 @@ Each request is a JSON envelope; `records` preserves commit order:
 ## Delivery semantics
 
 Delivery is **at-least-once**: a crash can redeliver a batch your receiver already processed, so apply
-records idempotently — upsert by `id`, delete by `id`, and treat a delete for an unknown id as success.
+records idempotently - upsert by `id`, delete by `id`, and treat a delete for an unknown id as success.
 If your receiver has side effects beyond state (e.g. sends an email per record), store each record's
 `idempotencyKey` and skip keys you have seen; `(commitLsn, commitIdx)` orders live changes.
 
@@ -127,8 +127,8 @@ The response status classifies the outcome:
 | Response | Outcome |
 | --- | --- |
 | 2xx | Delivered; the batch is acked. |
-| 408, 429, 5xx, network errors, timeout | **Retryable** — the dispatcher retries with backoff. |
-| Any other status | **Permanent** — the pipeline halts (the receiver rejected the payload). |
+| 408, 429, 5xx, network errors, timeout | **Retryable** - the dispatcher retries with backoff. |
+| Any other status | **Permanent** - the pipeline halts (the receiver rejected the payload). |
 
 Batches larger than `MaxRecordsPerRequest` are split into sequential requests in commit order; a failing
 chunk stops the delivery and the whole batch is redelivered after backoff.
@@ -142,7 +142,7 @@ Opt in with:
 o.Compression = HttpSinkCompression.Gzip; // or Brotli
 ```
 
-Requests then carry `Content-Encoding: gzip` (or `br`), so the receiver must decompress — in ASP.NET Core,
+Requests then carry `Content-Encoding: gzip` (or `br`), so the receiver must decompress - in ASP.NET Core,
 enable the [request decompression middleware](https://learn.microsoft.com/aspnet/core/fundamentals/middleware/request-decompression):
 
 ```csharp

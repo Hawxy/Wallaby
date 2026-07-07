@@ -9,15 +9,15 @@ import FlowLink from './flow/FlowLink.vue';
 // Animated replacement for the "How It Works" flowchart: the full
 // delivery loop. A packet leaves postgres, is read, transformed and
 // delivered, then the acknowledgement rides the rail back up and the
-// slot's flushed position catches up to the WAL — the at-least-once
+// slot's flushed position catches up to the WAL - the at-least-once
 // ordering, drawn. Every fourth cycle a backfill batch (blue) enters
 // the same path through the read stage.
-const delivered = ref(23481); // deterministic start — SSR hydration
+const delivered = ref(23481); // deterministic start - SSR hydration
 const flushed = ref(lsn.value);
 
 // which chip is processing (amber border)
 const lit = ref('');
-// which chip is flashing blue — its data value just updated
+// which chip is flashing blue - its data value just updated
 const flash = ref('');
 // which connector the packet is on
 const pulse = ref('');
@@ -48,7 +48,7 @@ function liveSteps(): FlowStep[] {
       delivered.value += 6 + Math.floor(Math.random() * 34);
       flash.value = 'sinks';
     }],
-    // sinks stays lit while the packet rides to ack — matching the
+    // sinks stays lit while the packet rides to ack - matching the
     // ~1s hold of the processing chips, so its decay doesn't read as
     // faster than theirs
     [2700, () => (pulse.value = 'l4')],
@@ -65,7 +65,7 @@ function liveSteps(): FlowStep[] {
 }
 
 // backfill: snapshot rows join at read and flow through the same
-// transform + sink path, but no WAL position rides along — the loop
+// transform + sink path, but no WAL position rides along - the loop
 // back to postgres stays quiet
 function backfillSteps(): FlowStep[] {
   return [
@@ -87,7 +87,7 @@ function backfillSteps(): FlowStep[] {
 useFlowCycle({
   kick: 600,
   // the live sequence ends at ~4.9s; the rest is a beat between
-  // packets — same ~600ms breather as the homepage widget
+  // packets - same ~600ms breather as the homepage widget
   interval: 5500,
   cycle: () => {
     cycleCount += 1;

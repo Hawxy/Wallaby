@@ -110,5 +110,5 @@ after a crash is safe.
 
 ## Per-tenant indexes
 
-Route each tenant to its own index with `ScopedDestination` — see multi-tenancy for
+Route each tenant to its own index with `ScopedDestination` - see multi-tenancy for
 [EF Core](/providers/entity-framework-core/multi-tenancy) or [Marten](/providers/marten/multi-tenancy).
