@@ -22,6 +22,8 @@
     <PackageVersion Include="Meilisearch" Version="0.20.0" />
     <!-- Kafka sink package -->
     <PackageVersion Include="Confluent.Kafka" Version="2.15.0" />
+    <!-- OpenSearch sink package -->
+    <PackageVersion Include="OpenSearch.Client" Version="1.8.0" />
     <!-- Sample / test infrastructure -->
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
     <!-- Trace demo (tests/Wallaby.TraceDemo only) -->
