@@ -334,7 +334,7 @@ internal sealed class WallabyPipeline(
 
     private async Task EmitBackfillChunkAsync(PendingWindow window, CancellationToken ct)
     {
-        using var activity = _instr.StartBackfillChunk();
+        using var activity = _instr.StartBackfillChunk(window.SourceContext);
         try
         {
             var events = new List<ChangeEvent>(window.Buffer.Count);

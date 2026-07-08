@@ -60,12 +60,21 @@ The activity source `Wallaby` emits one span per unit of work:
 | `route` | Internal | `wallaby.batch.size` |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |
 | `sink.deliver` | Producer | `wallaby.sink`, `wallaby.destination`, `wallaby.batch.size` (retries recorded as span events; status `Error` on terminal failure) |
-| `backfill.chunk` | Internal | `wallaby.table`, `wallaby.chunk.size` |
+| `backfill` | Internal | `wallaby.table`, `wallaby.backfill.rows` (one root span per backfill run — whole-table or scoped fan-out; status `Error` on fault) |
+| `backfill.chunk` | Internal | `wallaby.table`, `wallaby.chunk.size` (span link to the `backfill` span of the run that produced the chunk) |
 | `ack` | Internal | `wallaby.slot`, `wallaby.txn.lsn.end` |
 
-Spans nest under the `transaction` root, so a single trace shows a committed transaction flowing
+Live spans nest under the `transaction` root, so a single trace shows a committed transaction flowing
 through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the EF Core
 queries your transforms run appear nested under the `transform` (and `dependent.resolve`) spans.
+
+A backfill run gets its own `backfill` root span covering the run end-to-end, from the first chunk read
+until the last chunk's delivery is acknowledged. Each chunk is delivered *inside* a slot commit, so its
+`backfill.chunk` span appears in that transaction's trace and carries a **span link** back to the
+`backfill` root — from a slow backfill you can jump to the commits that delivered its chunks, and from
+an odd-looking transaction you can jump to the backfill run it was carrying. A `backfill` span that
+stays open far longer than its chunks take to read means the run is waiting on the live pipeline to
+reach its watermarks (for example, a sink retrying ahead of them).
 
 ## Cardinality
 

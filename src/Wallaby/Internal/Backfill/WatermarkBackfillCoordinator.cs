@@ -120,6 +120,9 @@ internal sealed class WatermarkBackfillCoordinator(
         (PendingWindow Window, BackfillChunk Chunk, long ChunkStart)? inFlight = null;
         PendingWindow? current = null;
 
+        using var activity = _instr.StartBackfill();
+        activity?.SetTag(WallabyInstrumentation.TableTag, qualifiedTable);
+
         _instr.BackfillStarted();
         try
         {
@@ -134,6 +137,7 @@ internal sealed class WatermarkBackfillCoordinator(
                 {
                     QualifiedTable = qualifiedTable,
                     Token = Guid.NewGuid().ToString("N"),
+                    SourceContext = activity?.Context ?? default,
                 };
                 _byToken[current.Token] = current;
 
@@ -161,6 +165,11 @@ internal sealed class WatermarkBackfillCoordinator(
                 current = null;
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
         finally
         {
             // On success the pipeline evicted each window via TryTakeHighWindow (no-ops here). On fault/cancel
@@ -178,6 +187,7 @@ internal sealed class WatermarkBackfillCoordinator(
             _instr.BackfillCompleted();
         }
 
+        activity?.SetTag("wallaby.backfill.rows", rowsCopied);
         return rowsCopied;
 
         async Task SettleAsync((PendingWindow Window, BackfillChunk Chunk, long ChunkStart) entry)

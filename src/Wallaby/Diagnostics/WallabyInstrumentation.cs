@@ -33,6 +33,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string RouteActivity = "route";
     internal const string TransformActivity = "transform";
     internal const string SinkDeliverActivity = "sink.deliver";
+    internal const string BackfillActivity = "backfill";
     internal const string BackfillChunkActivity = "backfill.chunk";
     internal const string AckActivity = "ack";
 
@@ -133,7 +134,16 @@ public sealed class WallabyInstrumentation : IDisposable
     internal Activity? StartRoute() => _activitySource.StartActivity(RouteActivity);
     internal Activity? StartTransform() => _activitySource.StartActivity(TransformActivity);
     internal Activity? StartSinkDelivery() => _activitySource.StartActivity(SinkDeliverActivity, ActivityKind.Producer);
-    internal Activity? StartBackfillChunk() => _activitySource.StartActivity(BackfillChunkActivity);
+
+    /// <summary>Root span for one backfill run (whole-table or scoped fan-out); chunks link back to it.</summary>
+    internal Activity? StartBackfill() => _activitySource.StartActivity(BackfillActivity);
+
+    // The chunk is delivered inside a slot commit, so it parents under that transaction's span; the link
+    // ties it back to the backfill run that produced it (which lives in a different trace).
+    internal Activity? StartBackfillChunk(ActivityContext backfillRun) => _activitySource.StartActivity(
+        BackfillChunkActivity, ActivityKind.Internal, parentContext: default,
+        links: backfillRun == default ? null : [new ActivityLink(backfillRun)]);
+
     internal Activity? StartAck() => _activitySource.StartActivity(AckActivity);
 
     // ---- ingestion / pipeline ----
