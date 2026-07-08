@@ -179,6 +179,7 @@ internal sealed class WatermarkBackfillCoordinator(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
             throw;
         }
         finally

@@ -131,15 +131,8 @@ internal sealed class LeaderSession(
         bootstrap?.SetTag(WallabyInstrumentation.SlotTag, options.SlotName);
         try
         {
-            SelfConfigResult selfConfig;
-            using (instrumentation.StartSelfConfig())
-            {
-                selfConfig = await components.SelfConfigurator.EnsureConfiguredAsync(components.Model, ct);
-            }
-            using (instrumentation.StartSlotRepair())
-            {
-                await RepairSlotGapAsync(selfConfig, ct);
-            }
+            var selfConfig = await components.SelfConfigurator.EnsureConfiguredAsync(components.Model, ct);
+            await RepairSlotGapAsync(selfConfig, ct);
             await InitializeSinksAsync(ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -158,6 +151,7 @@ internal sealed class LeaderSession(
     /// </summary>
     private async Task RepairSlotGapAsync(SelfConfigResult selfConfig, CancellationToken ct)
     {
+        using var repair = instrumentation.StartSlotRepair();
         var consistentPoint = selfConfig.ConsistentPoint ?? await ReadRegisteredConsistentPointAsync(ct);
         if (consistentPoint is null)
         {
@@ -173,6 +167,11 @@ internal sealed class LeaderSession(
 
         logger.SlotGapDetected(
             options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
+        repair?.AddEvent(new ActivityEvent("slot.gap", tags: new ActivityTagsCollection
+        {
+            ["wallaby.lsn.checkpoint"] = new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(),
+            ["wallaby.lsn.consistent"] = consistentPoint,
+        }));
 
         foreach (var (table, _) in components.BackfillTables)
         {

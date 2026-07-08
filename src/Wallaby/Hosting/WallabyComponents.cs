@@ -117,7 +117,8 @@ internal sealed class WallabyComponents
                     RequireFullReplicaIdentity = options.RequireFullReplicaIdentity,
                     ExternalSlots = ExternalSlotResolver.Resolve(config.ExternalSlots, providers.ModelProviders),
                 },
-                logger),
+                logger,
+                instrumentation),
             Checkpoints = options.Advanced.CheckpointSaveInterval > TimeSpan.Zero
                 ? new ThrottledCheckpointStore(checkpointsDirect, options.Advanced.CheckpointSaveInterval)
                 : checkpointsDirect,

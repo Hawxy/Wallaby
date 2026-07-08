@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Npgsql;
 using Wallaby.Abstractions;
@@ -112,6 +113,10 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
             if (continuation is not null)
             {
                 offloaded++;
+                activity?.AddEvent(new ActivityEvent("fanout.offloaded", tags: new ActivityTagsCollection
+                {
+                    [WallabyInstrumentation.TableTag] = binding.PrimaryTable.QualifiedName,
+                }));
             }
             results.Add(new FanoutResult(page, continuation));
         }

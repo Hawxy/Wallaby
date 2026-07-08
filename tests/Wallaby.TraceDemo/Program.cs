@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -25,11 +26,16 @@ await pg.InitializeAsync();
 
 try
 {
+    // Roots the demo's own database writes (seeding, live mutations), so they don't appear as loose
+    // single-span postgresql traces next to Wallaby's.
+    using var demo = new ActivitySource("TraceDemo");
+
     var resource = ResourceBuilder.CreateDefault().AddService("wallaby-trace-demo");
     using var tracing = Sdk.CreateTracerProviderBuilder()
         .SetResourceBuilder(resource)
         .AddSource(WallabyInstrumentation.ActivitySourceName)
         .AddSource("Npgsql") // enrichment queries nest under Wallaby's transform spans
+        .AddSource(demo.Name)
         .SetSampler(new AlwaysOnSampler())
         .AddOtlpExporter(o => o.Endpoint = new Uri(dashboard.OtlpEndpoint))
         .Build();
@@ -52,27 +58,39 @@ try
 
     // Seeded before self-config, so these 20 rows arrive via the backfill below, not the live stream.
     Console.WriteLine("Seeding a category with 20 products...");
-    var categoryId = await harness.Db.AddCategoryAsync("Electronics");
-    await harness.Db.AddProductsAsync(categoryId, [.. Enumerable.Range(1, 20).Select(i => $"product-{i:00}")]);
+    int categoryId;
+    using (demo.StartActivity("seed"))
+    {
+        categoryId = await harness.Db.AddCategoryAsync("Electronics");
+        await harness.Db.AddProductsAsync(categoryId, [.. Enumerable.Range(1, 20).Select(i => $"product-{i:00}")]);
+    }
 
     await harness.SelfConfigureAsync();
+    // No ambient span here: the pipeline task inherits the current execution context, and an active
+    // demo span would become the parent of every transaction.process trace.
     await harness.StartAsync();
 
     Console.WriteLine("Live insert/update/delete (the first delivery fails retryably, so its sink.deliver span shows a retry)...");
-    var liveId = await harness.Db.AddProductAsync(categoryId, "product-live-1", 9.99m);
-    var doomedId = await harness.Db.AddProductAsync(categoryId, "product-live-2", 19.99m);
-    await harness.WaitUntilAsync(() => Delivered() >= 2, timeout);
+    using (demo.StartActivity("live-changes"))
+    {
+        var liveId = await harness.Db.AddProductAsync(categoryId, "product-live-1", 9.99m);
+        var doomedId = await harness.Db.AddProductAsync(categoryId, "product-live-2", 19.99m);
+        await harness.WaitUntilAsync(() => Delivered() >= 2, timeout);
 
-    await harness.Db.UpdateProductNameAsync(liveId, "product-live-1-renamed");
-    await harness.WaitUntilAsync(() => Delivered() >= 3, timeout);
+        await harness.Db.UpdateProductNameAsync(liveId, "product-live-1-renamed");
+        await harness.WaitUntilAsync(() => Delivered() >= 3, timeout);
 
-    await harness.Db.DeleteProductAsync(doomedId);
-    await harness.WaitUntilAsync(() => Delivered() >= 4, timeout);
+        await harness.Db.DeleteProductAsync(doomedId);
+        await harness.WaitUntilAsync(() => Delivered() >= 4, timeout);
+    }
 
     Console.WriteLine("Dependent fan-out: renaming the category re-emits its 21 products...");
-    await harness.Db.SetCategoryNameAsync(categoryId, "Electronics & Gadgets");
-    await harness.DrainFanoutAsync();
-    await harness.WaitUntilAsync(() => Delivered() >= 25, timeout);
+    using (demo.StartActivity("fanout-trigger"))
+    {
+        await harness.Db.SetCategoryNameAsync(categoryId, "Electronics & Gadgets");
+        await harness.DrainFanoutAsync();
+        await harness.WaitUntilAsync(() => Delivered() >= 25, timeout);
+    }
 
     Console.WriteLine("Whole-table backfill of products (backfill root span + linked backfill.chunk spans)...");
     await harness.RunBackfillAsync();
