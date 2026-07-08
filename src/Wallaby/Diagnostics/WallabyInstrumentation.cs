@@ -26,6 +26,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string SourceTag = "wallaby.source";
     internal const string DeliveryOutcomeTag = "wallaby.delivery.outcome";
     internal const string DestinationTag = "wallaby.destination";
+    internal const string BackfillKindTag = "wallaby.backfill.kind";
 
     // ---- span names ----
     internal const string TransactionActivity = "transaction.process";
@@ -36,6 +37,10 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string BackfillActivity = "backfill";
     internal const string BackfillChunkActivity = "backfill.chunk";
     internal const string AckActivity = "ack";
+    internal const string LeaderBootstrapActivity = "leader.bootstrap";
+    internal const string SelfConfigActivity = "selfconfig";
+    internal const string SlotRepairActivity = "slot.repair";
+    internal const string SinkInitializeActivity = "sink.initialize";
 
     // ---- low-cardinality attribute values ----
     internal const string SourceLive = "live";
@@ -43,6 +48,8 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliverySuccess = "success";
     internal const string DeliveryRetryable = "retryable";
     internal const string DeliveryPermanent = "permanent";
+    internal const string BackfillKindTable = "table";
+    internal const string BackfillKindFanout = "fanout";
 
     /// <summary>A shared, never-observed instance for components constructed outside DI (tests, direct use).</summary>
     internal static readonly WallabyInstrumentation NoOp = new();
@@ -145,6 +152,13 @@ public sealed class WallabyInstrumentation : IDisposable
         links: backfillRun == default ? null : [new ActivityLink(backfillRun)]);
 
     internal Activity? StartAck() => _activitySource.StartActivity(AckActivity);
+
+    // ---- leader bootstrap (per leadership term, before streaming) ----
+
+    internal Activity? StartLeaderBootstrap() => _activitySource.StartActivity(LeaderBootstrapActivity);
+    internal Activity? StartSelfConfig() => _activitySource.StartActivity(SelfConfigActivity);
+    internal Activity? StartSlotRepair() => _activitySource.StartActivity(SlotRepairActivity);
+    internal Activity? StartSinkInitialize() => _activitySource.StartActivity(SinkInitializeActivity);
 
     // ---- ingestion / pipeline ----
 

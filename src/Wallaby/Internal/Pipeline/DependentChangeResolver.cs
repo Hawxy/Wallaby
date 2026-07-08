@@ -90,6 +90,7 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
         var results = new List<FanoutResult>(perBinding.Count);
         using var activity = _instr.StartDependentResolve();
         var totalSynthetic = 0;
+        var offloaded = 0;
 
         // One connection shared across every binding's first-page read for this transaction.
         await using var connection = await dataSource.OpenConnectionAsync(ct);
@@ -108,10 +109,17 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
             var continuation = chunk.HasMore
                 ? new ScopedFanoutSpec(binding.PrimaryTable, columns, acc.Tuples)
                 : null;
+            if (continuation is not null)
+            {
+                offloaded++;
+            }
             results.Add(new FanoutResult(page, continuation));
         }
 
         activity?.SetTag("wallaby.dependent.count", totalSynthetic);
+        // How many bindings' tails were handed to the fan-out queue — the scoped backfills that will
+        // appear later as their own traces.
+        activity?.SetTag("wallaby.fanout.offloaded", offloaded);
         return results;
     }
 

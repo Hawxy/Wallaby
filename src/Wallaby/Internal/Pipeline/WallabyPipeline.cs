@@ -107,7 +107,11 @@ internal sealed class WallabyPipeline(
             activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
             activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
             activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-            activity.SetTag("wallaby.txn.size", transaction.IsStreamed ? -1 : transaction.Changes.Count);
+            activity.SetTag("wallaby.txn.streamed", transaction.IsStreamed);
+            if (!transaction.IsStreamed)
+            {
+                activity.SetTag("wallaby.txn.size", transaction.Changes.Count);
+            }
             if (lagSeconds >= 0)
             {
                 activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
@@ -121,6 +125,12 @@ internal sealed class WallabyPipeline(
         var processed = transaction.IsStreamed
             ? await ProcessStreamedAsync(transaction, ct)
             : await ProcessInMemoryAsync(transaction, ct);
+
+        // A streamed transaction's size is only known once its spill has been read through.
+        if (transaction.IsStreamed)
+        {
+            activity?.SetTag("wallaby.txn.size", processed);
+        }
 
         using (var ackActivity = _instr.StartAck())
         {

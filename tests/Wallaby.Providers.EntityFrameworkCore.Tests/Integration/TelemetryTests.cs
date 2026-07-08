@@ -67,10 +67,11 @@ public class TelemetryTests(TestModelPostgresFixture pg)
             await harness.StopAsync();
         }
 
-        // The run gets its own root span, tagged with the table and total rows.
+        // The run gets its own root span, tagged with the table, kind, and total rows.
         var root = activities.Last("backfill");
         root.ShouldNotBeNull();
         root.GetTagItem("wallaby.table").ShouldNotBeNull();
+        root.GetTagItem("wallaby.backfill.kind").ShouldBe("table");
         // The shared fixture database may hold rows from other tests; at least our row was copied.
         ((long)root.GetTagItem("wallaby.backfill.rows")!).ShouldBeGreaterThanOrEqualTo(1L);
 

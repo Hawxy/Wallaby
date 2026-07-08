@@ -55,16 +55,20 @@ The activity source `Wallaby` emits one span per unit of work:
 
 | Span | Kind | Notable attributes |
 | --- | --- | --- |
-| `transaction` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.ingestion.lag_s` |
-| `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count` |
+| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s` |
+| `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count`, `wallaby.fanout.offloaded` (bindings whose tail was queued as a scoped backfill) |
 | `route` | Internal | `wallaby.batch.size` |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |
 | `sink.deliver` | Producer | `wallaby.sink`, `wallaby.destination`, `wallaby.batch.size` (retries recorded as span events; status `Error` on terminal failure) |
-| `backfill` | Internal | `wallaby.table`, `wallaby.backfill.rows` (one root span per backfill run — whole-table or scoped fan-out; status `Error` on fault) |
+| `backfill` | Internal | `wallaby.table`, `wallaby.backfill.kind` (`table`/`fanout`), `wallaby.fanout.keys` (fanout only), `wallaby.backfill.rows` (one root span per backfill run; status `Error` on fault) |
 | `backfill.chunk` | Internal | `wallaby.table`, `wallaby.chunk.size` (span link to the `backfill` span of the run that produced the chunk) |
 | `ack` | Internal | `wallaby.slot`, `wallaby.txn.lsn.end` |
+| `leader.bootstrap` | Internal | `wallaby.slot` (one per leadership term: self-config, slot-gap repair, and sink initialization before streaming; status `Error` on fault) |
+| `selfconfig` | Internal | child of `leader.bootstrap`: server validation and publication/slot/state-schema setup |
+| `slot.repair` | Internal | child of `leader.bootstrap`: slot-loss gap detection (and re-backfill marking when one is found) |
+| `sink.initialize` | Internal | `wallaby.sink`; child of `leader.bootstrap`, one per sink with one-time setup |
 
-Live spans nest under the `transaction` root, so a single trace shows a committed transaction flowing
+Live spans nest under the `transaction.process` root, so a single trace shows a committed transaction flowing
 through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the EF Core
 queries your transforms run appear nested under the `transform` (and `dependent.resolve`) spans.
 
@@ -75,6 +79,10 @@ until the last chunk's delivery is acknowledged. Each chunk is delivered *inside
 an odd-looking transaction you can jump to the backfill run it was carrying. A `backfill` span that
 stays open far longer than its chunks take to read means the run is waiting on the live pipeline to
 reach its watermarks (for example, a sink retrying ahead of them).
+
+To browse example traces locally, run `dotnet run --project tests/Wallaby.TraceDemo` (needs Docker) —
+it runs a scenario covering every span above and exports to an Aspire Dashboard at
+`http://localhost:18888/traces`.
 
 ## Cardinality
 
