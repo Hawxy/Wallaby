@@ -148,13 +148,13 @@ applied before Wallaby validates the tables.
 ## NativeAOT
 
 The core `Wallaby` and `Wallaby.Providers.Marten` packages are trim- and NativeAOT-compatible
-(`IsAotCompatible`). Running under `PublishAot` additionally needs the Marten store itself configured for AOT:
+(`IsAotCompatible`). Running under `PublishAot` additionally needs the Marten store itself configured for AOT. 
+Namely, you'll need to configure Marten's `System.Text.Json` serializer with a
+source-generated `JsonSerializerContext` covering your document types, so Wallaby's rehydration through the store's serializer needs no reflection.
 
-- **Source-generated serialization**: configure Marten's `System.Text.Json` serializer with a
-  source-generated `JsonSerializerContext` covering your document types, so Wallaby's rehydration through the store's serializer needs no reflection.
-- **Root the Marten assembly**: Marten reflects over its own internals during store configuration, so it cannot be trimmed yet - add `<TrimmerRootAssembly Include="Marten" />` to your app.
-
-One core caveat: when a very large transaction spills to disk/database, column values of common scalar and scalar-array types are encoded natively, but exotic column types fall back to reflection-based JSON - under NativeAOT that fallback fails the spill with a descriptive error. Marten's captured columns (`id`, `data`, `tenant_id`, `mt_deleted`, `mt_deleted_at`) are all natively encoded.
+One core caveat: when a very large transaction spills to disk/database, column values of common scalar and scalar-array types are encoded natively, 
+but exotic column types fall back to reflection-based JSON - under NativeAOT that fallback fails the spill with a descriptive error. 
+Marten's captured columns (`id`, `data`, `tenant_id`, `mt_deleted`, `mt_deleted_at`) are all natively encoded.
 
 ## Limitations (v1)
 

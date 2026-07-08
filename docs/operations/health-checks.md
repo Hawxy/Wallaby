@@ -42,7 +42,7 @@ single transaction is fully delivered and acknowledged (e.g. a sink permanently 
 counter only resets on real progress or a clean step-down - not just because a failing session ran for a
 while first - so it is a reliable alerting signal even when each session streams briefly before failing.
 
-::: WARNING
+::: warning
 The `data` dictionary can include exception text. Don't expose a detailed `/health` response on a public
 endpoint.
 :::

@@ -12,9 +12,6 @@
     <!-- Marten's document metadata discovery reflects over the document types; keep this assembly's
          members so the smoke exercises Wallaby's code paths rather than trimmer behaviour. -->
     <TrimmerRootAssembly Include="Wallaby.AotSmokeTest" />
-    <!-- Marten reflects over its own internals (e.g. EventGraph closes EventMapping<T> via Activator),
-         so it cannot be trimmed until its tier-1 AOT mode lands. -->
-    <TrimmerRootAssembly Include="Marten" />
   </ItemGroup>
 
   <ItemGroup>
