@@ -26,15 +26,21 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string SourceTag = "wallaby.source";
     internal const string DeliveryOutcomeTag = "wallaby.delivery.outcome";
     internal const string DestinationTag = "wallaby.destination";
+    internal const string BackfillKindTag = "wallaby.backfill.kind";
 
     // ---- span names ----
-    internal const string TransactionActivity = "transaction";
+    internal const string TransactionActivity = "transaction.process";
     internal const string DependentResolveActivity = "dependent.resolve";
     internal const string RouteActivity = "route";
     internal const string TransformActivity = "transform";
     internal const string SinkDeliverActivity = "sink.deliver";
+    internal const string BackfillActivity = "backfill";
     internal const string BackfillChunkActivity = "backfill.chunk";
     internal const string AckActivity = "ack";
+    internal const string LeaderBootstrapActivity = "leader.bootstrap";
+    internal const string SelfConfigActivity = "selfconfig";
+    internal const string SlotRepairActivity = "slot.repair";
+    internal const string SinkInitializeActivity = "sink.initialize";
 
     // ---- low-cardinality attribute values ----
     internal const string SourceLive = "live";
@@ -42,6 +48,8 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliverySuccess = "success";
     internal const string DeliveryRetryable = "retryable";
     internal const string DeliveryPermanent = "permanent";
+    internal const string BackfillKindTable = "table";
+    internal const string BackfillKindFanout = "fanout";
 
     /// <summary>A shared, never-observed instance for components constructed outside DI (tests, direct use).</summary>
     internal static readonly WallabyInstrumentation NoOp = new();
@@ -133,8 +141,24 @@ public sealed class WallabyInstrumentation : IDisposable
     internal Activity? StartRoute() => _activitySource.StartActivity(RouteActivity);
     internal Activity? StartTransform() => _activitySource.StartActivity(TransformActivity);
     internal Activity? StartSinkDelivery() => _activitySource.StartActivity(SinkDeliverActivity, ActivityKind.Producer);
-    internal Activity? StartBackfillChunk() => _activitySource.StartActivity(BackfillChunkActivity);
+
+    /// <summary>Root span for one backfill run (whole-table or scoped fan-out); chunks link back to it.</summary>
+    internal Activity? StartBackfill() => _activitySource.StartActivity(BackfillActivity);
+
+    // The chunk is delivered inside a slot commit, so it parents under that transaction's span; the link
+    // ties it back to the backfill run that produced it (which lives in a different trace).
+    internal Activity? StartBackfillChunk(ActivityContext backfillRun) => _activitySource.StartActivity(
+        BackfillChunkActivity, ActivityKind.Internal, parentContext: default,
+        links: backfillRun == default ? null : [new ActivityLink(backfillRun)]);
+
     internal Activity? StartAck() => _activitySource.StartActivity(AckActivity);
+
+    // ---- leader bootstrap (per leadership term, before streaming) ----
+
+    internal Activity? StartLeaderBootstrap() => _activitySource.StartActivity(LeaderBootstrapActivity);
+    internal Activity? StartSelfConfig() => _activitySource.StartActivity(SelfConfigActivity);
+    internal Activity? StartSlotRepair() => _activitySource.StartActivity(SlotRepairActivity);
+    internal Activity? StartSinkInitialize() => _activitySource.StartActivity(SinkInitializeActivity);
 
     // ---- ingestion / pipeline ----
 

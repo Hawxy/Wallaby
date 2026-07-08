@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Wallaby.Abstractions;
 using Wallaby.Model;
 
@@ -16,6 +17,9 @@ internal sealed class PendingWindow
 
     /// <summary>Single per-window token; the low/high distinction comes from the message prefix.</summary>
     public required string Token { get; init; }
+
+    /// <summary>Trace context of the backfill run that produced this window; the pipeline's chunk span links to it.</summary>
+    public ActivityContext SourceContext { get; init; }
 
     /// <summary>Primary keys of live changes observed for this table within the window.</summary>
     public HashSet<DocumentKey> SeenKeys { get; } = [];

@@ -68,7 +68,7 @@ internal sealed class WatermarkBackfillCoordinator(
         logger.BackfillStarting(table.QualifiedName);
 
         var rowsCopied = await RunChunkLoopAsync(
-            pager, table.QualifiedName, cursor, startRows,
+            pager, table.QualifiedName, WallabyInstrumentation.BackfillKindTable, fanoutKeys: 0, cursor, startRows,
             (cur, rows, hasMore, token) => store.SaveAsync(
                 new BackfillState(
                     table.QualifiedName,
@@ -96,14 +96,17 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
-        var rowsCopied = await RunChunkLoopAsync(pager, spec.PrimaryTable.QualifiedName, startCursor, startRows, saveProgress, ct);
+        var rowsCopied = await RunChunkLoopAsync(
+            pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,
+            startCursor, startRows, saveProgress, ct);
 
         logger.ScopedFanoutComplete(spec.PrimaryTable.QualifiedName, rowsCopied);
         return rowsCopied;
     }
 
     private async Task<long> RunChunkLoopAsync(
-        KeysetPager pager, string qualifiedTable, object?[]? startCursor, long startRows,
+        KeysetPager pager, string qualifiedTable, string backfillKind, int fanoutKeys,
+        object?[]? startCursor, long startRows,
         Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
     {
         var cursor = startCursor;
@@ -120,6 +123,17 @@ internal sealed class WatermarkBackfillCoordinator(
         (PendingWindow Window, BackfillChunk Chunk, long ChunkStart)? inFlight = null;
         PendingWindow? current = null;
 
+        using var activity = _instr.StartBackfill();
+        if (activity is not null)
+        {
+            activity.SetTag(WallabyInstrumentation.TableTag, qualifiedTable);
+            activity.SetTag(WallabyInstrumentation.BackfillKindTag, backfillKind);
+            if (fanoutKeys > 0)
+            {
+                activity.SetTag("wallaby.fanout.keys", fanoutKeys);
+            }
+        }
+
         _instr.BackfillStarted();
         try
         {
@@ -134,6 +148,7 @@ internal sealed class WatermarkBackfillCoordinator(
                 {
                     QualifiedTable = qualifiedTable,
                     Token = Guid.NewGuid().ToString("N"),
+                    SourceContext = activity?.Context ?? default,
                 };
                 _byToken[current.Token] = current;
 
@@ -161,6 +176,12 @@ internal sealed class WatermarkBackfillCoordinator(
                 current = null;
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
+            throw;
+        }
         finally
         {
             // On success the pipeline evicted each window via TryTakeHighWindow (no-ops here). On fault/cancel
@@ -178,6 +199,7 @@ internal sealed class WatermarkBackfillCoordinator(
             _instr.BackfillCompleted();
         }
 
+        activity?.SetTag("wallaby.backfill.rows", rowsCopied);
         return rowsCopied;
 
         async Task SettleAsync((PendingWindow Window, BackfillChunk Chunk, long ChunkStart) entry)

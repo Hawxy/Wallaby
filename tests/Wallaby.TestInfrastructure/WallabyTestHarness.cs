@@ -194,7 +194,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         await new PostgresSelfConfigurator(
                 _dataSource,
                 new SelfConfigOptions { SlotName = Names.Slot, PublicationName = Names.Publication },
-                NullLogger.Instance)
+                NullLogger.Instance,
+                Instrumentation)
             .EnsureConfiguredAsync(_model!, ct);
     }
 

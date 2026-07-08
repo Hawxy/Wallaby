@@ -107,29 +107,56 @@ internal sealed class WallabyPipeline(
             activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
             activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
             activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-            activity.SetTag("wallaby.txn.size", transaction.IsStreamed ? -1 : transaction.Changes.Count);
+            activity.SetTag("wallaby.txn.streamed", transaction.IsStreamed);
+            if (!transaction.IsStreamed)
+            {
+                activity.SetTag("wallaby.txn.size", transaction.Changes.Count);
+            }
             if (lagSeconds >= 0)
             {
                 activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
+            }
+            // Marks the tiny transactions that exist only to bracket a backfill chunk, so they can be
+            // filtered in a trace viewer.
+            if (transaction.Watermarks.Count > 0)
+            {
+                activity.SetTag("wallaby.watermark",
+                    transaction.Watermarks[0].Prefix == WallabySchema.WatermarkLowPrefix ? "low" : "high");
             }
         }
 
         _instr.RecordIngestionLag(slotName, lagSeconds);
 
-        // A streamed (large) transaction's changes live in the spill, not in memory — process them in
-        // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
-        var processed = transaction.IsStreamed
-            ? await ProcessStreamedAsync(transaction, ct)
-            : await ProcessInMemoryAsync(transaction, ct);
-
-        using (var ackActivity = _instr.StartAck())
+        int processed;
+        try
         {
-            ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
-            ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-            await stream.AcknowledgeAsync(transaction.EndLsn, ct);
-            LastAcknowledgedLsn = transaction.EndLsn;
-            await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
-            status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
+            // A streamed (large) transaction's changes live in the spill, not in memory — process them in
+            // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
+            processed = transaction.IsStreamed
+                ? await ProcessStreamedAsync(transaction, ct)
+                : await ProcessInMemoryAsync(transaction, ct);
+
+            // A streamed transaction's size is only known once its spill has been read through.
+            if (transaction.IsStreamed)
+            {
+                activity?.SetTag("wallaby.txn.size", processed);
+            }
+
+            using (var ackActivity = _instr.StartAck())
+            {
+                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
+                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
+                await stream.AcknowledgeAsync(transaction.EndLsn, ct);
+                LastAcknowledgedLsn = transaction.EndLsn;
+                await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
+                status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
+            throw;
         }
 
         // The committed transaction (batch) is fully delivered to sinks and acknowledged to the server.
@@ -334,7 +361,7 @@ internal sealed class WallabyPipeline(
 
     private async Task EmitBackfillChunkAsync(PendingWindow window, CancellationToken ct)
     {
-        using var activity = _instr.StartBackfillChunk();
+        using var activity = _instr.StartBackfillChunk(window.SourceContext);
         try
         {
             var events = new List<ChangeEvent>(window.Buffer.Count);
@@ -371,6 +398,8 @@ internal sealed class WallabyPipeline(
         }
         catch (Exception ex)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
             // Fault the waiter so the backfill loop throws instead of persisting progress for an unapplied chunk.
             window.Completed.TrySetException(ex);
             throw;

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
@@ -39,9 +40,7 @@ internal sealed class LeaderSession(
     /// </summary>
     public async Task<bool> RunAsync(CancellationToken ct)
     {
-        var selfConfig = await components.SelfConfigurator.EnsureConfiguredAsync(components.Model, ct);
-        await RepairSlotGapAsync(selfConfig, ct);
-        await InitializeSinksAsync(ct);
+        await BootstrapAsync(ct);
 
         // Spill target for pgoutput v2 streamed (large) transactions. Clear any leftovers from a prior crash —
         // an un-acked streamed transaction is re-streamed from the slot, so stale spill data is never needed.
@@ -124,6 +123,25 @@ internal sealed class LeaderSession(
         return leadership.Lost.IsCancellationRequested; // otherwise: did we step down because the lock dropped?
     }
 
+    // Self-configure, repair any slot-loss gap, and initialize sinks — grouped under one bootstrap span so
+    // a slow startup (slot creation, index setup) is visible as a single trace per leadership term.
+    private async Task BootstrapAsync(CancellationToken ct)
+    {
+        using var bootstrap = instrumentation.StartLeaderBootstrap();
+        bootstrap?.SetTag(WallabyInstrumentation.SlotTag, options.SlotName);
+        try
+        {
+            var selfConfig = await components.SelfConfigurator.EnsureConfiguredAsync(components.Model, ct);
+            await RepairSlotGapAsync(selfConfig, ct);
+            await InitializeSinksAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            bootstrap?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+    }
+
     /// <summary>
     /// Detects and repairs a slot-loss gap: a persisted checkpoint behind the slot's consistent point can
     /// only mean the slot was recreated after that checkpoint was written (invalidation, failover, manual
@@ -133,6 +151,7 @@ internal sealed class LeaderSession(
     /// </summary>
     private async Task RepairSlotGapAsync(SelfConfigResult selfConfig, CancellationToken ct)
     {
+        using var repair = instrumentation.StartSlotRepair();
         var consistentPoint = selfConfig.ConsistentPoint ?? await ReadRegisteredConsistentPointAsync(ct);
         if (consistentPoint is null)
         {
@@ -148,6 +167,11 @@ internal sealed class LeaderSession(
 
         logger.SlotGapDetected(
             options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
+        repair?.AddEvent(new ActivityEvent("slot.gap", tags: new ActivityTagsCollection
+        {
+            ["wallaby.lsn.checkpoint"] = new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(),
+            ["wallaby.lsn.consistent"] = consistentPoint,
+        }));
 
         foreach (var (table, _) in components.BackfillTables)
         {
@@ -189,6 +213,8 @@ internal sealed class LeaderSession(
         {
             if (sink is ISinkInitializer initializer)
             {
+                using var activity = instrumentation.StartSinkInitialize();
+                activity?.SetTag(WallabyInstrumentation.SinkTag, sink.Name);
                 await initializer.InitializeAsync(ct);
                 logger.SinkInitialized(sink.Name);
             }

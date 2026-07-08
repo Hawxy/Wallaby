@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
@@ -13,34 +15,47 @@ namespace Wallaby.Internal.SelfConfig;
 internal sealed class PostgresSelfConfigurator(
     NpgsqlDataSource dataSource,
     SelfConfigOptions options,
-    ILogger logger) : ISelfConfigurator
+    ILogger logger,
+    WallabyInstrumentation? instrumentation = null) : ISelfConfigurator
 {
     private readonly ServerValidator _validator = new(logger);
     private readonly StateSchemaBootstrapper _stateSchema = new();
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     public async Task<SelfConfigResult> EnsureConfiguredAsync(WallabyModel model, CancellationToken ct)
     {
-        await using var connection = await dataSource.OpenConnectionAsync(ct);
+        using var activity = _instr.StartSelfConfig();
+        activity?.SetTag(WallabyInstrumentation.SlotTag, options.SlotName);
+        try
+        {
+            await using var connection = await dataSource.OpenConnectionAsync(ct);
 
-        // Validate headroom for every slot we intend to create (primary + external).
-        var intendedSlots = new List<string>(1 + options.ExternalSlots.Count) { options.SlotName };
-        intendedSlots.AddRange(options.ExternalSlots.Select(s => s.SlotName));
-        await _validator.ValidateAsync(connection, intendedSlots, ct);
+            // Validate headroom for every slot we intend to create (primary + external).
+            var intendedSlots = new List<string>(1 + options.ExternalSlots.Count) { options.SlotName };
+            intendedSlots.AddRange(options.ExternalSlots.Select(s => s.SlotName));
+            await _validator.ValidateAsync(connection, intendedSlots, ct);
 
-        await _stateSchema.EnsureAsync(connection, ct);
+            await _stateSchema.EnsureAsync(connection, ct);
 
-        var publicationCreated = await EnsurePublicationAsync(
-            connection, options.PublicationName, DesiredTables(model).ToList(), options.ManagePublicationTables, ct);
-        var (slotCreated, consistentPoint) = await EnsureSlotAsync(
-            connection, options.SlotName, options.PublicationName, kind: "primary", ct);
-        var warnings = await ValidateReplicaIdentityAsync(connection, model, ct);
-        var externalResults = await EnsureExternalSlotsAsync(connection, ct);
+            var publicationCreated = await EnsurePublicationAsync(
+                connection, options.PublicationName, DesiredTables(model).ToList(), options.ManagePublicationTables, ct);
+            var (slotCreated, consistentPoint) = await EnsureSlotAsync(
+                connection, options.SlotName, options.PublicationName, kind: "primary", ct);
+            var warnings = await ValidateReplicaIdentityAsync(connection, model, ct);
+            var externalResults = await EnsureExternalSlotsAsync(connection, ct);
 
-        logger.SelfConfigComplete(options.PublicationName, publicationCreated, options.SlotName, slotCreated);
+            logger.SelfConfigComplete(options.PublicationName, publicationCreated, options.SlotName, slotCreated);
 
-        return new SelfConfigResult(
-            options.PublicationName, options.SlotName, publicationCreated, slotCreated, consistentPoint, warnings,
-            externalResults);
+            return new SelfConfigResult(
+                options.PublicationName, options.SlotName, publicationCreated, slotCreated, consistentPoint, warnings,
+                externalResults);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
+            throw;
+        }
     }
 
     /// <summary>
@@ -50,6 +65,7 @@ internal sealed class PostgresSelfConfigurator(
     /// </summary>
     public async Task<IReadOnlyList<ExternalSlotResult>> EnsureExternalSlotsOnlyAsync(CancellationToken ct)
     {
+        using var activity = _instr.StartSelfConfig();
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         // Only the external slots are created here, so only they consume slot headroom.

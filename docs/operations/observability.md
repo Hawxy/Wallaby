@@ -55,17 +55,38 @@ The activity source `Wallaby` emits one span per unit of work:
 
 | Span | Kind | Notable attributes |
 | --- | --- | --- |
-| `transaction` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.ingestion.lag_s` |
-| `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count` |
+| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk); status `Error` on fault |
+| `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count`, `wallaby.fanout.offloaded` (bindings whose tail was queued as a scoped backfill) |
 | `route` | Internal | `wallaby.batch.size` |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |
 | `sink.deliver` | Producer | `wallaby.sink`, `wallaby.destination`, `wallaby.batch.size` (retries recorded as span events; status `Error` on terminal failure) |
-| `backfill.chunk` | Internal | `wallaby.table`, `wallaby.chunk.size` |
+| `backfill` | Internal | `wallaby.table`, `wallaby.backfill.kind` (`table`/`fanout`), `wallaby.fanout.keys` (fanout only), `wallaby.backfill.rows` (one root span per backfill run; status `Error` on fault) |
+| `backfill.chunk` | Internal | `wallaby.table`, `wallaby.chunk.size` (span link to the `backfill` span of the run that produced the chunk) |
 | `ack` | Internal | `wallaby.slot`, `wallaby.txn.lsn.end` |
+| `leader.bootstrap` | Internal | `wallaby.slot` (one per leadership term: self-config, slot-gap repair, and sink initialization before streaming; status `Error` on fault) |
+| `selfconfig` | Internal | `wallaby.slot`; server validation and publication/slot/state-schema setup (child of `leader.bootstrap` when hosted); status `Error` on fault |
+| `slot.repair` | Internal | child of `leader.bootstrap`: slot-loss gap detection (and re-backfill marking when one is found) |
+| `sink.initialize` | Internal | `wallaby.sink`; child of `leader.bootstrap`, one per sink with one-time setup |
 
-Spans nest under the `transaction` root, so a single trace shows a committed transaction flowing
-through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the EF Core
+Live spans nest under the `transaction.process` root, so a single trace shows a committed transaction flowing
+through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the
 queries your transforms run appear nested under the `transform` (and `dependent.resolve`) spans.
+
+Anomalies are recorded as **span events**, so they show up on the span's timeline exactly when they
+happened: `retry` on `sink.deliver` (with `attempt` and `error`), `fanout.offloaded` on
+`dependent.resolve` (one per binding whose tail was queued, with `wallaby.table`), and `slot.gap` on
+`slot.repair` (with the checkpoint and consistent-point LSNs). None of these will appear on the happy path.
+
+A backfill run gets its own `backfill` root span covering the run end-to-end, from the first chunk read
+until the last chunk's delivery is acknowledged. Each chunk is delivered *inside* a slot commit, so its
+`backfill.chunk` span appears in that transaction's trace and carries a **span link** back to the
+`backfill` root. From a slow backfill you can jump to the commits that delivered its chunks, and from
+an odd-looking transaction you can jump to the backfill run it was carrying. A `backfill` span that
+stays open far longer than its chunks take to read means the run is waiting on the pipeline to
+reach its watermarks (for example, a sink retrying).
+
+To browse example traces locally, run `dotnet run --project tests/Wallaby.TraceDemo` (needs Docker).
+It runs a scenario covering every span above and exports to an Aspire Dashboard at `http://localhost:18888/traces`.
 
 ## Cardinality
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Retry;
@@ -108,6 +109,7 @@ internal sealed class SinkDispatcher
         {
             await _retry.ExecuteAsync(async static (state, token) =>
             {
+                var attempt = ++state.Attempts.Value;
                 var attemptStart = WallabyInstrumentation.StartTimer();
                 var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
                 var name = state.SinkBatch.SinkName;
@@ -124,12 +126,16 @@ internal sealed class SinkDispatcher
                         state.Status?.RecordSinkDelivered(name, DateTimeOffset.UtcNow);
                         return;
                     case DeliveryStatus.RetryableFailure:
-                        state.Activity?.AddEvent(new ActivityEvent("retry"));
+                        state.Activity?.AddEvent(new ActivityEvent("retry", tags: new ActivityTagsCollection
+                        {
+                            ["attempt"] = attempt,
+                            ["error"] = result.Error,
+                        }));
                         throw new SinkRetryableException(name, result.Error ?? "(unspecified)", result.Exception);
                     default:
                         throw new SinkDeliveryException(name, result.Error ?? "(unspecified)", result.Exception);
                 }
-            }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity), ct);
+            }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity, Attempts: new StrongBox<int>()), ct);
         }
         catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
         {
