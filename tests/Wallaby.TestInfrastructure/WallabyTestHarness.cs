@@ -236,7 +236,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
         _pipeline = new WallabyPipeline(
-            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, Instrumentation, SinkRetry),
+            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, NullLogger.Instance, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
 

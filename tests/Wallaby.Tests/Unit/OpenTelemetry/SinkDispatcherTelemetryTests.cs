@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
+using Microsoft.Extensions.Logging.Abstractions;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.Pipeline;
@@ -27,7 +28,7 @@ public class SinkDispatcherTelemetryTests
             ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)),
         };
 
-        await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None);
+        await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None);
 
         delivered.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBe(1L);
 
@@ -53,7 +54,7 @@ public class SinkDispatcherTelemetryTests
             }),
         };
 
-        await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None);
+        await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None);
 
         // The delivery-duration histogram is recorded once per attempt, so its count is the attempt count.
         duration.GetMeasurementSnapshot().Count.ShouldBe(3); // 2 retryable + 1 success
@@ -73,7 +74,7 @@ public class SinkDispatcherTelemetryTests
         };
 
         var before = DateTimeOffset.UtcNow;
-        await new SinkDispatcher(sinks, instrumentation: instr, status: status)
+        await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr, status: status)
             .DispatchAsync(OneRecord(), CancellationToken.None);
 
         lag.RecordObservableInstruments();
@@ -99,7 +100,7 @@ public class SinkDispatcherTelemetryTests
         };
 
         await Should.ThrowAsync<Exception>(
-            async () => await new SinkDispatcher(sinks, instrumentation: instr, status: status)
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr, status: status)
                 .DispatchAsync(OneRecord(), CancellationToken.None));
 
         lag.RecordObservableInstruments();
@@ -120,7 +121,7 @@ public class SinkDispatcherTelemetryTests
         };
 
         await Should.ThrowAsync<Exception>(
-            async () => await new SinkDispatcher(sinks, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None));
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None));
 
         failures.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(1L);
         var captured = activities.Last("sink.deliver");

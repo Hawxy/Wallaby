@@ -103,7 +103,7 @@ internal sealed class WallabyComponents
             Model = model,
             Materializer = providers.MergedPlan.Materializer,
             Router = new MappingChangeRouter(mappings, instrumentation),
-            Dispatcher = new SinkDispatcher(sinks, instrumentation, options.SinkRetry, status),
+            Dispatcher = new SinkDispatcher(sinks, logger, instrumentation, options.SinkRetry, status),
             Sinks = sinks,
             Coordinator = new WatermarkBackfillCoordinator(
                 dataSource.Source, backfillStore, logger, instrumentation) { ChunkSize = options.ChunkSize },

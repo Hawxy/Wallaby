@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Internal.Pipeline;
@@ -20,7 +23,7 @@ public class SinkDispatcherTests
     [Test]
     public async Task Permanent_failure_halts()
     {
-        var dispatcher = new SinkDispatcher(FailingSink());
+        var dispatcher = new SinkDispatcher(FailingSink(), NullLogger.Instance);
 
         await Should.ThrowAsync<Exception>(
             async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
@@ -38,7 +41,7 @@ public class SinkDispatcherTests
                 return Task.FromResult(DeliveryResult.Retry("nope"));
             }),
         };
-        var dispatcher = new SinkDispatcher(sinks, retry: new SinkRetryOptions
+        var dispatcher = new SinkDispatcher(sinks, NullLogger.Instance, retry: new SinkRetryOptions
         {
             MaxAttempts = 2,
             BaseDelay = TimeSpan.FromMilliseconds(1),
@@ -49,6 +52,31 @@ public class SinkDispatcherTests
             async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
 
         attempts.ShouldBe(3);
+    }
+
+    [Test]
+    public async Task Retryable_failures_log_a_warning_per_retry()
+    {
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Retry("nope"))),
+        };
+        var logger = new FakeLogger();
+        var dispatcher = new SinkDispatcher(sinks, logger, retry: new SinkRetryOptions
+        {
+            MaxAttempts = 2,
+            BaseDelay = TimeSpan.FromMilliseconds(1),
+            MaxDelay = TimeSpan.FromMilliseconds(2),
+        });
+
+        await Should.ThrowAsync<Exception>(
+            async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
+
+        // One warning per retry; the final failed attempt propagates instead of retrying.
+        var warnings = logger.Collector.GetSnapshot().Where(r => r.Level == LogLevel.Warning).ToList();
+        warnings.Count.ShouldBe(2);
+        warnings[0].Message.ShouldContain("'sink'");
+        warnings[0].Exception.ShouldBeOfType<SinkRetryableException>();
     }
 
     [Test]
@@ -63,7 +91,7 @@ public class SinkDispatcherTests
                 return Task.FromResult(DeliveryResult.Retry("nope"));
             }),
         };
-        var dispatcher = new SinkDispatcher(sinks, retry: new SinkRetryOptions { MaxAttempts = 0 });
+        var dispatcher = new SinkDispatcher(sinks, NullLogger.Instance, retry: new SinkRetryOptions { MaxAttempts = 0 });
 
         await Should.ThrowAsync<Exception>(
             async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
@@ -97,7 +125,7 @@ public class SinkDispatcherTests
             }),
         };
 
-        await new SinkDispatcher(sinks).DispatchAsync(OneRecordPerSink("a", "b"), CancellationToken.None);
+        await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(OneRecordPerSink("a", "b"), CancellationToken.None);
     }
 
     [Test]
@@ -116,7 +144,7 @@ public class SinkDispatcherTests
         };
 
         await Should.ThrowAsync<Exception>(
-            async () => await new SinkDispatcher(sinks).DispatchAsync(OneRecordPerSink("ok", "bad"), CancellationToken.None));
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(OneRecordPerSink("ok", "bad"), CancellationToken.None));
 
         // WhenAll settles every delivery before the failure propagates.
         delivered.ShouldBeTrue();
@@ -135,7 +163,7 @@ public class SinkDispatcherTests
             }),
         };
 
-        await new SinkDispatcher(sinks).DispatchAsync(OneRecord(), CancellationToken.None);
+        await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(OneRecord(), CancellationToken.None);
 
         received.ShouldBe(1);
     }

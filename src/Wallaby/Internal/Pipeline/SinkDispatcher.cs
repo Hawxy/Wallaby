@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Retry;
 using Wallaby.Abstractions;
@@ -9,7 +10,10 @@ namespace Wallaby.Internal.Pipeline;
 
 /// <summary>Raised internally to drive Polly retries on a retryable sink failure.</summary>
 internal sealed class SinkRetryableException(string sinkName, string error, Exception? inner)
-    : Exception($"Sink '{sinkName}' reported a retryable failure: {error}", inner);
+    : Exception($"Sink '{sinkName}' reported a retryable failure: {error}", inner)
+{
+    public string SinkName { get; } = sinkName;
+}
 
 /// <summary>Raised when a sink permanently fails (or retries are exhausted); halts the pipeline.</summary>
 internal sealed class SinkDeliveryException(string sinkName, string error, Exception? inner)
@@ -30,7 +34,7 @@ internal sealed class SinkDispatcher
     private readonly ResiliencePipeline _retry;
 
     public SinkDispatcher(
-        IReadOnlyDictionary<string, ISink> sinks, WallabyInstrumentation? instrumentation = null,
+        IReadOnlyDictionary<string, ISink> sinks, ILogger logger, WallabyInstrumentation? instrumentation = null,
         SinkRetryOptions? retry = null, WallabyStatus? status = null)
     {
         _sinks = sinks;
@@ -50,6 +54,14 @@ internal sealed class SinkDispatcher
                     UseJitter = true,
                     Delay = retry.BaseDelay,
                     MaxDelay = retry.MaxDelay,
+                    OnRetry = args =>
+                    {
+                        var ex = args.Outcome.Exception!;
+                        logger.SinkDeliveryRetrying(
+                            ex, (ex as SinkRetryableException)?.SinkName ?? "(unknown)",
+                            args.AttemptNumber + 1, args.RetryDelay);
+                        return default;
+                    },
                 })
                 .Build();
     }
@@ -146,4 +158,11 @@ internal sealed class SinkDispatcher
 
         return order;
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="SinkDispatcher"/>.</summary>
+internal static partial class SinkDispatcherLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Sink '{Sink}' delivery attempt {Attempt} failed with a retryable error; retrying in {Delay}.")]
+    internal static partial void SinkDeliveryRetrying(this ILogger logger, Exception ex, string sink, int attempt, TimeSpan delay);
 }
