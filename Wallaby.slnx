@@ -22,6 +22,7 @@
     <Project Path="tests/Wallaby.Sinks.Meilisearch.Tests/Wallaby.Sinks.Meilisearch.Tests.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
     <Project Path="tests/Wallaby.Tests/Wallaby.Tests.csproj" />
+    <Project Path="tests/Wallaby.TraceDemo/Wallaby.TraceDemo.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Sample.MartenWorkerApp/Sample.MartenWorkerApp.csproj" />

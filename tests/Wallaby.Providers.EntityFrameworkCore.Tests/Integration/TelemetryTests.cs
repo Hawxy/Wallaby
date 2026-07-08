@@ -34,7 +34,7 @@ public class TelemetryTests(TestModelPostgresFixture pg)
         lag.GetMeasurementSnapshot().ShouldNotBeEmpty();
 
         // A transaction root span and a sink-delivery span were emitted.
-        activities.OperationNames.ShouldContain("transaction");
+        activities.OperationNames.ShouldContain("transaction.process");
         activities.OperationNames.ShouldContain("sink.deliver");
     }
 

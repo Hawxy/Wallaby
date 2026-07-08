@@ -28,7 +28,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DestinationTag = "wallaby.destination";
 
     // ---- span names ----
-    internal const string TransactionActivity = "transaction";
+    internal const string TransactionActivity = "transaction.process";
     internal const string DependentResolveActivity = "dependent.resolve";
     internal const string RouteActivity = "route";
     internal const string TransformActivity = "transform";

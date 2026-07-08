@@ -59,3 +59,18 @@ All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Pos
 - One package: `dotnet run -c Release --project tests/Wallaby.Providers.EntityFrameworkCore.Tests`
 - Unit tests only (no Docker): append `-- --treenode-filter "/*/*.Unit*/*/*"`
 
+### Viewing traces
+
+`tests/Wallaby.TraceDemo` (a console app, not a test project) runs a curated CDC scenario — live
+changes with a sink retry, dependent fan-out, whole-table backfill — and exports the resulting traces
+and metrics to a local [Aspire Dashboard](https://learn.microsoft.com/dotnet/aspire/fundamentals/dashboard/standalone)
+container:
+
+```
+dotnet run --project tests/Wallaby.TraceDemo
+# then open http://localhost:18888/traces
+```
+
+The dashboard keeps running (and accumulates traces across runs); remove it with
+`docker rm -f wallaby-trace-dashboard`.
+
