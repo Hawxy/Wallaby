@@ -58,6 +58,11 @@ public sealed record SinkBatch(string SinkName, IReadOnlyList<SinkRecord> Record
 /// A destination plugin. Implementations deliver batches of <see cref="SinkRecord"/>s and should
 /// be idempotent (upsert/delete by <see cref="SinkRecord.DocumentId"/>) to honor at-least-once delivery.
 /// </summary>
+/// <remarks>
+/// Registering a sink hands its lifetime to Wallaby: a sink that also implements
+/// <see cref="IAsyncDisposable"/> or <see cref="IDisposable"/> is disposed once at host shutdown,
+/// after streaming has stopped. Implement <see cref="ISinkInitializer"/> for one-time setup.
+/// </remarks>
 public interface ISink
 {
     /// <summary>The unique registration name of this sink (matches mappings' target name).</summary>

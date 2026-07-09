@@ -70,6 +70,23 @@ public sealed class MySink : ISink, ISinkInitializer
 whenever a standby takes over leadership. Make it idempotent. If it throws, the leader session is retried
 (the pipeline won't stream into an unconfigured sink).
 
+## Cleanup
+
+Registering a sink hands its lifetime to Wallaby. If your sink
+holds resources (a client, a connection pool, a producer), implement `IAsyncDisposable` (or
+`IDisposable`):
+
+```csharp
+public sealed class MySink : ISink, IAsyncDisposable
+{
+    public ValueTask DisposeAsync() => _client.DisposeAsync();
+}
+```
+
+Disposal runs **once, at host shutdown**, after streaming has stopped. 
+A sink implementing both interfaces is disposed via `DisposeAsync` only, and a throwing
+dispose is logged without disrupting the rest of shutdown.
+
 ## Registering
 
 ```csharp

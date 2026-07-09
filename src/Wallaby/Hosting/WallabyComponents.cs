@@ -16,10 +16,12 @@ namespace Wallaby.Hosting;
 /// The runtime's long-lived components, wired once from the resolved configuration and shared by every
 /// leader session: the merged capture model and its materializer, the routing/dispatch pair, the backfill
 /// coordinator and state stores, and the self-configurator. Per-term resources (the spill, replication
-/// stream, and pipeline) are created by <see cref="LeaderSession"/>.
+/// stream, and pipeline) are created by <see cref="LeaderSession"/>. Disposing releases the sinks that
+/// opted into disposal.
 /// </summary>
-internal sealed class WallabyComponents
+internal sealed class WallabyComponents : IAsyncDisposable
 {
+    public required ILogger Logger { get; init; }
     public required WallabyModel Model { get; init; }
     public required IRowMaterializer Materializer { get; init; }
     public required MappingChangeRouter Router { get; init; }
@@ -100,6 +102,7 @@ internal sealed class WallabyComponents
 
         return new WallabyComponents
         {
+            Logger = logger,
             Model = model,
             Materializer = providers.MergedPlan.Materializer,
             Router = new MappingChangeRouter(mappings, instrumentation),
@@ -129,4 +132,7 @@ internal sealed class WallabyComponents
             BackfillTables = backfillTables,
         };
     }
+
+    /// <summary>Sinks are materialized once per host, so they are disposed here rather than per leader session.</summary>
+    public ValueTask DisposeAsync() => SinkDisposal.DisposeAllAsync(Sinks.Values, Logger);
 }

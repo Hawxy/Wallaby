@@ -53,7 +53,8 @@ internal sealed class WallabyRuntime
 
     public async Task RunAsync(CancellationToken ct)
     {
-        var components = WallabyComponents.Build(
+        // Disposed when the election loop exits (shutdown or fault), releasing the sinks it materialized.
+        await using var components = WallabyComponents.Build(
             _providers, _config, _options, _dataSource, _services, _instrumentation, _status, _logger);
 
         // Grows the retry delay (with jitter, capped) when leadership acquisition or a leader session keeps
@@ -95,7 +96,7 @@ internal sealed class WallabyRuntime
                 {
                     var session = new LeaderSession(
                         components, _config, _options, _dataSource, leadership, _services,
-                        _instrumentation, _status, _logger);
+                        _instrumentation, _status);
                     var lostLeadership = await session.RunAsync(ct);
                     backoff.Reset();
                     _status.ResetLeaderFailures();

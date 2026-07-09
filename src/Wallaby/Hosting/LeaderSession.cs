@@ -30,9 +30,10 @@ internal sealed class LeaderSession(
     IClusterLockHandle leadership,
     IServiceProvider services,
     WallabyInstrumentation instrumentation,
-    WallabyStatus status,
-    ILogger logger)
+    WallabyStatus status)
 {
+    private readonly ILogger _logger = components.Logger;
+
     /// <summary>
     /// Run the leader workload for the lifetime of leadership. Returns true if it ended because the
     /// cluster lock was lost (so the caller re-elects without treating it as a fault); a real fault —
@@ -53,7 +54,7 @@ internal sealed class LeaderSession(
         var changeEventFactory = new ChangeEventFactory(components.Materializer);
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
-            options.SlotName, logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
+            options.SlotName, _logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
             components.DependentResolver, components.FanoutQueue, instrumentation, status);
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
@@ -67,7 +68,7 @@ internal sealed class LeaderSession(
                 AutoBackfillNewTables = options.AutoBackfillNewTables,
                 AutoBackfillOnVersionChange = options.AutoBackfillOnVersionChange,
             },
-            logger);
+            _logger);
 
         // A background-task fault fails the whole leader session (first fault wins): the task records it,
         // cancels the workload, and the fault is rethrown below so the caller halts and retries with backoff.
@@ -79,7 +80,7 @@ internal sealed class LeaderSession(
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                logger.BackfillSchedulerFailed(ex);
+                _logger.BackfillSchedulerFailed(ex);
                 Interlocked.CompareExchange(ref backgroundFault, ex, null);
                 await linked.CancelAsync();
             }
@@ -89,11 +90,11 @@ internal sealed class LeaderSession(
         var fanoutTask = components.FanoutQueue is not null
             ? Task.Run(async () =>
             {
-                try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, logger, options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
+                try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, _logger, options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
-                    logger.FanoutWorkerFailed(ex);
+                    _logger.FanoutWorkerFailed(ex);
                     Interlocked.CompareExchange(ref backgroundFault, ex, null);
                     await linked.CancelAsync();
                 }
@@ -165,7 +166,7 @@ internal sealed class LeaderSession(
             return;
         }
 
-        logger.SlotGapDetected(
+        _logger.SlotGapDetected(
             options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
         repair?.AddEvent(new ActivityEvent("slot.gap", tags: new ActivityTagsCollection
         {
@@ -216,7 +217,7 @@ internal sealed class LeaderSession(
                 using var activity = instrumentation.StartSinkInitialize();
                 activity?.SetTag(WallabyInstrumentation.SinkTag, sink.Name);
                 await initializer.InitializeAsync(ct);
-                logger.SinkInitialized(sink.Name);
+                _logger.SinkInitialized(sink.Name);
             }
         }
     }
