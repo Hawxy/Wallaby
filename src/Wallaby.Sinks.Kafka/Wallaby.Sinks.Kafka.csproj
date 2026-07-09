@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby.Sinks.Kafka</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Kafka destination/sink for Wallaby: produce Postgres changes to Kafka topics, keyed by document id with tombstone deletes.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.Sinks.Kafka.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby\Wallaby.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNet.ReproducibleBuilds">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+
+  <Import Project="../../Package.Build.props" />
+</Project>

@@ -40,7 +40,17 @@ const sinks = [
     link: '/sinks/http',
   },
   {
+    title: 'kafka',
+    sub: 'event streaming',
+    label: 'Kafka →',
+    link: '/sinks/kafka',
+  },
+  {
     title: 'opensearch',
+    sub: 'coming soon',
+  },
+    {
+    title: 'elasticsearch',
     sub: 'coming soon',
   },
   {

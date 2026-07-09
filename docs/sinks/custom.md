@@ -4,8 +4,8 @@ description: "Implementing ISink to deliver change batches to any destination, a
 
 # Custom Sinks
 
-A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere - an HTTP API,
-Kafka, another database, a cache.
+A sink is a destination plugin. Implement `ISink` to deliver batches of records anywhere - another
+database, a message broker, a cache.
 
 ::: tip
 We're always looking for new sink contributions. Feel free to open a pull request for review.
