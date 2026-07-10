@@ -136,8 +136,10 @@ public class MartenRowMaterializerTests
         var change = Change("mt_doc_softdoc", ChangeAction.Update,
             newValues: [Col("id", DocId), Toast("data"), Col("mt_deleted", false)]);
 
-        Should.Throw<InvalidOperationException>(() => Materializer().TryMaterialize(change, out _))
-            .Message.ShouldContain("REPLICA IDENTITY FULL");
+        var ex = Should.Throw<InvalidOperationException>(() => Materializer().TryMaterialize(change, out _));
+
+        ex.Message.ShouldContain("REPLICA IDENTITY FULL");
+        ex.Message.ShouldContain("https://wallabycdc.net/providers/marten/");
     }
 
     [Test]

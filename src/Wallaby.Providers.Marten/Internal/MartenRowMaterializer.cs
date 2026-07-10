@@ -151,7 +151,8 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         throw new InvalidOperationException(
             $"The document body for '{plan.Table.QualifiedName}' was not carried in the change (an unchanged " +
             $"TOASTed value with no old tuple). Run: ALTER TABLE {plan.Table.QualifiedName} REPLICA IDENTITY FULL; " +
-            "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set).");
+            "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set). " +
+            "See https://wallabycdc.net/providers/marten/#managed-replica-identity");
     }
 
     private static object AsJson(MartenTablePlan plan, object? value)

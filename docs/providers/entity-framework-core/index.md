@@ -186,6 +186,13 @@ public partial class OrdersReplicaIdentity : Migration
 }
 ```
 
+::: warning Large (TOASTed) columns
+Entities with large values - long text, big jsonb, bytea over ~2KB - also need `REPLICA IDENTITY FULL`.
+Postgres omits an *unchanged* TOASTed value from an update's new tuple, so under the default identity
+the value isn't carried in the change at all. Rather than deliver a document with the field silently
+nulled, Wallaby fails the change with the DDL above in the error message.
+:::
+
 ## Next steps
 
 - [Configuration](/configuration): all configuration options.
