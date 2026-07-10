@@ -19,7 +19,8 @@ namespace Wallaby.Sinks.Kafka;
 public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
 {
     private readonly KafkaSinkOptions _options;
-    private readonly Lazy<IProducer<string, byte[]>> _producer;
+
+    private IProducer<string, byte[]>? _producer;
 
     /// <summary>
     /// Creates a sink that produces to the cluster described by <paramref name="options"/>. The
@@ -38,10 +39,11 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
     {
         Name = name;
         _options = options;
-        _producer = producer is null
-            ? new Lazy<IProducer<string, byte[]>>(() => new ProducerBuilder<string, byte[]>(BuildProducerConfig(options)).Build())
-            : new Lazy<IProducer<string, byte[]>>(() => producer);
+        _producer = producer;
     }
+
+    private IProducer<string, byte[]> GetProducer()
+        => _producer ??= new ProducerBuilder<string, byte[]>(BuildProducerConfig(_options)).Build();
 
     private static ProducerConfig BuildProducerConfig(KafkaSinkOptions options)
     {
@@ -113,9 +115,10 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
             return DeliveryResult.Success;
         }
 
-        // Produce calls are pipelined (each returns on enqueue, not delivery) and librdkafka preserves
-        // produce order per partition, so per-document commit order survives batching and retries.
-        var reports = new Task[records.Count];
+        // Validate and serialize the whole batch before the first produce, so a permanent failure can
+        // never leave already-enqueued delivery reports behind.
+        var topics = new string[records.Count];
+        var messages = new Message<string, byte[]>[records.Count];
         for (var i = 0; i < records.Count; i++)
         {
             var record = records[i];
@@ -140,17 +143,29 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
                 return DeliveryResult.Permanent($"Kafka sink message serialization failed: {ex.Message}", ex);
             }
 
-            var message = new Message<string, byte[]>
+            topics[i] = topic;
+            messages[i] = new Message<string, byte[]>
             {
                 Key = record.DocumentId,
                 Value = value!,
                 Headers = KafkaMessageWriter.BuildHeaders(record),
             };
-            reports[i] = _producer.Value.ProduceAsync(topic, message, ct);
         }
 
+        // The produce loop runs inside the classified try: ProduceAsync throws synchronously when the
+        // local queue is full (a transient condition), and producer creation can fail transiently too —
+        // both must classify, not escape as raw exceptions the dispatcher won't retry.
+        var reports = new List<Task>(records.Count);
         try
         {
+            // Produce calls are pipelined (each returns on enqueue, not delivery) and librdkafka preserves
+            // produce order per partition, so per-document commit order survives batching and retries.
+            var producer = GetProducer();
+            for (var i = 0; i < messages.Length; i++)
+            {
+                reports.Add(producer.ProduceAsync(topics[i], messages[i], ct));
+            }
+
             // Every delivery report is awaited, so a batch is only reported delivered (and the LSN acked)
             // once the brokers have actually accepted all of it.
             await Task.WhenAll(reports);
@@ -162,11 +177,26 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
         }
         catch (ProduceException<string, byte[]> ex)
         {
+            await ObserveAsync(reports);
             return Classify(ex.Error, ex);
         }
         catch (KafkaException ex)
         {
+            await ObserveAsync(reports);
             return Classify(ex.Error, ex);
+        }
+    }
+
+    // A produce call can throw before every report is enqueued; the in-flight reports still settle and
+    // must be awaited so none surfaces as an unobserved task fault.
+    private static async Task ObserveAsync(List<Task> reports)
+    {
+        try
+        {
+            await Task.WhenAll(reports);
+        }
+        catch
+        {
         }
     }
 
@@ -190,14 +220,14 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
     /// <summary>Flushes in-flight messages and releases the producer. Called by the runtime at host shutdown.</summary>
     public void Dispose()
     {
-        if (!_producer.IsValueCreated)
+        if (_producer is null)
         {
             return;
         }
 
         // Un-flushed messages belong to an unacknowledged batch and would be redelivered after restart,
         // but flushing avoids pointless redelivery on a clean shutdown.
-        _producer.Value.Flush(TimeSpan.FromSeconds(5));
-        _producer.Value.Dispose();
+        _producer.Flush(TimeSpan.FromSeconds(5));
+        _producer.Dispose();
     }
 }
