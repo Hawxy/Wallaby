@@ -77,7 +77,7 @@ internal sealed class LeaderSession(
         var backfillTask = Task.Run(async () =>
         {
             try { await scheduler.RunDueBackfillsAsync(linked.Token); }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 _logger.BackfillSchedulerFailed(ex);
@@ -91,7 +91,7 @@ internal sealed class LeaderSession(
             ? Task.Run(async () =>
             {
                 try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, _logger, options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
                 catch (Exception ex)
                 {
                     _logger.FanoutWorkerFailed(ex);
@@ -105,9 +105,11 @@ internal sealed class LeaderSession(
         {
             await pipeline.RunAsync(linked.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
             // Shutdown (ct), lost-lock, or a background fault cancelled the workload — distinguished below.
+            // An OCE while the workload is NOT being cancelled (e.g. a sink-thrown TaskCanceledException
+            // from an HTTP timeout) is a real fault and propagates like any other exception.
         }
         finally
         {
