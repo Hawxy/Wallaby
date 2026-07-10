@@ -91,6 +91,7 @@ class Build : NukeBuild
         "Wallaby.Providers.EntityFrameworkCore",
         "Wallaby.Providers.Marten",
         "Wallaby.Sinks.Http",
+        "Wallaby.Sinks.Kafka",
         "Wallaby.Sinks.Meilisearch",
         "Wallaby.AspNetCore.HealthChecks",
         "Wallaby.Testing",

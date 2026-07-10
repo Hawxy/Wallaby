@@ -358,6 +358,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         {
             await StopAsync();
         }
+        await SinkDisposal.DisposeAllAsync(_sinks.Values, NullLogger.Instance);
         await _dataSource.DisposeAsync();
     }
 

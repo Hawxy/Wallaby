@@ -9,9 +9,10 @@ namespace Wallaby.Sinks.Meilisearch;
 /// idempotent), and deletions remove by that same id. Records are routed to the index named by
 /// <see cref="SinkRecord.Destination"/> (falling back to <see cref="MeilisearchSinkOptions.DefaultIndex"/>).
 /// </summary>
-public sealed class MeilisearchSink : ISink, ISinkInitializer
+public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
 {
     private readonly MeilisearchSinkOptions _options;
+    private readonly HttpClient _httpClient;
     private readonly MeilisearchClient _client;
 
     // Per configured index, the attribute keys every document must carry (empty unless
@@ -20,8 +21,8 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
 
     /// <summary>
     /// Creates a sink that delivers to the Meilisearch instance described by <paramref name="options"/>.
-    /// The underlying client (and its HTTP connection pool) is created once and reused for the
-    /// lifetime of the sink.
+    /// The underlying client (and its HTTP connection pool) is created once, reused for the lifetime of
+    /// the sink, and released when the sink is disposed.
     /// </summary>
     /// <param name="name">The sink's registration name (used for routing, telemetry, and test replacement).</param>
     /// <param name="options">Connection, index, and delivery-behaviour settings.</param>
@@ -29,9 +30,18 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
     {
         Name = name;
         _options = options;
-        _client = new MeilisearchClient(options.Host, options.ApiKey);
+        // MeilisearchMessageHandler turns error responses into MeilisearchApiError (the client relies on
+        // it), and the base address must end with '/' for relative request URIs to resolve under it.
+        _httpClient = new HttpClient(new MeilisearchMessageHandler(new HttpClientHandler()))
+        {
+            BaseAddress = new Uri(options.Host.EndsWith('/') ? options.Host : options.Host + "/"),
+        };
+        _client = new MeilisearchClient(_httpClient, options.ApiKey);
         _requiredAttributes = BuildRequiredAttributes(options);
     }
+
+    /// <summary>Releases the sink's HTTP connection pool. Called by the runtime at host shutdown.</summary>
+    public void Dispose() => _httpClient.Dispose();
 
     private static IReadOnlyDictionary<string, IReadOnlyCollection<string>> BuildRequiredAttributes(
         MeilisearchSinkOptions options)

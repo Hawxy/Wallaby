@@ -12,6 +12,7 @@
     <!-- Marten's document metadata discovery reflects over the document types; keep this assembly's
          members so the smoke exercises Wallaby's code paths rather than trimmer behaviour. -->
     <TrimmerRootAssembly Include="Wallaby.AotSmokeTest" />
+    <TrimmerRootAssembly Include="Marten" />
   </ItemGroup>
 
   <ItemGroup>
