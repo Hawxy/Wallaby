@@ -17,17 +17,17 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
 {
     private const int FlushThreshold = 500;
 
-    private readonly Dictionary<uint, List<RawChange>> _pending = [];
+    private readonly Dictionary<uint, List<(uint Subxid, RawChange Change)>> _pending = [];
     private readonly Dictionary<uint, long> _nextSeq = [];
 
-    public async ValueTask AppendAsync(uint xid, RawChange change, CancellationToken ct)
+    public async ValueTask AppendAsync(uint xid, uint subxid, RawChange change, CancellationToken ct)
     {
         if (!_pending.TryGetValue(xid, out var batch))
         {
             batch = [];
             _pending[xid] = batch;
         }
-        batch.Add(change);
+        batch.Add((subxid, change));
         if (batch.Count >= FlushThreshold)
         {
             await FlushAsync(xid, ct);
@@ -61,6 +61,36 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
             ("s", slotName), ("x", (long)xid));
     }
 
+    public async ValueTask DiscardSubtransactionAsync(uint xid, uint subxid, CancellationToken ct)
+    {
+        // Truncate flushed rows from the subtransaction's first change onward; min(seq) is NULL (deleting
+        // nothing) when the subxid never flushed.
+        var deleted = await PgExec.ExecuteAsync(
+            dataSource,
+            "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x AND seq >= " +
+            "(SELECT min(seq) FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x AND subxid = @sub)",
+            ct, ("s", slotName), ("x", (long)xid), ("sub", (long)subxid));
+
+        if (!_pending.TryGetValue(xid, out var batch))
+        {
+            return;
+        }
+
+        if (deleted > 0)
+        {
+            // A flush drains the whole batch, so everything still pending was appended after the flushed
+            // first change — it all goes, even entries carrying only descendant subxids.
+            batch.Clear();
+            return;
+        }
+
+        var first = batch.FindIndex(e => e.Subxid == subxid);
+        if (first >= 0)
+        {
+            batch.RemoveRange(first, batch.Count - first);
+        }
+    }
+
     public async ValueTask ClearAsync(CancellationToken ct)
     {
         _pending.Clear();
@@ -86,13 +116,14 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         var seq = _nextSeq.GetValueOrDefault(xid);
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using (var importer = await connection.BeginBinaryImportAsync(
-            "COPY wallaby.stream_buffer (slot_name, xid, seq, payload) FROM STDIN (FORMAT BINARY)", ct))
+            "COPY wallaby.stream_buffer (slot_name, xid, subxid, seq, payload) FROM STDIN (FORMAT BINARY)", ct))
         {
-            foreach (var change in batch)
+            foreach (var (subxid, change) in batch)
             {
                 await importer.StartRowAsync(ct);
                 await importer.WriteAsync(slotName, NpgsqlDbType.Text, ct);
                 await importer.WriteAsync((long)xid, NpgsqlDbType.Bigint, ct);
+                await importer.WriteAsync((long)subxid, NpgsqlDbType.Bigint, ct);
                 await importer.WriteAsync(seq++, NpgsqlDbType.Bigint, ct);
                 await importer.WriteAsync(SpillCodec.Encode(change), NpgsqlDbType.Bytea, ct);
             }

@@ -55,6 +55,37 @@ public sealed class TestDatabase(string connectionString)
         await ctx.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// One transaction that inserts <paramref name="preNames"/>, rolls a savepoint back over
+    /// <paramref name="rolledBackNames"/>, then inserts <paramref name="postNames"/> and commits — the shape
+    /// that makes pgoutput emit a subtransaction stream-abort inside a streamed (large) transaction.
+    /// </summary>
+    public async Task AddProductsWithSavepointRollbackAsync(
+        int categoryId, string[] preNames, string[] rolledBackNames, string[] postNames)
+    {
+        await using var ctx = NewContext();
+        await using var tx = await ctx.Database.BeginTransactionAsync();
+
+        ctx.Products.AddRange(preNames.Select(NewProduct));
+        await ctx.SaveChangesAsync();
+
+        await tx.CreateSavepointAsync("sp1");
+        ctx.Products.AddRange(rolledBackNames.Select(NewProduct));
+        await ctx.SaveChangesAsync();
+        await tx.RollbackToSavepointAsync("sp1");
+
+        ctx.Products.AddRange(postNames.Select(NewProduct));
+        await ctx.SaveChangesAsync();
+
+        await tx.CommitAsync();
+
+        Product NewProduct(string n) => new()
+        {
+            Name = n, Price = 1m, Sku = n, Status = ProductStatus.Active, Tags = [], Description = "",
+            CategoryId = categoryId,
+        };
+    }
+
     /// <summary>Rename a category and one of its products in the same transaction (dependent + primary in one batch).</summary>
     public async Task RenameCategoryAndProductAsync(int categoryId, string categoryName, int productId, string productName)
     {

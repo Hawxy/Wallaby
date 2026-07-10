@@ -58,10 +58,14 @@ internal sealed class StateSchemaBootstrapper
         CREATE UNLOGGED TABLE IF NOT EXISTS wallaby.stream_buffer (
             slot_name text   NOT NULL,
             xid       bigint NOT NULL,
+            subxid    bigint NOT NULL DEFAULT 0,
             seq       bigint NOT NULL,
             payload   bytea  NOT NULL,
             PRIMARY KEY (slot_name, xid, seq)
         );
+
+        -- CREATE IF NOT EXISTS won't evolve an existing table; stale rows are cleared at session start.
+        ALTER TABLE wallaby.stream_buffer ADD COLUMN IF NOT EXISTS subxid bigint NOT NULL DEFAULT 0;
         """;
 
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)

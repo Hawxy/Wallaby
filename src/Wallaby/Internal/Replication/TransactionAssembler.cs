@@ -18,7 +18,8 @@ namespace Wallaby.Internal.Replication;
 /// <b>spilled</b> (via <see cref="ITransactionSpill"/>) rather than buffered in memory, so a single huge
 /// transaction can't exhaust the heap; on <see cref="StreamCommitMessage"/> a spill-backed
 /// <see cref="CommittedTransaction"/> is returned (the pipeline reads the changes back in pages), and on
-/// <see cref="StreamAbortMessage"/> the spill is discarded.
+/// <see cref="StreamAbortMessage"/> the spill is discarded — wholly for a transaction abort, or truncated from
+/// the subtransaction's first change for a rolled-back savepoint.
 /// </para>
 /// Relation and truncate messages are not (yet) surfaced as changes. Generic WAL messages with the
 /// <c>wallaby.watermark.*</c> prefix are buffered as <see cref="Watermark"/>s for the backfill coordinator.
@@ -64,8 +65,14 @@ internal sealed class TransactionAssembler(ITransactionSpill spill, int maxBuffe
                 _currentStreamXid = null;                   // segment ended; another xid's segment, or commit/abort, follows
                 return null;
 
+            case StreamAbortMessage abort when abort.SubtransactionXid == abort.TransactionXid:
+                await spill.DiscardAsync(abort.TransactionXid, ct);  // whole transaction rolled back — drop its spill
+                return null;
+
             case StreamAbortMessage abort:
-                await spill.DiscardAsync(abort.TransactionXid, ct);  // (sub)transaction rolled back — drop its spill
+                // A rolled-back savepoint: truncate just that subtransaction's changes; the rest of the
+                // transaction streams on and may still commit.
+                await spill.DiscardSubtransactionAsync(abort.TransactionXid, abort.SubtransactionXid, ct);
                 return null;
 
             case StreamCommitMessage streamCommit:
@@ -88,26 +95,26 @@ internal sealed class TransactionAssembler(ITransactionSpill spill, int maxBuffe
 
             // ---- DML: spill it for the open streamed xid, else buffer it for the non-streamed transaction ----
             case InsertMessage insert:
-                await RouteAsync(await DecodeInsertAsync(insert, ct), ct);
+                await RouteAsync(await DecodeInsertAsync(insert, ct), insert.TransactionXid, ct);
                 return null;
 
             // Derived update types first; the base UpdateMessage is abstract.
             case FullUpdateMessage update:
-                await RouteAsync(await DecodeUpdateAsync(update, update.OldRow, ct), ct);
+                await RouteAsync(await DecodeUpdateAsync(update, update.OldRow, ct), update.TransactionXid, ct);
                 return null;
             case IndexUpdateMessage update:
-                await RouteAsync(await DecodeUpdateAsync(update, update.Key, ct), ct);
+                await RouteAsync(await DecodeUpdateAsync(update, update.Key, ct), update.TransactionXid, ct);
                 return null;
             case DefaultUpdateMessage update:
-                await RouteAsync(await DecodeUpdateAsync(update, oldRow: null, ct), ct);
+                await RouteAsync(await DecodeUpdateAsync(update, oldRow: null, ct), update.TransactionXid, ct);
                 return null;
 
             // Derived delete types; the base DeleteMessage is abstract.
             case FullDeleteMessage delete:
-                await RouteAsync(await DecodeDeleteAsync(delete, delete.OldRow, ct), ct);
+                await RouteAsync(await DecodeDeleteAsync(delete, delete.OldRow, ct), delete.TransactionXid, ct);
                 return null;
             case KeyDeleteMessage delete:
-                await RouteAsync(await DecodeDeleteAsync(delete, delete.Key, ct), ct);
+                await RouteAsync(await DecodeDeleteAsync(delete, delete.Key, ct), delete.TransactionXid, ct);
                 return null;
 
             default:
@@ -116,11 +123,13 @@ internal sealed class TransactionAssembler(ITransactionSpill spill, int maxBuffe
         }
     }
 
-    private async ValueTask RouteAsync(RawChange change, CancellationToken ct)
+    // messageXid is the streamed DML message's own xid — the subtransaction's when made inside a
+    // savepoint, the toplevel's otherwise (and null on non-streamed messages).
+    private async ValueTask RouteAsync(RawChange change, uint? messageXid, CancellationToken ct)
     {
         if (_currentStreamXid is { } xid)
         {
-            await spill.AppendAsync(xid, change, ct);  // streamed: out of memory, no size guard needed
+            await spill.AppendAsync(xid, messageXid ?? xid, change, ct);  // streamed: out of memory, no size guard needed
             return;
         }
 
