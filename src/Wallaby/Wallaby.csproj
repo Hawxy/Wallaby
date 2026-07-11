@@ -12,6 +12,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Testing" />
     <InternalsVisibleTo Include="Wallaby.Providers.Marten" />
+    <InternalsVisibleTo Include="Wallaby.Sinks.Http" />
+    <InternalsVisibleTo Include="Wallaby.Sinks.Kafka" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.Tests" />

@@ -10,6 +10,7 @@
     <PackageReference Include="TUnit" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Verify.TUnit" />
     <PackageReference Include="Testcontainers.Kafka" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
