@@ -95,6 +95,97 @@ internal static class KeysetCodec
         return true;
     }
 
+    /// <summary>
+    /// Serialize a scoped-backfill cursor: the filter-batch index plus the in-batch PK cursor. Unlike
+    /// <see cref="SerializeCursor"/>, a null <paramref name="values"/> still writes an envelope ("start
+    /// of batch <paramref name="batch"/>"), so a crash between batches resumes at the right batch.
+    /// </summary>
+    public static string SerializeScopedCursor(int batch, object?[]? values, IReadOnlyList<string> pkColumns)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("v"u8, CursorVersion);
+            writer.WriteNumber("b"u8, batch);
+            writer.WriteStartArray("pk"u8);
+            foreach (var column in pkColumns)
+            {
+                writer.WriteStringValue(column);
+            }
+            writer.WriteEndArray();
+            if (values is null)
+            {
+                writer.WriteNull("cur"u8);
+            }
+            else
+            {
+                writer.WriteStartArray("cur"u8);
+                foreach (var value in values)
+                {
+                    WriteValue(writer, value);
+                }
+                writer.WriteEndArray();
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    /// <summary>
+    /// Deserialize a scoped-backfill cursor. Cursors persisted before batching carry no batch index and
+    /// read back as batch 0. Returns false on a stale/mismatched envelope — the caller reruns the scope
+    /// fresh. Null/empty input is a valid "no cursor yet".
+    /// </summary>
+    public static bool TryDeserializeScopedCursor(
+        string? json, IReadOnlyList<string> pkColumns, IReadOnlyList<Type> targets,
+        out int batch, out object?[]? cursor)
+    {
+        batch = 0;
+        cursor = null;
+        if (string.IsNullOrEmpty(json))
+        {
+            return true;
+        }
+
+        CursorEnvelope? envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.CursorEnvelope);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (envelope is null || envelope.V != CursorVersion || envelope.Pk is null || envelope.B < 0 ||
+            envelope.Pk.Length != pkColumns.Count ||
+            (envelope.Cur is not null && envelope.Cur.Length != targets.Count))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < pkColumns.Count; i++)
+        {
+            if (!string.Equals(envelope.Pk[i], pkColumns[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        batch = envelope.B;
+        if (envelope.Cur is not null)
+        {
+            var row = new object?[envelope.Cur.Length];
+            for (var i = 0; i < row.Length; i++)
+            {
+                row[i] = ElementToClr(envelope.Cur[i], targets[i]);
+            }
+            cursor = row;
+        }
+        return true;
+    }
+
     /// <summary>Serialize a set of value tuples (e.g. distinct fan-out lookup keys) to JSON.</summary>
     public static string SerializeTuples(IReadOnlyList<object?[]> tuples)
     {
@@ -184,11 +275,17 @@ internal static class KeysetCodec
     }
 }
 
-/// <summary>The persisted shape of a keyset cursor: format version, PK column names, cursor values.</summary>
+/// <summary>
+/// The persisted shape of a keyset cursor: format version, PK column names, cursor values, and (for
+/// scoped cursors) the filter-batch index — absent on whole-table cursors, reading back as 0.
+/// </summary>
 internal sealed class CursorEnvelope
 {
     [JsonPropertyName("v")]
     public int V { get; init; }
+
+    [JsonPropertyName("b")]
+    public int B { get; init; }
 
     [JsonPropertyName("pk")]
     public string[]? Pk { get; init; }

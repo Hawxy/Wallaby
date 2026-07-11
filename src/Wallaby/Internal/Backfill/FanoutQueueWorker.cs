@@ -116,21 +116,26 @@ internal sealed class FanoutQueueWorker(
 
         // Requested = run fresh; an orphaned InProgress (leader crashed mid-run) resumes from its cursor.
         var fresh = job.Status == BackfillStatus.Requested;
+        var startBatch = 0;
         object?[]? startCursor = null;
-        if (!fresh && !KeysetCodec.TryDeserializeCursor(job.CursorJson, lookup.PkColumns, lookup.PkTypes, out startCursor))
+        if (!fresh && !KeysetCodec.TryDeserializeScopedCursor(
+                job.CursorJson, lookup.PkColumns, lookup.PkTypes, out startBatch, out startCursor))
         {
             // The job's cursor was built against a different key shape (or format) — rerun the scope fresh.
             logger.FanoutCursorRejected(job.TableQualified);
             fresh = true;
+            startBatch = 0;
+            startCursor = null;
         }
         var startRows = fresh ? 0 : job.RowsCopied;
 
         await store.MarkInProgressAsync(job.TableQualified, job.LookupHash, fresh ? null : job.CursorJson, ct);
 
         await coordinator.BackfillScopeAsync(
-            spec, startCursor, startRows,
-            (cursor, rows, _, token) => store.SaveProgressAsync(
-                job.TableQualified, job.LookupHash, KeysetCodec.SerializeCursor(cursor, lookup.PkColumns), rows, token),
+            spec, startBatch, startCursor, startRows,
+            (batch, cursor, rows, _, token) => store.SaveProgressAsync(
+                job.TableQualified, job.LookupHash,
+                KeysetCodec.SerializeScopedCursor(batch, cursor, lookup.PkColumns), rows, token),
             ct);
 
         await store.CompleteAsync(job.TableQualified, job.LookupHash, ct);

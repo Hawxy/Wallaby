@@ -99,15 +99,17 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
         foreach (var (binding, acc) in perBinding)
         {
             var columns = binding.Lookup.Select(l => l.PrimaryColumn).ToArray();
-            var filter = KeysetFilter.ForLookup(columns, acc.Tuples);
-            var pager = new KeysetPager(binding.PrimaryTable, filter);
+            var filters = KeysetFilter.ForLookup(columns, acc.Tuples);
+            var pager = new KeysetPager(binding.PrimaryTable, filters[0]);
             var chunk = await pager.ReadChunkAsync(connection, cursor: null, pageSize, ct);
 
             var page = ToSyntheticUpdates(chunk.Rows, acc.Representative);
             totalSynthetic += page.Count;
             _instr.RecordDependentSynthetic(binding.DependentTable.QualifiedName, page.Count);
 
-            var continuation = chunk.HasMore
+            // A multi-filter lookup must offload even when the first filter's page ran dry: the later
+            // filters' rows were never scanned inline.
+            var continuation = chunk.HasMore || filters.Count > 1
                 ? new ScopedFanoutSpec(binding.PrimaryTable, columns, acc.Tuples)
                 : null;
             if (continuation is not null)

@@ -85,20 +85,46 @@ internal sealed class WatermarkBackfillCoordinator(
 
     /// <summary>
     /// Snapshot only the rows of <paramref name="spec"/>'s primary table matching its lookup values
-    /// (a dependent fan-out's affected set), resuming from <paramref name="startCursor"/>.
+    /// (a dependent fan-out's affected set). The lookup filter may span several bounded-parameter
+    /// batches (see <see cref="KeysetFilter.ForLookup"/>), scanned sequentially; resume is
+    /// (<paramref name="startBatch"/>, <paramref name="startCursor"/>). <paramref name="saveProgress"/>
+    /// receives (batch, cursor, rows, hasMore) — hasMore stays true until the last chunk of the last
+    /// batch, so the job completes only when the whole scope is done.
     /// </summary>
     public async Task<long> BackfillScopeAsync(
-        ScopedFanoutSpec spec, object?[]? startCursor, long startRows,
-        Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
+        ScopedFanoutSpec spec, int startBatch, object?[]? startCursor, long startRows,
+        Func<int, object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
     {
-        var filter = KeysetFilter.ForLookup(spec.LookupColumns, spec.LookupValues);
-        var pager = new KeysetPager(spec.PrimaryTable, filter);
+        var filters = KeysetFilter.ForLookup(spec.LookupColumns, spec.LookupValues);
+        if (startBatch >= filters.Count)
+        {
+            // A resume point past the current batch count (e.g. a changed batching bound) can't be
+            // trusted; rescan the whole scope — upsert-only, so overlap is safe.
+            startBatch = 0;
+            startCursor = null;
+        }
 
         logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
-        var rowsCopied = await RunChunkLoopAsync(
-            pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,
-            startCursor, startRows, saveProgress, ct);
+        var rowsCopied = startRows;
+        for (var b = startBatch; b < filters.Count; b++)
+        {
+            var batch = b;
+            var isLastBatch = batch == filters.Count - 1;
+            var pager = new KeysetPager(spec.PrimaryTable, filters[batch]);
+
+            rowsCopied = await RunChunkLoopAsync(
+                pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,
+                batch == startBatch ? startCursor : null, rowsCopied,
+                // A finished non-final batch persists (batch + 1, null): resume at the next batch's start.
+                (cur, rows, hasMore, token) => saveProgress(
+                    hasMore ? batch : batch + 1,
+                    hasMore ? cur : null,
+                    rows,
+                    hasMore || !isLastBatch,
+                    token),
+                ct);
+        }
 
         logger.ScopedFanoutComplete(spec.PrimaryTable.QualifiedName, rowsCopied);
         return rowsCopied;
