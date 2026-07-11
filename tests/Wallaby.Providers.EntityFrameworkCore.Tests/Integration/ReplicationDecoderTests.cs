@@ -66,22 +66,29 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         // 3) Stream and collect the product changes.
         var collected = new List<RawChange>();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
-        await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
         try
         {
-            await foreach (var txn in stream.ReadAsync(cts.Token))
+            await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+            await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
+            try
             {
-                collected.AddRange(txn.Changes.Where(c => c.TableName == "products"));
-                if (collected.Any(c => c.Action == ChangeAction.Delete))
+                await foreach (var txn in stream.ReadAsync(cts.Token))
                 {
-                    break;
+                    collected.AddRange(txn.Changes.Where(c => c.TableName == "products"));
+                    if (collected.Any(c => c.Action == ChangeAction.Delete))
+                    {
+                        break;
+                    }
                 }
             }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                // Fall through to assertions, which will report what was (not) captured.
+            }
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        finally
         {
-            // Fall through to assertions, which will report what was (not) captured.
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
         }
 
         // Insert

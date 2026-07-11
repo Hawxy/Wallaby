@@ -41,17 +41,24 @@ public class MartenReplicationDecoderTests(MartenStoreFixture pg)
 
         RawChange? insert = null;
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
-        await using var stream = new LogicalReplicationStream(
-            pg.ConnectionString, names.Slot, names.Publication, spill, model: model);
-        await foreach (var txn in stream.ReadAsync(cts.Token))
+        try
         {
-            insert = txn.Changes.FirstOrDefault(
-                c => c.TableName == "mt_doc_widget" && c.Action == ChangeAction.Insert);
-            if (insert is not null)
+            await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+            await using var stream = new LogicalReplicationStream(
+                pg.ConnectionString, names.Slot, names.Publication, spill, model: model);
+            await foreach (var txn in stream.ReadAsync(cts.Token))
             {
-                break;
+                insert = txn.Changes.FirstOrDefault(
+                    c => c.TableName == "mt_doc_widget" && c.Action == ChangeAction.Insert);
+                if (insert is not null)
+                {
+                    break;
+                }
             }
+        }
+        finally
+        {
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
         }
 
         var data = insert.ShouldNotBeNull().NewValues!.Single(c => c.ColumnName == "data");

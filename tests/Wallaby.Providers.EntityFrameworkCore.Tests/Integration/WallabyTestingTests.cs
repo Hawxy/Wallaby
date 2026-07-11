@@ -53,19 +53,26 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("meili", capture);
 
-        await using var node = await WallabyTestNode.StartAsync(services);
-        await WallabyReadiness.WaitForStreamingAsync(node.Services);
+        try
+        {
+            await using var node = await WallabyTestNode.StartAsync(services);
+            await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
-        var categoryId = await Db.AddCategoryAsync();
-        var id = await Db.AddProductAsync(categoryId, $"testing_{names.Suffix}");
+            var categoryId = await Db.AddCategoryAsync();
+            var id = await Db.AddProductAsync(categoryId, $"testing_{names.Suffix}");
 
-        await capture.WaitForDocumentsAsync([id.ToString()]);
+            await capture.WaitForDocumentsAsync([id.ToString()]);
 
-        var latest = capture.LatestByDocumentId(destination: "products");
-        var record = latest[id.ToString()];
-        record.IsDeletion.ShouldBeFalse();
-        record.Destination.ShouldBe("products");
-        record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
+            var latest = capture.LatestByDocumentId(destination: "products");
+            var record = latest[id.ToString()];
+            record.IsDeletion.ShouldBeFalse();
+            record.Destination.ShouldBe("products");
+            record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
+        }
+        finally
+        {
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
+        }
     }
 
     [Test]
@@ -104,17 +111,24 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("meili", capture);
 
-        await using var node = await WallabyTestNode.StartAsync(services);
-        await WallabyReadiness.WaitForStreamingAsync(node.Services);
+        try
+        {
+            await using var node = await WallabyTestNode.StartAsync(services);
+            await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
-        var categoryId = await Db.AddCategoryAsync();
-        var id = await Db.AddProductAsync(categoryId, $"late_bound_{names.Suffix}");
+            var categoryId = await Db.AddCategoryAsync();
+            var id = await Db.AddProductAsync(categoryId, $"late_bound_{names.Suffix}");
 
-        await capture.WaitForDocumentsAsync([id.ToString()]);
+            await capture.WaitForDocumentsAsync([id.ToString()]);
 
-        var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
-        record.IsDeletion.ShouldBeFalse();
-        record.Document!["name"].ShouldBe($"late_bound_{names.Suffix}");
+            var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
+            record.IsDeletion.ShouldBeFalse();
+            record.Document!["name"].ShouldBe($"late_bound_{names.Suffix}");
+        }
+        finally
+        {
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
+        }
     }
 }
 

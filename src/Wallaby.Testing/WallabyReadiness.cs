@@ -37,7 +37,7 @@ public static class WallabyReadiness
         while (status.Current.Role != WallabyNodeRole.Leader)
         {
             ThrowIfFaulted(status.Current);
-            await DelayOrTimeout(deadline, effectiveTimeout, $"role to become Leader (current: {status.Current.Role})", ct);
+            await DelayOrTimeout(deadline, effectiveTimeout, "role to become Leader", status, ct);
         }
 
         // Phase 2: the slot exists and a walsender is attached — changes from here on are captured.
@@ -56,7 +56,8 @@ public static class WallabyReadiness
                 }
             }
 
-            await DelayOrTimeout(deadline, effectiveTimeout, $"replication slot '{options.SlotName}' to become active", ct);
+            await DelayOrTimeout(
+                deadline, effectiveTimeout, $"replication slot '{options.SlotName}' to become active", status, ct);
         }
     }
 
@@ -69,11 +70,18 @@ public static class WallabyReadiness
         }
     }
 
-    private static async Task DelayOrTimeout(DateTime deadline, TimeSpan timeout, string waitingFor, CancellationToken ct)
+    private static async Task DelayOrTimeout(
+        DateTime deadline, TimeSpan timeout, string waitingFor, IWallabyStatus status, CancellationToken ct)
     {
         if (DateTime.UtcNow >= deadline)
         {
-            throw new TimeoutException($"Timed out after {timeout} waiting for {waitingFor}.");
+            // A retrying (non-faulted) node reports why it isn't ready — a crash-looping leader's error
+            // would otherwise be invisible here.
+            var snapshot = status.Current;
+            throw new TimeoutException(
+                $"Timed out after {timeout} waiting for {waitingFor}. " +
+                $"Role: {snapshot.Role}, consecutive leader failures: {snapshot.ConsecutiveLeaderFailures}, " +
+                $"last error: {snapshot.LastError ?? "(none)"}");
         }
         await Task.Delay(PollInterval, ct);
     }

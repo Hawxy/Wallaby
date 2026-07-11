@@ -80,17 +80,24 @@ public class CrashRecoveryTests(TestModelPostgresFixture pg)
             var categoryId = await db.AddCategoryAsync();
             var productId = await db.AddProductAsync(categoryId, $"crash_{names.Suffix}");
 
-            // The sink's TaskCanceledException must surface as a leader-session failure, not a clean step-down.
+            // The sink's TaskCanceledException must surface as a leader-session failure, not a clean
+            // step-down — and the count must accumulate across retried sessions, so a crash-looping
+            // leader is visible to health checks.
             await WaitUntilAsync(
-                () => status.Current.ConsecutiveLeaderFailures >= 1,
-                $"ConsecutiveLeaderFailures stayed 0 (last error: {status.Current.LastError ?? "none"})");
+                () => status.Current.ConsecutiveLeaderFailures >= 2,
+                $"ConsecutiveLeaderFailures never reached 2 (last error: {status.Current.LastError ?? "none"})");
 
             sink.Release();
             await sink.WaitForDocumentsAsync([productId.ToString()]);
+
+            // A delivered + acknowledged transaction proves the leader is healthy again.
+            await WaitUntilAsync(
+                () => status.Current.ConsecutiveLeaderFailures == 0,
+                "ConsecutiveLeaderFailures did not reset after recovery");
         }
         finally
         {
-            await DropSlotAndPublicationAsync(names);
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
         }
     }
 
@@ -107,30 +114,4 @@ public class CrashRecoveryTests(TestModelPostgresFixture pg)
         }
     }
 
-    // Slots and publications survive the shared session database, so tests drop their own to avoid
-    // exhausting max_replication_slots. The prior node's replication connection can linger briefly
-    // after shutdown; retry until the server considers the slot inactive.
-    private async Task DropSlotAndPublicationAsync(WallabyNames names)
-    {
-        await using var conn = new NpgsqlConnection(pg.ConnectionString);
-        await conn.OpenAsync();
-        for (var attempt = 0; ; attempt++)
-        {
-            try
-            {
-                await PgExec.ExecuteAsync(
-                    conn,
-                    "SELECT pg_drop_replication_slot(@s) WHERE EXISTS " +
-                    "(SELECT 1 FROM pg_replication_slots WHERE slot_name = @s)",
-                    default,
-                    ("s", names.Slot));
-                break;
-            }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ObjectInUse && attempt < 50)
-            {
-                await Task.Delay(100);
-            }
-        }
-        await PgExec.ExecuteAsync(conn, $"DROP PUBLICATION IF EXISTS {PgExec.QuoteIdentifier(names.Publication)}", default);
-    }
 }

@@ -392,12 +392,21 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_pipelineTask is not null)
+        try
         {
-            await StopAsync();
+            if (_pipelineTask is not null)
+            {
+                await StopAsync(); // throws when the pipeline faulted — cleanup below must still run
+            }
         }
-        await SinkDisposal.DisposeAllAsync(_sinks.Values, NullLogger.Instance);
-        await _dataSource.DisposeAsync();
+        finally
+        {
+            await SinkDisposal.DisposeAllAsync(_sinks.Values, NullLogger.Instance);
+            // The shared session container caps max_replication_slots; leaving this test's slot behind
+            // eventually starves a later test's slot creation.
+            await PostgresReplicationCleanup.DropAsync(ConnectionString, Names);
+            await _dataSource.DisposeAsync();
+        }
     }
 
     private void ThrowIfPipelineFaulted()
