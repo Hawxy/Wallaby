@@ -66,6 +66,9 @@ internal sealed class StateSchemaBootstrapper
 
         -- CREATE IF NOT EXISTS won't evolve an existing table; stale rows are cleared at session start.
         ALTER TABLE wallaby.stream_buffer ADD COLUMN IF NOT EXISTS subxid bigint NOT NULL DEFAULT 0;
+
+        -- Finished fan-out jobs are deleted on completion; clear rows written before that behavior.
+        DELETE FROM wallaby.fanout_queue WHERE status = 'Completed';
         """;
 
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)

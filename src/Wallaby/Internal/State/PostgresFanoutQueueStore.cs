@@ -160,8 +160,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         => PgExec.ExecuteAsync(
             dataSource,
             """
-            UPDATE wallaby.fanout_queue
-            SET status = 'Completed', updated_at = now()
+            DELETE FROM wallaby.fanout_queue
             WHERE table_qualified = @t AND lookup_hash = @h AND status = 'InProgress'
             """,
             ct,

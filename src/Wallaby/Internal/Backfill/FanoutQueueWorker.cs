@@ -8,8 +8,8 @@ namespace Wallaby.Internal.Backfill;
 
 /// <summary>
 /// Drains the scoped fan-out queue on the leader: claims due jobs, reconstructs their lookup against the
-/// model, and runs each as a scoped backfill via the <see cref="WatermarkBackfillCoordinator"/>. A job is
-/// marked <c>Completed</c> only if it is still <c>InProgress</c>, so a trigger that re-arms it mid-run is
+/// model, and runs each as a scoped backfill via the <see cref="WatermarkBackfillCoordinator"/>. A finished
+/// job's row is removed only if it is still <c>InProgress</c>, so a trigger that re-arms it mid-run is
 /// not lost (it re-runs on the next pass).
 /// </summary>
 internal sealed class FanoutQueueWorker(

@@ -23,7 +23,7 @@ internal interface IFanoutQueueStore
     /// <summary>Persist the resume cursor + running row count for an in-progress job (status untouched).</summary>
     Task SaveProgressAsync(string tableQualified, string lookupHash, string? cursorJson, long rowsCopied, CancellationToken ct);
 
-    /// <summary>Mark a job <c>Completed</c>, but only if it is still <c>InProgress</c> (so a concurrent re-arm survives).</summary>
+    /// <summary>Remove a finished job's row, but only if it is still <c>InProgress</c> (so a concurrent re-arm survives and re-runs).</summary>
     Task CompleteAsync(string tableQualified, string lookupHash, CancellationToken ct);
 
     /// <summary>

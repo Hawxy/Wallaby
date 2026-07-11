@@ -202,15 +202,51 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         resumed!.Status.ShouldBe(BackfillStatus.InProgress);
         resumed.CursorJson.ShouldNotBeNull();
 
-        // Completing it (guarded on InProgress) removes it from the due set.
+        // Completing it (guarded on InProgress) deletes the row.
         await store.CompleteAsync(due.TableQualified, due.LookupHash, CancellationToken.None);
         (await store.GetNextDueAsync(CancellationToken.None)).ShouldBeNull();
+        (await store.ListAsync(CancellationToken.None)).ShouldBeEmpty();
 
-        // A repeat trigger for the same lookup re-arms the SAME row rather than adding a second.
+        // A repeat trigger after completion enqueues a single fresh row.
         await store.EnqueueAsync(spec, CancellationToken.None);
         var rearmed = await store.GetNextDueAsync(CancellationToken.None);
         rearmed!.Status.ShouldBe(BackfillStatus.Requested);
         (await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash)
             .ShouldBe(1);
+    }
+
+    [Test]
+    public async Task Completing_a_re_armed_job_leaves_the_requested_row()
+    {
+        await using (var conn = await pg.DataSource.OpenConnectionAsync())
+        {
+            await new StateSchemaBootstrapper().EnsureAsync(conn, CancellationToken.None);
+        }
+        await PgExec.ExecuteAsync(pg.DataSource, "DELETE FROM wallaby.fanout_queue", CancellationToken.None);
+
+        var store = new PostgresFanoutQueueStore(pg.DataSource);
+        var table = new CapturedTable
+        {
+            EntityClrType = typeof(Product),
+            Schema = "public",
+            TableName = "products",
+            Columns = [],
+            PrimaryKey = [],
+        };
+        var spec = new ScopedFanoutSpec(table, ["category_id"], [new object?[] { 4242 }]);
+
+        await store.EnqueueAsync(spec, CancellationToken.None);
+        var job = (await store.GetNextDueAsync(CancellationToken.None))!;
+        await store.MarkInProgressAsync(job.TableQualified, job.LookupHash, null, CancellationToken.None);
+
+        // A trigger fires while the job is running: the row re-arms to Requested.
+        await store.EnqueueAsync(spec, CancellationToken.None);
+
+        // The finished run must not delete the re-armed request.
+        await store.CompleteAsync(job.TableQualified, job.LookupHash, CancellationToken.None);
+
+        var remaining = await store.ListAsync(CancellationToken.None);
+        remaining.Count.ShouldBe(1);
+        remaining[0].Status.ShouldBe(BackfillStatus.Requested);
     }
 }
