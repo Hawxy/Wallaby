@@ -18,7 +18,7 @@ public class BackfillTests(TestModelPostgresFixture pg, MeilisearchFixture meili
         index = harness.Names.Named("products");
         // A unique backfill version isolates this test from the shared wallaby.backfill_state for public.products
         // (otherwise the scheduler would skip an already-"Completed" table from a prior test).
-        harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
+        harness.AddSink(TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
             .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name },
                 backfill: true, backfillVersion: harness.Names.Suffix);
         return harness;

@@ -17,7 +17,7 @@ public class DependentFanoutTests(TestModelPostgresFixture pg, MeilisearchFixtur
         var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         index = harness.Names.Named("products_fanout");
 
-        harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }));
+        harness.AddSink(TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }));
         harness.Map<Product>("meili", index, async (db, changes, ct) =>
         {
             var ids = changes.Where(c => c.Entity is not null).Select(c => (int)c.PrimaryKey[0]!).ToList();

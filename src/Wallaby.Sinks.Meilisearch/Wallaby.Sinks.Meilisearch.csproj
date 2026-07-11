@@ -12,11 +12,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.Sinks.Meilisearch.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="DotNet.ReproducibleBuilds">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Meilisearch" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
   <Import Project="../../Package.Build.props" />

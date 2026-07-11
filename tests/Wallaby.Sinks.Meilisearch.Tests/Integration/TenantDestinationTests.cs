@@ -16,7 +16,7 @@ public class TenantDestinationTests(TestModelPostgresFixture pg, MeilisearchFixt
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var prefix = harness.Names.Named("products"); // unique per test run
-        harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
+        harness.AddSink(TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
             .Project<Product>("meili", destination: null,
                 document: p => new WallabyDocument { ["name"] = p.Name },
                 scopeKey: p => p.TenantId,

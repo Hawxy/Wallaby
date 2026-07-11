@@ -33,7 +33,7 @@ public class RegistrationTests
     [Arguments("hooks/relative")]
     public void Endpoint_must_be_an_absolute_url(string endpoint)
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
 
         Should.Throw<ArgumentException>(() => builder.AddHttpSink("webhook", o => o.Endpoint = endpoint))
             .Message.ShouldContain("absolute");
@@ -42,7 +42,7 @@ public class RegistrationTests
     [Test]
     public void Max_records_per_request_must_be_positive()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
 
         Should.Throw<ArgumentException>(() => builder.AddHttpSink("webhook", o =>
         {

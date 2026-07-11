@@ -6,7 +6,7 @@ namespace Wallaby.Internal;
 /// <summary>
 /// Owns the single <see cref="NpgsqlDataSource"/> Wallaby uses for all pooled work (checkpoints, advisory
 /// locks, backfill reads, dependent-key lookups). Built from the connection string supplied via
-/// <see cref="WallabyBuilder.UseConnectionString"/>; lifetime is tied to the DI container.
+/// <see cref="WallabyBuilder.UseConnectionString(string)"/>; lifetime is tied to the DI container.
 /// </summary>
 internal sealed class WallabyDataSource : IAsyncDisposable
 {

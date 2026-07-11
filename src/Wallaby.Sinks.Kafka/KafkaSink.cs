@@ -96,13 +96,30 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
             })
             .ToList();
 
+        // OperationTimeout waits for the topics to actually exist (not just be accepted), so streaming
+        // never starts against topics still propagating.
+        var timeout = TimeSpan.FromMilliseconds(_options.AdminTimeoutMs);
+        var create = admin.CreateTopicsAsync(specs, new CreateTopicsOptions
+        {
+            RequestTimeout = timeout,
+            OperationTimeout = timeout,
+        });
+
         try
         {
-            await admin.CreateTopicsAsync(specs);
+            // CreateTopicsAsync has no cancellation overload; WaitAsync abandons it on cancellation.
+            await create.WaitAsync(ct);
         }
         catch (CreateTopicsException ex) when (ex.Results.TrueForAll(
             r => r.Error.Code is ErrorCode.NoError or ErrorCode.TopicAlreadyExists))
         {
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Observe the abandoned task's eventual fault so it never surfaces as an unobserved exception.
+            _ = create.ContinueWith(
+                static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            throw;
         }
     }
 

@@ -79,12 +79,14 @@ internal sealed class ExternalSlotRegistration
 internal sealed class WallabyConfiguration
 {
     /// <summary>
-    /// Option mutations queued by <see cref="WallabyBuilder.ConfigureOptions"/> and
-    /// <see cref="WallabyBuilder.UseConnectionString"/>. Applied to the <see cref="WallabyOptions"/> being built by
-    /// the options pipeline at the <c>AddWallaby</c> registration position, so they compose with the standard
-    /// <c>Configure&lt;WallabyOptions&gt;</c>/<c>PostConfigure</c> calls in registration order.
+    /// Option mutations queued by <see cref="WallabyBuilder.ConfigureOptions(Action{WallabyOptions})"/> and
+    /// <see cref="WallabyBuilder.UseConnectionString(string)"/> (and their provider-aware overloads).
+    /// Applied to the <see cref="WallabyOptions"/> being built by the options pipeline at the
+    /// <c>AddWallaby</c> registration position, so they compose with the standard
+    /// <c>Configure&lt;WallabyOptions&gt;</c>/<c>PostConfigure</c> calls in registration order; the provider
+    /// passed in is the root provider available at options-pipeline time.
     /// </summary>
-    public List<Action<WallabyOptions>> OptionsActions { get; } = [];
+    public List<Action<IServiceProvider, WallabyOptions>> OptionsActions { get; } = [];
 
     public List<SinkRegistration> Sinks { get; } = [];
 

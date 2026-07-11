@@ -16,12 +16,10 @@ dotnet add package Wallaby.Sinks.Http
 
 ## Register
 
-The sink sends through an `IHttpClientFactory` named client, so `services.AddHttpClient()` must be
-registered:
+The sink sends through an `IHttpClientFactory` named client; `AddHttpSink` registers
+`services.AddHttpClient()` for you.
 
 ```csharp
-builder.Services.AddHttpClient();
-
 builder.Services.AddWallaby(cdc =>
 {
     cdc.UseEntityFrameworkCore<AppDbContext>()

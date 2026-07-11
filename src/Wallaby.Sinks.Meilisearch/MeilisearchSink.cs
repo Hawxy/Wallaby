@@ -1,5 +1,7 @@
+using System.Buffers;
 using Meilisearch;
 using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
 
 namespace Wallaby.Sinks.Meilisearch;
 
@@ -8,12 +10,32 @@ namespace Wallaby.Sinks.Meilisearch;
 /// <see cref="MeilisearchSinkOptions.PrimaryKey"/> set to the record's document id (so updates are
 /// idempotent), and deletions remove by that same id. Records are routed to the index named by
 /// <see cref="SinkRecord.Destination"/> (falling back to <see cref="MeilisearchSinkOptions.DefaultIndex"/>).
+/// Requests are sent through an <see cref="IHttpMessageHandlerFactory"/> named handler pipeline (see
+/// <see cref="ClientNameFor"/>), so proxies, resilience handlers, and lifetimes are configured on the
+/// named client.
 /// </summary>
-public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
+public sealed class MeilisearchSink : ISink, ISinkInitializer
 {
+    private static readonly SearchValues<string> PermanentErrorCodes = SearchValues.Create(
+        [
+            "invalid_api_key",
+            "missing_authorization_header",
+            "payload_too_large",
+            "invalid_document_id",
+            "missing_document_id",
+            "invalid_document_fields",
+            "invalid_document_geo_field",
+            "invalid_index_uid",
+            "invalid_index_primary_key",
+            "index_primary_key_already_exists",
+            "index_primary_key_multiple_candidates_found",
+            "bad_request",
+        ],
+        StringComparison.Ordinal);
+
     private readonly MeilisearchSinkOptions _options;
-    private readonly HttpClient _httpClient;
-    private readonly MeilisearchClient _client;
+    private readonly Func<HttpMessageHandler> _transport;
+    private readonly Uri _baseAddress;
 
     // Per configured index, the attribute keys every document must carry (empty unless
     // ValidateConfiguredAttributes is on). Indexes not declared via ConfigureIndex are absent and unchecked.
@@ -21,27 +43,48 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
 
     /// <summary>
     /// Creates a sink that delivers to the Meilisearch instance described by <paramref name="options"/>.
-    /// The underlying client (and its HTTP connection pool) is created once, reused for the lifetime of
-    /// the sink, and released when the sink is disposed.
+    /// The handler pipeline is drawn from <paramref name="factory"/> per delivery, so named-client
+    /// configuration (handlers, lifetimes) applies without caching a connection pool on this
+    /// long-lived sink.
     /// </summary>
     /// <param name="name">The sink's registration name (used for routing, telemetry, and test replacement).</param>
     /// <param name="options">Connection, index, and delivery-behaviour settings.</param>
-    public MeilisearchSink(string name, MeilisearchSinkOptions options)
+    /// <param name="factory">Factory providing the named handler pipeline.</param>
+    public MeilisearchSink(string name, MeilisearchSinkOptions options, IHttpMessageHandlerFactory factory)
+        : this(name, options, TransportFor(factory, options.HttpClientName ?? ClientNameFor(name)))
+    {
+    }
+
+    internal MeilisearchSink(string name, MeilisearchSinkOptions options, Func<HttpMessageHandler> transport)
     {
         Name = name;
         _options = options;
-        // MeilisearchMessageHandler turns error responses into MeilisearchApiError (the client relies on
-        // it), and the base address must end with '/' for relative request URIs to resolve under it.
-        _httpClient = new HttpClient(new MeilisearchMessageHandler(new HttpClientHandler()))
-        {
-            BaseAddress = new Uri(options.Host.EndsWith('/') ? options.Host : options.Host + "/"),
-        };
-        _client = new MeilisearchClient(_httpClient, options.ApiKey);
+        _transport = transport;
+        // The base address must end with '/' for the client's relative request URIs to resolve under it.
+        _baseAddress = new Uri(options.Host.EndsWith('/') ? options.Host : options.Host + "/");
         _requiredAttributes = BuildRequiredAttributes(options);
     }
 
-    /// <summary>Releases the sink's HTTP connection pool. Called by the runtime at host shutdown.</summary>
-    public void Dispose() => _httpClient.Dispose();
+    private static Func<HttpMessageHandler> TransportFor(IHttpMessageHandlerFactory factory, string clientName)
+        => () => factory.CreateHandler(clientName);
+
+    /// <summary>
+    /// The default <see cref="IHttpMessageHandlerFactory"/> client name for a sink,
+    /// <c>wallaby.sinks.meilisearch.&lt;name&gt;</c>. Configure the pipeline on it:
+    /// <c>services.AddHttpClient(MeilisearchSink.ClientNameFor("meili")).ConfigurePrimaryHttpMessageHandler(...)</c>.
+    /// </summary>
+    public static string ClientNameFor(string sinkName) => $"wallaby.sinks.meilisearch.{sinkName}";
+
+    // A client per operation: the factory owns the (pooled) handler's lifetime, so neither the client nor
+    // the MeilisearchMessageHandler wrapper (which converts error responses into MeilisearchApiError —
+    // the SDK relies on it) may dispose it.
+    private MeilisearchClient CreateClient()
+        => new(
+            new HttpClient(new MeilisearchMessageHandler(_transport()), disposeHandler: false)
+            {
+                BaseAddress = _baseAddress,
+            },
+            _options.ApiKey);
 
     private static IReadOnlyDictionary<string, IReadOnlyCollection<string>> BuildRequiredAttributes(
         MeilisearchSinkOptions options)
@@ -129,13 +172,14 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken ct)
     {
+        var client = CreateClient();
         foreach (var config in _options.Indexes)
         {
-            var index = _client.Index(config.Name);
+            var index = client.Index(config.Name);
 
-            if (!await IndexExistsAsync(config.Name, ct))
+            if (!await IndexExistsAsync(client, config.Name, ct))
             {
-                var created = await _client.CreateIndexAsync(config.Name, _options.PrimaryKey, ct);
+                var created = await client.CreateIndexAsync(config.Name, _options.PrimaryKey, ct);
                 await WaitAsync(index, created, ct);
             }
 
@@ -147,14 +191,14 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
         }
     }
 
-    private async Task<bool> IndexExistsAsync(string name, CancellationToken ct)
+    private static async Task<bool> IndexExistsAsync(MeilisearchClient client, string name, CancellationToken ct)
     {
         try
         {
-            await _client.GetIndexAsync(name, ct);
+            await client.GetIndexAsync(name, ct);
             return true;
         }
-        catch (MeilisearchApiError)
+        catch (MeilisearchApiError ex) when (ex.Code == "index_not_found")
         {
             return false;
         }
@@ -165,12 +209,13 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
     {
         try
         {
+            var client = CreateClient();
             var groups = GroupByIndex(batch.Records);
             if (groups.Count <= 1)
             {
                 foreach (var group in groups)
                 {
-                    await DispatchGroupAsync(group, ct);
+                    await DispatchGroupAsync(client, group, ct);
                 }
             }
             else
@@ -180,7 +225,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
                 var tasks = new Task[groups.Count];
                 for (var i = 0; i < groups.Count; i++)
                 {
-                    tasks[i] = DispatchGroupAsync(groups[i], ct);
+                    tasks[i] = DispatchGroupAsync(client, groups[i], ct);
                 }
                 await Task.WhenAll(tasks);
             }
@@ -197,26 +242,47 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
             // would never succeed, so fail permanently (the dispatcher halts the pipeline).
             return DeliveryResult.Permanent(ex.Message, ex);
         }
+        catch (WallabyConfigurationException ex)
+        {
+            return DeliveryResult.Permanent(ex.Message, ex);
+        }
+        catch (MeilisearchTaskFailedException ex)
+        {
+            return ClassifyByCode(ex.Code, ex.Message, ex);
+        }
+        catch (MeilisearchApiError ex)
+        {
+            return ClassifyByCode(ex.Code, $"Meilisearch request failed ({ex.Code ?? "no code"}): {ex.Message}", ex);
+        }
         catch (Exception ex)
         {
-            // Network/HTTP/Meili task failures are treated as retryable; the dispatcher backs off.
+            // Transport failures and anything without a Meilisearch error code are retryable.
             return DeliveryResult.Retry($"Meilisearch delivery failed: {ex.Message}", ex);
         }
     }
 
-    private async Task DispatchGroupAsync(IndexGroup group, CancellationToken ct)
-    {
-        var index = _client.Index(group.Index);
+    private static DeliveryResult ClassifyByCode(string? code, string description, Exception exception)
+        => code is not null && PermanentErrorCodes.Contains(code)
+            ? DeliveryResult.Permanent(description, exception)
+            : DeliveryResult.Retry(description, exception);
 
-        if (group.Upserts.Count > 0)
+    private async Task DispatchGroupAsync(MeilisearchClient client, IndexGroup group, CancellationToken ct)
+    {
+        var index = client.Index(group.Index);
+
+        // Chunks keep each request payload well under Meilisearch's body limit; upserts complete before
+        // deletions so a delete always wins over an earlier upsert of the same document in the batch.
+        for (var offset = 0; offset < group.Upserts.Count; offset += _options.MaxRecordsPerBatch)
         {
-            var info = await index.AddDocumentsAsync(group.Upserts, _options.PrimaryKey, ct);
+            var count = Math.Min(_options.MaxRecordsPerBatch, group.Upserts.Count - offset);
+            var info = await index.AddDocumentsAsync(group.Upserts.GetRange(offset, count), _options.PrimaryKey, ct);
             await WaitAsync(index, info, ct);
         }
 
-        if (group.Deletions.Count > 0)
+        for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerBatch)
         {
-            var info = await index.DeleteDocumentsAsync(group.Deletions, ct);
+            var count = Math.Min(_options.MaxRecordsPerBatch, group.Deletions.Count - offset);
+            var info = await index.DeleteDocumentsAsync(group.Deletions.GetRange(offset, count), ct);
             await WaitAsync(index, info, ct);
         }
     }
@@ -228,8 +294,14 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
         var result = await index.WaitForTaskAsync(info.TaskUid, _options.WaitTimeoutMs, _options.WaitIntervalMs, ct);
         if (result.Status is TaskInfoStatus.Failed or TaskInfoStatus.Canceled)
         {
-            var error = result.Error is null ? "(no detail)" : string.Join("; ", result.Error.Select(kv => $"{kv.Key}={kv.Value}"));
-            throw new InvalidOperationException($"Meilisearch task {info.TaskUid} finished with status {result.Status}: {error}");
+            string? code = null;
+            var detail = "(no detail)";
+            if (result.Error is not null)
+            {
+                result.Error.TryGetValue("code", out code);
+                detail = string.Join("; ", result.Error.Select(kv => $"{kv.Key}={kv.Value}"));
+            }
+            throw new MeilisearchTaskFailedException(info.TaskUid, result.Status, code, detail);
         }
     }
 
@@ -241,7 +313,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, IDisposable
         foreach (var record in records)
         {
             var indexName = record.Destination ?? _options.DefaultIndex
-                ?? throw new InvalidOperationException(
+                ?? throw new WallabyConfigurationException(
                     $"Record {record.DocumentId} has no destination and no DefaultIndex is configured for sink '{Name}'.");
 
             if (!groups.TryGetValue(indexName, out var group))

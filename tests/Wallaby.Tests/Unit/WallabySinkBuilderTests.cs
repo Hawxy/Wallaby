@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 
@@ -13,7 +14,7 @@ public class WallabySinkBuilderTests
 
     private static (WallabyBuilder Builder, WallabySinkBuilder Sink) BuilderWithSink()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         var sink = builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
         return (builder, sink);
     }

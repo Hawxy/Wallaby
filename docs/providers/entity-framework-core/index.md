@@ -51,8 +51,8 @@ await builder.Build().RunAsync();
 Transforms receive a leased `DbContext` for enrichment lookups - see [Mappings](/mappings).
 
 ::: tip
-If the builder needs services at registration time (e.g. `IConfiguration`), use the
-`AddWallaby((sp, cdc) => ...)` overload - see
+If option values need services (e.g. `IConfiguration`), use the provider-aware overloads of
+`UseConnectionString`/`ConfigureOptions` - see
 [Reading configuration at startup](/configuration#reading-configuration-at-startup).
 :::
 

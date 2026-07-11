@@ -69,7 +69,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
     }
 
     [Test]
-    public async Task Deferred_overload_reads_configuration_and_streams_to_the_replaced_sink()
+    public async Task Provider_aware_connection_string_streams_to_the_replaced_sink()
     {
         var names = WallabyNames.Unique();
         var capture = new CaptureSink();
@@ -84,10 +84,10 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         services.AddLogging();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(pg.ConnectionString));
-        services.AddWallaby((sp, cdc) =>
+        services.AddWallaby(cdc =>
         {
             cdc.UseEntityFrameworkCore<AppDbContext>()
-               .UseConnectionString(sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
+               .UseConnectionString(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
                .AddDelegateSink("meili", (_, _) => throw new InvalidOperationException("The replaced sink must never be invoked."))
                .WithMappings(sink => sink
                    .Map<Product>()
@@ -95,7 +95,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
                    .UsingTransform(TestTransforms.ProductNames));
         });
 
-        // ConfigureTestServices ordering: overrides registered after the (deferred) AddWallaby.
+        // ConfigureTestServices ordering: overrides registered after AddWallaby.
         services.ConfigureWallabyOptions(o =>
         {
             o.SlotName = names.Slot;
@@ -108,13 +108,13 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
         var categoryId = await Db.AddCategoryAsync();
-        var id = await Db.AddProductAsync(categoryId, $"deferred_{names.Suffix}");
+        var id = await Db.AddProductAsync(categoryId, $"late_bound_{names.Suffix}");
 
         await capture.WaitForDocumentsAsync([id.ToString()]);
 
         var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
         record.IsDeletion.ShouldBeFalse();
-        record.Document!["name"].ShouldBe($"deferred_{names.Suffix}");
+        record.Document!["name"].ShouldBe($"late_bound_{names.Suffix}");
     }
 }
 
@@ -131,14 +131,14 @@ public class WallabyTestingExtensionTests
     [Test]
     public void ReplaceWallabySink_throws_for_unknown_sink_name()
     {
-        var services = BuildRegisteredServices(deferred: false);
+        var services = BuildRegisteredServices();
         Should.Throw<InvalidOperationException>(() => services.ReplaceWallabySink("wrong", new CaptureSink()));
     }
 
     [Test]
     public async Task ConfigureWallabyOptions_mutates_the_registered_instance()
     {
-        var services = BuildRegisteredServices(deferred: false);
+        var services = BuildRegisteredServices();
 
         services.ConfigureWallabyOptions(o => o.SlotName = "overridden_slot");
 
@@ -147,10 +147,10 @@ public class WallabyTestingExtensionTests
     }
 
     [Test]
-    public async Task Deferred_overrides_compose_in_call_order()
+    public async Task Overrides_compose_in_call_order()
     {
         var capture = new CaptureSink();
-        var services = BuildRegisteredServices(deferred: true);
+        var services = BuildRegisteredServices();
 
         services.ConfigureWallabyOptions(o => o.SlotName = "first");
         services.ConfigureWallabyOptions(o => o.SlotName = "second");
@@ -164,37 +164,16 @@ public class WallabyTestingExtensionTests
         ReferenceEquals(sinks[0].Factory(provider), capture).ShouldBeTrue();
     }
 
-    [Test]
-    public async Task Deferred_ReplaceWallabySink_with_unknown_name_throws_at_first_resolution()
-    {
-        var services = BuildRegisteredServices(deferred: true);
-
-        // The deferred configuration has not materialized yet, so the unknown name cannot be detected here.
-        services.ReplaceWallabySink("wrong", new CaptureSink());
-
-        await using var provider = services.BuildServiceProvider();
-        Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<WallabyConfiguration>());
-    }
-
-    private static ServiceCollection BuildRegisteredServices(bool deferred)
+    private static ServiceCollection BuildRegisteredServices()
     {
         var services = new ServiceCollection();
-        if (deferred)
-        {
-            services.AddWallaby((_, cdc) => Configure(cdc));
-        }
-        else
-        {
-            services.AddWallaby(Configure);
-        }
-        return services;
-
-        static void Configure(WallabyBuilder cdc) => cdc
+        services.AddWallaby(cdc => cdc
             .UseEntityFrameworkCore<AppDbContext>()
             .UseConnectionString("Host=localhost;Database=unused")
             .AddDelegateSink("real", (_, _) => Task.FromResult(DeliveryResult.Success))
             .WithMappings(sink => sink
                 .Map<Product>()
-                .UsingTransform(TestTransforms.ProductNames));
+                .UsingTransform(TestTransforms.ProductNames)));
+        return services;
     }
 }

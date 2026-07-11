@@ -18,7 +18,7 @@ public class BackfillSchedulerIntegrationTests(TestModelPostgresFixture pg, Meil
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         harness.ChunkSize = 2;
         var index = harness.Names.Named("products");
-        harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
+        harness.AddSink(TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
             .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name }, backfill: true);
 
         var categoryId = await harness.Db.AddCategoryAsync();
@@ -69,7 +69,7 @@ public class BackfillSchedulerIntegrationTests(TestModelPostgresFixture pg, Meil
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products");
-        harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
+        harness.AddSink(TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
             .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name },
                 backfill: true, backfillVersion: harness.Names.Suffix);
 

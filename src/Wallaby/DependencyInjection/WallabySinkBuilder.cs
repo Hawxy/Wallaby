@@ -18,6 +18,8 @@ public sealed class WallabySinkBuilder
     /// <summary>The parent builder, for continuing the chain without attaching mappings.</summary>
     public WallabyBuilder Wallaby => _parent;
 
+    internal SinkRegistration Registration => _sink;
+
     /// <summary>
     /// Declare the entity mappings this sink receives: each <c>Map&lt;T&gt;()</c> inside the callback routes
     /// that entity's documents here. Repeated calls are additive. Returns the parent builder so the

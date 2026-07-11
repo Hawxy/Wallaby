@@ -69,19 +69,20 @@ builder.Services.PostConfigure<WallabyOptions>(o => o.SlotName = "tests_slot");
 
 ## Reading configuration at startup
 
-When the builder needs services use the provider-included overload of `AddWallaby`:
+When option values need services, use the provider-aware value hooks — `UseConnectionString`,
+`ConfigureOptions`, and the sinks' options overloads all accept an `IServiceProvider`-taking delegate
+that runs on first resolution, while the registration itself stays eager:
 
 ```csharp
-builder.Services.AddWallaby((sp, cdc) =>
+builder.Services.AddWallaby(cdc =>
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-
     cdc.UseEntityFrameworkCore<AppDbContext>() // or any other provider
-       .UseConnectionString(config.GetConnectionString("App")!)
-       // ... sinks and mappings as usual ...
+       .UseConnectionString(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
+       .AddMeilisearchSink("meili", (sp, m) => m.Host = sp.GetRequiredService<IConfiguration>()["Meili:Host"]!)
+       // ... mappings as usual ...
 });
 ```
 
-The callback runs once, when the host first resolves Wallaby's services. Two consequences of the deferred timing: the
-callback receives the **root** provider (scoped services are unavailable), and configuration errors surface
-at host start instead of at registration.
+The delegates run once, when the host first resolves Wallaby's services, and receive the **root** provider
+(scoped services are unavailable). Resolving Wallaby's own services inside them creates a resolution cycle,
+and their configuration errors surface at host start instead of at registration.
