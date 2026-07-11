@@ -221,6 +221,32 @@ public class AddWallabyRegistrationTests
     }
 
     [Test]
+    public void Calling_AddWallaby_twice_throws_at_registration_time()
+    {
+        var services = NewServices();
+        services.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString));
+
+        var ex = Should.Throw<WallabyConfigurationException>(
+            () => services.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString)));
+
+        ex.Message.ShouldContain("one instance per host");
+    }
+
+    [Test]
+    public void Mixing_the_eager_and_deferred_overloads_also_throws()
+    {
+        var eagerFirst = NewServices();
+        eagerFirst.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString));
+        Should.Throw<WallabyConfigurationException>(
+            () => eagerFirst.AddWallaby((_, cdc) => AddCaptureConfig(cdc, ConnectionString)));
+
+        var deferredFirst = NewServices();
+        deferredFirst.AddWallaby((_, cdc) => AddCaptureConfig(cdc, ConnectionString));
+        Should.Throw<WallabyConfigurationException>(
+            () => deferredFirst.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString)));
+    }
+
+    [Test]
     public async Task Deferred_configure_runs_exactly_once()
     {
         var calls = 0;

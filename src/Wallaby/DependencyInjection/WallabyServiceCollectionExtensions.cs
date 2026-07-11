@@ -25,10 +25,12 @@ public static class WallabyServiceCollectionExtensions
     /// <see cref="WallabyOptions"/> participates in the standard options pipeline: <c>Configure&lt;WallabyOptions&gt;</c>
     /// and configuration binding compose with the builder's <c>ConfigureOptions</c> in registration order, and
     /// <c>PostConfigure</c> runs last; option values are validated on first resolution.
+    /// Call at most once per service collection; a second call throws <see cref="WallabyConfigurationException"/>.
     /// </summary>
     public static IServiceCollection AddWallaby(this IServiceCollection services, Action<WallabyBuilder> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
+        ThrowIfAlreadyRegistered(services);
         var builder = new WallabyBuilder();
         configure(builder);
         services.AddSingleton(builder.Build());
@@ -44,11 +46,13 @@ public static class WallabyServiceCollectionExtensions
     /// configuration errors surface at host start rather than at registration. The callback receives the
     /// <b>root</b> provider: scoped services are unavailable, and resolving Wallaby's own services
     /// (<see cref="WallabyOptions"/>, <see cref="IWallabyStatus"/>, …) inside it creates a resolution cycle.
+    /// Call at most once per service collection; a second call throws <see cref="WallabyConfigurationException"/>.
     /// </summary>
     public static IServiceCollection AddWallaby(
         this IServiceCollection services, Action<IServiceProvider, WallabyBuilder> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
+        ThrowIfAlreadyRegistered(services);
         services.AddSingleton(sp =>
         {
             var builder = new WallabyBuilder();
@@ -56,6 +60,19 @@ public static class WallabyServiceCollectionExtensions
             return builder.Build();
         });
         return AddWallabyCore(services);
+    }
+
+    // Every registration in AddWallabyCore is a plain AddSingleton and the host starts every registered
+    // IHostedService, so a second AddWallaby would shadow the first configuration and run two election
+    // loops against the same slot.
+    private static void ThrowIfAlreadyRegistered(IServiceCollection services)
+    {
+        if (services.Any(d => d.ServiceType == typeof(WallabyConfiguration) && !d.IsKeyedService))
+        {
+            throw new WallabyConfigurationException(
+                "AddWallaby has already been called on this service collection. Wallaby supports one instance " +
+                "per host; combine all providers, sinks, and mappings into the single AddWallaby call.");
+        }
     }
 
     /// <summary>
