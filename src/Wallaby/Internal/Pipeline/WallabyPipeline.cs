@@ -169,8 +169,16 @@ internal sealed class WallabyPipeline(
     private async Task<int> ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
     {
         var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
+        var sawDependentChange = false;
         foreach (var raw in transaction.Changes)
         {
+            // Note while passing whether any change can trigger fan-out, so transactions that touched
+            // no dependent table skip the fan-out resolve (and its live-key index) entirely.
+            if (!sawDependentChange && dependentResolver is not null && dependentResolver.HasBindingFor(raw.Schema, raw.TableName))
+            {
+                sawDependentChange = true;
+            }
+
             var changeEvent = changeEventFactory.Create(raw);
             if (changeEvent is not null)
             {
@@ -200,7 +208,7 @@ internal sealed class WallabyPipeline(
         await DispatchChunkedAsync(appEvents, ct);
 
         // Dependent fan-out: dispatch the first page per binding inline, offload any tail.
-        if (dependentResolver is not null)
+        if (sawDependentChange)
         {
             await ResolveAndDispatchFanoutAsync(ToAsync(transaction.Changes, ct), BuildLiveKeyIndex(appEvents), ct);
         }
