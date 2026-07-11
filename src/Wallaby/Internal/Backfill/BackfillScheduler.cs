@@ -36,6 +36,33 @@ internal sealed class BackfillScheduler(
     BackfillSchedulerOptions options,
     ILogger logger)
 {
+    /// <summary>
+    /// Run for the lifetime of leadership: an initial due pass, then serve manual backfill requests
+    /// as they arrive. Woken by the backfill notify channel; <paramref name="pollInterval"/> is only
+    /// the safety net for a missed notification. Requests are checked before each wait, so one
+    /// arriving during a pass is never stranded until the poll.
+    /// </summary>
+    public async Task RunAsync(TimeSpan pollInterval, CancellationToken ct)
+    {
+        await using var signal = store.Subscribe();
+        var tableNames = tables.Select(t => t.Table.QualifiedName).ToArray();
+
+        await RunDueBackfillsAsync(ct);
+        while (!ct.IsCancellationRequested)
+        {
+            var requested = await store.ListRequestedAsync(tableNames, ct);
+            if (requested.Count > 0)
+            {
+                logger.BackfillRequestsObserved(requested.Count);
+                await RunDueBackfillsAsync(ct);
+            }
+            else
+            {
+                await signal.WaitAsync(pollInterval, ct);
+            }
+        }
+    }
+
     public async Task RunDueBackfillsAsync(CancellationToken ct)
     {
         foreach (var (table, version) in tables)
@@ -84,4 +111,7 @@ internal static partial class BackfillSchedulerLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill {Action} for {Table} (version {Version}).")]
     internal static partial void BackfillScheduled(this ILogger logger, BackfillAction action, string table, string? version);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "{Count} manual backfill request(s) observed; running a scheduler pass.")]
+    internal static partial void BackfillRequestsObserved(this ILogger logger, int count);
 }

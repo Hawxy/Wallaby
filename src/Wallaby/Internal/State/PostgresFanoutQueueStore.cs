@@ -48,66 +48,8 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public IFanoutQueueSubscription Subscribe() => new Subscription(dataSource);
-
-    /// <summary>
-    /// A dedicated <c>LISTEN wallaby_fanout</c> connection, opened lazily on first wait and held for the
-    /// worker's (leader session's) lifetime. <see cref="WaitForJobAsync"/> returns on a notification (immediate
-    /// wake) or after the fallback timeout (safety poll).
-    /// </summary>
-    private sealed class Subscription(NpgsqlDataSource dataSource) : IFanoutQueueSubscription
-    {
-        private NpgsqlConnection? _connection;
-
-        public async Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct)
-        {
-            try
-            {
-                var connection = await EnsureListeningAsync(ct);
-                // Returns true if a notification arrived, false on timeout — either way we loop and drain.
-                await connection.WaitAsync(fallbackTimeout, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                // The listening connection faulted (e.g. server restart/failover). Drop it so the next wait
-                // reopens and re-listens; return now so the worker drains in case a notification was missed.
-                await DisposeConnectionAsync();
-            }
-        }
-
-        private async Task<NpgsqlConnection> EnsureListeningAsync(CancellationToken ct)
-        {
-            if (_connection is { State: System.Data.ConnectionState.Open } open)
-            {
-                return open;
-            }
-
-            await DisposeConnectionAsync();
-            var connection = await dataSource.OpenConnectionAsync(ct);
-            await using (var listen = new NpgsqlCommand($"LISTEN {WallabySchema.FanoutNotifyChannel}", connection))
-            {
-                await listen.ExecuteNonQueryAsync(ct);
-            }
-
-            _connection = connection;
-            return connection;
-        }
-
-        private async ValueTask DisposeConnectionAsync()
-        {
-            if (_connection is { } connection)
-            {
-                _connection = null;
-                await connection.DisposeAsync();
-            }
-        }
-
-        public ValueTask DisposeAsync() => DisposeConnectionAsync();
-    }
+    public INotifySubscription Subscribe()
+        => new PostgresChannelSubscription(dataSource, WallabySchema.FanoutNotifyChannel);
 
     public async Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct)
     {

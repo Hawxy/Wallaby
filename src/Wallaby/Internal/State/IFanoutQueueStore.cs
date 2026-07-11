@@ -38,18 +38,7 @@ internal interface IFanoutQueueStore
 
     /// <summary>
     /// Open a subscription the worker waits on between drains, so it wakes the moment a job is enqueued
-    /// (via LISTEN/NOTIFY) instead of polling every second. Scoped to the worker's lifetime — dispose it to
-    /// release any resources (e.g. a dedicated listening connection).
+    /// (via LISTEN/NOTIFY) instead of polling every second. Scoped to the worker's lifetime.
     /// </summary>
-    IFanoutQueueSubscription Subscribe();
-}
-
-/// <summary>
-/// A wait handle the fan-out worker blocks on between drains. <see cref="WaitForJobAsync"/> returns as soon as
-/// a job is enqueued (event-driven wake) or after the fallback timeout elapses (safety poll), whichever is first.
-/// </summary>
-internal interface IFanoutQueueSubscription : IAsyncDisposable
-{
-    /// <summary>Wait until a job is signalled or <paramref name="fallbackTimeout"/> elapses.</summary>
-    Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct);
+    INotifySubscription Subscribe();
 }

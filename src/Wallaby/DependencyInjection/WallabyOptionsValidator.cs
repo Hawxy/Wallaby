@@ -50,6 +50,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.FanoutPollInterval must be greater than zero.");
         }
+        if (options.Advanced.BackfillPollInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.BackfillPollInterval must be greater than zero.");
+        }
         if (options.Advanced.CheckpointSaveInterval < TimeSpan.Zero)
         {
             failures.Add("Advanced.CheckpointSaveInterval must be zero or greater.");

@@ -49,7 +49,7 @@ internal sealed class FanoutQueueWorker(
                 if (drained == 0)
                 {
                     // Idle: wake the moment a job is enqueued (NOTIFY), or after the fallback interval elapses.
-                    await signal.WaitForJobAsync(pollInterval, ct);
+                    await signal.WaitAsync(pollInterval, ct);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

@@ -63,4 +63,41 @@ public class BackfillSchedulerIntegrationTests(TestModelPostgresFixture pg, Meil
         await harness.RunBackfillAsync("v2");
         await AllIndexed();
     }
+
+    [Test]
+    public async Task A_requested_backfill_starts_without_a_leadership_change()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        var index = harness.Names.Named("products");
+        harness.AddSink(new MeilisearchSink("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey }))
+            .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name },
+                backfill: true, backfillVersion: harness.Names.Suffix);
+
+        var categoryId = await harness.Db.AddCategoryAsync();
+        var ids = await harness.Db.AddProductsAsync(categoryId, ["s0", "s1", "s2"]);
+
+        await harness.SelfConfigureAsync();
+        await harness.StartAsync();
+
+        var probe = new MeiliProbe(meili);
+        Task AllIndexed() => harness.WaitUntilAsync(async () =>
+        {
+            foreach (var (id, name) in ids)
+            {
+                if (await probe.NameAsync(index, id) != name) return false;
+            }
+            return true;
+        });
+
+        // The 30s poll interval means a prompt re-index below can only come from the NOTIFY wake.
+        _ = harness.RunBackfillLoopAsync(TimeSpan.FromSeconds(30));
+        await AllIndexed();
+
+        await probe.DropAsync(index);
+        await harness.WaitUntilAsync(async () => await probe.NameAsync(index, ids[0].Id) is null);
+
+        // The request alone must re-index — no scheduler restart, no leadership change.
+        await harness.BackfillManager.RequestBackfillAsync<Product>();
+        await AllIndexed();
+    }
 }

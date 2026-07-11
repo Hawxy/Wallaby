@@ -38,6 +38,13 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan FanoutPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Fallback poll interval for manual backfill requests. The leader's scheduler is primarily woken on
+    /// demand via LISTEN/NOTIFY the instant a request is persisted; this interval is only a safety net that
+    /// re-checks for requests in case a notification is ever missed (e.g. a dropped listening connection).
+    /// </summary>
+    public TimeSpan BackfillPollInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap
     /// detection and observability; the authoritative resume position is the slot's
     /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a

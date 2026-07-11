@@ -26,12 +26,12 @@ public class FanoutQueueWorkerTests
         public Task DeferAsync(string t, string h, CancellationToken ct) { Deferred++; return Task.CompletedTask; }
         public Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<FanoutJobRow>>([]);
-        public IFanoutQueueSubscription Subscribe() => new NoOpSubscription();
+        public INotifySubscription Subscribe() => new NoOpSubscription();
     }
 
-    private sealed class NoOpSubscription : IFanoutQueueSubscription
+    private sealed class NoOpSubscription : INotifySubscription
     {
-        public Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct) => Task.CompletedTask;
+        public Task WaitAsync(TimeSpan fallbackTimeout, CancellationToken ct) => Task.CompletedTask;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -39,8 +39,13 @@ public class FanoutQueueWorkerTests
     {
         public Task<BackfillState?> GetAsync(string t, CancellationToken ct) => Task.FromResult<BackfillState?>(null);
         public Task SaveAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
+        public Task RequestAsync(string t, string? v, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<string>> ListRequestedAsync(IReadOnlyList<string> t, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<BackfillState>>([]);
+        public INotifySubscription Subscribe() => new NoOpSubscription();
     }
 
     [Test]
@@ -76,7 +81,7 @@ public class FanoutQueueWorkerTests
             return Task.FromResult<FanoutJobRow?>(null);
         }
 
-        public IFanoutQueueSubscription Subscribe() => new StoppingSubscription(onIdle);
+        public INotifySubscription Subscribe() => new StoppingSubscription(onIdle);
 
         public Task<long> CountDueAsync(CancellationToken ct) => Task.FromResult(0L);
         public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
@@ -88,9 +93,9 @@ public class FanoutQueueWorkerTests
             => Task.FromResult<IReadOnlyList<FanoutJobRow>>([]);
     }
 
-    private sealed class StoppingSubscription(Action onIdle) : IFanoutQueueSubscription
+    private sealed class StoppingSubscription(Action onIdle) : INotifySubscription
     {
-        public Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct)
+        public Task WaitAsync(TimeSpan fallbackTimeout, CancellationToken ct)
         {
             onIdle();
             return Task.CompletedTask;
@@ -104,7 +109,7 @@ public class FanoutQueueWorkerTests
     {
         public Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct) => Task.FromResult<FanoutJobRow?>(null);
         public Task<long> CountDueAsync(CancellationToken ct) => Task.FromResult(dueCount);
-        public IFanoutQueueSubscription Subscribe() => new StoppingSubscription(onIdle);
+        public INotifySubscription Subscribe() => new StoppingSubscription(onIdle);
 
         public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
         public Task MarkInProgressAsync(string t, string h, string? c, CancellationToken ct) => Task.CompletedTask;

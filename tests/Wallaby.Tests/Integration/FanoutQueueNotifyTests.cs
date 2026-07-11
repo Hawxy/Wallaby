@@ -32,12 +32,12 @@ public class FanoutQueueNotifyTests(PostgresFixture pg)
 
         await using var subscription = store.Subscribe();
         // Prime the subscription so it is LISTENing before we enqueue — otherwise the NOTIFY is missed.
-        await subscription.WaitForJobAsync(TimeSpan.FromMilliseconds(100), CancellationToken.None);
+        await subscription.WaitAsync(TimeSpan.FromMilliseconds(100), CancellationToken.None);
 
         await store.EnqueueAsync(new ScopedFanoutSpec(Table, ["category_id"], [new object?[] { 1 }]), CancellationToken.None);
 
         var stopwatch = Stopwatch.StartNew();
-        await subscription.WaitForJobAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        await subscription.WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         stopwatch.Stop();
 
         // Woken by the NOTIFY, not the 30s fallback poll.
@@ -53,7 +53,7 @@ public class FanoutQueueNotifyTests(PostgresFixture pg)
         await using var subscription = store.Subscribe();
 
         var stopwatch = Stopwatch.StartNew();
-        await subscription.WaitForJobAsync(TimeSpan.FromMilliseconds(500), CancellationToken.None);
+        await subscription.WaitAsync(TimeSpan.FromMilliseconds(500), CancellationToken.None);
         stopwatch.Stop();
 
         // No notification arrived, so it returns at ~the fallback — neither instantly nor hanging.

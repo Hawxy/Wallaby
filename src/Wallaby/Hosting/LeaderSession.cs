@@ -75,7 +75,7 @@ internal sealed class LeaderSession(
 
         var backfillTask = Task.Run(async () =>
         {
-            try { await scheduler.RunDueBackfillsAsync(linked.Token); }
+            try { await scheduler.RunAsync(options.Advanced.BackfillPollInterval, linked.Token); }
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
             catch (Exception ex)
             {

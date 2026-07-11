@@ -69,7 +69,9 @@ internal sealed class WatermarkBackfillCoordinator(
 
         var rowsCopied = await RunChunkLoopAsync(
             pager, table.QualifiedName, WallabyInstrumentation.BackfillKindTable, fanoutKeys: 0, cursor, startRows,
-            (cur, rows, hasMore, token) => store.SaveAsync(
+            // Guarded save: a manual request arriving mid-run wins over every later progress write,
+            // so the row stays Requested and the scheduler re-runs the table fresh.
+            (cur, rows, hasMore, token) => store.SaveProgressAsync(
                 new BackfillState(
                     table.QualifiedName,
                     hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
