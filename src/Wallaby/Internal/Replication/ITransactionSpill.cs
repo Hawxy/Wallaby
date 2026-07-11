@@ -29,7 +29,11 @@ public interface ITransactionSpill : IAsyncDisposable
     /// </summary>
     ValueTask AppendAsync(uint xid, uint subxid, RawChange change, CancellationToken ct);
 
-    /// <summary>Read back, in append order, every change buffered for <paramref name="xid"/>.</summary>
+    /// <summary>
+    /// Read back, in append order, every change buffered for <paramref name="xid"/>. If the backing store no
+    /// longer holds everything appended (external mutation), the read should fail rather than yield a partial
+    /// buffer — a partial read that succeeded would be delivered and acknowledged as if complete.
+    /// </summary>
     IAsyncEnumerable<RawChange> ReadAsync(uint xid, CancellationToken ct);
 
     /// <summary>Drop the buffer for <paramref name="xid"/> (after its commit is consumed, or on abort).</summary>

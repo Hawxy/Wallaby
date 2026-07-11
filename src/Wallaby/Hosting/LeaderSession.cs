@@ -43,10 +43,9 @@ internal sealed class LeaderSession(
     {
         await BootstrapAsync(ct);
 
-        // Spill target for pgoutput v2 streamed (large) transactions. Clear any leftovers from a prior crash —
-        // an un-acked streamed transaction is re-streamed from the slot, so stale spill data is never needed.
+        // Spill target for pgoutput v2 streamed (large) transactions. Leftovers from a prior crash are
+        // cleared by the stream once it exclusively holds the slot.
         await using var spill = CreateSpill();
-        await spill.ClearAsync(ct);
 
         await using var stream = new LogicalReplicationStream(
             dataSource.ConnectionString, options.SlotName, options.PublicationName, spill,

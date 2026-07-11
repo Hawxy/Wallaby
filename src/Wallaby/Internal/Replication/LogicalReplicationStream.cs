@@ -42,8 +42,19 @@ internal sealed class LogicalReplicationStream(
         await _connection.Open(ct);
         var assembler = new TransactionAssembler(spill, maxBufferedChangesPerTransaction);
 
+        var cleared = false;
         await foreach (var message in _connection.StartReplication(_slot, _options, ct))
         {
+            if (!cleared)
+            {
+                // A received message proves this node exclusively holds the slot (START_REPLICATION fails
+                // while another node streams from it), so stale spill rows can't belong to a live leader.
+                // Clearing before the first ProcessAsync keeps a re-streamed transaction (same xid as a
+                // crashed run) from appending onto that run's leftovers.
+                await spill.ClearAsync(ct);
+                cleared = true;
+            }
+
             // Npgsql tracks LastReceivedLsn and answers keepalives internally.
             var transaction = await assembler.ProcessAsync(message, ct);
             if (transaction is not null)

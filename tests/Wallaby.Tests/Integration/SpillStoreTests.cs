@@ -1,3 +1,4 @@
+using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.State;
@@ -34,12 +35,16 @@ public class SpillStoreTests(PostgresFixture pg)
     }
 
     private async Task<PostgresUnloggedTableSpill> CreateSpillAsync()
+        => (await CreateNamedSpillAsync()).Spill;
+
+    private async Task<(PostgresUnloggedTableSpill Spill, string Slot)> CreateNamedSpillAsync()
     {
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
         {
             await new StateSchemaBootstrapper().EnsureAsync(conn, CancellationToken.None);
         }
-        return new PostgresUnloggedTableSpill(pg.DataSource, "spilltest_" + Guid.NewGuid().ToString("N"));
+        var slot = "spilltest_" + Guid.NewGuid().ToString("N");
+        return (new PostgresUnloggedTableSpill(pg.DataSource, slot), slot);
     }
 
     [Test]
@@ -142,6 +147,38 @@ public class SpillStoreTests(PostgresFixture pg)
             await spill.DiscardSubtransactionAsync(7, 100, CancellationToken.None);
 
             (await ReadAllAsync(spill, 7)).Count.ShouldBe(3);
+        }
+        finally
+        {
+            await spill.ClearAsync(CancellationToken.None);
+            await spill.DisposeAsync();
+        }
+    }
+
+    [Test]
+    public async Task Read_back_fails_loudly_when_rows_were_deleted_externally()
+    {
+        var (spill, slot) = await CreateNamedSpillAsync();
+        try
+        {
+            // 500 rows flush at the threshold; 100 stay pending.
+            for (var i = 0; i < 600; i++)
+            {
+                await spill.AppendAsync(7, 7, Change(i), CancellationToken.None);
+            }
+
+            // What another node's ClearAsync does during a split-brain takeover: delete flushed rows
+            // behind the live spill's back.
+            await using (var conn = await pg.DataSource.OpenConnectionAsync())
+            {
+                await using var cmd = new NpgsqlCommand(
+                    "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND seq < 100", conn);
+                cmd.Parameters.AddWithValue("s", slot);
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var ex = await Should.ThrowAsync<InvalidOperationException>(() => ReadAllAsync(spill, 7));
+            ex.Message.ShouldContain("500 of 600");
         }
         finally
         {

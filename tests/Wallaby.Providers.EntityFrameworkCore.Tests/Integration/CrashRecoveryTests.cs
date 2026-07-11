@@ -80,8 +80,7 @@ public class CrashRecoveryTests(TestModelPostgresFixture pg)
             var categoryId = await db.AddCategoryAsync();
             var productId = await db.AddProductAsync(categoryId, $"crash_{names.Suffix}");
 
-            // The sink's TaskCanceledException must surface as a leader-session failure. Before the
-            // cancellation filter it read as a clean step-down: no failure recorded, no backoff.
+            // The sink's TaskCanceledException must surface as a leader-session failure, not a clean step-down.
             await WaitUntilAsync(
                 () => status.Current.ConsecutiveLeaderFailures >= 1,
                 $"ConsecutiveLeaderFailures stayed 0 (last error: {status.Current.LastError ?? "none"})");

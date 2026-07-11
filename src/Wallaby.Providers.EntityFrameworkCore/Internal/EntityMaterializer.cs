@@ -90,8 +90,7 @@ internal sealed class EntityMaterializer : IRowMaterializer
     }
 
     // An unchanged TOASTed value is omitted from the new tuple; under REPLICA IDENTITY FULL the old
-    // tuple still carries it. Materializing without it would silently null the property, so an
-    // unavailable value is a poison change instead.
+    // tuple still carries it. An unavailable value is a poison change — never a silently nulled property.
     private static object ResolveUnchangedToast(RawChange change, string columnName)
     {
         if (change.OldValues is { } oldValues)
