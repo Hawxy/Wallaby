@@ -58,6 +58,10 @@ public static class HttpSinkBuilderExtensions
         {
             throw new ArgumentException("HttpSinkOptions.MaxRecordsPerRequest must be positive.", nameof(options));
         }
+        if (options.TimeoutMs <= 0)
+        {
+            throw new ArgumentException("HttpSinkOptions.TimeoutMs must be positive.", nameof(options));
+        }
     }
 
     internal static HttpSink CreateSink(string name, HttpSinkOptions options, IServiceProvider services)

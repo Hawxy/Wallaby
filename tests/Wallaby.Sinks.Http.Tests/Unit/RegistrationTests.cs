@@ -50,4 +50,18 @@ public class RegistrationTests
             o.MaxRecordsPerRequest = 0;
         }));
     }
+
+    [Test]
+    [Arguments(0)]
+    [Arguments(-1)]
+    public void Timeout_must_be_positive(int timeoutMs)
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddHttpSink("webhook", o =>
+        {
+            o.Endpoint = "https://receiver.example/hooks";
+            o.TimeoutMs = timeoutMs;
+        })).Message.ShouldContain("TimeoutMs");
+    }
 }

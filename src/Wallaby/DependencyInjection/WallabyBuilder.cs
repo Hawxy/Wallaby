@@ -60,6 +60,7 @@ public sealed class WallabyBuilder
     /// </summary>
     public WallabyBuilder UseConnectionString(string connectionString)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _configuration.OptionsActions.Add((_, options) => options.ConnectionString = connectionString);
         return this;
     }
@@ -123,6 +124,7 @@ public sealed class WallabyBuilder
     /// </summary>
     public WallabySinkBuilder AddSink(ISink sink)
     {
+        ArgumentNullException.ThrowIfNull(sink);
         var registration = new SinkRegistration { Name = sink.Name, Factory = _ => sink };
         _configuration.Sinks.Add(registration);
         return new WallabySinkBuilder(this, registration);
@@ -134,6 +136,8 @@ public sealed class WallabyBuilder
     /// </summary>
     public WallabySinkBuilder AddSink(string name, Func<IServiceProvider, ISink> factory)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(factory);
         var registration = new SinkRegistration { Name = name, Factory = factory };
         _configuration.Sinks.Add(registration);
         return new WallabySinkBuilder(this, registration);

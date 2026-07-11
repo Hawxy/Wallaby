@@ -69,6 +69,56 @@ public class RegistrationTests
             .Message.ShouldContain("absolute");
     }
 
+    [Test]
+    [Arguments(0d)]
+    [Arguments(-1d)]
+    public void Wait_timeout_must_be_positive(double waitTimeoutMs)
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        {
+            o.Host = "http://localhost:7700";
+            o.WaitTimeoutMs = waitTimeoutMs;
+        })).Message.ShouldContain("WaitTimeoutMs");
+    }
+
+    [Test]
+    public void Wait_interval_must_be_positive()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        {
+            o.Host = "http://localhost:7700";
+            o.WaitIntervalMs = 0;
+        })).Message.ShouldContain("WaitIntervalMs");
+    }
+
+    [Test]
+    public void Primary_key_is_required()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        {
+            o.Host = "http://localhost:7700";
+            o.PrimaryKey = " ";
+        })).Message.ShouldContain("PrimaryKey");
+    }
+
+    [Test]
+    public void Configured_index_name_is_required()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        {
+            o.Host = "http://localhost:7700";
+            o.ConfigureIndex("");
+        })).Message.ShouldContain("Name");
+    }
+
     private sealed record HostSetting(string Url);
 
     [Test]

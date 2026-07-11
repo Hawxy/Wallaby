@@ -58,6 +58,25 @@ public static class MeilisearchBuilderExtensions
         {
             throw new ArgumentException("MeilisearchSinkOptions.MaxRecordsPerBatch must be positive.", nameof(options));
         }
+        if (options.WaitTimeoutMs <= 0)
+        {
+            throw new ArgumentException("MeilisearchSinkOptions.WaitTimeoutMs must be positive.", nameof(options));
+        }
+        if (options.WaitIntervalMs <= 0)
+        {
+            throw new ArgumentException("MeilisearchSinkOptions.WaitIntervalMs must be positive.", nameof(options));
+        }
+        if (string.IsNullOrWhiteSpace(options.PrimaryKey))
+        {
+            throw new ArgumentException("MeilisearchSinkOptions.PrimaryKey is required.", nameof(options));
+        }
+        foreach (var index in options.Indexes)
+        {
+            if (string.IsNullOrWhiteSpace(index.Name))
+            {
+                throw new ArgumentException("MeilisearchIndexConfig.Name is required.", nameof(options));
+            }
+        }
     }
 
     internal static MeilisearchSink CreateSink(string name, MeilisearchSinkOptions options, IServiceProvider services)

@@ -60,5 +60,23 @@ public static class KafkaBuilderExtensions
         {
             throw new ArgumentException("KafkaSinkOptions.AdminTimeoutMs must be positive.", nameof(options));
         }
+        foreach (var topic in options.Topics)
+        {
+            if (string.IsNullOrWhiteSpace(topic.Name))
+            {
+                throw new ArgumentException("KafkaTopicConfig.Name is required.", nameof(options));
+            }
+            if (topic.Partitions <= 0)
+            {
+                throw new ArgumentException(
+                    $"KafkaTopicConfig.Partitions must be positive for topic '{topic.Name}'.", nameof(options));
+            }
+            if (topic.ReplicationFactor is not -1 and <= 0)
+            {
+                throw new ArgumentException(
+                    $"KafkaTopicConfig.ReplicationFactor must be positive or -1 (broker default) for topic '{topic.Name}'.",
+                    nameof(options));
+            }
+        }
     }
 }

@@ -76,7 +76,7 @@ internal sealed class FileTransactionSpill : ITransactionSpill
             var payload = new byte[length];
             if (!await ReadExactlyAsync(stream, payload, ct))
             {
-                yield break; // truncated tail (e.g. a partially-written record after a crash) — stop cleanly
+                yield break; // EOF right after the length prefix (no payload bytes); a partial payload throws
             }
             yield return SpillCodec.Decode(payload);
         }

@@ -54,6 +54,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// <summary>Bump this when the transform/projection changes to trigger an automatic re-backfill.</summary>
     public EntityMapBuilder<TEntity> WithBackfillVersion(string version)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
         _registration.BackfillVersion = version;
         return this;
     }
@@ -65,6 +66,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedBy(Func<TEntity, object?> keySelector)
     {
+        ArgumentNullException.ThrowIfNull(keySelector);
         _registration.ScopeKeySelector = change => change.Entity is TEntity entity ? keySelector(entity) : null;
         return this;
     }
@@ -88,6 +90,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedDestination(Func<object?, string?> destinationByScopeKey)
     {
+        ArgumentNullException.ThrowIfNull(destinationByScopeKey);
         _registration.DestinationSelector = destinationByScopeKey;
         return this;
     }
