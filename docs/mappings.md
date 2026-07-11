@@ -88,6 +88,23 @@ Deletes never reach a transform as the row is already gone. The engine deletes b
 the mapping's id rule. Your transform only sees inserts, updates, and backfill reads.
 :::
 
+## Document ids
+
+Documents are keyed by the source primary key by default; `KeyedBy(...)` derives the id from the
+entity instead:
+
+```csharp
+sink.Map<Product>()
+    .ToDestination("products")
+    .KeyedBy(p => p.Sku);
+```
+
+Because the engine deletes by key, the custom id must also be computable when the row is gone. A
+`KeyedBy` mapping therefore marks its table as requiring `REPLICA IDENTITY FULL` (self-configuration
+warns with the DDL to run, or fails when `RequireFullReplicaIdentity` is set), and a delete whose
+old row doesn't carry the key columns fails loudly rather than silently falling back to the primary
+key - a PK-named document was never written, so that delete would remove nothing.
+
 ## Documents
 
 A document is a `WallabyDocument`, simply a field bag keyed by destination field name. It derives from

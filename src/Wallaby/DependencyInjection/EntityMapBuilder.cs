@@ -27,12 +27,27 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
         return this;
     }
 
-    /// <summary>Override the document id (defaults to the source primary key).</summary>
+    /// <summary>
+    /// Override the document id (defaults to the source primary key). Because deletes must also compute
+    /// the id, the table is marked to need <c>REPLICA IDENTITY FULL</c> so the key columns are present on delete.
+    /// </summary>
     public EntityMapBuilder<TEntity> KeyedBy(Func<TEntity, object> keySelector)
     {
-        _registration.DocumentIdSelector = change => change.Entity is TEntity entity
-            ? keySelector(entity)?.ToString() ?? change.Key.ToString()
-            : change.Key.ToString();
+        ArgumentNullException.ThrowIfNull(keySelector);
+        _registration.DocumentIdSelector = change =>
+        {
+            if (change.Entity is not TEntity entity)
+            {
+                // Key-only rows (e.g. Marten deletes materialize no entity) identify by primary key.
+                return change.Key.ToString();
+            }
+            return keySelector(entity)?.ToString()
+                ?? throw new InvalidOperationException(
+                    $"KeyedBy selector for '{typeof(TEntity).Name}' returned null on {change.Action} of " +
+                    $"'{change.Metadata.QualifiedTableName}' (primary key {change.Key}). The key columns are " +
+                    "likely missing from the replicated old row; run: " +
+                    $"ALTER TABLE {change.Metadata.QualifiedTableName} REPLICA IDENTITY FULL;");
+        };
         return this;
     }
 

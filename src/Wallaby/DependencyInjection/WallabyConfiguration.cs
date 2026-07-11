@@ -140,8 +140,9 @@ internal sealed class WallabyConfiguration
             {
                 declaredEntities.Add(mapping.EntityClrType);
             }
-            // A scoped destination must resolve the scope key on deletes too, which needs full old-row values.
-            if (mapping.DestinationSelector is not null)
+            // Scoped destinations and custom document ids must both be computable on deletes,
+            // which needs full old-row values.
+            if (mapping.DestinationSelector is not null || mapping.DocumentIdSelector is not null)
             {
                 requiresFullReplicaIdentity.Add(mapping.EntityClrType);
             }

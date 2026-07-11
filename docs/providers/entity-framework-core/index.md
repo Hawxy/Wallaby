@@ -64,6 +64,9 @@ Only entities you **declare** are captured and added to the publication: `Map<T>
 primary key. The same entity may be mapped under several sinks - it is captured once and each sink's
 mapping runs its own transform.
 
+Entities in a **TPH hierarchy** cannot be captured: hierarchy members share one table, so rows would
+materialize as one arbitrary type and lose subclass data. Map hierarchies with TPT or TPC instead.
+
 ## Transforms
 
 ### Enrichment via the DbContext

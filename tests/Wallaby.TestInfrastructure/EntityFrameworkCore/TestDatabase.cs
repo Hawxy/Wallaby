@@ -164,12 +164,17 @@ public sealed class TestDatabase(string connectionString)
     }
 
     /// <summary>Set a table's replica identity to FULL so old-row values (incl. scope keys) are present on delete.</summary>
-    public async Task SetReplicaIdentityFullAsync(string table)
+    public Task SetReplicaIdentityFullAsync(string table) => SetReplicaIdentityAsync(table, "FULL");
+
+    /// <summary>Restore a table's replica identity to DEFAULT (tests share the session database).</summary>
+    public Task SetReplicaIdentityDefaultAsync(string table) => SetReplicaIdentityAsync(table, "DEFAULT");
+
+    private async Task SetReplicaIdentityAsync(string table, string identity)
     {
         await using var ctx = NewContext();
         // Trusted, test-only DDL; a table identifier cannot be parameterized.
 #pragma warning disable EF1002, EF1003
-        await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE " + table + " REPLICA IDENTITY FULL");
+        await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE " + table + " REPLICA IDENTITY " + identity);
 #pragma warning restore EF1002, EF1003
     }
 

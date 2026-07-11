@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
+using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore;
 using Wallaby.Providers.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
@@ -41,7 +42,8 @@ public static class WallabyTestHarnessEfCoreExtensions
             bool backfill = false,
             string? backfillVersion = null,
             Func<TEntity, object?>? scopeKey = null,
-            Func<object?, string?>? scopedDestination = null)
+            Func<object?, string?>? scopedDestination = null,
+            Func<TEntity, object>? keyedBy = null)
             where TEntity : class
             => harness.AddMapping(new EntityMapping
             {
@@ -52,6 +54,7 @@ public static class WallabyTestHarnessEfCoreExtensions
                 Sessions = null!, // late-bound by the harness at StartAsync (UseScopedContext may still override)
                 ScopeKeySelector = scopeKey is null ? null : change => change.Entity is TEntity e ? scopeKey(e) : null,
                 DestinationSelector = scopedDestination,
+                DocumentIdSelector = keyedBy is null ? null : KeyedBySelector(keyedBy),
             }, backfill, backfillVersion);
 
         /// <summary>Map an entity to a sink/destination via a simple per-row projection.</summary>
@@ -73,6 +76,14 @@ public static class WallabyTestHarnessEfCoreExtensions
         public WallabyTestHarness UseScopedContext(Func<object?, DbContext> factory)
             => harness.UseEnrichmentSessions(
                 new ScopedDbContextEnrichmentSessionProvider((key, _) => factory(key), NullServiceProvider.Instance));
+    }
+
+    /// <summary>The production <c>KeyedBy</c> document-id rule (a null selector result throws with DDL guidance).</summary>
+    private static Func<ChangeEvent, string> KeyedBySelector<TEntity>(Func<TEntity, object> keyedBy) where TEntity : class
+    {
+        var registration = new MappingRegistration { EntityClrType = typeof(TEntity) };
+        new EntityMapBuilder<TEntity>(registration).KeyedBy(keyedBy);
+        return registration.DocumentIdSelector!;
     }
 
     private sealed class NullServiceProvider : IServiceProvider, IServiceScopeFactory, IServiceScope
