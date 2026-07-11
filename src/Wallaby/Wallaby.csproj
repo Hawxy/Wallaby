@@ -25,6 +25,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="DistributedLock.Postgres" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Polly.Core" />

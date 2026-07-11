@@ -2,7 +2,7 @@ namespace Wallaby.Abstractions;
 
 /// <summary>
 /// Distributed lock used for leader election so that exactly one node owns the replication slot
-/// and runs backfills. The default implementation is a Postgres session-level advisory lock keyed
+/// and runs backfills. The default implementation is a Postgres transaction-scoped advisory lock keyed
 /// on the slot name; it is replaceable (e.g. Redis/ZooKeeper) without touching the pipeline.
 /// </summary>
 public interface IClusterLock
@@ -27,7 +27,7 @@ public interface IClusterLockHandle : IAsyncDisposable
     /// Custom implementations <b>must</b> override this and cancel it when loss is detected: with the
     /// default (never fires), a partitioned ex-leader keeps streaming until it next touches the lock,
     /// while a standby that acquired the lock also streams — a temporary double-leader. The built-in
-    /// Postgres lock heartbeats its connection and cancels this on a failed probe.
+    /// Postgres lock monitors its connection and cancels this when the connection drops.
     /// </summary>
     CancellationToken Lost => CancellationToken.None;
 }

@@ -13,7 +13,12 @@ internal sealed class WallabyDataSource : IAsyncDisposable
     public WallabyDataSource(string connectionString)
     {
         ConnectionString = connectionString;
-        Source = NpgsqlDataSource.Create(connectionString);
+        var source = NpgsqlDataSource.Create(connectionString);
+        
+        if(source is NpgsqlMultiHostDataSource multiHostDataSource)
+            Source = multiHostDataSource.WithTargetSession(TargetSessionAttributes.Primary);
+        else
+            Source = source;
     }
 
     /// <summary>The pooled data source Wallaby opens normal connections from.</summary>
