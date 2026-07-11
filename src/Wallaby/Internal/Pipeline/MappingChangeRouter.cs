@@ -35,9 +35,9 @@ internal sealed class MappingChangeRouter : IChangeRouter
         var sessions = new Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>();
         try
         {
-            foreach (var group in changes.GroupBy(c => c.EntityClrType))
+            foreach (var (type, group) in GroupByTypePreservingOrder(changes))
             {
-                if (!_mappings.TryGetValue(group.Key, out var typeMappings))
+                if (!_mappings.TryGetValue(type, out var typeMappings))
                 {
                     continue; // entity not mapped to any sink
                 }
@@ -45,8 +45,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                 // Collapse to the last change per key in commit order. A key inserted/updated and then
                 // deleted (or deleted and then re-inserted) within the same batch must resolve to its
                 // FINAL action — exactly one routed record per mapping, never both an upsert and a
-                // deletion. (GroupBy yields each group's elements in source order, and the batch is in
-                // commit order.)
+                // deletion. (Groups preserve source order, and the batch is in commit order.)
                 var lastByKey = new Dictionary<DocumentKey, ChangeEvent>();
                 foreach (var change in group)
                 {
@@ -87,10 +86,8 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         continue;
                     }
 
-                    foreach (var scopeGroup in upserts.GroupBy(mapping.GetScopeKey))
+                    foreach (var (scopeKey, subset) in GroupByScopePreservingOrder(mapping, upserts))
                     {
-                        var scopeKey = scopeGroup.Key;
-                        var subset = scopeGroup.ToList();
                         var destination = mapping.ResolveDestination(scopeKey);
                         var session = GetOrCreateSession(sessions, mapping.Sessions, scopeKey);
                         var entityName = mapping.EntityClrType.Name;
@@ -133,6 +130,52 @@ internal sealed class MappingChangeRouter : IChangeRouter
         }
 
         return routed;
+    }
+
+    /// <summary>Groups changes by entity type in first-occurrence order, each group in source order.</summary>
+    private static List<(Type Type, List<ChangeEvent> Changes)> GroupByTypePreservingOrder(
+        IReadOnlyList<ChangeEvent> changes)
+    {
+        var byType = new Dictionary<Type, List<ChangeEvent>>();
+        var groups = new List<(Type, List<ChangeEvent>)>();
+
+        foreach (var change in changes)
+        {
+            if (!byType.TryGetValue(change.EntityClrType, out var group))
+            {
+                group = [];
+                byType[change.EntityClrType] = group;
+                groups.Add((change.EntityClrType, group));
+            }
+            group.Add(change);
+        }
+
+        return groups;
+    }
+
+    /// <summary>
+    /// Groups changes by scope key in first-occurrence order (a null key is one group like any other),
+    /// resolving each change's scope key exactly once.
+    /// </summary>
+    private static List<(object? ScopeKey, List<ChangeEvent> Changes)> GroupByScopePreservingOrder(
+        EntityMapping mapping, List<ChangeEvent> changes)
+    {
+        var byKey = new Dictionary<object, List<ChangeEvent>>();
+        var groups = new List<(object?, List<ChangeEvent>)>();
+
+        foreach (var change in changes)
+        {
+            var key = mapping.GetScopeKey(change);
+            if (!byKey.TryGetValue(key ?? NullScopeKey, out var group))
+            {
+                group = [];
+                byKey[key ?? NullScopeKey] = group;
+                groups.Add((key, group));
+            }
+            group.Add(change);
+        }
+
+        return groups;
     }
 
     private static object GetOrCreateSession(

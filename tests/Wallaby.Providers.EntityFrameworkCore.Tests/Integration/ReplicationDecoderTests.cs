@@ -93,6 +93,9 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         Convert.ToInt32(Value(insert.NewValues, "Id")).ShouldBe(productId);
         Value(insert.NewValues, "Name").ShouldBe("Widget");
         Value(insert.NewValues, "product_sku").ShouldBe("W-1");
+        // jsonb without a ReadAsUtf8Json flag keeps its string representation (Product.Tags's
+        // ValueConverter expects a string).
+        Value(insert.NewValues, "Tags").ShouldBeOfType<string>();
 
         // Update (REPLICA IDENTITY DEFAULT + non-key change => new values only, no old tuple)
         var update = collected.Single(c => c.Action == ChangeAction.Update);

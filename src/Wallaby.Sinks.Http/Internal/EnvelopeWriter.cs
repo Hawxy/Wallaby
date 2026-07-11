@@ -14,8 +14,12 @@ internal static class EnvelopeWriter
 {
     private const string SerializerOptionsName = "HttpSinkOptions.SerializerOptions";
 
-    /// <summary>Write records <paramref name="offset"/>..<paramref name="offset"/>+<paramref name="count"/> as one envelope.</summary>
-    public static byte[] Write(
+    /// <summary>
+    /// Write records <paramref name="offset"/>..<paramref name="offset"/>+<paramref name="count"/> as one
+    /// envelope into <paramref name="buffer"/> (the caller owns and may reuse it between calls).
+    /// </summary>
+    public static void Write(
+        ArrayBufferWriter<byte> buffer,
         string sinkName,
         IReadOnlyList<SinkRecord> records,
         int offset,
@@ -23,7 +27,6 @@ internal static class EnvelopeWriter
         IReadOnlyDictionary<string, string>? annotations,
         JsonSerializerOptions? serializerOptions)
     {
-        var buffer = new ArrayBufferWriter<byte>();
         using var writer = new Utf8JsonWriter(buffer);
 
         writer.WriteStartObject();
@@ -47,7 +50,6 @@ internal static class EnvelopeWriter
         writer.WriteEndObject();
 
         writer.Flush();
-        return buffer.WrittenSpan.ToArray();
     }
 
     private static void WriteRecord(Utf8JsonWriter writer, SinkRecord record, JsonSerializerOptions? serializerOptions)

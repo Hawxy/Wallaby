@@ -67,6 +67,16 @@ public class MartenModelProviderTests
     }
 
     [Test]
+    public void The_data_column_is_flagged_to_read_as_utf8_json()
+    {
+        var plan = Provider().BuildCapturePlan(All);
+
+        var table = plan.Model.FindByClrType(typeof(PlainDoc)).ShouldNotBeNull();
+        table.Columns.Single(c => c.ColumnName == "data").ReadAsUtf8Json.ShouldBeTrue();
+        table.Columns.Where(c => c.ColumnName != "data").ShouldAllBe(c => !c.ReadAsUtf8Json);
+    }
+
+    [Test]
     public void Declared_entities_capture_only_their_tables()
     {
         var plan = Provider().BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(PlainDoc)] });

@@ -10,19 +10,25 @@ namespace Wallaby.Internal.Replication;
 /// </summary>
 internal static class PgOutputDecoder
 {
-    /// <summary>Read all columns of a replication tuple, copying values out.</summary>
-    public static async Task<RawColumn[]> ReadTupleAsync(ReplicationTuple tuple, CancellationToken ct)
+    /// <summary>
+    /// Read all columns of a replication tuple, copying values out. Columns named in
+    /// <paramref name="utf8JsonColumns"/> are read as raw UTF-8 JSON bytes instead of a decoded string
+    /// (see <see cref="Wallaby.Model.CapturedColumn.ReadAsUtf8Json"/>).
+    /// </summary>
+    public static async Task<RawColumn[]> ReadTupleAsync(
+        ReplicationTuple tuple, CancellationToken ct, IReadOnlySet<string>? utf8JsonColumns = null)
     {
         var columns = new RawColumn[tuple.NumColumns];
         var i = 0;
         await foreach (var value in tuple.WithCancellation(ct))
         {
-            columns[i++] = await ReadValueAsync(value, ct);
+            columns[i++] = await ReadValueAsync(value, utf8JsonColumns, ct);
         }
         return columns;
     }
 
-    private static async ValueTask<RawColumn> ReadValueAsync(ReplicationValue value, CancellationToken ct)
+    private static async ValueTask<RawColumn> ReadValueAsync(
+        ReplicationValue value, IReadOnlySet<string>? utf8JsonColumns, CancellationToken ct)
     {
         var columnName = value.GetFieldName();
 
@@ -38,7 +44,9 @@ internal static class PgOutputDecoder
             return new RawColumn { ColumnName = columnName, Value = null };
         }
 
-        var decoded = await value.Get(ct);
+        object decoded = utf8JsonColumns?.Contains(columnName) == true
+            ? await value.Get<byte[]>(ct)
+            : await value.Get(ct);
         return new RawColumn { ColumnName = columnName, Value = decoded };
     }
 }

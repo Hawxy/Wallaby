@@ -186,6 +186,22 @@ internal static class KeysetCodec
         return true;
     }
 
+    /// <summary>Serialize a single value tuple to its JSON array form (one element of <see cref="SerializeTuples"/>).</summary>
+    public static string SerializeTuple(object?[] tuple)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartArray();
+            foreach (var value in tuple)
+            {
+                WriteValue(writer, value);
+            }
+            writer.WriteEndArray();
+        }
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
     /// <summary>Serialize a set of value tuples (e.g. distinct fan-out lookup keys) to JSON.</summary>
     public static string SerializeTuples(IReadOnlyList<object?[]> tuples)
     {

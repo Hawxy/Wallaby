@@ -1,3 +1,4 @@
+using System.Text;
 using Marten;
 using NSubstitute;
 using Wallaby.Abstractions;
@@ -128,6 +129,68 @@ public class MartenRowMaterializerTests
         Materializer().TryMaterialize(change, out var row).ShouldBeTrue();
         row!.Action.ShouldBe(ChangeAction.Update);
         row.Entity.ShouldBeOfType<SoftDoc>().Name.ShouldBe("restored");
+    }
+
+    [Test]
+    public void An_insert_with_a_utf8_byte_body_rehydrates_the_document()
+    {
+        var change = Change("mt_doc_softdoc", ChangeAction.Insert, newValues:
+        [
+            Col("id", DocId),
+            Col("data", Encoding.UTF8.GetBytes($$"""{"Id":"{{DocId}}","Name":"bytes"}""")),
+            Col("mt_deleted", false),
+        ]);
+
+        Materializer().TryMaterialize(change, out var row).ShouldBeTrue();
+        row!.Entity.ShouldBeOfType<SoftDoc>().Name.ShouldBe("bytes");
+        row.PrimaryKey.ShouldBe(new object[] { DocId });
+    }
+
+    [Test]
+    public void A_byte_body_reaches_the_serializer_as_a_stream_of_the_same_bytes()
+    {
+        var body = Encoding.UTF8.GetBytes($$"""{"Id":"{{DocId}}","Name":"spied"}""");
+        byte[]? seen = null;
+        var spy = Substitute.For<ISerializer>();
+        spy.FromJson(typeof(PlainDoc), Arg.Any<Stream>()).Returns(call =>
+        {
+            using var buffer = new MemoryStream();
+            call.Arg<Stream>().CopyTo(buffer);
+            seen = buffer.ToArray();
+            return new PlainDoc { Id = DocId, Name = "spied" };
+        });
+
+        var options = new StoreOptions();
+        options.Connection("Host=localhost;Database=db;Username=u;Password=p");
+        options.DatabaseSchemaName = "docs";
+        options.RegisterDocumentType<PlainDoc>();
+        options.Serializer(spy);
+        var materializer = new MartenModelProvider(options)
+            .BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(PlainDoc)] })
+            .Materializer;
+
+        var change = Change("mt_doc_plaindoc", ChangeAction.Insert, newValues: [Col("id", DocId), Col("data", body)]);
+
+        materializer.TryMaterialize(change, out var row).ShouldBeTrue();
+        row!.Entity.ShouldBeOfType<PlainDoc>().Name.ShouldBe("spied");
+        seen.ShouldBe(body);
+    }
+
+    [Test]
+    public void An_unchanged_toasted_byte_body_falls_back_to_the_old_tuple()
+    {
+        var change = Change("mt_doc_softdoc", ChangeAction.Update,
+            newValues: [Col("id", DocId), Toast("data"), Col("mt_deleted", false)],
+            oldValues:
+            [
+                Col("id", DocId),
+                Col("data", Encoding.UTF8.GetBytes($$"""{"Id":"{{DocId}}","Name":"restored-bytes"}""")),
+                Col("mt_deleted", true),
+            ]);
+
+        Materializer().TryMaterialize(change, out var row).ShouldBeTrue();
+        row!.Action.ShouldBe(ChangeAction.Update);
+        row.Entity.ShouldBeOfType<SoftDoc>().Name.ShouldBe("restored-bytes");
     }
 
     [Test]

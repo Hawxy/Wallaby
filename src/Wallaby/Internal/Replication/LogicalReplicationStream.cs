@@ -4,6 +4,7 @@ using Npgsql.Replication;
 using Npgsql.Replication.PgOutput;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
+using Wallaby.Model;
 
 namespace Wallaby.Internal.Replication;
 
@@ -21,7 +22,7 @@ namespace Wallaby.Internal.Replication;
 /// </remarks>
 internal sealed class LogicalReplicationStream(
     string connectionString, string slotName, string publicationName, ITransactionSpill spill,
-    int maxBufferedChangesPerTransaction = int.MaxValue) : IAsyncDisposable
+    int maxBufferedChangesPerTransaction = int.MaxValue, WallabyModel? model = null) : IAsyncDisposable
 {
     private readonly LogicalReplicationConnection _connection = new(connectionString);
     private readonly PgOutputReplicationSlot _slot = new(slotName);
@@ -40,7 +41,8 @@ internal sealed class LogicalReplicationStream(
     public async IAsyncEnumerable<CommittedTransaction> ReadAsync([EnumeratorCancellation] CancellationToken ct)
     {
         await _connection.Open(ct);
-        var assembler = new TransactionAssembler(spill, maxBufferedChangesPerTransaction);
+        var assembler = new TransactionAssembler(
+            spill, maxBufferedChangesPerTransaction, TransactionAssembler.BuildUtf8JsonColumnLookup(model));
 
         var cleared = false;
         await foreach (var message in _connection.StartReplication(_slot, _options, ct))

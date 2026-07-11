@@ -108,4 +108,45 @@ public class WallabyStatusTests
         status.Current.Role.ShouldBe(WallabyNodeRole.Standby);
         status.Current.LeaderSince.ShouldBeNull();
     }
+
+    [Test]
+    public void Sink_deliveries_surface_in_the_snapshot()
+    {
+        var status = new WallabyStatus();
+        var at = DateTimeOffset.UtcNow;
+
+        status.RecordSinkDelivered("search", at);
+        status.RecordSinkDelivered("audit", at.AddSeconds(1));
+
+        var snapshot = status.Current;
+        snapshot.LastSinkDeliveryAt["search"].ShouldBe(at);
+        snapshot.LastSinkDeliveryAt["audit"].ShouldBe(at.AddSeconds(1));
+    }
+
+    [Test]
+    public void A_previously_read_snapshot_is_not_mutated_by_later_deliveries()
+    {
+        var status = new WallabyStatus();
+        var at = DateTimeOffset.UtcNow;
+        status.RecordSinkDelivered("search", at);
+
+        var before = status.Current;
+        status.RecordSinkDelivered("search", at.AddMinutes(1));
+        status.RecordSinkDelivered("audit", at.AddMinutes(1));
+
+        before.LastSinkDeliveryAt["search"].ShouldBe(at);
+        before.LastSinkDeliveryAt.ShouldNotContainKey("audit");
+    }
+
+    [Test]
+    public void The_latest_delivery_per_sink_wins()
+    {
+        var status = new WallabyStatus();
+        var at = DateTimeOffset.UtcNow;
+
+        status.RecordSinkDelivered("search", at);
+        status.RecordSinkDelivered("search", at.AddSeconds(5));
+
+        status.Current.LastSinkDeliveryAt["search"].ShouldBe(at.AddSeconds(5));
+    }
 }

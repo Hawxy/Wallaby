@@ -69,6 +69,53 @@ public class KeysetPagerIntegrationTests(PostgresFixture pg)
         ids.ToHashSet().SetEquals(expected).ShouldBeTrue();
     }
 
+    [Test]
+    public async Task A_flagged_jsonb_column_is_read_as_utf8_bytes()
+    {
+        await PgExec.ExecuteAsync(
+            pg.DataSource,
+            """
+            DROP TABLE IF EXISTS wallaby_jsonb_read;
+            CREATE TABLE wallaby_jsonb_read (id int PRIMARY KEY, body jsonb, note jsonb);
+            INSERT INTO wallaby_jsonb_read (id, body, note)
+            VALUES (1, '{"name":"kanga"}', '{"n":1}'), (2, NULL, NULL);
+            """,
+            CancellationToken.None);
+
+        var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true };
+        var table = new CapturedTable
+        {
+            EntityClrType = typeof(object),
+            Schema = "public",
+            TableName = "wallaby_jsonb_read",
+            Columns =
+            [
+                id,
+                new CapturedColumn
+                {
+                    PropertyName = "Body", ColumnName = "body", ClrType = typeof(string), IsPrimaryKey = false,
+                    ReadAsUtf8Json = true,
+                },
+                new CapturedColumn { PropertyName = "Note", ColumnName = "note", ClrType = typeof(string), IsPrimaryKey = false },
+            ],
+            PrimaryKey = [id],
+        };
+
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        var chunk = await new KeysetPager(table).ReadChunkAsync(connection, null, 10, CancellationToken.None);
+
+        chunk.Rows.Count.ShouldBe(2);
+        var first = chunk.Rows[0].NewValues!;
+        var bytes = first.Single(c => c.ColumnName == "body").Value.ShouldBeOfType<byte[]>();
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+        json.ShouldStartWith("{"); // raw JSON — no jsonb version byte prefix
+        json.ShouldContain("kanga");
+        // An unflagged jsonb column keeps its default string representation.
+        first.Single(c => c.ColumnName == "note").Value.ShouldBeOfType<string>();
+        // NULL in a flagged column stays null.
+        chunk.Rows[1].NewValues!.Single(c => c.ColumnName == "body").Value.ShouldBeNull();
+    }
+
     private async Task<List<int>> ReadAllIdsAsync(CapturedTable table, IReadOnlyList<KeysetFilter> filters, int chunkSize)
     {
         var ids = new List<int>();
