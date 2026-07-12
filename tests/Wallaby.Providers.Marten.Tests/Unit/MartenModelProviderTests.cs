@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Marten;
+using Wallaby.Model;
 using Wallaby.Providers.Marten.Internal;
 using Wallaby.Providers;
 
@@ -64,6 +65,16 @@ public class MartenModelProviderTests
         var id = table.PrimaryKey[1];
         id.PropertyName.ShouldBe("Id");
         id.ClrType.ShouldBe(typeof(string));
+    }
+
+    [Test]
+    public void The_data_column_is_declared_to_read_as_utf8_json_bytes()
+    {
+        var plan = Provider().BuildCapturePlan(All);
+
+        var table = plan.Model.FindByClrType(typeof(PlainDoc)).ShouldNotBeNull();
+        table.Columns.Single(c => c.ColumnName == "data").ReadMode.ShouldBe(ColumnReadMode.Utf8JsonBytes);
+        table.Columns.Where(c => c.ColumnName != "data").ShouldAllBe(c => c.ReadMode == ColumnReadMode.Default);
     }
 
     [Test]

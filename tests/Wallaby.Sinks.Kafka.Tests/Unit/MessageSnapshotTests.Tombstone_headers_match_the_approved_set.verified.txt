@@ -1,0 +1,4 @@
+﻿wallaby.operation=delete
+wallaby.idempotency-key=27271208:1:products:43
+wallaby.table=public.products
+wallaby.commit-lsn=27271208

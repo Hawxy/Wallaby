@@ -46,13 +46,13 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.KeepaliveInterval must be greater than zero.");
         }
-        if (options.Advanced.LeaderHeartbeatInterval <= TimeSpan.Zero)
-        {
-            failures.Add("Advanced.LeaderHeartbeatInterval must be greater than zero.");
-        }
         if (options.Advanced.FanoutPollInterval <= TimeSpan.Zero)
         {
             failures.Add("Advanced.FanoutPollInterval must be greater than zero.");
+        }
+        if (options.Advanced.BackfillPollInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.BackfillPollInterval must be greater than zero.");
         }
         if (options.Advanced.CheckpointSaveInterval < TimeSpan.Zero)
         {

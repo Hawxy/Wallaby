@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Confluent.Kafka;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Wallaby.Abstractions;
 using Wallaby.Sinks.Kafka.Internal;
 using static Wallaby.Sinks.Kafka.Tests.Unit.KafkaTestHelpers;
@@ -141,6 +142,38 @@ public class DeliveryTests
 
         result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
         settled.ShouldBe(1); // the slower in-flight report was still awaited before failing the batch
+    }
+
+    [Test]
+    public async Task A_synchronously_thrown_produce_exception_is_classified_not_escaped()
+    {
+        // ProduceAsync throws (rather than returning a faulted task) when the local queue is full.
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        producer.ProduceAsync(Arg.Any<string>(), Arg.Any<Message<string, byte[]>>(), Arg.Any<CancellationToken>())
+            .Throws(new ProduceException<string, byte[]>(
+                new Error(ErrorCode.Local_QueueFull), new Confluent.Kafka.DeliveryResult<string, byte[]>()));
+        var sink = CreateSink(producer);
+
+        var result = await sink.DeliverAsync(
+            Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
+        result.Error.ShouldNotBeNull().ShouldContain("Local_QueueFull");
+    }
+
+    [Test]
+    public async Task A_batch_that_fails_validation_produces_nothing()
+    {
+        var (sink, produced) = CreateSink();
+
+        var result = await sink.DeliverAsync(
+            Batch(
+                Upsert("1", new Dictionary<string, object?>()),
+                Upsert("2", new Dictionary<string, object?>(), destination: null)),
+            CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        produced.ShouldBeEmpty(); // the routable first record was not produced either
     }
 
     [Test]

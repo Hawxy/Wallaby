@@ -57,6 +57,64 @@ public class KeysetCodecTests
     }
 
     [Test]
+    public void Scoped_cursor_round_trips_its_batch_index()
+    {
+        var json = KeysetCodec.SerializeScopedCursor(3, [42, "abc"], Pk);
+
+        KeysetCodec.TryDeserializeScopedCursor(json, Pk, [typeof(int), typeof(string)], out var batch, out var cursor)
+            .ShouldBeTrue();
+
+        batch.ShouldBe(3);
+        cursor.ShouldNotBeNull();
+        cursor[0].ShouldBe(42);
+        cursor[1].ShouldBe("abc");
+    }
+
+    [Test]
+    public void A_scoped_cursor_at_batch_start_round_trips_with_a_null_cursor()
+    {
+        var json = KeysetCodec.SerializeScopedCursor(2, null, Pk);
+
+        json.ShouldNotBeNull();
+        KeysetCodec.TryDeserializeScopedCursor(json, Pk, [typeof(int), typeof(string)], out var batch, out var cursor)
+            .ShouldBeTrue();
+
+        batch.ShouldBe(2);
+        cursor.ShouldBeNull();
+    }
+
+    [Test]
+    public void A_legacy_cursor_deserializes_as_batch_zero()
+    {
+        var json = KeysetCodec.SerializeCursor([42, "abc"], Pk);
+
+        KeysetCodec.TryDeserializeScopedCursor(json, Pk, [typeof(int), typeof(string)], out var batch, out var cursor)
+            .ShouldBeTrue();
+
+        batch.ShouldBe(0);
+        cursor.ShouldNotBeNull();
+        cursor[0].ShouldBe(42);
+    }
+
+    [Test]
+    public void A_scoped_cursor_with_mismatched_pk_columns_is_rejected()
+    {
+        var json = KeysetCodec.SerializeScopedCursor(1, [42, "abc"], Pk);
+
+        KeysetCodec.TryDeserializeScopedCursor(json, ["other", "columns"], [typeof(int), typeof(string)], out _, out _)
+            .ShouldBeFalse();
+    }
+
+    [Test]
+    public void Null_or_empty_json_is_a_fresh_scoped_start()
+    {
+        KeysetCodec.TryDeserializeScopedCursor(null, Pk, [typeof(int), typeof(int)], out var batch, out var cursor)
+            .ShouldBeTrue();
+        batch.ShouldBe(0);
+        cursor.ShouldBeNull();
+    }
+
+    [Test]
     public void Legacy_bare_array_is_rejected()
     {
         KeysetCodec.TryDeserializeCursor("[1,2]", Pk, [typeof(int), typeof(int)], out var cursor).ShouldBeFalse();

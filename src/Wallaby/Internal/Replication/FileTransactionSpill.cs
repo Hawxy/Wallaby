@@ -7,12 +7,17 @@ namespace Wallaby.Internal.Replication;
 /// <summary>
 /// Disk-backed <see cref="ITransactionSpill"/>: one append-only file per xid under a directory, each change
 /// written as a length-prefixed <see cref="SpillCodec"/> record. The truest memory bound and zero source-DB
-/// load, but it needs a writable path (mount a volume in locked-down containers). The default backend.
+/// load, but it needs a writable path (mount a volume in locked-down containers). Opt in via
+/// <c>SpillToDisk</c>; the database backend is the default.
 /// </summary>
 internal sealed class FileTransactionSpill : ITransactionSpill
 {
     private readonly string _directory;
     private readonly Dictionary<uint, FileStream> _writers = [];
+
+    // First append offset per (xid, subxid) — the truncation point when that subtransaction aborts.
+    // In-memory only: spill files never survive a session (ClearAsync runs before streaming appends).
+    private readonly Dictionary<uint, Dictionary<uint, long>> _subxidFirstOffsets = [];
 
     public FileTransactionSpill(string directory)
     {
@@ -22,13 +27,20 @@ internal sealed class FileTransactionSpill : ITransactionSpill
 
     private string PathFor(uint xid) => Path.Combine(_directory, $"{xid}.spill");
 
-    public async ValueTask AppendAsync(uint xid, RawChange change, CancellationToken ct)
+    public async ValueTask AppendAsync(uint xid, uint subxid, RawChange change, CancellationToken ct)
     {
         if (!_writers.TryGetValue(xid, out var writer))
         {
             writer = new FileStream(PathFor(xid), FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
             _writers[xid] = writer;
         }
+
+        if (!_subxidFirstOffsets.TryGetValue(xid, out var offsets))
+        {
+            offsets = [];
+            _subxidFirstOffsets[xid] = offsets;
+        }
+        offsets.TryAdd(subxid, writer.Position);
 
         var payload = SpillCodec.Encode(change);
         var length = new byte[4];
@@ -40,6 +52,7 @@ internal sealed class FileTransactionSpill : ITransactionSpill
     public async IAsyncEnumerable<RawChange> ReadAsync(
         uint xid, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        _subxidFirstOffsets.Remove(xid);
         if (_writers.Remove(xid, out var writer))
         {
             await writer.DisposeAsync();   // flush + close before reading back
@@ -63,7 +76,7 @@ internal sealed class FileTransactionSpill : ITransactionSpill
             var payload = new byte[length];
             if (!await ReadExactlyAsync(stream, payload, ct))
             {
-                yield break; // truncated tail (e.g. a partially-written record after a crash) — stop cleanly
+                yield break; // EOF right after the length prefix (no payload bytes); a partial payload throws
             }
             yield return SpillCodec.Decode(payload);
         }
@@ -71,11 +84,35 @@ internal sealed class FileTransactionSpill : ITransactionSpill
 
     public async ValueTask DiscardAsync(uint xid, CancellationToken ct)
     {
+        _subxidFirstOffsets.Remove(xid);
         if (_writers.Remove(xid, out var writer))
         {
             await writer.DisposeAsync();
         }
         Delete(PathFor(xid));
+    }
+
+    public async ValueTask DiscardSubtransactionAsync(uint xid, uint subxid, CancellationToken ct)
+    {
+        // No recorded first offset means the subtransaction spilled nothing (or no spill exists at all).
+        if (!_subxidFirstOffsets.TryGetValue(xid, out var offsets)
+            || !offsets.TryGetValue(subxid, out var firstOffset)
+            || !_writers.TryGetValue(xid, out var writer))
+        {
+            return;
+        }
+
+        await writer.FlushAsync(ct);
+        writer.SetLength(firstOffset);  // Position clamps to the new length; later appends continue from here
+
+        // Everything at/after the truncation point belonged to the aborted subtransaction or one nested in it.
+        foreach (var (sub, offset) in offsets)
+        {
+            if (offset >= firstOffset)
+            {
+                offsets.Remove(sub);
+            }
+        }
     }
 
     public ValueTask ClearAsync(CancellationToken ct)
@@ -85,6 +122,7 @@ internal sealed class FileTransactionSpill : ITransactionSpill
             writer.Dispose();
         }
         _writers.Clear();
+        _subxidFirstOffsets.Clear();
         if (Directory.Exists(_directory))
         {
             foreach (var file in Directory.EnumerateFiles(_directory, "*.spill"))
@@ -102,6 +140,7 @@ internal sealed class FileTransactionSpill : ITransactionSpill
             await writer.DisposeAsync();
         }
         _writers.Clear();
+        _subxidFirstOffsets.Clear();
     }
 
     private static async Task<bool> ReadExactlyAsync(Stream stream, byte[] buffer, CancellationToken ct)

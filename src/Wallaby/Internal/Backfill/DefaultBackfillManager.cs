@@ -6,8 +6,9 @@ namespace Wallaby.Internal.Backfill;
 
 /// <summary>
 /// Default <see cref="IWallabyBackfillManager"/>: persists a backfill request by marking the table's
-/// <c>wallaby.backfill_state</c> row as <see cref="BackfillStatus.Requested"/>, so the leader's scheduler
-/// picks it up (works regardless of which node received the request).
+/// <c>wallaby.backfill_state</c> row as <see cref="BackfillStatus.Requested"/> and signalling the backfill
+/// notify channel, so the leader's scheduler serves it immediately (works regardless of which node
+/// received the request).
 /// </summary>
 internal sealed class DefaultBackfillManager(WallabyModel model, IBackfillStateStore store) : IWallabyBackfillManager
 {
@@ -21,9 +22,7 @@ internal sealed class DefaultBackfillManager(WallabyModel model, IBackfillStateS
                 $"Cannot request a backfill for '{entityClrType.FullName}': it is not a captured table.");
 
         var existing = await store.GetAsync(table.QualifiedName, ct);
-        await store.SaveAsync(
-            new BackfillState(table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion, null, 0, DateTimeOffset.UtcNow),
-            ct);
+        await store.RequestAsync(table.QualifiedName, existing?.TransformVersion, ct);
     }
 
     public Task<IReadOnlyList<BackfillState>> GetStatusAsync(CancellationToken ct = default)

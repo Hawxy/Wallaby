@@ -61,6 +61,7 @@ public static class ValueCoercion
                 DateTime dateTime => dateTime.Kind == DateTimeKind.Unspecified
                     ? new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc))
                     : new DateTimeOffset(dateTime),
+                DateOnly dateOnly => new DateTimeOffset(dateOnly.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
                 string text => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal),
                 _ => rawValue,
             };
@@ -71,7 +72,41 @@ public static class ValueCoercion
             return rawValue switch
             {
                 DateTimeOffset dateTimeOffset => dateTimeOffset.UtcDateTime,
+                DateOnly dateOnly => dateOnly.ToDateTime(TimeOnly.MinValue),
                 string text => DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
+                _ => rawValue,
+            };
+        }
+
+        // Npgsql decodes date as DateOnly, time as TimeOnly, and interval as TimeSpan; none of these
+        // are IConvertible, so mismatched CLR properties need explicit bridges.
+        if (target == typeof(DateOnly))
+        {
+            return rawValue switch
+            {
+                DateTime dateTime => DateOnly.FromDateTime(dateTime),
+                string text => DateOnly.Parse(text, CultureInfo.InvariantCulture),
+                _ => rawValue,
+            };
+        }
+
+        if (target == typeof(TimeOnly))
+        {
+            return rawValue switch
+            {
+                TimeSpan timeSpan => TimeOnly.FromTimeSpan(timeSpan),
+                DateTime dateTime => TimeOnly.FromDateTime(dateTime),
+                string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
+                _ => rawValue,
+            };
+        }
+
+        if (target == typeof(TimeSpan))
+        {
+            return rawValue switch
+            {
+                TimeOnly timeOnly => timeOnly.ToTimeSpan(),
+                string text => TimeSpan.Parse(text, CultureInfo.InvariantCulture),
                 _ => rawValue,
             };
         }

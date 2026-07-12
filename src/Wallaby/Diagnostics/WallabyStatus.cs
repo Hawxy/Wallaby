@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Wallaby.Abstractions;
 
 namespace Wallaby.Diagnostics;
@@ -5,11 +6,14 @@ namespace Wallaby.Diagnostics;
 /// <summary>
 /// Mutable, thread-safe implementation of <see cref="IWallabyStatus"/>. The runtime, pipeline, and background
 /// service update it at lifecycle points; reads (from health-check probe threads) are lock-free via an
-/// atomically-swapped immutable snapshot.
+/// atomically-swapped immutable snapshot. Per-sink delivery timestamps are the highest-frequency update, so
+/// they mutate a concurrent map in place and are composed into the snapshot on read — not atomic with the
+/// other snapshot fields.
 /// </summary>
 internal sealed class WallabyStatus : IWallabyStatus
 {
     private readonly Lock _gate = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _sinkDeliveries = new(StringComparer.Ordinal);
     private WallabyStatusSnapshot _snapshot;
 
     public WallabyStatus(string slotName = "", TimeProvider? clock = null)
@@ -22,7 +26,19 @@ internal sealed class WallabyStatus : IWallabyStatus
         };
     }
 
-    public WallabyStatusSnapshot Current => Volatile.Read(ref _snapshot);
+    public WallabyStatusSnapshot Current
+    {
+        get
+        {
+            var snapshot = Volatile.Read(ref _snapshot);
+            return _sinkDeliveries.IsEmpty
+                ? snapshot
+                : snapshot with
+                {
+                    LastSinkDeliveryAt = new Dictionary<string, DateTimeOffset>(_sinkDeliveries, StringComparer.Ordinal),
+                };
+        }
+    }
 
     // Mutations are rare (role transitions, once per committed transaction) so a lock is fine; readers stay
     // lock-free via Volatile.Read of the swapped immutable snapshot.
@@ -64,12 +80,7 @@ internal sealed class WallabyStatus : IWallabyStatus
             ConsecutiveLeaderFailures = 0,
         });
 
-    internal void RecordSinkDelivered(string sink, DateTimeOffset at) =>
-        Update(s => s with
-        {
-            LastSinkDeliveryAt =
-                new Dictionary<string, DateTimeOffset>(s.LastSinkDeliveryAt, StringComparer.Ordinal) { [sink] = at },
-        });
+    internal void RecordSinkDelivered(string sink, DateTimeOffset at) => _sinkDeliveries[sink] = at;
 
     internal void MarkFaulted(string error) =>
         Update(s => s with { Role = WallabyNodeRole.Stopped, Faulted = true, LastError = error });

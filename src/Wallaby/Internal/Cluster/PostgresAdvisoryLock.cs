@@ -1,44 +1,40 @@
+using System.Collections.Concurrent;
+using Medallion.Threading;
+using Medallion.Threading.Postgres;
 using Npgsql;
 using Wallaby.Abstractions;
 
 namespace Wallaby.Internal.Cluster;
 
 /// <summary>
-/// Default <see cref="IClusterLock"/> using a Postgres session-level advisory lock on a dedicated
-/// connection. Because the lock is session-scoped, it is released automatically if the holder's
-/// connection drops (process crash, network partition) — giving fast, dependency-free failover. The
-/// returned handle also heartbeats that connection so a <em>silent</em> drop surfaces promptly via
-/// <see cref="IClusterLockHandle.Lost"/>.
+/// Default <see cref="IClusterLock"/> backed by DistributedLock.Postgres: a transaction-scoped advisory
+/// lock on a dedicated connection the library owns and monitors. 
 /// </summary>
-internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource, TimeSpan heartbeatInterval = default) : IClusterLock
+internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource) : IClusterLock
 {
-    private readonly TimeSpan _heartbeatInterval =
-        heartbeatInterval > TimeSpan.Zero ? heartbeatInterval : TimeSpan.FromSeconds(10);
+    // One long-lived lock object per key, reused across every acquisition attempt.
+    private readonly ConcurrentDictionary<string, PostgresDistributedLock> _locks = new(StringComparer.Ordinal);
 
     public async Task<IClusterLockHandle?> TryAcquireAsync(string key, CancellationToken ct)
     {
-        var lockKey = StableKey(key);
-        var connection = await dataSource.OpenConnectionAsync(ct);
-        try
-        {
-            var acquired = await PgExec.ScalarBoolAsync(connection, "SELECT pg_try_advisory_lock(@k)", ct, ("k", lockKey));
-            if (!acquired)
-            {
-                await connection.DisposeAsync();
-                return null;
-            }
+        var advisoryLock = _locks.GetOrAdd(
+            key,
+            static (k, ds) => new PostgresDistributedLock(
+                new PostgresAdvisoryLockKey(StableKey(k)),
+                ds,
+                o => o.UseTransaction()),
+            dataSource);
 
-            return new Handle(connection, lockKey, _heartbeatInterval);
-        }
-        catch
-        {
-            await connection.DisposeAsync();
-            throw;
-        }
+        var handle = await advisoryLock.TryAcquireAsync(TimeSpan.Zero, ct);
+        return handle is null ? null : new Handle(handle);
     }
 
-    /// <summary>Deterministic 64-bit key derived from the name (FNV-1a), used as the advisory lock id.</summary>
-    private static long StableKey(string value)
+    /// <summary>
+    /// Deterministic 64-bit key derived from the name (FNV-1a), used as the advisory lock id. Every node
+    /// version must derive the same key for the same name — the cluster's mutual exclusion depends on it —
+    /// so this hash is pinned by a test and must never change.
+    /// </summary>
+    internal static long StableKey(string value)
     {
         const ulong offset = 14695981039346656037;
         const ulong prime = 1099511628211;
@@ -53,77 +49,33 @@ internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource, TimeSpan
 
     private sealed class Handle : IClusterLockHandle
     {
-        // Short probe timeout so a silently wedged connection surfaces as a lost lock within roughly one
-        // heartbeat interval, instead of stalling on Npgsql's default 30s command timeout.
-        private const int ProbeTimeoutSeconds = 5;
+        private readonly IDistributedSynchronizationHandle _handle;
+        private bool _disposed;
 
-        private readonly NpgsqlConnection _connection;
-        private readonly long _lockKey;
-        private readonly CancellationTokenSource _lost = new();
-        private readonly CancellationTokenSource _stop = new();
-        private readonly Task _heartbeat;
-
-        public Handle(NpgsqlConnection connection, long lockKey, TimeSpan heartbeatInterval)
+        public Handle(IDistributedSynchronizationHandle handle)
         {
-            _connection = connection;
-            _lockKey = lockKey;
-
-            // Heartbeat the dedicated lock connection. The session advisory lock lives as long as the
-            // connection, so a failed probe means the session (and lock) is gone — cancel Lost so the
-            // leader steps down. (The probe also keeps the otherwise-idle connection alive.)
-            _heartbeat = LeadershipMonitor.WatchAsync(
-                ProbeAsync,
-                heartbeatInterval,
-                onLost: () => { IsHeld = false; return _lost.CancelAsync(); },
-                _stop.Token);
+            _handle = handle;
+            // Reading HandleLostToken starts the library's connection monitoring.
+            Lost = handle.HandleLostToken;
         }
 
-        public bool IsHeld { get; private set; } = true;
+        public bool IsHeld => !_disposed && !Lost.IsCancellationRequested;
 
-        public CancellationToken Lost => _lost.Token;
-
-        private async Task<bool> ProbeAsync(CancellationToken ct)
-        {
-            try
-            {
-                await using var cmd = new NpgsqlCommand("SELECT 1", _connection) { CommandTimeout = ProbeTimeoutSeconds };
-                await cmd.ExecuteScalarAsync(ct);
-                return true;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // we're stopping, not losing the lock
-            }
-            catch
-            {
-                return false; // broken/timed-out connection => session gone => lock lost
-            }
-        }
+        public CancellationToken Lost { get; }
 
         public async ValueTask DisposeAsync()
         {
-            // Stop the heartbeat first so it can't touch the connection while we release/close it.
-            await _stop.CancelAsync();
-            try { await _heartbeat; } catch { /* monitor swallows cancellation */ }
-
-            var wasHeld = IsHeld;
-            IsHeld = false;
+            _disposed = true;
             try
             {
-                // Skip the explicit unlock if the session is already gone (it released the lock for us).
-                if (wasHeld)
-                {
-                    await PgExec.ExecuteAsync(_connection, "SELECT pg_advisory_unlock(@k)", CancellationToken.None, ("k", _lockKey));
-                }
+                await _handle.DisposeAsync();
             }
             catch
             {
-                // Closing the session releases the advisory lock regardless.
+                // The explicit unlock fails when the session is already gone (e.g. a terminated backend).
+                // The library disposes its connection in a finally either way, and closing the session
+                // releases the advisory lock regardless.
             }
-
-            await _connection.DisposeAsync(); // always dispose, even after a detected loss, so it can't leak
-            _stop.Dispose();
-            _lost.Dispose();
         }
     }
 }

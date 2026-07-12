@@ -38,8 +38,11 @@ public sealed class AdminController(IWallabyBackfillManager backfill)
 }
 ```
 
-Requests are persisted, so they survive restarts and are executed by whichever node currently holds
-leadership. `GetStatusAsync()` is also available and returns the current state of every tracked table.
+Requests are persisted, so they survive restarts, and the requesting node signals the current leader
+via `LISTEN`/`NOTIFY` so the backfill starts immediately. A request made while the table is already backfilling wins: the run's remaining progress writes are
+discarded and the table re-runs from the start.
+
+`GetStatusAsync()` is also available and returns the current state of every tracked table.
 
 ## How it works
 

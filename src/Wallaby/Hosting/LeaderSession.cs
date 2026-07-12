@@ -43,14 +43,13 @@ internal sealed class LeaderSession(
     {
         await BootstrapAsync(ct);
 
-        // Spill target for pgoutput v2 streamed (large) transactions. Clear any leftovers from a prior crash —
-        // an un-acked streamed transaction is re-streamed from the slot, so stale spill data is never needed.
+        // Spill target for pgoutput v2 streamed (large) transactions. Leftovers from a prior crash are
+        // cleared by the stream once it exclusively holds the slot.
         await using var spill = CreateSpill();
-        await spill.ClearAsync(ct);
 
         await using var stream = new LogicalReplicationStream(
             dataSource.ConnectionString, options.SlotName, options.PublicationName, spill,
-            options.Advanced.MaxBufferedChangesPerTransaction);
+            options.Advanced.MaxBufferedChangesPerTransaction, components.Model);
         var changeEventFactory = new ChangeEventFactory(components.Materializer);
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
@@ -76,8 +75,8 @@ internal sealed class LeaderSession(
 
         var backfillTask = Task.Run(async () =>
         {
-            try { await scheduler.RunDueBackfillsAsync(linked.Token); }
-            catch (OperationCanceledException) { }
+            try { await scheduler.RunAsync(options.Advanced.BackfillPollInterval, linked.Token); }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 _logger.BackfillSchedulerFailed(ex);
@@ -91,7 +90,7 @@ internal sealed class LeaderSession(
             ? Task.Run(async () =>
             {
                 try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, _logger, options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
                 catch (Exception ex)
                 {
                     _logger.FanoutWorkerFailed(ex);
@@ -105,9 +104,11 @@ internal sealed class LeaderSession(
         {
             await pipeline.RunAsync(linked.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
             // Shutdown (ct), lost-lock, or a background fault cancelled the workload — distinguished below.
+            // An OCE while the workload is NOT being cancelled (e.g. a sink-thrown TaskCanceledException
+            // from an HTTP timeout) is a real fault and propagates like any other exception.
         }
         finally
         {

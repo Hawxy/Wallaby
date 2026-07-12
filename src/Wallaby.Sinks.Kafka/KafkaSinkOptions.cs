@@ -43,6 +43,13 @@ public sealed class KafkaSinkOptions
     public int MessageTimeoutMs { get; set; } = 30_000;
 
     /// <summary>
+    /// Ceiling in milliseconds on the admin request that creates <see cref="Topics"/> at initialization,
+    /// so an unreachable broker fails the leader session (which retries with backoff) instead of
+    /// stalling startup on librdkafka's default admin timeout.
+    /// </summary>
+    public int AdminTimeoutMs { get; set; } = 30_000;
+
+    /// <summary>
     /// Static key/value pairs echoed in every message value — useful for consumers fed by several
     /// pipelines or environments (e.g. <c>{"env": "prod"}</c>).
     /// </summary>

@@ -56,10 +56,10 @@ internal sealed class EntityMaterializer : IRowMaterializer
         for (var i = 0; i < source.Count; i++)
         {
             var column = source[i];
-            if (column.IsUnchangedToast) continue;
             if (!plan.ColumnsByName.TryGetValue(column.ColumnName, out var columnPlan)) continue;
 
-            var modelValue = ToModelValue(column.Value, columnPlan.ClrType, columnPlan.Converter);
+            var value = column.IsUnchangedToast ? ResolveUnchangedToast(change, column.ColumnName) : column.Value;
+            var modelValue = ToModelValue(value, columnPlan.ClrType, columnPlan.Converter);
             if (modelValue is null && !columnPlan.AcceptsNull)
             {
                 // pgoutput emits non-identity columns as nulls on DELETE/REPLICA IDENTITY DEFAULT.
@@ -87,6 +87,30 @@ internal sealed class EntityMaterializer : IRowMaterializer
 
         row = new MaterializedRow(change.Action, entity, record, changes, primaryKey, plan.ClrType);
         return true;
+    }
+
+    // An unchanged TOASTed value is omitted from the new tuple; under REPLICA IDENTITY FULL the old
+    // tuple still carries it. An unavailable value is a poison change — never a silently nulled property.
+    private static object ResolveUnchangedToast(RawChange change, string columnName)
+    {
+        if (change.OldValues is { } oldValues)
+        {
+            for (var i = 0; i < oldValues.Count; i++)
+            {
+                var old = oldValues[i];
+                if (old.ColumnName == columnName && old is { IsUnchangedToast: false, Value: not null })
+                {
+                    return old.Value;
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Column '{columnName}' on '{change.Schema}.{change.TableName}' was not carried in the change " +
+            $"(an unchanged TOASTed value with no old tuple). Run: ALTER TABLE {change.Schema}.{change.TableName} " +
+            "REPLICA IDENTITY FULL; — self-config warns with this DDL at startup (or fails when " +
+            "RequireFullReplicaIdentity is set). See " +
+            "https://wallabycdc.net/providers/entity-framework-core/#replica-identity-in-migrations");
     }
 
     private static object? ToModelValue(object? rawValue, Type modelClrType, ValueConverter? converter)

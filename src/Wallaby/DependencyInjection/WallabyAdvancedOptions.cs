@@ -22,13 +22,6 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// How often the leader verifies it still holds the cluster lock while streaming. If the lock's
-    /// connection has dropped (so Postgres auto-released it), the leader steps down within roughly this
-    /// interval and re-elects, instead of running on with a stale lock.
-    /// </summary>
-    public TimeSpan LeaderHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(10);
-
-    /// <summary>
     /// How often, while a single transaction is being processed, Wallaby sends a replication status
     /// update to keep the connection alive — covering slow transforms/sinks when the consumer isn't
     /// reading the stream (so Npgsql can't answer the server's keepalives). Keep it well under the
@@ -43,6 +36,13 @@ public sealed class WallabyAdvancedOptions
     /// worst-case fan-out latency at the cost of more idle queue polls.
     /// </summary>
     public TimeSpan FanoutPollInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Fallback poll interval for manual backfill requests. The leader's scheduler is primarily woken on
+    /// demand via LISTEN/NOTIFY the instant a request is persisted; this interval is only a safety net that
+    /// re-checks for requests in case a notification is ever missed (e.g. a dropped listening connection).
+    /// </summary>
+    public TimeSpan BackfillPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap

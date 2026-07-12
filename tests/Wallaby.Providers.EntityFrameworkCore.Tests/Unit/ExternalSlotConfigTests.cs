@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore.Internal;
@@ -13,7 +14,7 @@ public class ExternalSlotConfigTests
     // runs alongside a primary slot/publication (exercises the collision-with-primary checks).
     private static WallabyBuilder MinimalBuilder()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         builder.UseEntityFrameworkCore<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
@@ -26,7 +27,7 @@ public class ExternalSlotConfigTests
     // A provision-only builder: a connection string + external slots, no context and no sink.
     private static WallabyBuilder ProvisionOnlyBuilder()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         return builder;
     }
@@ -56,7 +57,7 @@ public class ExternalSlotConfigTests
     [Test]
     public void Capturing_without_a_context_fails_fast()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)); // => CaptureIntended
 
@@ -131,10 +132,11 @@ public class ExternalSlotConfigTests
     /// <summary>Materialize WallabyOptions the way AddWallaby does: builder actions applied, then validated.</summary>
     private static WallabyOptions ValidatedOptions(WallabyConfiguration config)
     {
+        using var provider = new ServiceCollection().BuildServiceProvider();
         var options = new WallabyOptions();
         foreach (var apply in config.OptionsActions)
         {
-            apply(options);
+            apply(provider, options);
         }
         var result = new WallabyOptionsValidator(config).Validate(null, options);
         return result.Failed

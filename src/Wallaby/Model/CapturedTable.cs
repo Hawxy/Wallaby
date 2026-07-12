@@ -14,6 +14,9 @@ public sealed class CapturedColumn
 
     /// <summary>True when the column participates in the primary key.</summary>
     public required bool IsPrimaryKey { get; init; }
+
+    /// <summary>How to read this column's wire value; see <see cref="ColumnReadMode"/>.</summary>
+    public ColumnReadMode ReadMode { get; init; }
 }
 
 /// <summary>

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore;
@@ -23,7 +24,7 @@ public class EntityMapBuilderTests
     [Test]
     public void ScopedBy_change_overload_reads_the_scope_key_from_the_record()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         builder.UseEntityFrameworkCore<AppDbContext>();
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         var sink = builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));

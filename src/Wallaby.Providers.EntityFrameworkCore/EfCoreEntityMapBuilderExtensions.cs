@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,7 +23,9 @@ public static class EfCoreEntityMapBuilderExtensions
     }
 
     /// <summary>Use a transform type resolved (or constructed) from the container.</summary>
-    public static EntityMapBuilder<TEntity> UsingTransform<TEntity, TTransform>(this EntityMapBuilder<TEntity> map)
+    public static EntityMapBuilder<TEntity> UsingTransform<TEntity,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TTransform>(
+        this EntityMapBuilder<TEntity> map)
         where TEntity : class
         where TTransform : class, IWallabyEfTransform<TEntity>
         => map.UsingTransformInvoker(sp =>

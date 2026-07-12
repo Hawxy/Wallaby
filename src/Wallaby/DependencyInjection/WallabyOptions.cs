@@ -47,7 +47,7 @@ public sealed class WallabyOptions
 
     /// <summary>
     /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill
-    /// reads. Supply it via <see cref="WallabyBuilder.UseConnectionString"/> or through the options pipeline
+    /// reads. Supply it via <see cref="WallabyBuilder.UseConnectionString(string)"/> or through the options pipeline
     /// (<c>Configure&lt;WallabyOptions&gt;</c>, configuration binding, or <c>PostConfigure</c> — the standard
     /// ordering applies). Validated as non-empty on first resolution.
     /// </summary>

@@ -151,7 +151,8 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         throw new InvalidOperationException(
             $"The document body for '{plan.Table.QualifiedName}' was not carried in the change (an unchanged " +
             $"TOASTed value with no old tuple). Run: ALTER TABLE {plan.Table.QualifiedName} REPLICA IDENTITY FULL; " +
-            "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set).");
+            "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set). " +
+            "See https://wallabycdc.net/providers/marten/#managed-replica-identity");
     }
 
     private static object AsJson(MartenTablePlan plan, object? value)
@@ -171,8 +172,9 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
             return _serializer.FromJson(documentType, stream);
         }
 
-        // The wire value is a string on every built-in path; FromJson only accepts a Stream, so encode
-        // into a pooled buffer — a fresh byte[] per row would put large documents straight on the LOH.
+        // The built-in producers deliver the body as UTF-8 bytes (handled above); a string body — e.g.
+        // from a custom producer — is encoded into a pooled buffer, since a fresh byte[] per row would
+        // put large documents straight on the LOH.
         var json = (string)data;
         var buffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(json));
         try

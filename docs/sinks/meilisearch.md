@@ -45,7 +45,21 @@ cdc.AddMeilisearchSink("meili", m => { /* ... */ })
 | `PrimaryKey` | `id` | Document key field Wallaby injects into every document. |
 | `WaitTimeoutMs` | `60000` | Max wait per indexing task (every task is awaited before the batch is acked). |
 | `WaitIntervalMs` | `50` | Poll interval while waiting. |
+| `MaxRecordsPerBatch` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
+| `HttpClientName` | `null` | `IHttpClientFactory` client name to send through; `null` uses `MeilisearchSink.ClientNameFor(name)`. |
 | `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
+
+## HttpClient
+
+The underlying HttpClient is configurable via the `IHttpClientFactory`'s named client. Use
+`MeilisearchSink.ClientNameFor("meili")`, or the name you set
+via `HttpClientName`:
+
+```csharp
+builder.Services.AddHttpClient(MeilisearchSink.ClientNameFor("meili"))
+    .AddCustomResilienceHandler();
+```
+
 
 ## Index configuration
 
@@ -98,15 +112,24 @@ If a way to customize this would be useful, open an issue.
 - Document ids are sanitized to Meilisearch's allowed set (`[a-zA-Z0-9-_]`); composite-key separators are
   replaced, so composite keys work transparently.
 - A transform that returns `null` for a key (or omits it) issues a **delete** for that id.
-- Records are grouped by index; within an index, upserts are applied before deletes, and distinct indexes
-  are dispatched in parallel.
+- Records are grouped by index; within an index, upserts are applied before deletes (each split into
+  requests of at most `MaxRecordsPerBatch` records), and distinct indexes are dispatched in parallel.
 
 ## Delivery semantics
 
-Network/HTTP/task failures are reported as **retryable** - the dispatcher retries with exponential
-backoff. Every indexing task is awaited to completion; a task that finishes `Failed`/`Canceled` surfaces as
-a failure so the batch isn't acked prematurely. Because Meilisearch upserts are by primary key, redelivery
+Every indexing task is awaited to completion; a task that finishes `Failed`/`Canceled` surfaces as a
+failure so the batch isn't acked prematurely. Because Meilisearch upserts are by primary key, redelivery
 after a crash is safe.
+
+Failures are classified for the dispatcher by their Meilisearch error code (from the HTTP response or
+the failed task):
+
+| Error | Outcome |
+| --- | --- |
+| Transport failures, timeouts, responses without a Meilisearch error code | **Retryable** - the dispatcher retries with exponential backoff. |
+| Environment-fixable codes: `index_not_found`, `internal`, disk/queue pressure, … | **Retryable**. |
+| Deterministic configuration/credential/payload errors: `invalid_api_key`, `missing_authorization_header`, `payload_too_large`, `invalid_document_id`, `missing_document_id`, `invalid_document_fields`, `invalid_document_geo_field`, `invalid_index_uid`, `invalid_index_primary_key`, `index_primary_key_already_exists`, `index_primary_key_multiple_candidates_found`, `bad_request` | **Permanent** - the pipeline halts (a `MeilisearchTaskFailedException` carries the failed task's code). |
+| A record with no destination and no `DefaultIndex`, or a document missing a [configured attribute](#attribute-validation) | **Permanent**. |
 
 ## Per-tenant indexes
 

@@ -27,6 +27,19 @@ public sealed class MeilisearchSinkOptions
     public int WaitIntervalMs { get; set; } = 50;
 
     /// <summary>
+    /// Maximum records per indexing request. A larger batch is split into sequential requests, keeping
+    /// each payload safely under Meilisearch's request body limit (100 MB by default —
+    /// <c>payload_too_large</c> fails delivery permanently).
+    /// </summary>
+    public int MaxRecordsPerBatch { get; set; } = 500;
+
+    /// <summary>
+    /// <see cref="IHttpMessageHandlerFactory"/> client name whose handler pipeline the sink sends
+    /// through. Null uses <see cref="MeilisearchSink.ClientNameFor"/> for the sink's name.
+    /// </summary>
+    public string? HttpClientName { get; set; }
+
+    /// <summary>
     /// When true (the default), every upsert document is checked against its index's configured attributes
     /// (searchable/filterable/sortable from <see cref="ConfigureIndex"/>): if a configured attribute is not a
     /// key on the document, delivery fails permanently rather than silently indexing a document Meilisearch

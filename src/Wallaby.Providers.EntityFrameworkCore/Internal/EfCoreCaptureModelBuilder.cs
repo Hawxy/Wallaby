@@ -54,6 +54,16 @@ internal static class EfCoreCaptureModelBuilder
                     $"Entity '{clrType.FullName}' has no primary key. pgoutput logical replication requires a primary key to capture changes.");
             }
 
+            // A discriminator property exists exactly for TPH hierarchy members; TPT/TPC don't share tables.
+            if (entityType.FindDiscriminatorProperty() is not null
+                && (entityType.BaseType is not null || entityType.GetDirectlyDerivedTypes().Any()))
+            {
+                throw new WallabyConfigurationException(
+                    $"Entity '{clrType.FullName}' is part of a TPH hierarchy, which Wallaby cannot capture: " +
+                    "rows would materialize as one arbitrary hierarchy type and lose subclass data. " +
+                    "Use TPT or TPC mapping for captured hierarchies.");
+            }
+
             primaries.Add((entityType, BuildTable(entityType, spec.RequiresFullReplicaIdentity.Contains(clrType))));
         }
 

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics.CodeAnalysis;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
@@ -95,7 +96,7 @@ public class MultiProviderTests
     private static (WallabyBuilder Builder, WallabySinkBuilder Sink) CapturingBuilder(
         params WallabyProviderRegistration[] providers)
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         var sink = builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
         foreach (var provider in providers)
@@ -130,7 +131,7 @@ public class MultiProviderTests
     [Test]
     public void Scoped_sessions_require_the_target_provider_to_be_registered_first()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
 
         Should.Throw<WallabyConfigurationException>(
             () => builder.UseScopedEnrichmentSessions("A", _ => new FakeSessionProvider()));

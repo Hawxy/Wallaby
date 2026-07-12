@@ -52,6 +52,7 @@ builder.Services.AddWallaby(cdc =>
 | `Compression` | `Lz4` | Message batch compression. |
 | `LingerMs` | `5` | How long the producer lingers to fill a batch before sending. |
 | `MessageTimeoutMs` | `30000` | How long librdkafka retries transient broker errors internally before the failure surfaces as retryable. |
+| `AdminTimeoutMs` | `30000` | Ceiling on the startup [topic-creation](#topic-creation) request; an unreachable broker fails the leader session (which retries with backoff) instead of stalling startup. |
 | `Annotations` | `null` | Static key/values echoed in every message value. |
 | `SerializerOptions` | `null` | Serializer for non-scalar document values — see [NativeAOT](#nativeaot). |
 

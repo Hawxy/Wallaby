@@ -115,6 +115,58 @@ public class StreamingTests
             TimeSpan.FromSeconds(20));
     }
 
+    [Test]
+    public async Task Savepoint_rollback_inside_streamed_transaction_loses_only_the_rolled_back_changes()
+    {
+        await using var container = new PostgreSqlBuilder("postgres:17")
+            .WithCommand(
+                "-c", "wal_level=logical",
+                "-c", "logical_decoding_work_mem=64kB",
+                "-c", "max_replication_slots=20",
+                "-c", "max_wal_senders=20")
+            .Build();
+        await container.StartAsync();
+        var connectionString = container.GetConnectionString();
+
+        await using (var ctx = new AppDbContext(TestModelFactory.CreateOptions(connectionString)))
+        {
+            await ctx.Database.EnsureCreatedAsync();
+        }
+
+        await using var harness = WallabyTestHarness.ForTestModel(connectionString);
+        var capture = harness.AddCaptureSink();
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
+        await harness.SelfConfigureAsync();
+
+        // ONE streamed transaction: every segment individually exceeds the 64kB reorder-buffer limit, so
+        // the pre-savepoint changes are already spilled when the subtransaction's stream-abort arrives.
+        const int count = 2000;
+        var categoryId = await harness.Db.AddCategoryAsync();
+        await harness.Db.AddProductsWithSavepointRollbackAsync(
+            categoryId,
+            preNames: Enumerable.Range(0, count).Select(i => $"pre_{i}").ToArray(),
+            rolledBackNames: Enumerable.Range(0, count).Select(i => $"gone_{i}").ToArray(),
+            postNames: Enumerable.Range(0, count).Select(i => $"post_{i}").ToArray());
+
+        await harness.RunUntilAsync(
+            () => capture.For("products").Count(r => r.Document is not null) >= count * 2,
+            timeout: TimeSpan.FromSeconds(90));
+
+        // The pre-savepoint and post-rollback changes both deliver; the rolled-back ones never do.
+        var names = capture.For("products")
+            .Where(r => r.Document is not null)
+            .Select(r => (string)r.Document!["name"]!)
+            .ToList();
+        names.Count.ShouldBe(count * 2);
+        names.Count(n => n.StartsWith("pre_")).ShouldBe(count);
+        names.Count(n => n.StartsWith("post_")).ShouldBe(count);
+        names.ShouldNotContain(n => n.StartsWith("gone_"));
+
+        // The server actually streamed the transaction (proves the v2 stream-abort path was exercised).
+        await Polling.UntilAsync(async () => await StreamTxnsAsync(connectionString, harness.Names.Slot) > 0L,
+            TimeSpan.FromSeconds(20));
+    }
+
     private static async Task<long> StreamTxnsAsync(string connectionString, string slot)
     {
         await using var conn = new NpgsqlConnection(connectionString);

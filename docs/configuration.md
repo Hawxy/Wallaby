@@ -46,9 +46,9 @@ You shouldn't modify these unless you know what you're doing:
 | --- | --- | --- |
 | `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
-| `LeaderHeartbeatInterval` | `10s` | How often the leader verifies it still holds the cluster lock while streaming. If the lock's connection dropped (so Postgres auto-released it), the leader steps down within roughly this interval and re-elects. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
 | `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/providers/entity-framework-core/#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
+| `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval is only a safety net for a missed notification. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 | `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/why-wallaby#slot-loss-gap-detection).|
 
@@ -69,19 +69,20 @@ builder.Services.PostConfigure<WallabyOptions>(o => o.SlotName = "tests_slot");
 
 ## Reading configuration at startup
 
-When the builder needs services use the provider-included overload of `AddWallaby`:
+When option values need services, use the provider-aware value hooks — `UseConnectionString`,
+`ConfigureOptions`, and the sinks' options overloads all accept an `IServiceProvider`-taking delegate
+that runs on first resolution, while the registration itself stays eager:
 
 ```csharp
-builder.Services.AddWallaby((sp, cdc) =>
+builder.Services.AddWallaby(cdc =>
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-
     cdc.UseEntityFrameworkCore<AppDbContext>() // or any other provider
-       .UseConnectionString(config.GetConnectionString("App")!)
-       // ... sinks and mappings as usual ...
+       .UseConnectionString(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
+       .AddMeilisearchSink("meili", (sp, m) => m.Host = sp.GetRequiredService<IConfiguration>()["Meili:Host"]!)
+       // ... mappings as usual ...
 });
 ```
 
-The callback runs once, when the host first resolves Wallaby's services. Two consequences of the deferred timing: the
-callback receives the **root** provider (scoped services are unavailable), and configuration errors surface
-at host start instead of at registration.
+The delegates run once, when the host first resolves Wallaby's services, and receive the **root** provider
+(scoped services are unavailable). Resolving Wallaby's own services inside them creates a resolution cycle,
+and their configuration errors surface at host start instead of at registration.

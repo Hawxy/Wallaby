@@ -9,11 +9,7 @@ namespace Wallaby.Testing;
 /// Post-registration overrides for test hosts: swap a production sink for a test double or adjust
 /// <see cref="WallabyOptions"/> after the application's own <c>AddWallaby</c> call has run. Designed for
 /// <c>WebApplicationFactory.ConfigureTestServices</c> (which executes after the app's
-/// <c>ConfigureServices</c>) but works with any <see cref="IServiceCollection"/>. Both extensions support
-/// the eager <c>AddWallaby(Action&lt;WallabyBuilder&gt;)</c> overload and the deferred provider-aware
-/// <c>AddWallaby(Action&lt;IServiceProvider, WallabyBuilder&gt;)</c> overload; with the deferred overload the
-/// overrides apply when the configuration first materializes (host start), so configuration errors —
-/// including an unknown sink name — surface there rather than at registration.
+/// <c>ConfigureServices</c>) but works with any <see cref="IServiceCollection"/>.
 /// </summary>
 public static class WallabyTestingServiceCollectionExtensions
 {
@@ -29,8 +25,7 @@ public static class WallabyTestingServiceCollectionExtensions
     /// <param name="replacement">The sink that should receive the batches instead.</param>
     /// <exception cref="InvalidOperationException">
     /// <c>AddWallaby</c> has not been called on <paramref name="services"/>, or no sink is registered
-    /// under <paramref name="name"/>. With the deferred <c>AddWallaby</c> overload the unknown-name case
-    /// throws when the configuration first materializes (host start) instead of immediately.
+    /// under <paramref name="name"/>.
     /// </exception>
     public static IServiceCollection ReplaceWallabySink(this IServiceCollection services, string name, ISink replacement)
     {
@@ -70,16 +65,14 @@ public static class WallabyTestingServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Apply <paramref name="mutate"/> to the registered <see cref="WallabyConfiguration"/>: immediately when it
-    /// was registered as an instance (eager <c>AddWallaby</c>), or by decorating the registration's factory
-    /// when it is deferred (provider-aware <c>AddWallaby</c>) so the mutation runs right after the
-    /// application's configure callback. Repeated calls compose in call order.
+    /// Apply <paramref name="mutate"/> to the registered <see cref="WallabyConfiguration"/> instance.
+    /// Repeated calls compose in call order.
     /// </summary>
     private static IServiceCollection MutateConfiguration(
         this IServiceCollection services, string caller, Action<WallabyConfiguration> mutate)
     {
         // Walk backwards: the LAST registration wins for singleton resolution. Keyed descriptors are skipped —
-        // their ImplementationInstance/ImplementationFactory getters throw.
+        // their ImplementationInstance getter throws.
         for (var i = services.Count - 1; i >= 0; i--)
         {
             var descriptor = services[i];
@@ -91,20 +84,6 @@ public static class WallabyTestingServiceCollectionExtensions
             if (descriptor.ImplementationInstance is WallabyConfiguration instance)
             {
                 mutate(instance);
-                return services;
-            }
-
-            if (descriptor.ImplementationFactory is { } inner)
-            {
-                // Replace in place (by index) rather than via Replace(), which removes the FIRST matching
-                // descriptor and re-appends — wrong target and a reorder. The decorated factory still runs
-                // exactly once (singleton).
-                services[i] = ServiceDescriptor.Singleton(sp =>
-                {
-                    var configuration = (WallabyConfiguration)inner(sp);
-                    mutate(configuration);
-                    return configuration;
-                });
                 return services;
             }
 

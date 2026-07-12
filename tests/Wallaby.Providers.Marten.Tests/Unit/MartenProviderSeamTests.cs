@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Providers;
@@ -13,7 +14,7 @@ public class MartenProviderSeamTests
 {
     private static (WallabyBuilder Builder, WallabySinkBuilder Sink) CapturingBuilder()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
         builder.UseConnectionString("Host=localhost;Database=db;Username=u;Password=p");
         var sink = builder.AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success));
         return (builder, sink);

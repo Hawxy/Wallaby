@@ -16,11 +16,11 @@ internal sealed class FakeSession(FakeSessionProvider owner) : IEnrichmentSessio
 }
 
 /// <summary>Counts leases and disposals so tests can assert session-per-batch semantics.</summary>
-internal sealed class FakeSessionProvider : IEnrichmentSessionProvider
+internal sealed class FakeSessionProvider(bool isScoped = false) : IEnrichmentSessionProvider
 {
     public int Leases { get; private set; }
     public int Disposals { get; set; }
-    public bool IsScoped => false;
+    public bool IsScoped => isScoped;
 
     public IEnrichmentSession Lease(object? scopeKey)
     {
@@ -54,6 +54,15 @@ internal static class TestChanges
         => new()
         {
             EntityClrType = type, SinkName = "sink", Destination = "dest", Transform = transform, Sessions = sessions,
+        };
+
+    public static EntityMapping Mapping(
+        Type type, IWallabyTransformInvoker transform, IEnrichmentSessionProvider sessions,
+        Func<ChangeEvent, object?> scopeKeySelector)
+        => new()
+        {
+            EntityClrType = type, SinkName = "sink", Destination = "dest", Transform = transform, Sessions = sessions,
+            ScopeKeySelector = scopeKeySelector,
         };
 
     public static ChangeEvent Change(Type type, int id, ChangeAction action = ChangeAction.Insert)

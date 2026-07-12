@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Providers;
@@ -11,6 +12,19 @@ public sealed class WallabyBuilder
 {
     private readonly WallabyConfiguration _configuration = new();
 
+    /// <summary>Created by <c>AddWallaby</c>; construct one directly only to exercise registration extensions in tests.</summary>
+    public WallabyBuilder(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        Services = services;
+    }
+
+    /// <summary>
+    /// The service collection <c>AddWallaby</c> was called on, for sink/provider registration extensions
+    /// that need supporting registrations (e.g. a named HttpClient pipeline).
+    /// </summary>
+    public IServiceCollection Services { get; }
+
     /// <summary>
     /// Configure options (slot/publication names, chunk size, auto-backfill, etc.). The action joins the
     /// standard options pipeline at the <c>AddWallaby</c> registration position, so it composes with
@@ -18,6 +32,20 @@ public sealed class WallabyBuilder
     /// registrations run before it, later ones and <c>PostConfigure</c> override it.
     /// </summary>
     public WallabyBuilder ConfigureOptions(Action<WallabyOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _configuration.OptionsActions.Add((_, options) => configure(options));
+        return this;
+    }
+
+    /// <summary>
+    /// Provider-aware overload of <see cref="ConfigureOptions(Action{WallabyOptions})"/>: the action runs
+    /// on first options resolution with the root provider, so option values can come from services (e.g.
+    /// <c>IConfiguration</c>) while registration — and <see cref="Services"/> — stays eager. Resolving
+    /// Wallaby's own services (<see cref="WallabyOptions"/>, <see cref="Abstractions.IWallabyStatus"/>, …)
+    /// inside it creates a resolution cycle.
+    /// </summary>
+    public WallabyBuilder ConfigureOptions(Action<IServiceProvider, WallabyOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
         _configuration.OptionsActions.Add(configure);
@@ -32,7 +60,20 @@ public sealed class WallabyBuilder
     /// </summary>
     public WallabyBuilder UseConnectionString(string connectionString)
     {
-        _configuration.OptionsActions.Add(options => options.ConnectionString = connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        _configuration.OptionsActions.Add((_, options) => options.ConnectionString = connectionString);
+        return this;
+    }
+
+    /// <summary>
+    /// Provider-aware overload of <see cref="UseConnectionString(string)"/>: the factory runs on first
+    /// options resolution, e.g.
+    /// <c>UseConnectionString(sp =&gt; sp.GetRequiredService&lt;IConfiguration&gt;().GetConnectionString("Db")!)</c>.
+    /// </summary>
+    public WallabyBuilder UseConnectionString(Func<IServiceProvider, string> connectionString)
+    {
+        ArgumentNullException.ThrowIfNull(connectionString);
+        _configuration.OptionsActions.Add((sp, options) => options.ConnectionString = connectionString(sp));
         return this;
     }
 
@@ -83,6 +124,7 @@ public sealed class WallabyBuilder
     /// </summary>
     public WallabySinkBuilder AddSink(ISink sink)
     {
+        ArgumentNullException.ThrowIfNull(sink);
         var registration = new SinkRegistration { Name = sink.Name, Factory = _ => sink };
         _configuration.Sinks.Add(registration);
         return new WallabySinkBuilder(this, registration);
@@ -94,6 +136,8 @@ public sealed class WallabyBuilder
     /// </summary>
     public WallabySinkBuilder AddSink(string name, Func<IServiceProvider, ISink> factory)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(factory);
         var registration = new SinkRegistration { Name = name, Factory = factory };
         _configuration.Sinks.Add(registration);
         return new WallabySinkBuilder(this, registration);

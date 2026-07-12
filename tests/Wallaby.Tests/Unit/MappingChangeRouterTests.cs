@@ -75,4 +75,70 @@ public class MappingChangeRouterTests
         await Should.ThrowAsync<InvalidOperationException>(
             async () => await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None));
     }
+
+    private sealed class OtherDoc;
+
+    [Test]
+    public async Task Interleaved_entity_types_route_in_first_occurrence_order()
+    {
+        var router = new MappingChangeRouter(
+        [
+            TestChanges.Mapping(typeof(Doc), new RecordingTransform(), new FakeSessionProvider()),
+            TestChanges.Mapping(typeof(OtherDoc), new RecordingTransform(), new FakeSessionProvider()),
+        ]);
+
+        var routed = await router.RouteAsync(
+            [
+                Change(ChangeAction.Insert, 1),
+                TestChanges.Change(typeof(OtherDoc), 2),
+                Change(ChangeAction.Insert, 3),
+                TestChanges.Change(typeof(OtherDoc), 4),
+            ],
+            CancellationToken.None);
+
+        routed.Select(r => r.Record.DocumentId).ShouldBe(["1", "3", "2", "4"]);
+    }
+
+    [Test]
+    public async Task Scope_groups_route_deletes_first_then_scopes_in_first_occurrence_order()
+    {
+        var router = new MappingChangeRouter(
+            [TestChanges.Mapping(typeof(Doc), new RecordingTransform(), new FakeSessionProvider(), ScopeOf)]);
+
+        var routed = await router.RouteAsync(
+            [
+                Change(ChangeAction.Delete, 9),
+                Change(ChangeAction.Insert, 1), // scope "A"
+                Change(ChangeAction.Insert, 2), // scope null
+                Change(ChangeAction.Insert, 3), // scope "B"
+                Change(ChangeAction.Insert, 4), // scope "A"
+            ],
+            CancellationToken.None);
+
+        routed.Select(r => r.Record.DocumentId).ShouldBe(["9", "1", "4", "2", "3"]);
+        routed[0].Record.IsDeletion.ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Same_scope_changes_share_one_session_lease()
+    {
+        var sessions = new FakeSessionProvider(isScoped: true);
+        var router = new MappingChangeRouter(
+            [TestChanges.Mapping(typeof(Doc), new RecordingTransform(), sessions, ScopeOf)]);
+
+        await router.RouteAsync(
+            [Change(ChangeAction.Insert, 1), Change(ChangeAction.Insert, 4), Change(ChangeAction.Insert, 3)],
+            CancellationToken.None);
+
+        // ids 1 and 4 share scope "A"; id 3 is scope "B".
+        sessions.Leases.ShouldBe(2);
+        sessions.Disposals.ShouldBe(2);
+    }
+
+    private static object? ScopeOf(ChangeEvent change) => (int)change.Entity! switch
+    {
+        1 or 4 => "A",
+        3 => "B",
+        _ => null,
+    };
 }

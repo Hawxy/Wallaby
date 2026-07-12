@@ -16,6 +16,8 @@ public class MaterializationTests
 
     private static RawColumn Col(string name, object? value) => new() { ColumnName = name, Value = value };
 
+    private static RawColumn Toast(string name) => new() { ColumnName = name, Value = null, IsUnchangedToast = true };
+
     private static RawChange ProductInsert() => new()
     {
         RelationId = 1,
@@ -117,6 +119,59 @@ public class MaterializationTests
         row.PrimaryKey[0].ShouldBe(42);
         row.Changes.ShouldBeNull();
         ((Product)row.Entity!).Id.ShouldBe(42);
+    }
+
+    [Test]
+    public void An_unchanged_toasted_column_falls_back_to_the_old_tuple()
+    {
+        var materializer = CreateMaterializer();
+
+        // REPLICA IDENTITY FULL: the unchanged TOASTed Description is omitted from the new tuple but
+        // carried in the old one.
+        var change = ProductInsert() with
+        {
+            Action = ChangeAction.Update,
+            NewValues =
+            [
+                Col("Id", 42), Col("Name", "Widget v2"), Col("Price", 9.99m), Col("product_sku", "W-1"),
+                Col("Status", "Active"), Col("Tags", "[\"a\",\"b\"]"), Toast("Description"), Col("CategoryId", 7),
+            ],
+            OldValues =
+            [
+                Col("Id", 42), Col("Name", "Widget"), Col("Price", 9.99m), Col("product_sku", "W-1"),
+                Col("Status", "Active"), Col("Tags", "[\"a\",\"b\"]"), Col("Description", "a widget"), Col("CategoryId", 7),
+            ],
+        };
+
+        materializer.TryMaterialize(change, out var row);
+
+        ((Product)row!.Entity!).Description.ShouldBe("a widget");
+        row.Record[nameof(Product.Description)].ShouldBe("a widget");
+    }
+
+    [Test]
+    public void An_unavailable_toasted_column_is_a_poison_change_with_replica_identity_guidance()
+    {
+        var materializer = CreateMaterializer();
+
+        // REPLICA IDENTITY DEFAULT: no old tuple, so the unchanged TOASTed value is unrecoverable.
+        var change = ProductInsert() with
+        {
+            Action = ChangeAction.Update,
+            NewValues =
+            [
+                Col("Id", 42), Col("Name", "Widget v2"), Col("Price", 9.99m), Col("product_sku", "W-1"),
+                Col("Status", "Active"), Col("Tags", "[\"a\",\"b\"]"), Toast("Description"), Col("CategoryId", 7),
+            ],
+            OldValues = null,
+        };
+
+        var ex = Should.Throw<InvalidOperationException>(() => materializer.TryMaterialize(change, out _));
+
+        ex.Message.ShouldContain("Description");
+        ex.Message.ShouldContain("public.products");
+        ex.Message.ShouldContain("REPLICA IDENTITY FULL");
+        ex.Message.ShouldContain("https://wallabycdc.net/providers/entity-framework-core/");
     }
 
     [Test]

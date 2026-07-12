@@ -66,22 +66,29 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         // 3) Stream and collect the product changes.
         var collected = new List<RawChange>();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
-        await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
         try
         {
-            await foreach (var txn in stream.ReadAsync(cts.Token))
+            await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+            await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
+            try
             {
-                collected.AddRange(txn.Changes.Where(c => c.TableName == "products"));
-                if (collected.Any(c => c.Action == ChangeAction.Delete))
+                await foreach (var txn in stream.ReadAsync(cts.Token))
                 {
-                    break;
+                    collected.AddRange(txn.Changes.Where(c => c.TableName == "products"));
+                    if (collected.Any(c => c.Action == ChangeAction.Delete))
+                    {
+                        break;
+                    }
                 }
             }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                // Fall through to assertions, which will report what was (not) captured.
+            }
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        finally
         {
-            // Fall through to assertions, which will report what was (not) captured.
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
         }
 
         // Insert
@@ -93,6 +100,9 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         Convert.ToInt32(Value(insert.NewValues, "Id")).ShouldBe(productId);
         Value(insert.NewValues, "Name").ShouldBe("Widget");
         Value(insert.NewValues, "product_sku").ShouldBe("W-1");
+        // jsonb with the default ColumnReadMode keeps its string representation (Product.Tags's
+        // ValueConverter expects a string).
+        Value(insert.NewValues, "Tags").ShouldBeOfType<string>();
 
         // Update (REPLICA IDENTITY DEFAULT + non-key change => new values only, no old tuple)
         var update = collected.Single(c => c.Action == ChangeAction.Update);

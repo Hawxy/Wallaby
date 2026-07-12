@@ -56,6 +56,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private DependentChangeResolver? _dependentResolver;
     private IFanoutQueueStore? _fanoutQueue;
     private Task? _pipelineTask;
+    private Task? _backfillLoopTask;
 
     public WallabyTestHarness(string connectionString, IWallabyModelProvider modelProvider, WallabyNames? names = null)
     {
@@ -210,7 +211,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot);
-        _stream = new LogicalReplicationStream(ConnectionString, Names.Slot, Names.Publication, _spill);
+        _stream = new LogicalReplicationStream(ConnectionString, Names.Slot, Names.Publication, _spill, model: _model);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
 
@@ -271,8 +272,39 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>Run a backfill scheduler pass for the declared backfill tables (awaits completion).</summary>
     /// <param name="version">Overrides the declared transform version for all backfill tables (e.g. to force a re-backfill).</param>
     public async Task RunBackfillAsync(string? version = null)
+        => await BuildScheduler(version).RunDueBackfillsAsync(_cts?.Token
+            ?? throw new InvalidOperationException("Call StartAsync() before running a backfill."));
+
+    /// <summary>
+    /// Start the leader's backfill loop in the background: an initial due pass, then serving manual
+    /// requests as they arrive (until <see cref="StopAsync"/>). Returns the loop task.
+    /// </summary>
+    /// <param name="pollInterval">Fallback poll interval; a request normally wakes the loop via NOTIFY.</param>
+    /// <param name="version">Overrides the declared transform version for all backfill tables.</param>
+    public Task RunBackfillLoopAsync(TimeSpan pollInterval, string? version = null)
     {
-        if (_coordinator is null || _cts is null)
+        if (_cts is null)
+        {
+            throw new InvalidOperationException("Call StartAsync() before running the backfill loop.");
+        }
+        if (_backfillLoopTask is not null)
+        {
+            throw new InvalidOperationException("The backfill loop is already running.");
+        }
+
+        var scheduler = BuildScheduler(version);
+        var token = _cts.Token;
+        _backfillLoopTask = Task.Run(async () =>
+        {
+            try { await scheduler.RunAsync(pollInterval, token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        });
+        return _backfillLoopTask;
+    }
+
+    private BackfillScheduler BuildScheduler(string? version)
+    {
+        if (_coordinator is null)
         {
             throw new InvalidOperationException("Call StartAsync() before running a backfill.");
         }
@@ -280,10 +312,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         var tables = _backfillTypes
             .Select(kv => (_model!.FindByClrType(kv.Key)!, version ?? kv.Value))
             .ToList();
-
-        var scheduler = new BackfillScheduler(
+        return new BackfillScheduler(
             tables, new PostgresBackfillStore(_dataSource), _coordinator, new BackfillSchedulerOptions(), NullLogger.Instance);
-        await scheduler.RunDueBackfillsAsync(_cts.Token);
     }
 
     /// <summary>Poll until the condition holds (or times out), surfacing any pipeline fault promptly.</summary>
@@ -326,6 +356,13 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             catch (Exception ex) { fault = ex; }
         }
 
+        if (_backfillLoopTask is not null)
+        {
+            try { await _backfillLoopTask; }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { fault ??= ex; }
+        }
+
         if (_stream is not null)
         {
             await _stream.DisposeAsync();
@@ -339,6 +376,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _cts?.Dispose();
         _cts = null;
         _pipelineTask = null;
+        _backfillLoopTask = null;
         _stream = null;
         _spill = null;
         _pipeline = null;
@@ -354,12 +392,21 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_pipelineTask is not null)
+        try
         {
-            await StopAsync();
+            if (_pipelineTask is not null)
+            {
+                await StopAsync(); // throws when the pipeline faulted — cleanup below must still run
+            }
         }
-        await SinkDisposal.DisposeAllAsync(_sinks.Values, NullLogger.Instance);
-        await _dataSource.DisposeAsync();
+        finally
+        {
+            await SinkDisposal.DisposeAllAsync(_sinks.Values, NullLogger.Instance);
+            // The shared session container caps max_replication_slots; leaving this test's slot behind
+            // eventually starves a later test's slot creation.
+            await PostgresReplicationCleanup.DropAsync(ConnectionString, Names);
+            await _dataSource.DisposeAsync();
+        }
     }
 
     private void ThrowIfPipelineFaulted()
@@ -367,6 +414,10 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         if (_pipelineTask is { IsFaulted: true } task)
         {
             throw new InvalidOperationException("CDC pipeline faulted.", task.Exception?.GetBaseException());
+        }
+        if (_backfillLoopTask is { IsFaulted: true } loop)
+        {
+            throw new InvalidOperationException("Backfill loop faulted.", loop.Exception?.GetBaseException());
         }
     }
 

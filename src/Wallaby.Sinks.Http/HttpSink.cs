@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -57,17 +58,20 @@ public sealed class HttpSink : ISink
     {
         var client = _factory.CreateClient(_clientName);
         var records = batch.Records;
+        // One buffer serves every chunk of this call — the previous request has fully settled before the
+        // next chunk resets it. Per-call (not per-instance) because ISink has no threading contract.
+        var buffer = new ArrayBufferWriter<byte>();
 
         // Chunks are sent sequentially so commit order is preserved across requests.
         for (var offset = 0; offset < records.Count; offset += _options.MaxRecordsPerRequest)
         {
             var count = Math.Min(_options.MaxRecordsPerRequest, records.Count - offset);
 
-            byte[] payload;
+            buffer.ResetWrittenCount();
             try
             {
-                payload = EnvelopeWriter.Write(
-                    batch.SinkName, records, offset, count, _options.Annotations, _options.SerializerOptions);
+                EnvelopeWriter.Write(
+                    buffer, batch.SinkName, records, offset, count, _options.Annotations, _options.SerializerOptions);
             }
             catch (Exception ex)
             {
@@ -80,8 +84,8 @@ public sealed class HttpSink : ISink
             // (middleware) decompression.
             var signature = _signingKey is null
                 ? null
-                : $"sha256={Convert.ToHexStringLower(HMACSHA256.HashData(_signingKey, payload))}";
-            var body = Compress(payload);
+                : $"sha256={Convert.ToHexStringLower(HMACSHA256.HashData(_signingKey, buffer.WrittenSpan))}";
+            var body = Compress(buffer);
 
             var failure = await PostAsync(client, body, signature, ct);
             if (failure is not null)
@@ -94,25 +98,28 @@ public sealed class HttpSink : ISink
     }
 
     /// <summary>Apply the configured request-body compression; the payload as-is for <see cref="HttpSinkCompression.None"/>.</summary>
-    private byte[] Compress(byte[] payload)
+    private ReadOnlyMemory<byte> Compress(ArrayBufferWriter<byte> payload)
     {
         if (_options.Compression == HttpSinkCompression.None)
         {
-            return payload;
+            return payload.WrittenMemory;
         }
 
         using var output = new MemoryStream();
         using (Stream compressor = _options.Compression == HttpSinkCompression.Gzip
-            ? new GZipStream(output, CompressionLevel.Fastest)
-            : new BrotliStream(output, CompressionLevel.Fastest))
+            ? new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true)
+            : new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true))
         {
-            compressor.Write(payload);
+            compressor.Write(payload.WrittenSpan);
         }
-        return output.ToArray();
+        // The compressed bytes are handed off without the ToArray copy; the MemoryStream's buffer stays
+        // reachable through the returned memory.
+        return output.GetBuffer().AsMemory(0, (int)output.Length);
     }
 
     /// <summary>POST one envelope; null on success, otherwise the classified failure.</summary>
-    private async Task<DeliveryResult?> PostAsync(HttpClient client, byte[] body, string? signature, CancellationToken ct)
+    private async Task<DeliveryResult?> PostAsync(
+        HttpClient client, ReadOnlyMemory<byte> body, string? signature, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_options.TimeoutMs);
@@ -120,7 +127,7 @@ public sealed class HttpSink : ISink
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint);
-            var content = new ByteArrayContent(body);
+            var content = new ReadOnlyMemoryContent(body);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             if (_options.Compression != HttpSinkCompression.None)
             {

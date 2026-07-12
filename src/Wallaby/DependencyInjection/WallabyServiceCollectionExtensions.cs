@@ -25,57 +25,43 @@ public static class WallabyServiceCollectionExtensions
     /// <see cref="WallabyOptions"/> participates in the standard options pipeline: <c>Configure&lt;WallabyOptions&gt;</c>
     /// and configuration binding compose with the builder's <c>ConfigureOptions</c> in registration order, and
     /// <c>PostConfigure</c> runs last; option values are validated on first resolution.
+    /// Call at most once per service collection; a second call throws <see cref="WallabyConfigurationException"/>.
     /// </summary>
     public static IServiceCollection AddWallaby(this IServiceCollection services, Action<WallabyBuilder> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
-        var builder = new WallabyBuilder();
+        ThrowIfAlreadyRegistered(services);
+        var builder = new WallabyBuilder(services);
         configure(builder);
         services.AddSingleton(builder.Build());
         return AddWallabyCore(services);
     }
 
-    /// <summary>
-    /// Add Postgres CDC, deferring configuration until the service provider exists — use this when the
-    /// builder needs services such as <c>IConfiguration</c> (e.g.
-    /// <c>cdc.UseConnectionString(sp.GetRequiredService&lt;IConfiguration&gt;().GetConnectionString(...))</c>),
-    /// which also lets test hosts redirect those values through ordinary configuration overrides.
-    /// Unlike the eager overload, <paramref name="configure"/> runs (exactly once) on first resolution, so
-    /// configuration errors surface at host start rather than at registration. The callback receives the
-    /// <b>root</b> provider: scoped services are unavailable, and resolving Wallaby's own services
-    /// (<see cref="WallabyOptions"/>, <see cref="IWallabyStatus"/>, …) inside it creates a resolution cycle.
-    /// </summary>
-    public static IServiceCollection AddWallaby(
-        this IServiceCollection services, Action<IServiceProvider, WallabyBuilder> configure)
+    // Every registration in AddWallabyCore is a plain AddSingleton and the host starts every registered
+    // IHostedService, so a second AddWallaby would shadow the first configuration and run two election
+    // loops against the same slot.
+    private static void ThrowIfAlreadyRegistered(IServiceCollection services)
     {
-        ArgumentNullException.ThrowIfNull(configure);
-        services.AddSingleton(sp =>
+        if (services.Any(d => d.ServiceType == typeof(WallabyConfiguration) && !d.IsKeyedService))
         {
-            var builder = new WallabyBuilder();
-            configure(sp, builder);
-            return builder.Build();
-        });
-        return AddWallabyCore(services);
+            throw new WallabyConfigurationException(
+                "AddWallaby has already been called on this service collection. Wallaby supports one instance " +
+                "per host; combine all providers, sinks, and mappings into the single AddWallaby call.");
+        }
     }
 
-    /// <summary>
-    /// Registrations shared by both overloads. Every factory resolves <see cref="WallabyConfiguration"/> /
-    /// <see cref="WallabyOptions"/> from the provider, so it works whether the configuration was registered as an
-    /// instance (eager overload) or a deferred factory (provider-aware overload).
-    /// </summary>
     private static IServiceCollection AddWallabyCore(IServiceCollection services)
     {
         services.AddOptions();
 
         // Bridge the builder's option actions into the options pipeline at THIS registration position:
         // Configure<WallabyOptions> calls made before AddWallaby run first (the builder overrides them), later
-        // ones override the builder, and PostConfigure always wins. Resolving WallabyConfiguration lazily keeps
-        // this working for both the eager (instance) and deferred (factory) registration.
+        // ones override the builder, and PostConfigure always wins.
         services.AddSingleton<IConfigureOptions<WallabyOptions>>(sp => new ConfigureOptions<WallabyOptions>(options =>
         {
             foreach (var apply in sp.GetRequiredService<WallabyConfiguration>().OptionsActions)
             {
-                apply(options);
+                apply(sp, options);
             }
         }));
         services.AddSingleton<IValidateOptions<WallabyOptions>>(sp =>
@@ -111,9 +97,7 @@ public static class WallabyServiceCollectionExtensions
         services.AddSingleton<IWallabyStatus>(sp => sp.GetRequiredService<WallabyStatus>());
 
         services.AddSingleton<IClusterLock>(sp =>
-            new Internal.Cluster.PostgresAdvisoryLock(
-                sp.GetRequiredService<WallabyDataSource>().Source,
-                sp.GetRequiredService<WallabyOptions>().Advanced.LeaderHeartbeatInterval));
+            new Internal.Cluster.PostgresAdvisoryLock(sp.GetRequiredService<WallabyDataSource>().Source));
 
         // Capture runtime — registered unconditionally as lazy factories; only the hosted-service dispatch
         // below (or a consumer resolving IWallabyBackfillManager) materializes it. The providers and the
@@ -142,8 +126,7 @@ public static class WallabyServiceCollectionExtensions
         services.AddSingleton<ExternalSlotProvisioningService>();
 
         // Capture: stream via the runtime. Provision-only: create the declared external slots (if any) and
-        // idle — no primary slot/stream. Decided at host start, when the (possibly deferred) configuration
-        // first materializes.
+        // idle — no primary slot/stream. Decided at host start.
         services.AddSingleton<IHostedService>(sp =>
             sp.GetRequiredService<WallabyConfiguration>().CaptureIntended
                 ? (IHostedService)sp.GetRequiredService<WallabyBackgroundService>()

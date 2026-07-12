@@ -89,6 +89,38 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Transaction_with_no_dependent_change_delivers_without_fanout()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        var capture = harness.AddCaptureSink();
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
+        harness.DependsOn<Product, Category?>(p => p.Category);
+
+        var cat = await harness.Db.AddCategoryAsync("Cat");
+
+        await harness.SelfConfigureAsync();
+        await harness.ClearFanoutQueueAsync();
+
+        using var synthetic = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.dependent.synthetic");
+
+        await harness.StartAsync();
+        try
+        {
+            // Only the product changes — the dependent (categories) table is untouched, so no fan-out runs.
+            await harness.Db.AddProductAsync(cat, "p1");
+            await harness.WaitUntilAsync(() => capture.For("products").Any(), Timeout);
+            (await harness.PendingFanoutJobCountAsync()).ShouldBe(0);
+        }
+        finally
+        {
+            await harness.StopAsync();
+        }
+
+        capture.For("products").Select(r => r.DocumentId).Distinct().Count().ShouldBe(1);
+        synthetic.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBe(0L);
+    }
+
+    [Test]
     public async Task Primary_changed_with_its_dependent_in_one_transaction_is_emitted_once()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
@@ -202,15 +234,51 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         resumed!.Status.ShouldBe(BackfillStatus.InProgress);
         resumed.CursorJson.ShouldNotBeNull();
 
-        // Completing it (guarded on InProgress) removes it from the due set.
+        // Completing it (guarded on InProgress) deletes the row.
         await store.CompleteAsync(due.TableQualified, due.LookupHash, CancellationToken.None);
         (await store.GetNextDueAsync(CancellationToken.None)).ShouldBeNull();
+        (await store.ListAsync(CancellationToken.None)).ShouldBeEmpty();
 
-        // A repeat trigger for the same lookup re-arms the SAME row rather than adding a second.
+        // A repeat trigger after completion enqueues a single fresh row.
         await store.EnqueueAsync(spec, CancellationToken.None);
         var rearmed = await store.GetNextDueAsync(CancellationToken.None);
         rearmed!.Status.ShouldBe(BackfillStatus.Requested);
         (await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash)
             .ShouldBe(1);
+    }
+
+    [Test]
+    public async Task Completing_a_re_armed_job_leaves_the_requested_row()
+    {
+        await using (var conn = await pg.DataSource.OpenConnectionAsync())
+        {
+            await new StateSchemaBootstrapper().EnsureAsync(conn, CancellationToken.None);
+        }
+        await PgExec.ExecuteAsync(pg.DataSource, "DELETE FROM wallaby.fanout_queue", CancellationToken.None);
+
+        var store = new PostgresFanoutQueueStore(pg.DataSource);
+        var table = new CapturedTable
+        {
+            EntityClrType = typeof(Product),
+            Schema = "public",
+            TableName = "products",
+            Columns = [],
+            PrimaryKey = [],
+        };
+        var spec = new ScopedFanoutSpec(table, ["category_id"], [new object?[] { 4242 }]);
+
+        await store.EnqueueAsync(spec, CancellationToken.None);
+        var job = (await store.GetNextDueAsync(CancellationToken.None))!;
+        await store.MarkInProgressAsync(job.TableQualified, job.LookupHash, null, CancellationToken.None);
+
+        // A trigger fires while the job is running: the row re-arms to Requested.
+        await store.EnqueueAsync(spec, CancellationToken.None);
+
+        // The finished run must not delete the re-armed request.
+        await store.CompleteAsync(job.TableQualified, job.LookupHash, CancellationToken.None);
+
+        var remaining = await store.ListAsync(CancellationToken.None);
+        remaining.Count.ShouldBe(1);
+        remaining[0].Status.ShouldBe(BackfillStatus.Requested);
     }
 }

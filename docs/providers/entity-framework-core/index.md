@@ -51,8 +51,8 @@ await builder.Build().RunAsync();
 Transforms receive a leased `DbContext` for enrichment lookups - see [Mappings](/mappings).
 
 ::: tip
-If the builder needs services at registration time (e.g. `IConfiguration`), use the
-`AddWallaby((sp, cdc) => ...)` overload - see
+If option values need services (e.g. `IConfiguration`), use the provider-aware overloads of
+`UseConnectionString`/`ConfigureOptions` - see
 [Reading configuration at startup](/configuration#reading-configuration-at-startup).
 :::
 
@@ -63,6 +63,9 @@ Only entities you **declare** are captured and added to the publication: `Map<T>
 [`DependsOn`](#dependent-tables) are captured automatically. Captured tables must have a
 primary key. The same entity may be mapped under several sinks - it is captured once and each sink's
 mapping runs its own transform.
+
+Entities in a **TPH hierarchy** cannot be captured: hierarchy members share one table, so rows would
+materialize as one arbitrary type and lose subclass data. Map hierarchies with TPT or TPC instead.
 
 ## Transforms
 
@@ -185,6 +188,13 @@ public partial class OrdersReplicaIdentity : Migration
         => migrationBuilder.SetReplicaIdentityDefault("orders", schema: "sales");
 }
 ```
+
+::: warning Large (TOASTed) columns
+Entities with large values - long text, big jsonb, bytea over ~2KB - also need `REPLICA IDENTITY FULL`.
+Postgres omits an *unchanged* TOASTed value from an update's new tuple, so under the default identity
+the value isn't carried in the change at all. Rather than deliver a document with the field silently
+nulled, Wallaby fails the change with the DDL above in the error message.
+:::
 
 ## Next steps
 

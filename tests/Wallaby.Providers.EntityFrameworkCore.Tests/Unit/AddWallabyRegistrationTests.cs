@@ -12,9 +12,9 @@ using Wallaby.TestModel;
 namespace Wallaby.Providers.EntityFrameworkCore.Tests.Unit;
 
 /// <summary>
-/// Registration-level coverage of the two AddWallaby overloads and the WallabyOptions options-pipeline
-/// integration. Everything here runs offline: building the EF model and creating an NpgsqlDataSource
-/// never open a connection.
+/// Registration-level coverage of AddWallaby and the WallabyOptions options-pipeline integration.
+/// Everything here runs offline: building the EF model and creating an NpgsqlDataSource never open
+/// a connection.
 /// </summary>
 public class AddWallabyRegistrationTests
 {
@@ -53,20 +53,35 @@ public class AddWallabyRegistrationTests
     }
 
     [Test]
-    public async Task Deferred_configure_reads_services_from_the_provider()
+    public async Task Provider_aware_options_hooks_bind_values_on_first_resolution()
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:App"] = ConnectionString })
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:App"] = ConnectionString,
+                ["Wallaby:Slot"] = "late_slot",
+            })
             .Build();
 
         var services = NewServices();
         services.AddSingleton<IConfiguration>(configuration);
-        services.AddWallaby((sp, cdc) =>
-            AddCaptureConfig(cdc, sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!));
+        // Values come from services yet registration stays eager, so cdc.Services remains available
+        // to sink extensions.
+        services.AddWallaby(cdc =>
+        {
+            cdc.UseEntityFrameworkCore<AppDbContext>()
+               .UseConnectionString(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
+               .ConfigureOptions((sp, o) => o.SlotName = sp.GetRequiredService<IConfiguration>()["Wallaby:Slot"]!)
+               .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
+               .WithMappings(MinimalMapping);
+            cdc.Services.ShouldNotBeNull();
+        });
 
         await using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<WallabyOptions>();
 
-        provider.GetRequiredService<WallabyOptions>().ConnectionString.ShouldBe(ConnectionString);
+        options.ConnectionString.ShouldBe(ConnectionString);
+        options.SlotName.ShouldBe("late_slot");
     }
 
     [Test]
@@ -161,18 +176,15 @@ public class AddWallabyRegistrationTests
     }
 
     [Test]
-    public async Task Deferred_overload_surfaces_builder_errors_at_first_resolution()
+    public void Builder_errors_surface_at_registration()
     {
         var services = NewServices();
-        services.AddWallaby((_, cdc) => cdc
+
+        Should.Throw<WallabyConfigurationException>(() => services.AddWallaby(cdc => cdc
             .UseEntityFrameworkCore<AppDbContext>()
             .UseConnectionString(ConnectionString)
             .AddDelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success))
-            .WithMappings(sink => sink.Map<Product>())); // structurally invalid: no .UsingTransform(...)
-
-        await using var provider = services.BuildServiceProvider(); // registration itself is fine
-
-        Should.Throw<WallabyConfigurationException>(() => provider.GetRequiredService<WallabyConfiguration>());
+            .WithMappings(sink => sink.Map<Product>()))); // structurally invalid: no .UsingTransform(...)
     }
 
     [Test]
@@ -221,22 +233,15 @@ public class AddWallabyRegistrationTests
     }
 
     [Test]
-    public async Task Deferred_configure_runs_exactly_once()
+    public void Calling_AddWallaby_twice_throws_at_registration_time()
     {
-        var calls = 0;
         var services = NewServices();
-        services.AddWallaby((_, cdc) =>
-        {
-            calls++;
-            AddCaptureConfig(cdc, ConnectionString);
-        });
+        services.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString));
 
-        await using var provider = services.BuildServiceProvider();
-        _ = provider.GetRequiredService<WallabyConfiguration>();
-        _ = provider.GetRequiredService<WallabyOptions>();
-        _ = provider.GetRequiredService<IWallabyStatus>();
-        _ = provider.GetRequiredService<IHostedService>();
+        var ex = Should.Throw<WallabyConfigurationException>(
+            () => services.AddWallaby(cdc => AddCaptureConfig(cdc, ConnectionString)));
 
-        calls.ShouldBe(1);
+        ex.Message.ShouldContain("one instance per host");
     }
+
 }

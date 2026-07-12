@@ -55,6 +55,37 @@ public sealed class TestDatabase(string connectionString)
         await ctx.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// One transaction that inserts <paramref name="preNames"/>, rolls a savepoint back over
+    /// <paramref name="rolledBackNames"/>, then inserts <paramref name="postNames"/> and commits — the shape
+    /// that makes pgoutput emit a subtransaction stream-abort inside a streamed (large) transaction.
+    /// </summary>
+    public async Task AddProductsWithSavepointRollbackAsync(
+        int categoryId, string[] preNames, string[] rolledBackNames, string[] postNames)
+    {
+        await using var ctx = NewContext();
+        await using var tx = await ctx.Database.BeginTransactionAsync();
+
+        ctx.Products.AddRange(preNames.Select(NewProduct));
+        await ctx.SaveChangesAsync();
+
+        await tx.CreateSavepointAsync("sp1");
+        ctx.Products.AddRange(rolledBackNames.Select(NewProduct));
+        await ctx.SaveChangesAsync();
+        await tx.RollbackToSavepointAsync("sp1");
+
+        ctx.Products.AddRange(postNames.Select(NewProduct));
+        await ctx.SaveChangesAsync();
+
+        await tx.CommitAsync();
+
+        Product NewProduct(string n) => new()
+        {
+            Name = n, Price = 1m, Sku = n, Status = ProductStatus.Active, Tags = [], Description = "",
+            CategoryId = categoryId,
+        };
+    }
+
     /// <summary>Rename a category and one of its products in the same transaction (dependent + primary in one batch).</summary>
     public async Task RenameCategoryAndProductAsync(int categoryId, string categoryName, int productId, string productName)
     {
@@ -133,12 +164,17 @@ public sealed class TestDatabase(string connectionString)
     }
 
     /// <summary>Set a table's replica identity to FULL so old-row values (incl. scope keys) are present on delete.</summary>
-    public async Task SetReplicaIdentityFullAsync(string table)
+    public Task SetReplicaIdentityFullAsync(string table) => SetReplicaIdentityAsync(table, "FULL");
+
+    /// <summary>Restore a table's replica identity to DEFAULT (tests share the session database).</summary>
+    public Task SetReplicaIdentityDefaultAsync(string table) => SetReplicaIdentityAsync(table, "DEFAULT");
+
+    private async Task SetReplicaIdentityAsync(string table, string identity)
     {
         await using var ctx = NewContext();
         // Trusted, test-only DDL; a table identifier cannot be parameterized.
 #pragma warning disable EF1002, EF1003
-        await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE " + table + " REPLICA IDENTITY FULL");
+        await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE " + table + " REPLICA IDENTITY " + identity);
 #pragma warning restore EF1002, EF1003
     }
 

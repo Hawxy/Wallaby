@@ -10,35 +10,28 @@ namespace Wallaby.Internal.Replication;
 /// </summary>
 internal static class PgOutputDecoder
 {
-    /// <summary>Read all columns of a replication tuple, copying values out.</summary>
-    public static async Task<RawColumn[]> ReadTupleAsync(ReplicationTuple tuple, CancellationToken ct)
+    /// <summary>
+    /// Read all columns of a replication tuple, copying values out. <paramref name="readModes"/> is
+    /// aligned to the relation's column order; null means every column reads with
+    /// <see cref="ColumnReadMode.Default"/>.
+    /// </summary>
+    public static async Task<RawColumn[]> ReadTupleAsync(
+        ReplicationTuple tuple, ColumnReadMode[]? readModes, CancellationToken ct)
     {
         var columns = new RawColumn[tuple.NumColumns];
         var i = 0;
         await foreach (var value in tuple.WithCancellation(ct))
         {
-            columns[i++] = await ReadValueAsync(value, ct);
+            var columnName = value.GetFieldName();
+            columns[i] = value.IsUnchangedToastedValue
+                ? new RawColumn { ColumnName = columnName, Value = null, IsUnchangedToast = true }
+                : new RawColumn
+                {
+                    ColumnName = columnName,
+                    Value = await ColumnValueReader.ReadAsync(value, readModes?[i] ?? ColumnReadMode.Default, ct),
+                };
+            i++;
         }
         return columns;
-    }
-
-    private static async ValueTask<RawColumn> ReadValueAsync(ReplicationValue value, CancellationToken ct)
-    {
-        var columnName = value.GetFieldName();
-
-        if (value.IsUnchangedToastedValue)
-        {
-            return new RawColumn { ColumnName = columnName, Value = null, IsUnchangedToast = true };
-        }
-
-        if (value.IsDBNull)
-        {
-            // Consume the (empty) value to keep the tuple stream positioned correctly.
-            _ = await value.Get(ct);
-            return new RawColumn { ColumnName = columnName, Value = null };
-        }
-
-        var decoded = await value.Get(ct);
-        return new RawColumn { ColumnName = columnName, Value = decoded };
     }
 }

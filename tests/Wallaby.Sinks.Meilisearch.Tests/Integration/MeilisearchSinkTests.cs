@@ -15,7 +15,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
 {
     private sealed record ProductRow(int Id, string Name);
 
-    private MeilisearchSink Sink() => new("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey });
+    private MeilisearchSink Sink() => TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey });
 
     [Test]
     public async Task Product_projection_syncs_insert_update_and_delete()
@@ -124,7 +124,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
             s.SearchableAttributes = ["name"];
             s.FilterableAttributes = ["category"];
         });
-        var sink = new MeilisearchSink("meili", options);
+        var sink = TestMeilisearchSink.Create("meili", options);
 
         var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
         // The document carries "name" but not the configured filterable "category".
@@ -160,7 +160,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
                 },
             ];
         });
-        var sink = new MeilisearchSink("meili", options);
+        var sink = TestMeilisearchSink.Create("meili", options);
 
         var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
         // The document carries "name" but not the granular filterable "category".
@@ -181,7 +181,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         // Validation is on by default; the projection emits every configured attribute.
         var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex(index, s => s.FilterableAttributes = ["category"]);
-        harness.AddSink(new MeilisearchSink("meili", options))
+        harness.AddSink(TestMeilisearchSink.Create("meili", options))
             .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name, ["category"] = p.CategoryId });
         await harness.SelfConfigureAsync();
 
@@ -207,7 +207,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
             s.FilterableAttributes = ["category"];
             s.SortableAttributes = ["price"];
         });
-        harness.AddSink(new MeilisearchSink("meili", options))
+        harness.AddSink(TestMeilisearchSink.Create("meili", options))
             .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name });
 
         await harness.SelfConfigureAsync();

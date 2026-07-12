@@ -1,0 +1,28 @@
+﻿{
+  "operation": "upsert",
+  "id": "42",
+  "idempotencyKey": "27271208:0:products:42",
+  "annotations": {
+    "env": "test"
+  },
+  "document": {
+    "name": "Kangaroo plush",
+    "price": 19.95,
+    "tags": [
+      "toys",
+      null
+    ],
+    "dimensions": {
+      "heightCm": 30
+    }
+  },
+  "metadata": {
+    "schema": "public",
+    "table": "products",
+    "action": "insert",
+    "commitLsn": "27271208",
+    "commitIdx": 0,
+    "commitTimestamp": "2026-07-06T01:02:03.123\u002B00:00",
+    "isBackfill": false
+  }
+}

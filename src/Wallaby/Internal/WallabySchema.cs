@@ -14,4 +14,10 @@ internal static class WallabySchema
     /// LISTEN/NOTIFY channel the fan-out queue uses to wake its worker the moment a job is enqueued.
     /// </summary>
     public const string FanoutNotifyChannel = "wallaby_fanout";
+
+    /// <summary>
+    /// LISTEN/NOTIFY channel a manual backfill request signals, so the leader's scheduler serves it
+    /// the moment it is persisted.
+    /// </summary>
+    public const string BackfillNotifyChannel = "wallaby_backfill";
 }

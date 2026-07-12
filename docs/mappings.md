@@ -50,12 +50,12 @@ sink.Map<Product>()
 For more complex transforms, or anything with dependencies, implement your provider's transform
 interface as a class - [`IWallabyEfTransform<T>`](/providers/entity-framework-core/#class-based-transforms)
 (EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) - and
-register it with `UsingTransform<TEntity, TTransform>()`; the class is resolved from the container.
+register it with `UsingTransform<TEntity, TTransform>()`. This class is registered & resolved from the container.
 
 ## Mapping classes
 
-Inline mappings grow the `AddWallaby` callback by a block per entity per sink and can make your `Program.cs` unwieldy. Move each mapping into a
-class implementing `IWallabyEntityMapping<TEntity>`. This is also convient if you want to store your mappings alongside the transform it wires up:
+Inline mappings grow the `AddWallaby` callback and can make your `Program.cs` unwieldy. Move each mapping into a
+class implementing `IWallabyEntityMapping<TEntity>`. This is also convenient if you want to store your mappings alongside the transform it wires up:
 
 ```csharp
 public sealed class ProductSearchMapping : IWallabyEntityMapping<Product>
@@ -74,7 +74,7 @@ Apply it by type:
     .Apply<CategorySearchMapping>());
 ```
 
-For a mapping that needs constructor arguments, pass a configured instance:
+For a mapping that needs constructor arguments, pass an instance directly:
 `sink.Apply(new ProductSearchMapping(indexName))`.
 
 ## Internals
@@ -87,6 +87,23 @@ round-trip. Return a `null` document (or simply omit a key) to **delete** that k
 Deletes never reach a transform as the row is already gone. The engine deletes by key directly, using
 the mapping's id rule. Your transform only sees inserts, updates, and backfill reads.
 :::
+
+## Document ids
+
+Documents are keyed by the source primary key by default; `KeyedBy(...)` derives the id from the
+entity instead:
+
+```csharp
+sink.Map<Product>()
+    .ToDestination("products")
+    .KeyedBy(p => p.Sku);
+```
+
+Because the engine deletes by key, the custom id must also be computable when the row is gone. A
+`KeyedBy` mapping therefore marks its table as requiring `REPLICA IDENTITY FULL` (self-configuration
+warns with the DDL to run, or fails when `RequireFullReplicaIdentity` is set), and a delete whose
+old row doesn't carry the key columns fails loudly rather than silently falling back to the primary
+key - a PK-named document was never written, so that delete would remove nothing.
 
 ## Documents
 

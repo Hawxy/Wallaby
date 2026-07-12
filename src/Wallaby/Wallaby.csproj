@@ -12,6 +12,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Testing" />
     <InternalsVisibleTo Include="Wallaby.Providers.Marten" />
+    <InternalsVisibleTo Include="Wallaby.Sinks.Http" />
+    <InternalsVisibleTo Include="Wallaby.Sinks.Kafka" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.Tests" />
@@ -25,6 +27,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="DistributedLock.Postgres" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Polly.Core" />

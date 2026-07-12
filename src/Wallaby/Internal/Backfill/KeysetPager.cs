@@ -16,36 +16,101 @@ internal sealed record BackfillChunk(IReadOnlyList<RawChange> Rows, object?[]? N
 internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> Parameters)
 {
     /// <summary>
-    /// Build an <c>IN</c>-list filter matching <paramref name="columns"/> against the distinct value
-    /// <paramref name="tuples"/> (each tuple has one value per column). Single-column lookups produce
-    /// <c>"col" IN (@f0, @f1, …)</c>; composite lookups produce a row-value list
-    /// <c>("a","b") IN ((@f0,@f1), (@f2,@f3), …)</c>. An <c>IN</c>-list (rather than <c>= ANY(array)</c>)
-    /// keeps parameter typing simple and uniform across single/composite keys and persisted-then-reloaded values.
+    /// Ceiling on bound parameters per filter, well under Postgres's 65,535-parameter protocol limit so
+    /// an arbitrarily wide lookup set can never produce an unexecutable query.
     /// </summary>
-    public static KeysetFilter ForLookup(IReadOnlyList<string> columns, IReadOnlyList<object?[]> tuples)
-    {
-        var parameters = new List<object?>(columns.Count * tuples.Count);
-        var sql = new StringBuilder();
+    internal const int MaxFilterParameters = 2000;
 
-        if (columns.Count == 1)
+    /// <summary>
+    /// Build filters matching <paramref name="columns"/> against the distinct value
+    /// <paramref name="tuples"/> (each tuple has one value per column). A single-column lookup binds one
+    /// typed-array parameter — <c>"col" = ANY(@f0)</c> — so it is always exactly one filter regardless of
+    /// value count. A composite lookup produces row-value lists
+    /// <c>("a","b") IN ((@f0,@f1), (@f2,@f3), …)</c>, split into multiple filters so none binds more than
+    /// <paramref name="maxParametersPerQuery"/> parameters; the caller runs one paged scan per filter.
+    /// Null values never match an equality lookup (SQL null semantics), so single-column nulls are
+    /// dropped; a lookup with nothing left yields one <c>false</c> filter matching no rows.
+    /// </summary>
+    public static IReadOnlyList<KeysetFilter> ForLookup(
+        IReadOnlyList<string> columns, IReadOnlyList<object?[]> tuples,
+        int maxParametersPerQuery = MaxFilterParameters)
+    {
+        if (columns.Count == 1 && ForSingleColumn(columns[0], tuples) is { } single)
         {
-            var col = PgExec.QuoteIdentifier(columns[0]);
-            sql.Append(col).Append(" IN (");
-            for (var i = 0; i < tuples.Count; i++)
-            {
-                if (i > 0) sql.Append(", ");
-                sql.Append("@f").Append(parameters.Count);
-                parameters.Add(tuples[i][0]);
-            }
-            sql.Append(')');
+            return [single];
         }
-        else
+
+        // Composite keys — and the rare single-column element type with no typed-array mapping — use
+        // parameter-per-value row-value lists, split to stay under the budget.
+        return ForComposite(columns, tuples, maxParametersPerQuery);
+    }
+
+    private static KeysetFilter? ForSingleColumn(string column, IReadOnlyList<object?[]> tuples)
+    {
+        var values = new List<object>(tuples.Count);
+        foreach (var tuple in tuples)
         {
-            var cols = string.Join(", ", columns.Select(PgExec.QuoteIdentifier));
-            sql.Append('(').Append(cols).Append(") IN (");
-            for (var t = 0; t < tuples.Count; t++)
+            if (tuple[0] is { } value and not DBNull)
             {
-                if (t > 0) sql.Append(", ");
+                values.Add(value);
+            }
+        }
+
+        if (values.Count == 0)
+        {
+            return new KeysetFilter("false", []);
+        }
+
+        // All values share one CLR type (lookup values are coerced to the column's type), so a typed
+        // array binds as the matching Postgres array type. The explicit type switch (instead of
+        // Array.CreateInstance) keeps this AOT-compatible.
+        Array? array = values[0] switch
+        {
+            bool => ToArray<bool>(values),
+            byte => ToArray<byte>(values),
+            short => ToArray<short>(values),
+            int => ToArray<int>(values),
+            long => ToArray<long>(values),
+            decimal => ToArray<decimal>(values),
+            double => ToArray<double>(values),
+            float => ToArray<float>(values),
+            string => ToArray<string>(values),
+            Guid => ToArray<Guid>(values),
+            DateTime => ToArray<DateTime>(values),
+            DateTimeOffset => ToArray<DateTimeOffset>(values),
+            DateOnly => ToArray<DateOnly>(values),
+            _ => null,
+        };
+
+        return array is null ? null : new KeysetFilter($"{PgExec.QuoteIdentifier(column)} = ANY(@f0)", [array]);
+    }
+
+    private static T[] ToArray<T>(List<object> values)
+    {
+        var result = new T[values.Count];
+        for (var i = 0; i < values.Count; i++)
+        {
+            result[i] = (T)values[i];
+        }
+        return result;
+    }
+
+    private static List<KeysetFilter> ForComposite(
+        IReadOnlyList<string> columns, IReadOnlyList<object?[]> tuples, int maxParametersPerQuery)
+    {
+        var tuplesPerBatch = Math.Max(1, maxParametersPerQuery / columns.Count);
+        var cols = string.Join(", ", columns.Select(PgExec.QuoteIdentifier));
+
+        var filters = new List<KeysetFilter>();
+        for (var start = 0; start < tuples.Count; start += tuplesPerBatch)
+        {
+            var end = Math.Min(start + tuplesPerBatch, tuples.Count);
+            var parameters = new List<object?>((end - start) * columns.Count);
+            var sql = new StringBuilder();
+            sql.Append('(').Append(cols).Append(") IN (");
+            for (var t = start; t < end; t++)
+            {
+                if (t > start) sql.Append(", ");
                 sql.Append('(');
                 for (var c = 0; c < columns.Count; c++)
                 {
@@ -56,9 +121,14 @@ internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> 
                 sql.Append(')');
             }
             sql.Append(')');
+            filters.Add(new KeysetFilter(sql.ToString(), parameters));
         }
 
-        return new KeysetFilter(sql.ToString(), parameters);
+        if (filters.Count == 0)
+        {
+            filters.Add(new KeysetFilter("false", []));
+        }
+        return filters;
     }
 }
 
@@ -72,6 +142,7 @@ internal sealed class KeysetPager
     private readonly CapturedTable _table;
     private readonly KeysetFilter? _filter;
     private readonly string[] _columnNames;
+    private readonly ColumnReadMode[] _readModes;
     private readonly int[] _pkIndexInColumns;
     private readonly string _firstPageSqlPrefix;
     private readonly string _nextPageSqlPrefix;
@@ -81,6 +152,7 @@ internal sealed class KeysetPager
         _table = table;
         _filter = filter;
         _columnNames = table.Columns.Select(c => c.ColumnName).ToArray();
+        _readModes = table.Columns.Select(c => c.ReadMode).ToArray();
 
         // Map each primary-key column to its index in _columnNames so we can read PK values
         // straight from the row buffer without a second GetOrdinal lookup.
@@ -132,7 +204,7 @@ internal sealed class KeysetPager
         }
 
         var rows = new List<RawChange>(limit);
-        object?[]? lastKey = null;
+        RawColumn[]? lastRow = null;
         var pkCount = _pkIndexInColumns.Length;
         var columnCount = _columnNames.Length;
 
@@ -151,8 +223,11 @@ internal sealed class KeysetPager
             var values = new RawColumn[columnCount];
             for (var i = 0; i < columnCount; i++)
             {
-                var raw = reader.GetValue(ordinals[i]);
-                values[i] = new RawColumn { ColumnName = _columnNames[i], Value = raw is DBNull ? null : raw };
+                values[i] = new RawColumn
+                {
+                    ColumnName = _columnNames[i],
+                    Value = ColumnValueReader.Read(reader, ordinals[i], _readModes[i]),
+                };
             }
 
             rows.Add(new RawChange
@@ -165,15 +240,20 @@ internal sealed class KeysetPager
                 OldValues = null,
             });
 
-            lastKey = new object?[pkCount];
-            for (var i = 0; i < pkCount; i++)
-            {
-                lastKey[i] = values[_pkIndexInColumns[i]].Value;
-            }
+            lastRow = values;
         }
 
         var hasMore = rows.Count == limit;
-        return new BackfillChunk(rows, hasMore ? lastKey : null, hasMore);
+        object?[]? lastKey = null;
+        if (hasMore && lastRow is not null)
+        {
+            lastKey = new object?[pkCount];
+            for (var i = 0; i < pkCount; i++)
+            {
+                lastKey[i] = lastRow[_pkIndexInColumns[i]].Value;
+            }
+        }
+        return new BackfillChunk(rows, lastKey, hasMore);
     }
 
     private string BuildKeysetPredicate()

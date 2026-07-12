@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Backfill;
@@ -14,14 +16,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
     public async Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct)
     {
         var columns = spec.LookupColumns.ToArray();
-        // Sort tuples by their JSON form so the same logical lookup set hashes identically regardless of
-        // the order changes were encountered in — that's what lets repeat triggers coalesce.
-        var sorted = spec.LookupValues
-            .Select(t => (Tuple: t, Json: KeysetCodec.SerializeTuples([t])))
-            .OrderBy(x => x.Json, StringComparer.Ordinal)
-            .Select(x => x.Tuple)
-            .ToList();
-        var valuesJson = KeysetCodec.SerializeTuples(sorted);
+        var valuesJson = CanonicalValuesJson(spec.LookupValues);
         var hash = Hash(spec.PrimaryTable.QualifiedName, columns, valuesJson);
 
         await using var connection = await dataSource.OpenConnectionAsync(ct);
@@ -48,66 +43,8 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public IFanoutQueueSubscription Subscribe() => new Subscription(dataSource);
-
-    /// <summary>
-    /// A dedicated <c>LISTEN wallaby_fanout</c> connection, opened lazily on first wait and held for the
-    /// worker's (leader session's) lifetime. <see cref="WaitForJobAsync"/> returns on a notification (immediate
-    /// wake) or after the fallback timeout (safety poll).
-    /// </summary>
-    private sealed class Subscription(NpgsqlDataSource dataSource) : IFanoutQueueSubscription
-    {
-        private NpgsqlConnection? _connection;
-
-        public async Task WaitForJobAsync(TimeSpan fallbackTimeout, CancellationToken ct)
-        {
-            try
-            {
-                var connection = await EnsureListeningAsync(ct);
-                // Returns true if a notification arrived, false on timeout — either way we loop and drain.
-                await connection.WaitAsync(fallbackTimeout, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                // The listening connection faulted (e.g. server restart/failover). Drop it so the next wait
-                // reopens and re-listens; return now so the worker drains in case a notification was missed.
-                await DisposeConnectionAsync();
-            }
-        }
-
-        private async Task<NpgsqlConnection> EnsureListeningAsync(CancellationToken ct)
-        {
-            if (_connection is { State: System.Data.ConnectionState.Open } open)
-            {
-                return open;
-            }
-
-            await DisposeConnectionAsync();
-            var connection = await dataSource.OpenConnectionAsync(ct);
-            await using (var listen = new NpgsqlCommand($"LISTEN {WallabySchema.FanoutNotifyChannel}", connection))
-            {
-                await listen.ExecuteNonQueryAsync(ct);
-            }
-
-            _connection = connection;
-            return connection;
-        }
-
-        private async ValueTask DisposeConnectionAsync()
-        {
-            if (_connection is { } connection)
-            {
-                _connection = null;
-                await connection.DisposeAsync();
-            }
-        }
-
-        public ValueTask DisposeAsync() => DisposeConnectionAsync();
-    }
+    public INotifySubscription Subscribe()
+        => new PostgresChannelSubscription(dataSource, WallabySchema.FanoutNotifyChannel);
 
     public async Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct)
     {
@@ -160,8 +97,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         => PgExec.ExecuteAsync(
             dataSource,
             """
-            UPDATE wallaby.fanout_queue
-            SET status = 'Completed', updated_at = now()
+            DELETE FROM wallaby.fanout_queue
             WHERE table_qualified = @t AND lookup_hash = @h AND status = 'InProgress'
             """,
             ct,
@@ -204,7 +140,37 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
             reader.IsDBNull(5) ? null : reader.GetString(5),
             reader.GetInt64(6));
 
-    private static string Hash(string table, string[] columns, string valuesJson)
+    /// <summary>
+    /// The canonical JSON for a lookup set: tuples sorted by their serialized form so the same logical
+    /// set produces identical bytes — and so an identical <c>lookup_hash</c>, which is what lets repeat
+    /// triggers coalesce regardless of the order changes were encountered in.
+    /// </summary>
+    internal static string CanonicalValuesJson(IReadOnlyList<object?[]> tuples)
+    {
+        // Each tuple is serialized once; its JSON (closing ']' included — that bracket participates in
+        // the ordinal comparison, and persisted lookup_hash values depend on the resulting order) is
+        // both the sort key and the raw value stitched into the final array.
+        var serialized = new string[tuples.Count];
+        for (var i = 0; i < serialized.Length; i++)
+        {
+            serialized[i] = KeysetCodec.SerializeTuple(tuples[i]);
+        }
+        Array.Sort(serialized, string.CompareOrdinal);
+
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartArray();
+            foreach (var tupleJson in serialized)
+            {
+                writer.WriteRawValue(tupleJson);
+            }
+            writer.WriteEndArray();
+        }
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    internal static string Hash(string table, string[] columns, string valuesJson)
     {
         var canonical = string.Concat(table, "|", string.Join("|", columns), "|", valuesJson);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));

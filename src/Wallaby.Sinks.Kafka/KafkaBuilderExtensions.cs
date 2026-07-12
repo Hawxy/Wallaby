@@ -17,19 +17,66 @@ public static class KafkaBuilderExtensions
 
         var options = new KafkaSinkOptions { BootstrapServers = "" };
         configure(options);
+        Validate(options);
+
+        return builder.AddSink(new KafkaSink(name, options));
+    }
+
+    /// <summary>
+    /// Provider-aware overload: <paramref name="configure"/> runs on first resolution, so option values
+    /// can come from services (e.g. <c>IConfiguration</c>) while the registration itself stays eager.
+    /// Validation failures surface at host start rather than at registration.
+    /// </summary>
+    public static WallabySinkBuilder AddKafkaSink(this WallabyBuilder builder, string name, Action<IServiceProvider, KafkaSinkOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        return builder.AddSink(name, sp =>
+        {
+            var options = new KafkaSinkOptions { BootstrapServers = "" };
+            configure(sp, options);
+            Validate(options);
+            return new KafkaSink(name, options);
+        });
+    }
+
+    private static void Validate(KafkaSinkOptions options)
+    {
         if (string.IsNullOrWhiteSpace(options.BootstrapServers))
         {
-            throw new ArgumentException("KafkaSinkOptions.BootstrapServers is required.", nameof(configure));
+            throw new ArgumentException("KafkaSinkOptions.BootstrapServers is required.", nameof(options));
         }
         if (options.MessageTimeoutMs <= 0)
         {
-            throw new ArgumentException("KafkaSinkOptions.MessageTimeoutMs must be positive.", nameof(configure));
+            throw new ArgumentException("KafkaSinkOptions.MessageTimeoutMs must be positive.", nameof(options));
         }
         if (options.LingerMs < 0)
         {
-            throw new ArgumentException("KafkaSinkOptions.LingerMs cannot be negative.", nameof(configure));
+            throw new ArgumentException("KafkaSinkOptions.LingerMs cannot be negative.", nameof(options));
         }
-
-        return builder.AddSink(new KafkaSink(name, options));
+        if (options.AdminTimeoutMs <= 0)
+        {
+            throw new ArgumentException("KafkaSinkOptions.AdminTimeoutMs must be positive.", nameof(options));
+        }
+        foreach (var topic in options.Topics)
+        {
+            if (string.IsNullOrWhiteSpace(topic.Name))
+            {
+                throw new ArgumentException("KafkaTopicConfig.Name is required.", nameof(options));
+            }
+            if (topic.Partitions <= 0)
+            {
+                throw new ArgumentException(
+                    $"KafkaTopicConfig.Partitions must be positive for topic '{topic.Name}'.", nameof(options));
+            }
+            if (topic.ReplicationFactor is not -1 and <= 0)
+            {
+                throw new ArgumentException(
+                    $"KafkaTopicConfig.ReplicationFactor must be positive or -1 (broker default) for topic '{topic.Name}'.",
+                    nameof(options));
+            }
+        }
     }
 }

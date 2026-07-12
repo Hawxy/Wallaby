@@ -17,17 +17,21 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
 {
     private const int FlushThreshold = 500;
 
-    private readonly Dictionary<uint, List<RawChange>> _pending = [];
+    private readonly Dictionary<uint, List<(uint Subxid, RawChange Change)>> _pending = [];
     private readonly Dictionary<uint, long> _nextSeq = [];
 
-    public async ValueTask AppendAsync(uint xid, RawChange change, CancellationToken ct)
+    // Flushed rows removed by subtransaction truncation, per xid. With _nextSeq (total rows ever
+    // flushed) this gives the exact row count a read-back must return.
+    private readonly Dictionary<uint, long> _truncatedFlushed = [];
+
+    public async ValueTask AppendAsync(uint xid, uint subxid, RawChange change, CancellationToken ct)
     {
         if (!_pending.TryGetValue(xid, out var batch))
         {
             batch = [];
             _pending[xid] = batch;
         }
-        batch.Add(change);
+        batch.Add((subxid, change));
         if (batch.Count >= FlushThreshold)
         {
             await FlushAsync(xid, ct);
@@ -39,16 +43,32 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
     {
         await FlushAsync(xid, ct);
 
-        await using var connection = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(
-            "SELECT payload FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x ORDER BY seq", connection);
-        cmd.Parameters.AddWithValue("s", slotName);
-        cmd.Parameters.AddWithValue("x", (long)xid);
+        // After the flush, _nextSeq holds every row ever written for the xid; truncations are the only
+        // legitimate removals. Anything else missing (or extra) means the buffer was mutated externally.
+        var expected = _nextSeq.GetValueOrDefault(xid) - _truncatedFlushed.GetValueOrDefault(xid);
+        var count = 0L;
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        await using (var connection = await dataSource.OpenConnectionAsync(ct))
         {
-            yield return SpillCodec.Decode(reader.GetFieldValue<byte[]>(0));
+            await using var cmd = new NpgsqlCommand(
+                "SELECT payload FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x ORDER BY seq", connection);
+            cmd.Parameters.AddWithValue("s", slotName);
+            cmd.Parameters.AddWithValue("x", (long)xid);
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                count++;
+                yield return SpillCodec.Decode(reader.GetFieldValue<byte[]>(0));
+            }
+        }
+
+        if (count != expected)
+        {
+            throw new InvalidOperationException(
+                $"Spill read-back for xid {xid} returned {count} of {expected} buffered changes — the stream " +
+                "buffer was modified externally (e.g. another node cleared it during a leadership handover). " +
+                "Failing the transaction so nothing partial is delivered; the slot re-streams it.");
         }
     }
 
@@ -56,15 +76,52 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
     {
         _pending.Remove(xid);
         _nextSeq.Remove(xid);
+        _truncatedFlushed.Remove(xid);
         await PgExec.ExecuteAsync(
             dataSource, "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x", ct,
             ("s", slotName), ("x", (long)xid));
+    }
+
+    public async ValueTask DiscardSubtransactionAsync(uint xid, uint subxid, CancellationToken ct)
+    {
+        // Truncate flushed rows from the subtransaction's first change onward; min(seq) is NULL (deleting
+        // nothing) when the subxid never flushed.
+        var deleted = await PgExec.ExecuteAsync(
+            dataSource,
+            "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x AND seq >= " +
+            "(SELECT min(seq) FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x AND subxid = @sub)",
+            ct, ("s", slotName), ("x", (long)xid), ("sub", (long)subxid));
+
+        if (deleted > 0)
+        {
+            _truncatedFlushed[xid] = _truncatedFlushed.GetValueOrDefault(xid) + deleted;
+        }
+
+        if (!_pending.TryGetValue(xid, out var batch))
+        {
+            return;
+        }
+
+        if (deleted > 0)
+        {
+            // A flush drains the whole batch, so everything still pending was appended after the flushed
+            // first change — it all goes, even entries carrying only descendant subxids.
+            batch.Clear();
+            return;
+        }
+
+        var first = batch.FindIndex(e => e.Subxid == subxid);
+        if (first >= 0)
+        {
+            batch.RemoveRange(first, batch.Count - first);
+        }
     }
 
     public async ValueTask ClearAsync(CancellationToken ct)
     {
         _pending.Clear();
         _nextSeq.Clear();
+        _truncatedFlushed.Clear();
         await PgExec.ExecuteAsync(
             dataSource, "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s", ct, ("s", slotName));
     }
@@ -73,6 +130,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
     {
         _pending.Clear();
         _nextSeq.Clear();
+        _truncatedFlushed.Clear();
         return ValueTask.CompletedTask;
     }
 
@@ -86,13 +144,14 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         var seq = _nextSeq.GetValueOrDefault(xid);
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using (var importer = await connection.BeginBinaryImportAsync(
-            "COPY wallaby.stream_buffer (slot_name, xid, seq, payload) FROM STDIN (FORMAT BINARY)", ct))
+            "COPY wallaby.stream_buffer (slot_name, xid, subxid, seq, payload) FROM STDIN (FORMAT BINARY)", ct))
         {
-            foreach (var change in batch)
+            foreach (var (subxid, change) in batch)
             {
                 await importer.StartRowAsync(ct);
                 await importer.WriteAsync(slotName, NpgsqlDbType.Text, ct);
                 await importer.WriteAsync((long)xid, NpgsqlDbType.Bigint, ct);
+                await importer.WriteAsync((long)subxid, NpgsqlDbType.Bigint, ct);
                 await importer.WriteAsync(seq++, NpgsqlDbType.Bigint, ct);
                 await importer.WriteAsync(SpillCodec.Encode(change), NpgsqlDbType.Bytea, ct);
             }
