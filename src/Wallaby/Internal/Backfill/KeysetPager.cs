@@ -142,7 +142,7 @@ internal sealed class KeysetPager
     private readonly CapturedTable _table;
     private readonly KeysetFilter? _filter;
     private readonly string[] _columnNames;
-    private readonly bool[] _readAsUtf8Json;
+    private readonly ColumnReadMode[] _readModes;
     private readonly int[] _pkIndexInColumns;
     private readonly string _firstPageSqlPrefix;
     private readonly string _nextPageSqlPrefix;
@@ -152,7 +152,7 @@ internal sealed class KeysetPager
         _table = table;
         _filter = filter;
         _columnNames = table.Columns.Select(c => c.ColumnName).ToArray();
-        _readAsUtf8Json = table.Columns.Select(c => c.ReadAsUtf8Json).ToArray();
+        _readModes = table.Columns.Select(c => c.ReadMode).ToArray();
 
         // Map each primary-key column to its index in _columnNames so we can read PK values
         // straight from the row buffer without a second GetOrdinal lookup.
@@ -223,18 +223,11 @@ internal sealed class KeysetPager
             var values = new RawColumn[columnCount];
             for (var i = 0; i < columnCount; i++)
             {
-                object? raw;
-                if (_readAsUtf8Json[i])
+                values[i] = new RawColumn
                 {
-                    // GetFieldValue<byte[]> throws on NULL (unlike GetValue), so guard explicitly.
-                    raw = reader.IsDBNull(ordinals[i]) ? null : reader.GetFieldValue<byte[]>(ordinals[i]);
-                }
-                else
-                {
-                    var value = reader.GetValue(ordinals[i]);
-                    raw = value is DBNull ? null : value;
-                }
-                values[i] = new RawColumn { ColumnName = _columnNames[i], Value = raw };
+                    ColumnName = _columnNames[i],
+                    Value = ColumnValueReader.Read(reader, ordinals[i], _readModes[i]),
+                };
             }
 
             rows.Add(new RawChange

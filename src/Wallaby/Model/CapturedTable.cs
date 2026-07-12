@@ -15,12 +15,8 @@ public sealed class CapturedColumn
     /// <summary>True when the column participates in the primary key.</summary>
     public required bool IsPrimaryKey { get; init; }
 
-    /// <summary>
-    /// True to read the column's value as raw UTF-8 JSON bytes (<c>byte[]</c>) instead of a decoded
-    /// string, on both the replication and backfill paths. Only valid on json/jsonb columns; lets a
-    /// consumer that feeds the bytes to a JSON deserializer skip the UTF-16 round trip.
-    /// </summary>
-    public bool ReadAsUtf8Json { get; init; }
+    /// <summary>How to read this column's wire value; see <see cref="ColumnReadMode"/>.</summary>
+    public ColumnReadMode ReadMode { get; init; }
 }
 
 /// <summary>

@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Text;
 using Npgsql.Replication.PgOutput.Messages;
 using Wallaby.Abstractions;
@@ -26,43 +25,16 @@ namespace Wallaby.Internal.Replication;
 /// <c>wallaby.watermark.*</c> prefix are buffered as <see cref="Watermark"/>s for the backfill coordinator.
 /// </summary>
 internal sealed class TransactionAssembler(
-    ITransactionSpill spill, int maxBufferedChangesPerTransaction = int.MaxValue,
-    IReadOnlyDictionary<(string Schema, string Table), IReadOnlySet<string>>? utf8JsonColumnsByTable = null)
+    ITransactionSpill spill, int maxBufferedChangesPerTransaction = int.MaxValue, WallabyModel? model = null)
 {
     // Non-streamed (small) transaction: changes between Begin and Commit (the common path).
     private readonly List<RawChange> _buffer = [];
     private readonly List<Watermark> _watermarks = [];
 
-    /// <summary>
-    /// Per-relation lookup of the columns flagged <see cref="CapturedColumn.ReadAsUtf8Json"/>, or null
-    /// when no table in <paramref name="model"/> flags any — the decoder then skips the check entirely.
-    /// </summary>
-    internal static IReadOnlyDictionary<(string Schema, string Table), IReadOnlySet<string>>? BuildUtf8JsonColumnLookup(
-        WallabyModel? model)
-    {
-        if (model is null)
-        {
-            return null;
-        }
-
-        Dictionary<(string, string), IReadOnlySet<string>>? lookup = null;
-        foreach (var table in model.Tables)
-        {
-            List<string>? flagged = null;
-            foreach (var column in table.Columns)
-            {
-                if (column.ReadAsUtf8Json)
-                {
-                    (flagged ??= []).Add(column.ColumnName);
-                }
-            }
-            if (flagged is not null)
-            {
-                (lookup ??= [])[(table.Schema, table.TableName)] = flagged.ToFrozenSet(StringComparer.Ordinal);
-            }
-        }
-        return lookup;
-    }
+    // Per-relation column read modes, aligned to the relation's column order; a null value means every
+    // column reads with ColumnReadMode.Default (also cached, so unflagged and unmodeled tables pay the
+    // model lookup once). Invalidated when the server re-sends a RelationMessage after a schema change.
+    private readonly Dictionary<uint, ColumnReadMode[]?> _readModesByRelation = [];
 
     // The xid of the streamed segment currently open (between StreamStart and StreamStop); null otherwise.
     private uint? _currentStreamXid;
@@ -151,8 +123,14 @@ internal sealed class TransactionAssembler(
                 await RouteAsync(await DecodeDeleteAsync(delete, delete.Key, ct), delete.TransactionXid, ct);
                 return null;
 
+            case RelationMessage relation:
+                // Sent before a relation's first DML and re-sent after a schema change; drop any cached
+                // read-mode plan so the next DML rebuilds it against the new column layout.
+                _readModesByRelation.Remove(relation.RelationId);
+                return null;
+
             default:
-                // RelationMessage, TruncateMessage, Begin/Commit-prepared, Type, etc.
+                // TruncateMessage, Begin/Commit-prepared, Type, etc.
                 return null;
         }
     }
@@ -178,14 +156,49 @@ internal sealed class TransactionAssembler(
     }
 
     // Resolved once per DML message and applied to the new AND old tuples (the unchanged-TOAST
-    // fallback reads the body from the old tuple).
-    private IReadOnlySet<string>? Utf8JsonColumnsFor(RelationMessage relation)
-        => utf8JsonColumnsByTable?.GetValueOrDefault((relation.Namespace, relation.RelationName));
+    // fallback reads the body from the old tuple). Built lazily on first DML rather than on the
+    // RelationMessage itself, because Npgsql recycles the message object; message.Relation on a DML
+    // message is valid within its own iteration.
+    private ColumnReadMode[]? ReadModesFor(RelationMessage relation)
+    {
+        if (model is null)
+        {
+            return null;
+        }
+        if (_readModesByRelation.TryGetValue(relation.RelationId, out var modes))
+        {
+            return modes;
+        }
+        return _readModesByRelation[relation.RelationId] = BuildReadModes(relation);
+    }
+
+    private ColumnReadMode[]? BuildReadModes(RelationMessage relation)
+    {
+        if (model!.FindByRelation(relation.Namespace, relation.RelationName) is not { } table)
+        {
+            return null;
+        }
+
+        ColumnReadMode[]? modes = null;
+        for (var i = 0; i < relation.Columns.Count; i++)
+        {
+            var name = relation.Columns[i].ColumnName;
+            foreach (var column in table.Columns)
+            {
+                if (column.ReadMode != ColumnReadMode.Default && column.ColumnName == name)
+                {
+                    (modes ??= new ColumnReadMode[relation.Columns.Count])[i] = column.ReadMode;
+                    break;
+                }
+            }
+        }
+        return modes;
+    }
 
     private async Task<RawChange> DecodeInsertAsync(InsertMessage message, CancellationToken ct)
     {
-        var utf8JsonColumns = Utf8JsonColumnsFor(message.Relation);
-        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, ct, utf8JsonColumns);
+        var readModes = ReadModesFor(message.Relation);
+        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, ct);
         return new RawChange
         {
             RelationId = message.Relation.RelationId,
@@ -200,10 +213,10 @@ internal sealed class TransactionAssembler(
     private async Task<RawChange> DecodeUpdateAsync(
         UpdateMessage message, Npgsql.Replication.PgOutput.ReplicationTuple? oldRow, CancellationToken ct)
     {
-        var utf8JsonColumns = Utf8JsonColumnsFor(message.Relation);
+        var readModes = ReadModesFor(message.Relation);
         // On the wire the old tuple (when present) precedes the new tuple, so read it first.
-        var oldValues = oldRow is null ? null : await PgOutputDecoder.ReadTupleAsync(oldRow, ct, utf8JsonColumns);
-        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, ct, utf8JsonColumns);
+        var oldValues = oldRow is null ? null : await PgOutputDecoder.ReadTupleAsync(oldRow, readModes, ct);
+        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, ct);
         return new RawChange
         {
             RelationId = message.Relation.RelationId,
@@ -218,7 +231,7 @@ internal sealed class TransactionAssembler(
     private async Task<RawChange> DecodeDeleteAsync(
         DeleteMessage message, Npgsql.Replication.PgOutput.ReplicationTuple oldOrKey, CancellationToken ct)
     {
-        var oldValues = await PgOutputDecoder.ReadTupleAsync(oldOrKey, ct, Utf8JsonColumnsFor(message.Relation));
+        var oldValues = await PgOutputDecoder.ReadTupleAsync(oldOrKey, ReadModesFor(message.Relation), ct);
         return new RawChange
         {
             RelationId = message.Relation.RelationId,

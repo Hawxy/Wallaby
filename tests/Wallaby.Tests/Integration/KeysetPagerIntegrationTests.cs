@@ -94,7 +94,7 @@ public class KeysetPagerIntegrationTests(PostgresFixture pg)
                 new CapturedColumn
                 {
                     PropertyName = "Body", ColumnName = "body", ClrType = typeof(string), IsPrimaryKey = false,
-                    ReadAsUtf8Json = true,
+                    ReadMode = ColumnReadMode.Utf8JsonBytes,
                 },
                 new CapturedColumn { PropertyName = "Note", ColumnName = "note", ClrType = typeof(string), IsPrimaryKey = false },
             ],

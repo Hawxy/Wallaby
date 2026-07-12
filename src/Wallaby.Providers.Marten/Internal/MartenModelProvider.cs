@@ -107,7 +107,7 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
             // The document body streams as raw UTF-8 bytes so the materializer feeds the serializer's
             // Stream path directly, with no UTF-16 round trip.
             PropertyName = "Data", ColumnName = DataColumn, ClrType = typeof(string), IsPrimaryKey = false,
-            ReadAsUtf8Json = true,
+            ReadMode = ColumnReadMode.Utf8JsonBytes,
         });
         if (softDeleted)
         {

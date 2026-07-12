@@ -41,8 +41,7 @@ internal sealed class LogicalReplicationStream(
     public async IAsyncEnumerable<CommittedTransaction> ReadAsync([EnumeratorCancellation] CancellationToken ct)
     {
         await _connection.Open(ct);
-        var assembler = new TransactionAssembler(
-            spill, maxBufferedChangesPerTransaction, TransactionAssembler.BuildUtf8JsonColumnLookup(model));
+        var assembler = new TransactionAssembler(spill, maxBufferedChangesPerTransaction, model);
 
         var cleared = false;
         await foreach (var message in _connection.StartReplication(_slot, _options, ct))

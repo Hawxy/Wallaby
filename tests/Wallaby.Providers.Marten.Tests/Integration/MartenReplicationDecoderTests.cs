@@ -11,8 +11,8 @@ using Wallaby.TestInfrastructure.Marten;
 namespace Wallaby.Providers.Marten.Tests.Integration;
 
 /// <summary>
-/// Proves the raw-byte path at the replication boundary: a jsonb column flagged
-/// <c>ReadAsUtf8Json</c> decodes to <c>byte[]</c> (Npgsql's binary-mode converter hands over the
+/// Proves the raw-byte path at the replication boundary: a jsonb column declared
+/// <c>ColumnReadMode.Utf8JsonBytes</c> decodes to <c>byte[]</c> (Npgsql's binary-mode converter hands over the
 /// payload without the jsonb version byte), so the materializer can stream it without transcoding.
 /// </summary>
 [NotInParallel]
