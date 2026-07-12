@@ -16,9 +16,6 @@ dotnet add package Wallaby.Sinks.Http
 
 ## Register
 
-The sink sends through an `IHttpClientFactory` named client; `AddHttpSink` registers
-`services.AddHttpClient()` for you.
-
 ```csharp
 builder.Services.AddWallaby(cdc =>
 {
@@ -51,12 +48,11 @@ builder.Services.AddWallaby(cdc =>
 
 ## Authentication
 
-Configure auth on the **named client**, such as bearer tokens via a message handler, static API keys via default
-headers, client certificates or proxies via the primary handler. The sink adds nothing to the request but
+Configure auth via the `IHttpClientFactory` **named client**. The sink adds nothing to the request but
 the body and its signature:
 
 ```csharp
-builder.Services.AddHttpClient(HttpSink.ClientNameFor("webhook"))
+builder.Services.AddHttpClient(HttpSink.ClientNameFor("webhook")) 
     .ConfigureHttpClient(c => c.DefaultRequestHeaders.Add("X-Api-Key", apiKey))
     .AddHttpMessageHandler<OAuthTokenHandler>(); // your DelegatingHandler
 ```

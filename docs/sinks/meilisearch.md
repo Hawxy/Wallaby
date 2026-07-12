@@ -25,18 +25,6 @@ cdc.AddMeilisearchSink("meili", m =>
 });
 ```
 
-The sink sends through the `IHttpClientFactory` pipeline; `AddMeilisearchSink` registers
-`services.AddHttpClient()` for you.
-
-Proxies, resilience handlers, and lifetimes are configured on the factory's named client —
-`MeilisearchSink.ClientNameFor("meili")` (i.e. `wallaby.sinks.meilisearch.meili`), or the name you set
-via `HttpClientName`:
-
-```csharp
-builder.Services.AddHttpClient(MeilisearchSink.ClientNameFor("meili"))
-    .AddStandardResilienceHandler();
-```
-
 Then attach the entities it indexes, using the destination as the **index name**:
 
 ```csharp
@@ -60,6 +48,18 @@ cdc.AddMeilisearchSink("meili", m => { /* ... */ })
 | `MaxRecordsPerBatch` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
 | `HttpClientName` | `null` | `IHttpClientFactory` client name to send through; `null` uses `MeilisearchSink.ClientNameFor(name)`. |
 | `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
+
+## HttpClient
+
+The underlying HttpClient is configurable via the `IHttpClientFactory`'s named client. Use
+`MeilisearchSink.ClientNameFor("meili")`, or the name you set
+via `HttpClientName`:
+
+```csharp
+builder.Services.AddHttpClient(MeilisearchSink.ClientNameFor("meili"))
+    .AddCustomResilienceHandler();
+```
+
 
 ## Index configuration
 

@@ -50,12 +50,12 @@ sink.Map<Product>()
 For more complex transforms, or anything with dependencies, implement your provider's transform
 interface as a class - [`IWallabyEfTransform<T>`](/providers/entity-framework-core/#class-based-transforms)
 (EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) - and
-register it with `UsingTransform<TEntity, TTransform>()`; the class is resolved from the container.
+register it with `UsingTransform<TEntity, TTransform>()`. This class is registered & resolved from the container.
 
 ## Mapping classes
 
-Inline mappings grow the `AddWallaby` callback by a block per entity per sink and can make your `Program.cs` unwieldy. Move each mapping into a
-class implementing `IWallabyEntityMapping<TEntity>`. This is also convient if you want to store your mappings alongside the transform it wires up:
+Inline mappings grow the `AddWallaby` callback and can make your `Program.cs` unwieldy. Move each mapping into a
+class implementing `IWallabyEntityMapping<TEntity>`. This is also convenient if you want to store your mappings alongside the transform it wires up:
 
 ```csharp
 public sealed class ProductSearchMapping : IWallabyEntityMapping<Product>
@@ -74,7 +74,7 @@ Apply it by type:
     .Apply<CategorySearchMapping>());
 ```
 
-For a mapping that needs constructor arguments, pass a configured instance:
+For a mapping that needs constructor arguments, pass an instance directly:
 `sink.Apply(new ProductSearchMapping(indexName))`.
 
 ## Internals
