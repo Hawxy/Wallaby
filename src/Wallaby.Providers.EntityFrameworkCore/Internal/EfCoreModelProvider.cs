@@ -10,13 +10,19 @@ namespace Wallaby.Providers.EntityFrameworkCore.Internal;
 /// The materializer plans every table in the model — not just captured ones — so publication-included
 /// but unmapped tables still materialize and are skipped by the router.
 /// </summary>
-internal sealed class EfCoreModelProvider(IModel model) : IWallabyModelProvider
+internal sealed class EfCoreModelProvider(IModel model, PropertyExclusions? exclusions = null) : IWallabyModelProvider
 {
-    public CapturePlan BuildCapturePlan(CaptureSpec spec) => new()
+    private readonly PropertyExclusions _exclusions = exclusions ?? PropertyExclusions.None;
+
+    public CapturePlan BuildCapturePlan(CaptureSpec spec)
     {
-        Model = EfCoreCaptureModelBuilder.Build(model, spec),
-        Materializer = new EntityMaterializer(model),
-    };
+        _exclusions.Validate(model);
+        return new()
+        {
+            Model = EfCoreCaptureModelBuilder.Build(model, spec, _exclusions),
+            Materializer = new EntityMaterializer(model, _exclusions),
+        };
+    }
 
     public QualifiedTable ResolveTable(Type entityClrType)
     {

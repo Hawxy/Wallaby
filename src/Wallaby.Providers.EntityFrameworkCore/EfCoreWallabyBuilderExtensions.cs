@@ -19,12 +19,23 @@ public static class EfCoreWallabyBuilderExtensions
     /// </summary>
     public static WallabyBuilder UseEntityFrameworkCore<TContext>(this WallabyBuilder cdc)
         where TContext : DbContext
+        => UseEntityFrameworkCore<TContext>(cdc, configure: null);
+
+    /// <summary>
+    /// Overload accepting provider configuration, e.g.
+    /// <c>UseEntityFrameworkCore&lt;AppDbContext&gt;(ef =&gt; ef.ExcludeProperty&lt;Order&gt;(o =&gt; o.Payload))</c>.
+    /// </summary>
+    public static WallabyBuilder UseEntityFrameworkCore<TContext>(
+        this WallabyBuilder cdc, Action<EfCoreProviderOptions>? configure)
+        where TContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(cdc);
+        var providerOptions = new EfCoreProviderOptions();
+        configure?.Invoke(providerOptions);
         return cdc.UseProvider(new WallabyProviderRegistration
         {
             Name = "EntityFrameworkCore",
-            ModelProvider = sp => new EfCoreModelProvider(DbContextResolver.ReadModel<TContext>(sp)),
+            ModelProvider = sp => new EfCoreModelProvider(DbContextResolver.ReadModel<TContext>(sp), providerOptions.Exclusions),
             EnrichmentSessions = sp => new DbContextEnrichmentSessionProvider(() => DbContextResolver.Lease<TContext>(sp)),
         });
     }

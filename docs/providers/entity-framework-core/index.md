@@ -193,8 +193,26 @@ public partial class OrdersReplicaIdentity : Migration
 Entities with large values - long text, big jsonb, bytea over ~2KB - also need `REPLICA IDENTITY FULL`.
 Postgres omits an *unchanged* TOASTed value from an update's new tuple, so under the default identity
 the value isn't carried in the change at all. Rather than deliver a document with the field silently
-nulled, Wallaby fails the change with the DDL above in the error message.
+nulled, Wallaby fails the change with the DDL above in the error message. If no transform reads the
+value, [exclude the property](#excluding-properties) instead of paying the WAL cost of full identity.
 :::
+
+## Excluding properties
+
+When a captured entity carries a large column that no transform reads (e.g. a big jsonb payload),
+exclude the property instead of turning on `REPLICA IDENTITY FULL` for it:
+
+```csharp
+cdc.UseEntityFrameworkCore<AppDbContext>(ef => ef
+    .ExcludeProperty<Product>(p => p.Description))
+```
+
+An excluded property is dropped from capture entirely: its column is skipped during materialization and
+never read during backfill, so an unchanged TOASTed value can no longer fail the change. The
+materialized entity keeps the property's default value and `ChangeEvent.Record` omits it - a transform
+that *does* read the property would see the default, so only exclude what your transforms never touch.
+Primary-key properties and columns a `DependsOn(...)` lookup resolves through cannot be excluded; both
+fail at startup.
 
 ## Next steps
 
