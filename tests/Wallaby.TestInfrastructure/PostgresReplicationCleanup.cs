@@ -6,7 +6,8 @@ namespace Wallaby.TestInfrastructure;
 /// <summary>
 /// Drops a test's replication slot and publication. Slots and publications survive on the shared
 /// session container, and the fixture caps <c>max_replication_slots</c> — a test that creates them
-/// must drop them or a later test's slot creation fails.
+/// must drop them or a later test's slot creation fails. Tests should not call this directly:
+/// <see cref="ReplicationScope"/> runs it automatically on dispose.
 /// </summary>
 public static class PostgresReplicationCleanup
 {

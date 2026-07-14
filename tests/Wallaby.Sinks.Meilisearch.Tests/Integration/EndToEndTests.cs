@@ -47,56 +47,40 @@ public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili
     [Test]
     public async Task AddWallaby_indexes_changes_end_to_end()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var index = names.Named("products");
         var probe = new MeiliProbe(meili);
 
-        try
-        {
-            await using var node = await WallabyTestNode.StartAsync(BuildServices(names, index));
+        await using var node = await WallabyTestNode.StartAsync(BuildServices(names, index));
 
-            var categoryId = await Db.AddCategoryAsync();
-            var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
+        var categoryId = await Db.AddCategoryAsync();
+        var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
 
-            await Polling.UntilAsync(async () => await probe.NameAsync(index, id) == $"e2e_{names.Suffix}");
-            (await probe.NameAsync(index, id)).ShouldBe($"e2e_{names.Suffix}");
-        }
-        finally
-        {
-            // Non-harness (full-DI) tests must drop their slot/publication themselves: a leaked
-            // publication's column lists later break other tests' DML on the shared database.
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
-        }
+        await Polling.UntilAsync(async () => await probe.NameAsync(index, id) == $"e2e_{names.Suffix}");
+        (await probe.NameAsync(index, id)).ShouldBe($"e2e_{names.Suffix}");
     }
 
     [Test]
     public async Task Cluster_keeps_serving_when_a_node_stops()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var index = names.Named("products");
         var probe = new MeiliProbe(meili);
 
-        try
-        {
-            await using var node1 = await WallabyTestNode.StartAsync(BuildServices(names, index));
-            await using var node2 = await WallabyTestNode.StartAsync(BuildServices(names, index));
+        await using var node1 = await WallabyTestNode.StartAsync(BuildServices(names, index));
+        await using var node2 = await WallabyTestNode.StartAsync(BuildServices(names, index));
 
-            var categoryId = await Db.AddCategoryAsync();
+        var categoryId = await Db.AddCategoryAsync();
 
-            // First change is served by whichever node is the leader.
-            var id1 = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
-            await Polling.UntilAsync(async () => await probe.NameAsync(index, id1) == $"before_{names.Suffix}");
+        // First change is served by whichever node is the leader.
+        var id1 = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+        await Polling.UntilAsync(async () => await probe.NameAsync(index, id1) == $"before_{names.Suffix}");
 
-            // Stop node1; if it was the leader, node2 must take over (single-owner slot + advisory lock).
-            await node1.DisposeAsync();
+        // Stop node1; if it was the leader, node2 must take over (single-owner slot + advisory lock).
+        await node1.DisposeAsync();
 
-            var id2 = await Db.AddProductAsync(categoryId, $"after_{names.Suffix}");
-            await Polling.UntilAsync(async () => await probe.NameAsync(index, id2) == $"after_{names.Suffix}");
-            (await probe.NameAsync(index, id2)).ShouldBe($"after_{names.Suffix}");
-        }
-        finally
-        {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
-        }
+        var id2 = await Db.AddProductAsync(categoryId, $"after_{names.Suffix}");
+        await Polling.UntilAsync(async () => await probe.NameAsync(index, id2) == $"after_{names.Suffix}");
+        (await probe.NameAsync(index, id2)).ShouldBe($"after_{names.Suffix}");
     }
 }

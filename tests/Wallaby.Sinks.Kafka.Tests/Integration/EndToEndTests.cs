@@ -56,7 +56,7 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
     [Test]
     public async Task Changes_are_produced_end_to_end_and_deletes_are_tombstones()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var topic = names.Named("products");
 
         await using var node = await WallabyTestNode.StartAsync(BuildServices(names, topic));
@@ -92,7 +92,7 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
     [Test]
     public async Task Declared_topics_are_created_on_start_and_survive_a_leadership_takeover()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var topic = names.Named("products_cfg");
 
         // Two nodes initialize the same sink configuration; topic creation must be idempotent.

@@ -80,113 +80,71 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
         return result;
     }
 
-    private async Task CleanupAsync(WallabyNames names)
-    {
-        await using var conn = new NpgsqlConnection(pg.ConnectionString);
-        await conn.OpenAsync();
-        await PgExec.ExecuteAsync(
-            conn,
-            "SELECT pg_drop_replication_slot(@s) WHERE EXISTS " +
-            "(SELECT 1 FROM pg_replication_slots WHERE slot_name = @s AND NOT active)",
-            default,
-            ("s", names.Slot));
-        await PgExec.ExecuteAsync(
-            conn, $"DROP PUBLICATION IF EXISTS {PgExec.QuoteIdentifier(names.Publication)}", default);
-    }
-
     [Test]
     public async Task Publication_is_created_with_column_lists_matching_the_model()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var exclusions = Exclude(o => o.ExcludeProperty<Product>(p => p.Description));
         var model = BuildTestModel(exclusions);
 
-        try
-        {
-            await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
+        await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
 
-            var columns = await ReadPublicationColumnsAsync(names.Publication);
-            columns.Count.ShouldBe(3);
-            columns.Values.ShouldAllBe(c => c != null); // every member has an explicit list
+        var columns = await ReadPublicationColumnsAsync(names.Publication);
+        columns.Count.ShouldBe(3);
+        columns.Values.ShouldAllBe(c => c != null); // every member has an explicit list
 
-            var expectedProduct = model.FindByClrType(typeof(Product))!.Columns.Select(c => c.ColumnName).ToHashSet();
-            columns["products"]!.ShouldBe(expectedProduct, ignoreOrder: true);
-            columns["products"]!.ShouldNotContain(nameof(Product.Description));
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        var expectedProduct = model.FindByClrType(typeof(Product))!.Columns.Select(c => c.ColumnName).ToHashSet();
+        columns["products"]!.ShouldBe(expectedProduct, ignoreOrder: true);
+        columns["products"]!.ShouldNotContain(nameof(Product.Description));
     }
 
     [Test]
     public async Task Reconcile_applies_column_lists_to_an_existing_whole_table_publication()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
-        try
-        {
-            // The upgrade path: a publication created without lists gains them on the next startup.
-            await CreateConfigurator(names, columnLists: false).EnsureConfiguredAsync(model, CancellationToken.None);
-            (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c == null);
+        // The upgrade path: a publication created without lists gains them on the next startup.
+        await CreateConfigurator(names, columnLists: false).EnsureConfiguredAsync(model, CancellationToken.None);
+        (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c == null);
 
-            await CreateConfigurator(names, columnLists: true).EnsureConfiguredAsync(model, CancellationToken.None);
-            (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c != null);
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        await CreateConfigurator(names, columnLists: true).EnsureConfiguredAsync(model, CancellationToken.None);
+        (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c != null);
     }
 
     [Test]
     public async Task Column_list_drift_is_reconciled()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
 
-        try
-        {
-            await CreateConfigurator(names).EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None);
-            (await ReadPublicationColumnsAsync(names.Publication))["products"]!
-                .ShouldContain(nameof(Product.Description));
+        await CreateConfigurator(names).EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None);
+        (await ReadPublicationColumnsAsync(names.Publication))["products"]!
+            .ShouldContain(nameof(Product.Description));
 
-            var excluded = BuildTestModel(Exclude(o => o.ExcludeProperty<Product>(p => p.Description)));
-            await CreateConfigurator(names).EnsureConfiguredAsync(excluded, CancellationToken.None);
+        var excluded = BuildTestModel(Exclude(o => o.ExcludeProperty<Product>(p => p.Description)));
+        await CreateConfigurator(names).EnsureConfiguredAsync(excluded, CancellationToken.None);
 
-            var columns = await ReadPublicationColumnsAsync(names.Publication);
-            columns.Count.ShouldBe(3); // membership intact
-            columns["products"]!.ShouldNotContain(nameof(Product.Description));
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        var columns = await ReadPublicationColumnsAsync(names.Publication);
+        columns.Count.ShouldBe(3); // membership intact
+        columns["products"]!.ShouldNotContain(nameof(Product.Description));
     }
 
     [Test]
     public async Task Disabling_the_option_removes_column_lists()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
-        try
-        {
-            await CreateConfigurator(names, columnLists: true).EnsureConfiguredAsync(model, CancellationToken.None);
-            await CreateConfigurator(names, columnLists: false).EnsureConfiguredAsync(model, CancellationToken.None);
+        await CreateConfigurator(names, columnLists: true).EnsureConfiguredAsync(model, CancellationToken.None);
+        await CreateConfigurator(names, columnLists: false).EnsureConfiguredAsync(model, CancellationToken.None);
 
-            (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c == null);
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c == null);
     }
 
     [Test]
     public async Task Replica_identity_full_table_publishes_whole_rows()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
@@ -204,84 +162,64 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
         finally
         {
             await PgExec.ExecuteAsync(conn, "ALTER TABLE public.categories REPLICA IDENTITY DEFAULT", default);
-            await CleanupAsync(names);
         }
     }
 
     [Test]
     public async Task Requires_full_replica_identity_table_is_never_listed()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         // Flagged tables are exempt even while relreplident is still 'd': the user is being told to
         // flip to FULL, and a list would turn that flip into publisher-side DML errors.
         var model = BuildTestModel(requiresFullReplicaIdentity: new HashSet<Type> { typeof(Product) });
 
-        try
-        {
-            await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
+        await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
 
-            var columns = await ReadPublicationColumnsAsync(names.Publication);
-            columns["products"].ShouldBeNull();
-            columns["categories"].ShouldNotBeNull();
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        var columns = await ReadPublicationColumnsAsync(names.Publication);
+        columns["products"].ShouldBeNull();
+        columns["categories"].ShouldNotBeNull();
     }
 
     [Test]
     public async Task Manage_publication_tables_false_leaves_the_publication_untouched()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
         await conn.OpenAsync();
         await PgExec.ExecuteAsync(
             conn, $"CREATE PUBLICATION {PgExec.QuoteIdentifier(names.Publication)} FOR TABLE public.products", default);
-        try
-        {
-            await CreateConfigurator(names, manageTables: false).EnsureConfiguredAsync(model, CancellationToken.None);
 
-            var columns = await ReadPublicationColumnsAsync(names.Publication);
-            columns.Count.ShouldBe(1); // membership not reconciled
-            columns["products"].ShouldBeNull(); // no list applied
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        await CreateConfigurator(names, manageTables: false).EnsureConfiguredAsync(model, CancellationToken.None);
+
+        var columns = await ReadPublicationColumnsAsync(names.Publication);
+        columns.Count.ShouldBe(1); // membership not reconciled
+        columns["products"].ShouldBeNull(); // no list applied
     }
 
     [Test]
     public async Task For_all_tables_publication_fails_with_guidance()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
         await conn.OpenAsync();
         await PgExec.ExecuteAsync(
             conn, $"CREATE PUBLICATION {PgExec.QuoteIdentifier(names.Publication)} FOR ALL TABLES", default);
-        try
-        {
-            var ex = await Should.ThrowAsync<WallabyConfigurationException>(
-                async () => await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None));
 
-            ex.Message.ShouldContain("FOR ALL TABLES");
-            ex.Message.ShouldContain("ManagePublicationTables");
-        }
-        finally
-        {
-            await CleanupAsync(names);
-        }
+        var ex = await Should.ThrowAsync<WallabyConfigurationException>(
+            async () => await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None));
+
+        ex.Message.ShouldContain("FOR ALL TABLES");
+        ex.Message.ShouldContain("ManagePublicationTables");
     }
 
     [Test]
     public async Task Generated_columns_are_omitted_from_the_list()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
 
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
         await conn.OpenAsync();
@@ -321,7 +259,6 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
         }
         finally
         {
-            await CleanupAsync(names);
             await PgExec.ExecuteAsync(conn, "DROP TABLE IF EXISTS public.gen_test", default);
         }
     }

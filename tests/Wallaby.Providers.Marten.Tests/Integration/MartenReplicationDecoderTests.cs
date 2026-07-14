@@ -22,7 +22,7 @@ public class MartenReplicationDecoderTests(MartenStoreFixture pg)
     [Test]
     public async Task The_jsonb_data_column_streams_as_utf8_bytes()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = new MartenModelProvider(pg.Store.Options)
             .BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(Widget)] }).Model;
 
@@ -41,24 +41,17 @@ public class MartenReplicationDecoderTests(MartenStoreFixture pg)
 
         RawChange? insert = null;
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        try
+        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+        await using var stream = new LogicalReplicationStream(
+            pg.ConnectionString, names.Slot, names.Publication, spill, model: model);
+        await foreach (var txn in stream.ReadAsync(cts.Token))
         {
-            await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
-            await using var stream = new LogicalReplicationStream(
-                pg.ConnectionString, names.Slot, names.Publication, spill, model: model);
-            await foreach (var txn in stream.ReadAsync(cts.Token))
+            insert = txn.Changes.FirstOrDefault(
+                c => c.TableName == "mt_doc_widget" && c.Action == ChangeAction.Insert);
+            if (insert is not null)
             {
-                insert = txn.Changes.FirstOrDefault(
-                    c => c.TableName == "mt_doc_widget" && c.Action == ChangeAction.Insert);
-                if (insert is not null)
-                {
-                    break;
-                }
+                break;
             }
-        }
-        finally
-        {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
         }
 
         var data = insert.ShouldNotBeNull().NewValues!.Single(c => c.ColumnName == "data");

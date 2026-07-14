@@ -25,7 +25,7 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Insert_update_delete_produce_correct_raw_changes()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
 
         // 1) Create slot + publication (captures from now on).
         var configurator = new PostgresSelfConfigurator(
@@ -66,29 +66,22 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         // 3) Stream and collect the product changes.
         var collected = new List<RawChange>();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+        await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
         try
         {
-            await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
-            await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
-            try
+            await foreach (var txn in stream.ReadAsync(cts.Token))
             {
-                await foreach (var txn in stream.ReadAsync(cts.Token))
+                collected.AddRange(txn.Changes.Where(c => c.TableName == "products"));
+                if (collected.Any(c => c.Action == ChangeAction.Delete))
                 {
-                    collected.AddRange(txn.Changes.Where(c => c.TableName == "products"));
-                    if (collected.Any(c => c.Action == ChangeAction.Delete))
-                    {
-                        break;
-                    }
+                    break;
                 }
             }
-            catch (OperationCanceledException) when (cts.IsCancellationRequested)
-            {
-                // Fall through to assertions, which will report what was (not) captured.
-            }
         }
-        finally
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
+            // Fall through to assertions, which will report what was (not) captured.
         }
 
         // Insert

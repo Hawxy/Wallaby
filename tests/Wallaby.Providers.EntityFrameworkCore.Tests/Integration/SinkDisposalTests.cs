@@ -1,9 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
-using Wallaby.Internal;
 using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
@@ -43,7 +41,7 @@ public class SinkDisposalTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Sinks_are_disposed_once_at_node_shutdown()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var sink = new DisposableCaptureSink();
 
         var services = new ServiceCollection();
@@ -67,25 +65,18 @@ public class SinkDisposalTests(TestModelPostgresFixture pg)
         services.ReplaceWallabySink("capture", sink);
 
         var db = new TestDatabase(pg.ConnectionString);
-        try
+        await using (var node = await WallabyTestNode.StartAsync(services))
         {
-            await using (var node = await WallabyTestNode.StartAsync(services))
-            {
-                await WallabyReadiness.WaitForStreamingAsync(node.Services);
-                var categoryId = await db.AddCategoryAsync();
-                var productId = await db.AddProductAsync(categoryId, $"disposal_{names.Suffix}");
-                await sink.WaitForDocumentsAsync([productId.ToString()]);
+            await WallabyReadiness.WaitForStreamingAsync(node.Services);
+            var categoryId = await db.AddCategoryAsync();
+            var productId = await db.AddProductAsync(categoryId, $"disposal_{names.Suffix}");
+            await sink.WaitForDocumentsAsync([productId.ToString()]);
 
-                // Streaming delivers while the sink is live; disposal only happens at shutdown.
-                sink.DisposeCount.ShouldBe(0);
-            }
+            // Streaming delivers while the sink is live; disposal only happens at shutdown.
+            sink.DisposeCount.ShouldBe(0);
+        }
 
-            sink.DisposeCount.ShouldBe(1);
-        }
-        finally
-        {
-            await DropSlotAndPublicationAsync(names);
-        }
+        sink.DisposeCount.ShouldBe(1);
     }
 
     [Test]
@@ -105,37 +96,10 @@ public class SinkDisposalTests(TestModelPostgresFixture pg)
         }
         finally
         {
+            // Harness disposal drops its own slot/publication.
             await harness.DisposeAsync();
-            await DropSlotAndPublicationAsync(harness.Names);
         }
 
         sink.DisposeCount.ShouldBe(1);
-    }
-
-    // Slots and publications survive the shared session database, so tests drop their own to avoid
-    // exhausting max_replication_slots. The prior node's replication connection can linger briefly
-    // after shutdown; retry until the server considers the slot inactive.
-    private async Task DropSlotAndPublicationAsync(WallabyNames names)
-    {
-        await using var conn = new NpgsqlConnection(pg.ConnectionString);
-        await conn.OpenAsync();
-        for (var attempt = 0; ; attempt++)
-        {
-            try
-            {
-                await PgExec.ExecuteAsync(
-                    conn,
-                    "SELECT pg_drop_replication_slot(@s) WHERE EXISTS " +
-                    "(SELECT 1 FROM pg_replication_slots WHERE slot_name = @s)",
-                    default,
-                    ("s", names.Slot));
-                break;
-            }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ObjectInUse && attempt < 50)
-            {
-                await Task.Delay(100);
-            }
-        }
-        await PgExec.ExecuteAsync(conn, $"DROP PUBLICATION IF EXISTS {PgExec.QuoteIdentifier(names.Publication)}", default);
     }
 }

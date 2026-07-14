@@ -26,7 +26,7 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Replaced_sink_captures_changes_end_to_end()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var capture = new CaptureSink();
 
         var services = new ServiceCollection();
@@ -53,32 +53,25 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("meili", capture);
 
-        try
-        {
-            await using var node = await WallabyTestNode.StartAsync(services);
-            await WallabyReadiness.WaitForStreamingAsync(node.Services);
+        await using var node = await WallabyTestNode.StartAsync(services);
+        await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
-            var categoryId = await Db.AddCategoryAsync();
-            var id = await Db.AddProductAsync(categoryId, $"testing_{names.Suffix}");
+        var categoryId = await Db.AddCategoryAsync();
+        var id = await Db.AddProductAsync(categoryId, $"testing_{names.Suffix}");
 
-            await capture.WaitForDocumentsAsync([id.ToString()]);
+        await capture.WaitForDocumentsAsync([id.ToString()]);
 
-            var latest = capture.LatestByDocumentId(destination: "products");
-            var record = latest[id.ToString()];
-            record.IsDeletion.ShouldBeFalse();
-            record.Destination.ShouldBe("products");
-            record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
-        }
-        finally
-        {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
-        }
+        var latest = capture.LatestByDocumentId(destination: "products");
+        var record = latest[id.ToString()];
+        record.IsDeletion.ShouldBeFalse();
+        record.Destination.ShouldBe("products");
+        record.Document!["name"].ShouldBe($"testing_{names.Suffix}");
     }
 
     [Test]
     public async Task Provider_aware_connection_string_streams_to_the_replaced_sink()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var capture = new CaptureSink();
 
         // The connection string travels through IConfiguration and is only read when the provider exists —
@@ -111,24 +104,17 @@ public class WallabyTestingTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("meili", capture);
 
-        try
-        {
-            await using var node = await WallabyTestNode.StartAsync(services);
-            await WallabyReadiness.WaitForStreamingAsync(node.Services);
+        await using var node = await WallabyTestNode.StartAsync(services);
+        await WallabyReadiness.WaitForStreamingAsync(node.Services);
 
-            var categoryId = await Db.AddCategoryAsync();
-            var id = await Db.AddProductAsync(categoryId, $"late_bound_{names.Suffix}");
+        var categoryId = await Db.AddCategoryAsync();
+        var id = await Db.AddProductAsync(categoryId, $"late_bound_{names.Suffix}");
 
-            await capture.WaitForDocumentsAsync([id.ToString()]);
+        await capture.WaitForDocumentsAsync([id.ToString()]);
 
-            var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
-            record.IsDeletion.ShouldBeFalse();
-            record.Document!["name"].ShouldBe($"late_bound_{names.Suffix}");
-        }
-        finally
-        {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
-        }
+        var record = capture.LatestByDocumentId(destination: "products")[id.ToString()];
+        record.IsDeletion.ShouldBeFalse();
+        record.Document!["name"].ShouldBe($"late_bound_{names.Suffix}");
     }
 }
 

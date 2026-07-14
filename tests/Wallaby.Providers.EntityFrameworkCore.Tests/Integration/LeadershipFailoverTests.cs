@@ -23,58 +23,51 @@ public class LeadershipFailoverTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Repeatedly_killing_the_lock_connection_fails_over_and_delivery_resumes()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var captureA = new CaptureSink();
         var captureB = new CaptureSink();
         var db = new TestDatabase(pg.ConnectionString);
 
-        try
+        await using var nodeA = await WallabyTestNode.StartAsync(BuildServices(names, captureA));
+        await using var nodeB = await WallabyTestNode.StartAsync(BuildServices(names, captureB));
+        var statusA = nodeA.Services.GetRequiredService<IWallabyStatus>();
+        var statusB = nodeB.Services.GetRequiredService<IWallabyStatus>();
+
+        // WallabyReadiness is node-scoped (either node may win the initial election), so gate on the
+        // shared slot directly.
+        await WaitUntilAsync(
+            () => SlotActiveAsync(names.Slot),
+            "the initial leader never started streaming");
+
+        var categoryId = await db.AddCategoryAsync();
+
+        for (var cycle = 1; cycle <= 3; cycle++)
         {
-            await using var nodeA = await WallabyTestNode.StartAsync(BuildServices(names, captureA));
-            await using var nodeB = await WallabyTestNode.StartAsync(BuildServices(names, captureB));
-            var statusA = nodeA.Services.GetRequiredService<IWallabyStatus>();
-            var statusB = nodeB.Services.GetRequiredService<IWallabyStatus>();
+            (await TerminateLockHolderAsync(names.Slot)).ShouldBeTrue($"no backend held the lock in cycle {cycle}");
 
-            // WallabyReadiness is node-scoped (either node may win the initial election), so gate on the
-            // shared slot directly.
+            // Exactly one leader emerges once the loser's step-down and the winner's takeover settle.
             await WaitUntilAsync(
-                () => SlotActiveAsync(names.Slot),
-                "the initial leader never started streaming");
+                () => Task.FromResult(CountLeaders(statusA, statusB) == 1),
+                $"cycle {cycle} did not settle on exactly one leader " +
+                $"(A: {statusA.Current.Role}, B: {statusB.Current.Role})");
 
-            var categoryId = await db.AddCategoryAsync();
-
-            for (var cycle = 1; cycle <= 3; cycle++)
-            {
-                (await TerminateLockHolderAsync(names.Slot)).ShouldBeTrue($"no backend held the lock in cycle {cycle}");
-
-                // Exactly one leader emerges once the loser's step-down and the winner's takeover settle.
-                await WaitUntilAsync(
-                    () => Task.FromResult(CountLeaders(statusA, statusB) == 1),
-                    $"cycle {cycle} did not settle on exactly one leader " +
-                    $"(A: {statusA.Current.Role}, B: {statusB.Current.Role})");
-
-                // Delivery resumes on whichever node now leads. The shared slot retains WAL across the
-                // handover, so a change written mid-failover must still arrive.
-                var id = await db.AddProductAsync(categoryId, $"failover_cycle{cycle}_{names.Suffix}");
-                await WaitUntilAsync(
-                    () => Task.FromResult(Delivered(captureA, id) || Delivered(captureB, id)),
-                    $"the change of cycle {cycle} was never delivered after failover");
-            }
-
-            // A lost lock is a clean step-down, and the surviving leader has acknowledged deliveries:
-            // neither node may end faulted or with an accumulated failure count.
-            statusA.Current.Faulted.ShouldBeFalse();
-            statusB.Current.Faulted.ShouldBeFalse();
+            // Delivery resumes on whichever node now leads. The shared slot retains WAL across the
+            // handover, so a change written mid-failover must still arrive.
+            var id = await db.AddProductAsync(categoryId, $"failover_cycle{cycle}_{names.Suffix}");
             await WaitUntilAsync(
-                () => Task.FromResult(
-                    statusA.Current.ConsecutiveLeaderFailures == 0 && statusB.Current.ConsecutiveLeaderFailures == 0),
-                "a node ended with a lingering leader-failure count " +
-                $"(A: {statusA.Current.ConsecutiveLeaderFailures}, B: {statusB.Current.ConsecutiveLeaderFailures})");
+                () => Task.FromResult(Delivered(captureA, id) || Delivered(captureB, id)),
+                $"the change of cycle {cycle} was never delivered after failover");
         }
-        finally
-        {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
-        }
+
+        // A lost lock is a clean step-down, and the surviving leader has acknowledged deliveries:
+        // neither node may end faulted or with an accumulated failure count.
+        statusA.Current.Faulted.ShouldBeFalse();
+        statusB.Current.Faulted.ShouldBeFalse();
+        await WaitUntilAsync(
+            () => Task.FromResult(
+                statusA.Current.ConsecutiveLeaderFailures == 0 && statusB.Current.ConsecutiveLeaderFailures == 0),
+            "a node ended with a lingering leader-failure count " +
+            $"(A: {statusA.Current.ConsecutiveLeaderFailures}, B: {statusB.Current.ConsecutiveLeaderFailures})");
     }
 
     private ServiceCollection BuildServices(WallabyNames names, CaptureSink capture)

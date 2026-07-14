@@ -39,7 +39,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Creates_publication_slot_and_state_schema()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
         var result = await CreateConfigurator(names.Slot, names.Publication).EnsureConfiguredAsync(model, CancellationToken.None);
@@ -84,7 +84,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Re_running_is_idempotent()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel();
 
         var first = await CreateConfigurator(names.Slot, names.Publication).EnsureConfiguredAsync(model, CancellationToken.None);
@@ -99,9 +99,10 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Provisions_external_slot_and_publication_without_consuming_it()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var extSlot = names.Named("elt_slot");
         var extPub = names.Named("elt_pub");
+        names.TrackExternal(extSlot, extPub);
         var model = BuildTestModel();
 
         var configurator = new PostgresSelfConfigurator(
@@ -117,50 +118,44 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
             },
             NullLogger.Instance);
 
-        try
-        {
-            var result = await configurator.EnsureConfiguredAsync(model, CancellationToken.None);
+        var result = await configurator.EnsureConfiguredAsync(model, CancellationToken.None);
 
-            result.ExternalSlots.Count.ShouldBe(1);
-            result.ExternalSlots[0].SlotCreated.ShouldBeTrue();
-            result.ExternalSlots[0].PublicationCreated.ShouldBeTrue();
+        result.ExternalSlots.Count.ShouldBe(1);
+        result.ExternalSlots[0].SlotCreated.ShouldBeTrue();
+        result.ExternalSlots[0].PublicationCreated.ShouldBeTrue();
 
-            await using var conn = new NpgsqlConnection(pg.ConnectionString);
-            await conn.OpenAsync();
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
 
-            // The external publication exists and contains exactly the two declared tables.
-            (await PgExec.ScalarLongAsync(conn,
-                "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", extPub))).ShouldBe(1L);
-            (await PgExec.ScalarLongAsync(conn,
-                "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p", default, ("p", extPub))).ShouldBe(2L);
+        // The external publication exists and contains exactly the two declared tables.
+        (await PgExec.ScalarLongAsync(conn,
+            "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", extPub))).ShouldBe(1L);
+        (await PgExec.ScalarLongAsync(conn,
+            "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p", default, ("p", extPub))).ShouldBe(2L);
 
-            // The external slot is pgoutput and NOT active — Wallaby provisions but never consumes it.
-            (await PgExec.ScalarStringAsync(conn,
-                "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("pgoutput");
-            (await PgExec.ScalarBoolAsync(conn,
-                "SELECT active FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBeFalse();
+        // The external slot is pgoutput and NOT active — Wallaby provisions but never consumes it.
+        (await PgExec.ScalarStringAsync(conn,
+            "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("pgoutput");
+        (await PgExec.ScalarBoolAsync(conn,
+            "SELECT active FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBeFalse();
 
-            // The registry distinguishes external slots from the primary one.
-            (await PgExec.ScalarStringAsync(conn,
-                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
-            (await PgExec.ScalarStringAsync(conn,
-                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", names.Slot))).ShouldBe("primary");
-        }
-        finally
-        {
-            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
-        }
+        // The registry distinguishes external slots from the primary one.
+        (await PgExec.ScalarStringAsync(conn,
+            "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
+        (await PgExec.ScalarStringAsync(conn,
+            "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", names.Slot))).ShouldBe("primary");
     }
 
     [Test]
     public async Task Provision_only_creates_external_slot_without_a_primary()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         // Primary names are supplied but must be IGNORED by the provision-only path (proves no primary slot).
         var primarySlot = names.Named("cdc_primary");
         var primaryPub = names.Named("cdc_primary_pub");
         var extSlot = names.Named("elt_slot");
         var extPub = names.Named("elt_pub");
+        names.TrackExternal(extSlot, extPub);
 
         var configurator = new PostgresSelfConfigurator(
             pg.DataSource,
@@ -172,49 +167,43 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
             },
             NullLogger.Instance);
 
-        try
-        {
-            var first = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
-            first.Count.ShouldBe(1);
-            first[0].SlotCreated.ShouldBeTrue();
-            first[0].PublicationCreated.ShouldBeTrue();
+        var first = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
+        first.Count.ShouldBe(1);
+        first[0].SlotCreated.ShouldBeTrue();
+        first[0].PublicationCreated.ShouldBeTrue();
 
-            await using var conn = new NpgsqlConnection(pg.ConnectionString);
-            await conn.OpenAsync();
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
 
-            // External publication + slot exist; the slot is pgoutput and unconsumed; registry marks it external.
-            (await PgExec.ScalarLongAsync(conn,
-                "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p", default, ("p", extPub))).ShouldBe(2L);
-            (await PgExec.ScalarStringAsync(conn,
-                "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("pgoutput");
-            (await PgExec.ScalarBoolAsync(conn,
-                "SELECT active FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBeFalse();
-            (await PgExec.ScalarStringAsync(conn,
-                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
+        // External publication + slot exist; the slot is pgoutput and unconsumed; registry marks it external.
+        (await PgExec.ScalarLongAsync(conn,
+            "SELECT count(*) FROM pg_publication_tables WHERE pubname = @p", default, ("p", extPub))).ShouldBe(2L);
+        (await PgExec.ScalarStringAsync(conn,
+            "SELECT plugin FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("pgoutput");
+        (await PgExec.ScalarBoolAsync(conn,
+            "SELECT active FROM pg_replication_slots WHERE slot_name = @s", default, ("s", extSlot))).ShouldBeFalse();
+        (await PgExec.ScalarStringAsync(conn,
+            "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
 
-            // The primary slot/publication were NOT created — provision-only never touches them.
-            (await PgExec.ScalarLongAsync(conn,
-                "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", default, ("s", primarySlot))).ShouldBe(0L);
-            (await PgExec.ScalarLongAsync(conn,
-                "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", primaryPub))).ShouldBe(0L);
+        // The primary slot/publication were NOT created — provision-only never touches them.
+        (await PgExec.ScalarLongAsync(conn,
+            "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", default, ("s", primarySlot))).ShouldBe(0L);
+        (await PgExec.ScalarLongAsync(conn,
+            "SELECT count(*) FROM pg_publication WHERE pubname = @p", default, ("p", primaryPub))).ShouldBe(0L);
 
-            // Idempotent re-run.
-            var second = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
-            second[0].SlotCreated.ShouldBeFalse();
-            second[0].PublicationCreated.ShouldBeFalse();
-        }
-        finally
-        {
-            await DropSlotsAndPublicationsAsync(primarySlot, primaryPub, extSlot, extPub);
-        }
+        // Idempotent re-run.
+        var second = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
+        second[0].SlotCreated.ShouldBeFalse();
+        second[0].PublicationCreated.ShouldBeFalse();
     }
 
     [Test]
     public async Task External_slot_is_idempotent_and_reconciles_tables()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var extSlot = names.Named("elt_slot");
         var extPub = names.Named("elt_pub");
+        names.TrackExternal(extSlot, extPub);
         var model = BuildTestModel();
 
         PostgresSelfConfigurator Make(params (string Schema, string Table)[] tables) => new(
@@ -227,146 +216,104 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
             },
             NullLogger.Instance);
 
-        try
+        var first = await Make(("public", "products"), ("public", "customers"))
+            .EnsureConfiguredAsync(model, CancellationToken.None);
+        first.ExternalSlots[0].SlotCreated.ShouldBeTrue();
+        first.ExternalSlots[0].PublicationCreated.ShouldBeTrue();
+
+        // Re-run with a changed table set: 'customers' dropped, 'categories' added; slot/pub reused.
+        var second = await Make(("public", "products"), ("public", "categories"))
+            .EnsureConfiguredAsync(model, CancellationToken.None);
+        second.ExternalSlots[0].SlotCreated.ShouldBeFalse();
+        second.ExternalSlots[0].PublicationCreated.ShouldBeFalse();
+
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        var tables = new List<string>();
+        await using (var cmd = new NpgsqlCommand(
+            "SELECT tablename FROM pg_publication_tables WHERE pubname = @p", conn))
         {
-            var first = await Make(("public", "products"), ("public", "customers"))
-                .EnsureConfiguredAsync(model, CancellationToken.None);
-            first.ExternalSlots[0].SlotCreated.ShouldBeTrue();
-            first.ExternalSlots[0].PublicationCreated.ShouldBeTrue();
-
-            // Re-run with a changed table set: 'customers' dropped, 'categories' added; slot/pub reused.
-            var second = await Make(("public", "products"), ("public", "categories"))
-                .EnsureConfiguredAsync(model, CancellationToken.None);
-            second.ExternalSlots[0].SlotCreated.ShouldBeFalse();
-            second.ExternalSlots[0].PublicationCreated.ShouldBeFalse();
-
-            await using var conn = new NpgsqlConnection(pg.ConnectionString);
-            await conn.OpenAsync();
-            var tables = new List<string>();
-            await using (var cmd = new NpgsqlCommand(
-                "SELECT tablename FROM pg_publication_tables WHERE pubname = @p", conn))
+            cmd.Parameters.AddWithValue("p", extPub);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                cmd.Parameters.AddWithValue("p", extPub);
-                await using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    tables.Add(reader.GetString(0));
-                }
+                tables.Add(reader.GetString(0));
             }
+        }
 
-            tables.Contains("products").ShouldBeTrue();
-            tables.Contains("categories").ShouldBeTrue();
-            tables.Contains("customers").ShouldBeFalse(); // reconciled away
-        }
-        finally
-        {
-            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
-        }
+        tables.Contains("products").ShouldBeTrue();
+        tables.Contains("categories").ShouldBeTrue();
+        tables.Contains("customers").ShouldBeFalse(); // reconciled away
     }
 
     [Test]
     public async Task Adopts_a_preexisting_pgoutput_slot_and_records_it()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var extSlot = names.Named("elt_slot");
         var extPub = names.Named("elt_pub");
+        names.TrackExternal(extSlot, extPub);
         var model = BuildTestModel();
 
-        try
+        // A pgoutput logical slot already exists on the server, created outside Wallaby.
+        await using (var seed = new NpgsqlConnection(pg.ConnectionString))
         {
-            // A pgoutput logical slot already exists on the server, created outside Wallaby.
-            await using (var seed = new NpgsqlConnection(pg.ConnectionString))
+            await seed.OpenAsync();
+            await PgExec.ExecuteAsync(
+                seed, "SELECT pg_create_logical_replication_slot(@s, 'pgoutput')", default, ("s", extSlot));
+        }
+
+        var configurator = new PostgresSelfConfigurator(
+            pg.DataSource,
+            new SelfConfigOptions
             {
-                await seed.OpenAsync();
-                await PgExec.ExecuteAsync(
-                    seed, "SELECT pg_create_logical_replication_slot(@s, 'pgoutput')", default, ("s", extSlot));
-            }
+                SlotName = names.Slot,
+                PublicationName = names.Publication,
+                ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products")])],
+            },
+            NullLogger.Instance);
 
-            var configurator = new PostgresSelfConfigurator(
-                pg.DataSource,
-                new SelfConfigOptions
-                {
-                    SlotName = names.Slot,
-                    PublicationName = names.Publication,
-                    ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products")])],
-                },
-                NullLogger.Instance);
+        var result = await configurator.EnsureConfiguredAsync(model, CancellationToken.None);
 
-            var result = await configurator.EnsureConfiguredAsync(model, CancellationToken.None);
+        // Adopted, not recreated...
+        result.ExternalSlots[0].SlotCreated.ShouldBeFalse();
 
-            // Adopted, not recreated...
-            result.ExternalSlots[0].SlotCreated.ShouldBeFalse();
-
-            // ...and now recorded in the registry as external.
-            await using var conn = new NpgsqlConnection(pg.ConnectionString);
-            await conn.OpenAsync();
-            (await PgExec.ScalarStringAsync(conn,
-                "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
-        }
-        finally
-        {
-            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
-        }
+        // ...and now recorded in the registry as external.
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        (await PgExec.ScalarStringAsync(conn,
+            "SELECT kind FROM wallaby.slot_registry WHERE slot_name = @s", default, ("s", extSlot))).ShouldBe("external");
     }
 
     [Test]
     public async Task Rejects_a_preexisting_slot_with_the_wrong_type()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var extSlot = names.Named("elt_slot");
         var extPub = names.Named("elt_pub");
+        names.TrackExternal(extSlot, extPub);
         var model = BuildTestModel();
 
-        try
+        // A physical slot squats the declared name — not a pgoutput logical slot.
+        await using (var seed = new NpgsqlConnection(pg.ConnectionString))
         {
-            // A physical slot squats the declared name — not a pgoutput logical slot.
-            await using (var seed = new NpgsqlConnection(pg.ConnectionString))
-            {
-                await seed.OpenAsync();
-                await PgExec.ExecuteAsync(
-                    seed, "SELECT pg_create_physical_replication_slot(@s)", default, ("s", extSlot));
-            }
-
-            var configurator = new PostgresSelfConfigurator(
-                pg.DataSource,
-                new SelfConfigOptions
-                {
-                    SlotName = names.Slot,
-                    PublicationName = names.Publication,
-                    ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products")])],
-                },
-                NullLogger.Instance);
-
-            await Should.ThrowAsync<WallabyConfigurationException>(
-                async () => await configurator.EnsureConfiguredAsync(model, CancellationToken.None));
-        }
-        finally
-        {
-            await DropSlotsAndPublicationsAsync(names.Slot, names.Publication, extSlot, extPub);
-        }
-    }
-
-    // External slots are never auto-dropped by Wallaby, so tests must clean up their own to avoid
-    // exhausting max_replication_slots in the shared session database.
-    private async Task DropSlotsAndPublicationsAsync(string slot, string pub, string extSlot, string extPub)
-    {
-        await using var conn = new NpgsqlConnection(pg.ConnectionString);
-        await conn.OpenAsync();
-
-        foreach (var slotName in new[] { slot, extSlot })
-        {
+            await seed.OpenAsync();
             await PgExec.ExecuteAsync(
-                conn,
-                "SELECT pg_drop_replication_slot(@s) WHERE EXISTS " +
-                "(SELECT 1 FROM pg_replication_slots WHERE slot_name = @s AND NOT active)",
-                default,
-                ("s", slotName));
+                seed, "SELECT pg_create_physical_replication_slot(@s)", default, ("s", extSlot));
         }
 
-        foreach (var publication in new[] { pub, extPub })
-        {
-            await PgExec.ExecuteAsync(conn, $"DROP PUBLICATION IF EXISTS {PgExec.QuoteIdentifier(publication)}", default);
-        }
+        var configurator = new PostgresSelfConfigurator(
+            pg.DataSource,
+            new SelfConfigOptions
+            {
+                SlotName = names.Slot,
+                PublicationName = names.Publication,
+                ExternalSlots = [new ExternalSlotSpec(extSlot, extPub, [("public", "products")])],
+            },
+            NullLogger.Instance);
+
+        await Should.ThrowAsync<WallabyConfigurationException>(
+            async () => await configurator.EnsureConfiguredAsync(model, CancellationToken.None));
     }
 
     [Test]
