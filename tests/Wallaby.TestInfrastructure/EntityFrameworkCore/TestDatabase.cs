@@ -17,6 +17,14 @@ public sealed class TestDatabase(string connectionString)
         return category.Id;
     }
 
+    public async Task SetProductDescriptionAsync(int id, string description)
+    {
+        await using var ctx = NewContext();
+        var product = await ctx.Products.FindAsync(id);
+        product!.Description = description;
+        await ctx.SaveChangesAsync();
+    }
+
     public async Task SetCategoryNameAsync(int id, string name)
     {
         await using var ctx = NewContext();

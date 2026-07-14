@@ -207,12 +207,13 @@ cdc.UseEntityFrameworkCore<AppDbContext>(ef => ef
     .ExcludeProperty<Product>(p => p.Description))
 ```
 
-An excluded property is dropped from capture entirely: its column is skipped during materialization and
-never read during backfill, so an unchanged TOASTed value can no longer fail the change. The
-materialized entity keeps the property's default value and `ChangeEvent.Record` omits it - a transform
-that *does* read the property would see the default, so only exclude what your transforms never touch.
-Primary-key properties and columns a `DependsOn(...)` lookup resolves through cannot be excluded; both
-fail at startup.
+An excluded property is dropped from capture entirely: its column is left out of the
+[publication column list](/configuration#publication-column-lists) (the value never leaves the server),
+skipped during materialization, and never read during backfill, so an unchanged TOASTed value can no
+longer fail the change. The materialized entity keeps the property's default value and
+`ChangeEvent.Record` omits it - a transform that *does* read the property would see the default, so
+only exclude what your transforms never touch. Primary-key properties and columns a `DependsOn(...)`
+lookup resolves through cannot be excluded; both fail at startup.
 
 ## Next steps
 

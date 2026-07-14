@@ -55,23 +55,32 @@ public class EndToEndTests(TestModelPostgresFixture pg)
         var names = WallabyNames.Unique();
         await using var receiver = new WebhookReceiver(SigningSecret);
 
-        await using var node = await WallabyTestNode.StartAsync(BuildServices(names, receiver.Endpoint));
+        try
+        {
+            await using var node = await WallabyTestNode.StartAsync(BuildServices(names, receiver.Endpoint));
 
-        var categoryId = await Db.AddCategoryAsync();
-        var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
+            var categoryId = await Db.AddCategoryAsync();
+            var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
 
-        await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "upsert") is not null);
-        var upsert = receiver.Latest(id.ToString(), "upsert")!.Value;
-        upsert.GetProperty("destination").GetString().ShouldBe("products");
-        upsert.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
-        upsert.GetProperty("idempotencyKey").GetString().ShouldNotBeNullOrEmpty();
-        upsert.GetProperty("metadata").GetProperty("schema").GetString().ShouldBe("public");
-        upsert.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("products");
-        upsert.GetProperty("metadata").GetProperty("action").GetString().ShouldBe("insert");
+            await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "upsert") is not null);
+            var upsert = receiver.Latest(id.ToString(), "upsert")!.Value;
+            upsert.GetProperty("destination").GetString().ShouldBe("products");
+            upsert.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
+            upsert.GetProperty("idempotencyKey").GetString().ShouldNotBeNullOrEmpty();
+            upsert.GetProperty("metadata").GetProperty("schema").GetString().ShouldBe("public");
+            upsert.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("products");
+            upsert.GetProperty("metadata").GetProperty("action").GetString().ShouldBe("insert");
 
-        await Db.DeleteProductAsync(id);
-        await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "delete") is not null);
+            await Db.DeleteProductAsync(id);
+            await Polling.UntilAsync(() => receiver.Latest(id.ToString(), "delete") is not null);
 
-        receiver.SawInvalidSignature.ShouldBeFalse();
+            receiver.SawInvalidSignature.ShouldBeFalse();
+        }
+        finally
+        {
+            // Non-harness (full-DI) tests must drop their slot/publication themselves: a leaked
+            // publication's column lists later break other tests' DML on the shared database.
+            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
+        }
     }
 }

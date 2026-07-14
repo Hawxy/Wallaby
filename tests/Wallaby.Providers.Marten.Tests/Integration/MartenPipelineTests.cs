@@ -1,4 +1,5 @@
 using Marten;
+using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.TestInfrastructure;
 using Wallaby.TestInfrastructure.Marten;
@@ -131,5 +132,56 @@ public class MartenPipelineTests(MartenStoreFixture pg)
         var backfilled = capture.For("mt_doc_softwidget").Where(r => r.Metadata.IsBackfill).ToList();
         backfilled.ShouldContain(r => r.DocumentId == aliveId.ToString() && !r.IsDeletion);
         backfilled.ShouldAllBe(r => NameOf(r) != "buried");
+    }
+
+    [Test]
+    public async Task Publication_lists_only_modeled_columns_and_soft_delete_docs_publish_whole_rows()
+    {
+        await using var harness = WallabyTestHarness.ForMartenStore(pg.Store, pg.ConnectionString);
+        harness.AddCaptureSink();
+        harness.Project<Widget>("capture", "widgets", w => new WallabyDocument());
+        harness.Project<SoftWidget>("capture", "softwidgets", w => new WallabyDocument());
+        await harness.SelfConfigureAsync();
+
+        var columns = new Dictionary<string, HashSet<string>?>();
+        await using (var conn = new NpgsqlConnection(pg.ConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                """
+                SELECT c.relname,
+                       CASE WHEN pr.prattrs IS NULL THEN NULL
+                            ELSE (SELECT array_agg(a.attname::text)
+                                  FROM pg_attribute a
+                                  WHERE a.attrelid = pr.prrelid AND a.attnum = ANY (pr.prattrs))
+                       END
+                FROM pg_publication p
+                JOIN pg_publication_rel pr ON pr.prpubid = p.oid
+                JOIN pg_class c ON c.oid = pr.prrelid
+                WHERE p.pubname = @p
+                """,
+                conn);
+            cmd.Parameters.AddWithValue("p", harness.Names.Publication);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                columns[reader.GetString(0)] = reader.IsDBNull(1)
+                    ? null
+                    : new HashSet<string>(reader.GetFieldValue<string[]>(1), StringComparer.Ordinal);
+            }
+        }
+
+        // A plain document publishes only the modeled columns — Marten's other metadata never hits the wire.
+        var widget = columns["mt_doc_widget"];
+        widget.ShouldNotBeNull();
+        widget!.ShouldContain("id");
+        widget.ShouldContain("data");
+        widget.ShouldNotContain("mt_version");
+        widget.ShouldNotContain("mt_last_modified");
+        widget.ShouldNotContain("mt_dotnet_type");
+
+        // Soft-delete documents require REPLICA IDENTITY FULL (undelete TOAST fallback), so they are
+        // never column-listed.
+        columns["mt_doc_softwidget"].ShouldBeNull();
     }
 }

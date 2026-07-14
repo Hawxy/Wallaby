@@ -25,6 +25,13 @@ internal sealed class SelfConfigOptions
     public bool RequireFullReplicaIdentity { get; init; }
 
     /// <summary>
+    /// When true (and <see cref="ManagePublicationTables"/> is true), the primary publication publishes
+    /// only each table's captured columns via a PG15 column list. Tables requiring
+    /// <c>REPLICA IDENTITY FULL</c> always publish whole rows; external publications are unaffected.
+    /// </summary>
+    public bool PublicationColumnLists { get; init; } = true;
+
+    /// <summary>
     /// Additional pgoutput publication+slot pairs to provision for third-party consumers (e.g. an ELT
     /// tool). Wallaby creates them, reconciles their table sets, and records them in
     /// <c>wallaby.slot_registry</c> with <c>kind='external'</c>, but never opens them itself.

@@ -20,11 +20,15 @@ public static class WallabyTestHarnessEfCoreExtensions
     extension(WallabyTestHarness)
     {
         /// <summary>Create a harness wired to the shared <see cref="AppDbContext"/> test model.</summary>
-        public static WallabyTestHarness ForTestModel(string connectionString, WallabyNames? names = null)
+        public static WallabyTestHarness ForTestModel(
+            string connectionString, WallabyNames? names = null, Action<EfCoreProviderOptions>? configure = null)
         {
+            var providerOptions = new EfCoreProviderOptions();
+            configure?.Invoke(providerOptions);
             var contextFactory = () => new AppDbContext(TestModelFactory.CreateOptions(connectionString));
             using var context = contextFactory();
-            return new WallabyTestHarness(connectionString, new EfCoreModelProvider(context.Model), names)
+            return new WallabyTestHarness(
+                    connectionString, new EfCoreModelProvider(context.Model, providerOptions.Exclusions), names)
                 .UseEnrichmentSessions(new DbContextEnrichmentSessionProvider(contextFactory));
         }
     }

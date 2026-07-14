@@ -12,6 +12,16 @@ internal sealed class ServerValidator(ILogger logger)
 {
     public async Task ValidateAsync(NpgsqlConnection connection, IReadOnlyCollection<string> slotNames, CancellationToken ct)
     {
+        var versionNum = await PgExec.ScalarLongAsync(
+            connection, "SELECT current_setting('server_version_num')::int", ct);
+        if (versionNum < 150000)
+        {
+            var display = await PgExec.ScalarStringAsync(connection, "SHOW server_version", ct);
+            throw new WallabyConfigurationException(
+                $"Postgres server version {display} is not supported. Wallaby requires PostgreSQL 15 or later " +
+                "(publication column lists). Upgrade the server, or pin an older Wallaby release for PostgreSQL 14.");
+        }
+
         var walLevel = await PgExec.ScalarStringAsync(connection, "SHOW wal_level", ct);
         if (!string.Equals(walLevel, "logical", StringComparison.OrdinalIgnoreCase))
         {

@@ -25,25 +25,31 @@ public class TenantDestinationTests(TestModelPostgresFixture pg, MeilisearchFixt
         await harness.SelfConfigureAsync();
         // Scoped destination needs the tenant key on deletes too.
         await harness.Db.SetReplicaIdentityFullAsync("products");
+        try
+        {
+            var categoryId = await harness.Db.AddCategoryAsync();
+            var t1 = await harness.Db.AddProductAsync(categoryId, "t1a", tenantId: 1);
+            var t2 = await harness.Db.AddProductAsync(categoryId, "t2a", tenantId: 2);
 
-        var categoryId = await harness.Db.AddCategoryAsync();
-        var t1 = await harness.Db.AddProductAsync(categoryId, "t1a", tenantId: 1);
-        var t2 = await harness.Db.AddProductAsync(categoryId, "t2a", tenantId: 2);
+            var probe = new MeiliProbe(meili);
+            await harness.RunUntilAsync(async () =>
+                await probe.NameAsync($"{prefix}_1", t1) == "t1a" && await probe.NameAsync($"{prefix}_2", t2) == "t2a");
 
-        var probe = new MeiliProbe(meili);
-        await harness.RunUntilAsync(async () =>
-            await probe.NameAsync($"{prefix}_1", t1) == "t1a" && await probe.NameAsync($"{prefix}_2", t2) == "t2a");
+            // Each document landed only in its own tenant index.
+            (await probe.NameAsync($"{prefix}_1", t1)).ShouldBe("t1a");
+            (await probe.NameAsync($"{prefix}_2", t2)).ShouldBe("t2a");
+            (await probe.NameAsync($"{prefix}_2", t1)).ShouldBeNull(); // not cross-indexed
 
-        // Each document landed only in its own tenant index.
-        (await probe.NameAsync($"{prefix}_1", t1)).ShouldBe("t1a");
-        (await probe.NameAsync($"{prefix}_2", t2)).ShouldBe("t2a");
-        (await probe.NameAsync($"{prefix}_2", t1)).ShouldBeNull(); // not cross-indexed
+            // Delete tenant 1's product -> removed from the tenant-1 index, tenant-2 untouched.
+            await harness.Db.DeleteProductAsync(t1);
+            await harness.RunUntilAsync(async () => await probe.NameAsync($"{prefix}_1", t1) is null);
 
-        // Delete tenant 1's product -> removed from the tenant-1 index, tenant-2 untouched.
-        await harness.Db.DeleteProductAsync(t1);
-        await harness.RunUntilAsync(async () => await probe.NameAsync($"{prefix}_1", t1) is null);
-
-        (await probe.NameAsync($"{prefix}_1", t1)).ShouldBeNull();
-        (await probe.NameAsync($"{prefix}_2", t2)).ShouldBe("t2a");
+            (await probe.NameAsync($"{prefix}_1", t1)).ShouldBeNull();
+            (await probe.NameAsync($"{prefix}_2", t2)).ShouldBe("t2a");
+        }
+        finally
+        {
+            await harness.Db.SetReplicaIdentityDefaultAsync("products");
+        }
     }
 }
