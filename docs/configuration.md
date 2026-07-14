@@ -30,12 +30,35 @@ You have a number of choices as to where streamed transactions spill:
 | `ChunkSize` | `500` | Backfill keyset page size (1–100 000; chunk rows are held in memory). |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/providers/entity-framework-core/#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
 | `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |
+| `PublicationColumnLists` | `true` | Publish only each table's captured columns via [publication column lists](#publication-column-lists). Requires `ManagePublicationTables`. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
 | `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
+
+### Publication column lists
+
+With `PublicationColumnLists` (the default), Wallaby publishes only the columns the capture model
+actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so excluded properties,
+unmapped physical columns, and (for Marten) unmodeled `mt_*` metadata are filtered inside Postgres:
+they are never decoded by the WAL sender or sent over the wire. Column lists are reconciled on every
+startup; drift is applied atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+
+Tables that require `REPLICA IDENTITY FULL` (scoped destinations, custom document ids, Marten
+soft-delete documents) and tables whose live replica identity is `FULL` always publish whole rows: a
+column list must cover the table's replica identity, and `FULL` covers every column.
+[External slots](/external-slots) are unaffected - their publications always carry whole tables for
+the third-party consumer.
+
+::: warning
+Flipping a column-listed table to `REPLICA IDENTITY FULL` while Wallaby is running makes that table's
+`UPDATE`/`DELETE` statements fail on the publisher until the next Wallaby startup reconciles it back to
+whole-row publishing. Restart Wallaby (or drop the identity change) after such a flip. Tables Wallaby
+itself flags for `REPLICA IDENTITY FULL` are never column-listed, so following Wallaby's own startup
+guidance is always safe.
+:::
 
 ### Advanced Options
 

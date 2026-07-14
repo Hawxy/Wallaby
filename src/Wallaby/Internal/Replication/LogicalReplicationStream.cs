@@ -30,7 +30,7 @@ internal sealed class LogicalReplicationStream(
     private readonly SemaphoreSlim _statusLock = new(1, 1);
     // Protocol v2 with streaming: the server streams a transaction larger than its logical_decoding_work_mem
     // before commit (StreamStart/Stop/Commit/Abort), so the assembler can buffer it incrementally rather than
-    // the server holding the whole transaction. Requires PG14+ (already our floor via the messages option).
+    // the server holding the whole transaction. Well within the PG15 floor (enforced by ServerValidator).
     // Binary mode so Npgsql decodes values to proper CLR types (e.g. DateTime, decimal) rather than text.
     // messages: true asks pgoutput to forward generic WAL messages from pg_logical_emit_message — the
     // transport for backfill low/high watermarks.

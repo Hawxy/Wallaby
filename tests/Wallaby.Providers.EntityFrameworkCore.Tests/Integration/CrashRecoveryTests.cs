@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Internal;
@@ -45,7 +44,7 @@ public class CrashRecoveryTests(TestModelPostgresFixture pg)
     [Test]
     public async Task A_sink_thrown_cancellation_is_a_recorded_fault_and_the_change_is_redelivered()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var sink = new ToggleFaultSink();
 
         var services = new ServiceCollection();
@@ -70,35 +69,28 @@ public class CrashRecoveryTests(TestModelPostgresFixture pg)
         services.ReplaceWallabySink("capture", sink);
 
         var db = new TestDatabase(pg.ConnectionString);
-        try
-        {
-            await using var node = await WallabyTestNode.StartAsync(services);
-            await WallabyReadiness.WaitForStreamingAsync(node.Services);
-            var status = node.Services.GetRequiredService<IWallabyStatus>();
+        await using var node = await WallabyTestNode.StartAsync(services);
+        await WallabyReadiness.WaitForStreamingAsync(node.Services);
+        var status = node.Services.GetRequiredService<IWallabyStatus>();
 
-            sink.Arm();
-            var categoryId = await db.AddCategoryAsync();
-            var productId = await db.AddProductAsync(categoryId, $"crash_{names.Suffix}");
+        sink.Arm();
+        var categoryId = await db.AddCategoryAsync();
+        var productId = await db.AddProductAsync(categoryId, $"crash_{names.Suffix}");
 
-            // The sink's TaskCanceledException must surface as a leader-session failure, not a clean
-            // step-down — and the count must accumulate across retried sessions, so a crash-looping
-            // leader is visible to health checks.
-            await WaitUntilAsync(
-                () => status.Current.ConsecutiveLeaderFailures >= 2,
-                $"ConsecutiveLeaderFailures never reached 2 (last error: {status.Current.LastError ?? "none"})");
+        // The sink's TaskCanceledException must surface as a leader-session failure, not a clean
+        // step-down — and the count must accumulate across retried sessions, so a crash-looping
+        // leader is visible to health checks.
+        await WaitUntilAsync(
+            () => status.Current.ConsecutiveLeaderFailures >= 2,
+            $"ConsecutiveLeaderFailures never reached 2 (last error: {status.Current.LastError ?? "none"})");
 
-            sink.Release();
-            await sink.WaitForDocumentsAsync([productId.ToString()]);
+        sink.Release();
+        await sink.WaitForDocumentsAsync([productId.ToString()]);
 
-            // A delivered + acknowledged transaction proves the leader is healthy again.
-            await WaitUntilAsync(
-                () => status.Current.ConsecutiveLeaderFailures == 0,
-                "ConsecutiveLeaderFailures did not reset after recovery");
-        }
-        finally
-        {
-            await PostgresReplicationCleanup.DropAsync(pg.ConnectionString, names);
-        }
+        // A delivered + acknowledged transaction proves the leader is healthy again.
+        await WaitUntilAsync(
+            () => status.Current.ConsecutiveLeaderFailures == 0,
+            "ConsecutiveLeaderFailures did not reset after recovery");
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, string timeoutMessage)

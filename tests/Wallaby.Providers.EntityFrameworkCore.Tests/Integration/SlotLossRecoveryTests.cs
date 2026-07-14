@@ -26,7 +26,8 @@ public class SlotLossRecoveryTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Changes_missed_while_the_slot_was_gone_are_rebackfilled()
     {
-        var names = WallabyNames.Unique();
+        // Scope disposal tolerates the slot already being gone from the mid-test drop below.
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
 
         // Node 1: stream one product so a checkpoint exists.
         var firstCapture = new CaptureSink();

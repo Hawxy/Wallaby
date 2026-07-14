@@ -27,6 +27,14 @@ public sealed class WallabyOptions
     /// <summary>Reconcile an existing publication's table set to match the captured model.</summary>
     public bool ManagePublicationTables { get; set; } = true;
 
+    /// <summary>
+    /// Publish only each table's captured columns (PostgreSQL publication column lists), so excluded
+    /// and unmapped columns never leave the server. Applies to the primary publication and only when
+    /// <see cref="ManagePublicationTables"/> is true; external publications always publish whole
+    /// tables, as do tables requiring <c>REPLICA IDENTITY FULL</c>.
+    /// </summary>
+    public bool PublicationColumnLists { get; set; } = true;
+
     /// <summary>Fail (instead of warn) when a table needs <c>REPLICA IDENTITY FULL</c> but lacks it.</summary>
     public bool RequireFullReplicaIdentity { get; set; }
 

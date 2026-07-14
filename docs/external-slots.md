@@ -39,6 +39,10 @@ builder.Services.AddWallaby(cdc =>
 Point your external tool at the **slot name** (`elt`) and **publication name** (`elt_pub`) in its
 pgoutput configuration.
 
+External publications always publish **whole tables**: the
+[`PublicationColumnLists`](/configuration#publication-column-lists) option only narrows Wallaby's own
+primary publication, never one consumed by a third-party tool.
+
 ### API
 
 | Member | Purpose |

@@ -118,6 +118,7 @@ internal sealed class WallabyComponents : IAsyncDisposable
                     PublicationName = options.PublicationName,
                     ManagePublicationTables = options.ManagePublicationTables,
                     RequireFullReplicaIdentity = options.RequireFullReplicaIdentity,
+                    PublicationColumnLists = options.PublicationColumnLists,
                     ExternalSlots = ExternalSlotResolver.Resolve(config.ExternalSlots, providers.ModelProviders),
                 },
                 logger,

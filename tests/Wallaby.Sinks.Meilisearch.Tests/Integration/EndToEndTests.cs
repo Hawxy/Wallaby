@@ -47,7 +47,7 @@ public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili
     [Test]
     public async Task AddWallaby_indexes_changes_end_to_end()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var index = names.Named("products");
         var probe = new MeiliProbe(meili);
 
@@ -63,7 +63,7 @@ public class EndToEndTests(TestModelPostgresFixture pg, MeilisearchFixture meili
     [Test]
     public async Task Cluster_keeps_serving_when_a_node_stops()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var index = names.Named("products");
         var probe = new MeiliProbe(meili);
 

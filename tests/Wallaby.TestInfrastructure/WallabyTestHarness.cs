@@ -435,6 +435,12 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         {
             DeclaredEntities = [.. _capturedEntities.Union(_mappings.Select(m => m.EntityClrType))],
             DeclaredDependencies = declared,
+            // Mirrors WallabyConfiguration.ToCaptureSpec: scoped destinations and custom document ids
+            // must be computable on deletes, which needs full old-row values.
+            RequiresFullReplicaIdentity = _mappings
+                .Where(m => m.DestinationSelector is not null || m.DocumentIdSelector is not null)
+                .Select(m => m.EntityClrType)
+                .ToHashSet(),
         });
         _model = plan.Model;
         _materializer = plan.Materializer;

@@ -52,9 +52,8 @@ public class EndToEndTests(TestModelPostgresFixture pg)
     [Test]
     public async Task AddWallaby_posts_signed_upserts_and_deletes_end_to_end()
     {
-        var names = WallabyNames.Unique();
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
         await using var receiver = new WebhookReceiver(SigningSecret);
-
         await using var node = await WallabyTestNode.StartAsync(BuildServices(names, receiver.Endpoint));
 
         var categoryId = await Db.AddCategoryAsync();
