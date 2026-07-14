@@ -5,6 +5,7 @@
     <PackageId>Wallaby.Testing</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Description>Test helpers for Wallaby consumers: capture sink, sink replacement, and streaming-readiness gates for end-to-end Wallaby tests against a real Postgres.</Description>
+    <PackageTags>testing;integration-testing</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

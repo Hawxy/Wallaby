@@ -6,6 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>EF Core storage provider for Wallaby: drives capture from your EF Core model — table/key discovery, entity materialization with value converters, DbContext-based transforms/enrichment, and DependsOn navigation fan-out.</Description>
+    <PackageTags>efcore;entity-framework-core</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

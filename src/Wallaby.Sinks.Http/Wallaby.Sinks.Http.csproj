@@ -6,6 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
     <Description>HTTP/webhook destination/sink for Wallaby: POST batches of Postgres changes to any endpoint.</Description>
+    <PackageTags>webhook;http;sink</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

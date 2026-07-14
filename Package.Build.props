@@ -11,6 +11,8 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageIcon>icon.png</PackageIcon>
+        <!-- Common tags first; each csproj sets its package-specific tags before this import. -->
+        <PackageTags>postgres;postgresql;cdc;change-data-capture;logical-replication;$(PackageTags)</PackageTags>
     </PropertyGroup>
     <ItemGroup>
         <None Include="..\..\README.md" Pack="true" PackagePath="\"/>

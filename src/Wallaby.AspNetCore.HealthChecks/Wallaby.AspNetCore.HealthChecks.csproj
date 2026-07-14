@@ -5,6 +5,7 @@
     <PackageId>Wallaby.AspNetCore.HealthChecks</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Description>ASP.NET Core health checks for Wallaby: role-aware liveness and replication readiness probes for Postgres CDC.</Description>
+    <PackageTags>aspnetcore;healthchecks</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

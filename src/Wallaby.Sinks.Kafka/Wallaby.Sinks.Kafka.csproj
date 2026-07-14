@@ -5,6 +5,7 @@
     <PackageId>Wallaby.Sinks.Kafka</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Description>Kafka destination/sink for Wallaby: produce Postgres changes to Kafka topics, keyed by document id with tombstone deletes.</Description>
+    <PackageTags>kafka;sink</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

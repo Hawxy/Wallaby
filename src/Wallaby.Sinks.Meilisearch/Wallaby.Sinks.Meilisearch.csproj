@@ -5,6 +5,7 @@
     <PackageId>Wallaby.Sinks.Meilisearch</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Description>Meilisearch destination/sink for Wallaby: keep a Meilisearch index in sync with Postgres changes.</Description>
+    <PackageTags>meilisearch;search;sink</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
