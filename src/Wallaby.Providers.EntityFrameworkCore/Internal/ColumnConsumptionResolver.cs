@@ -5,17 +5,20 @@ using Wallaby.Providers;
 namespace Wallaby.Providers.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// Computes each entity's effective consumed-property set from its mappings' column selections
-/// (<c>Consumes</c>/<c>ConsumesAllExcept</c>): the union of the selections, plus primary-key and
-/// <c>DependsOn(...)</c> lookup properties, which are always captured. Entities without selections are
-/// absent from the result (consume-all). Validates every selected name against the model.
+/// Computes each entity's effective consumed-property set, keyed by <see cref="IEntityType"/> name
+/// (shared-type join entities reuse one CLR type, so the type alone cannot key them). Two sources:
+/// mappings' column selections (<c>Consumes</c>/<c>ConsumesAllExcept</c>) union per entity, with
+/// primary-key and <c>DependsOn(...)</c> lookup properties always captured; and dependent-only tables,
+/// whose wire needs are fully determined by their bindings — fan-out reads just the lookup key, so they
+/// narrow to primary-key ∪ lookup properties with no declaration. Entities absent from the result are
+/// captured whole. Validates every selected name against the model.
 /// </summary>
 internal static class ColumnConsumptionResolver
 {
-    public static IReadOnlyDictionary<Type, IReadOnlySet<string>> Resolve(IModel model, CaptureSpec spec)
+    public static IReadOnlyDictionary<string, IReadOnlySet<string>> Resolve(IModel model, CaptureSpec spec)
     {
-        var resolved = new Dictionary<Type, IReadOnlySet<string>>();
-        if (spec.DeclaredColumnSelections.Count == 0)
+        var resolved = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+        if (spec.DeclaredColumnSelections.Count == 0 && spec.DeclaredDependencies.Count == 0)
         {
             return resolved;
         }
@@ -27,13 +30,29 @@ internal static class ColumnConsumptionResolver
                 ?? throw new WallabyConfigurationException(
                     $"A column selection was declared for '{clrType.Name}', which is not part of the DbContext model.");
 
-            resolved[clrType] = ResolveEntity(
+            resolved[entityType.Name] = ResolveEntity(
                 clrType.Name,
                 selections,
                 mappedProperties: entityType.GetProperties().Select(p => p.Name).ToHashSet(StringComparer.Ordinal),
                 primaryKeyProperties: entityType.FindPrimaryKey()?.Properties.Select(p => p.Name)
                     .ToHashSet(StringComparer.Ordinal) ?? [],
-                lookupProperties: lookupProperties.GetValueOrDefault(clrType) ?? []);
+                lookupProperties: lookupProperties.GetValueOrDefault(entityType) ?? []);
+        }
+
+        // A declared entity's capture is canonical, but a dependent-only table narrows automatically.
+        var declared = spec.DeclaredEntities.ToHashSet();
+        foreach (var (entityType, lookups) in lookupProperties)
+        {
+            if (declared.Contains(entityType.ClrType))
+            {
+                continue;
+            }
+            var narrowed = new HashSet<string>(lookups, StringComparer.Ordinal);
+            if (entityType.FindPrimaryKey() is { } primaryKey)
+            {
+                narrowed.UnionWith(primaryKey.Properties.Select(p => p.Name));
+            }
+            resolved[entityType.Name] = narrowed;
         }
         return resolved;
     }
@@ -87,9 +106,9 @@ internal static class ColumnConsumptionResolver
 
     // DependsOn fan-out reads its lookup keys from captured columns on both sides of the navigation, so
     // those properties are pinned into every effective set the way primary keys are.
-    private static Dictionary<Type, HashSet<string>> ResolveLookupProperties(IModel model, CaptureSpec spec)
+    private static Dictionary<IEntityType, HashSet<string>> ResolveLookupProperties(IModel model, CaptureSpec spec)
     {
-        var byType = new Dictionary<Type, HashSet<string>>();
+        var byType = new Dictionary<IEntityType, HashSet<string>>();
         foreach (var (clrType, expressions) in spec.DeclaredDependencies)
         {
             // A missing entity type fails later, in the model builder, with its own error.
@@ -111,7 +130,7 @@ internal static class ColumnConsumptionResolver
     }
 
     private static void AddByColumnName(
-        Dictionary<Type, HashSet<string>> byType, IEntityType entityType, string columnName)
+        Dictionary<IEntityType, HashSet<string>> byType, IEntityType entityType, string columnName)
     {
         var storeObject = StoreObjectIdentifier.Table(entityType.GetTableName()!, entityType.GetSchema());
         foreach (var property in entityType.GetProperties())
@@ -120,9 +139,9 @@ internal static class ColumnConsumptionResolver
             {
                 continue;
             }
-            if (!byType.TryGetValue(entityType.ClrType, out var names))
+            if (!byType.TryGetValue(entityType, out var names))
             {
-                byType[entityType.ClrType] = names = new HashSet<string>(StringComparer.Ordinal);
+                byType[entityType] = names = new HashSet<string>(StringComparer.Ordinal);
             }
             names.Add(property.Name);
             return;

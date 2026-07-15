@@ -36,10 +36,15 @@ internal sealed class WebhookReceiver : IAsyncDisposable
     /// <summary>True once any request arrived with a missing or invalid signature.</summary>
     public bool SawInvalidSignature { get; private set; }
 
-    /// <summary>The latest arrived state of a document id: its record element, or null when never seen.</summary>
-    public JsonElement? Latest(string id, string operation)
+    /// <summary>
+    /// The latest arrived state of a document id: its record element, or null when never seen.
+    /// An <paramref name="action"/> narrows the match to records with that metadata action.
+    /// </summary>
+    public JsonElement? Latest(string id, string operation, string? action = null)
         => Records.LastOrDefault(r =>
-            r.GetProperty("id").GetString() == id && r.GetProperty("operation").GetString() == operation) is
+            r.GetProperty("id").GetString() == id
+            && r.GetProperty("operation").GetString() == operation
+            && (action is null || r.GetProperty("metadata").GetProperty("action").GetString() == action)) is
             { ValueKind: not JsonValueKind.Undefined } match
             ? match
             : null;

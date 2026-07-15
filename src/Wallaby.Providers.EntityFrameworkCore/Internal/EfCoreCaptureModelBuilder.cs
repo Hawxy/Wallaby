@@ -16,7 +16,7 @@ internal static class EfCoreCaptureModelBuilder
 {
     public static WallabyModel Build(
         IModel model, CaptureSpec spec,
-        IReadOnlyDictionary<Type, IReadOnlySet<string>>? consumedProperties = null)
+        IReadOnlyDictionary<string, IReadOnlySet<string>>? consumedProperties = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(spec);
@@ -29,7 +29,7 @@ internal static class EfCoreCaptureModelBuilder
     }
 
     private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromDeclared(
-        IModel model, CaptureSpec spec, IReadOnlyDictionary<Type, IReadOnlySet<string>> consumedProperties)
+        IModel model, CaptureSpec spec, IReadOnlyDictionary<string, IReadOnlySet<string>> consumedProperties)
     {
         // An empty spec builds an empty model: with several providers registered, one of them may simply
         // have no mapped entities. "No mappings at all" is rejected once, at WallabyBuilder.Build().
@@ -70,7 +70,7 @@ internal static class EfCoreCaptureModelBuilder
 
             primaries.Add((entityType, BuildTable(
                 entityType, spec.RequiresFullReplicaIdentity.Contains(clrType),
-                consumedProperties.GetValueOrDefault(clrType))));
+                consumedProperties.GetValueOrDefault(entityType.Name))));
         }
 
         return primaries;
@@ -78,7 +78,7 @@ internal static class EfCoreCaptureModelBuilder
 
     private static (IReadOnlyList<CapturedTable> All, IReadOnlyList<DependentBinding> Bindings) AttachDependents(
         IModel model, List<(IEntityType EntityType, CapturedTable Table)> primaries, CaptureSpec spec,
-        IReadOnlyDictionary<Type, IReadOnlySet<string>> consumedProperties)
+        IReadOnlyDictionary<string, IReadOnlySet<string>> consumedProperties)
     {
         // Union of primary + dependent tables, de-duplicated by (schema, table). A table that is both
         // primary-mapped and the target of a DependsOn appears once — the primary capture is canonical.
@@ -138,7 +138,7 @@ internal static class EfCoreCaptureModelBuilder
 
     private static CapturedTable GetOrAddDependentTable(
         Dictionary<(string Schema, string Table), CapturedTable> byQualifiedName, IEntityType dependentEntityType,
-        IReadOnlyDictionary<Type, IReadOnlySet<string>> consumedProperties)
+        IReadOnlyDictionary<string, IReadOnlySet<string>> consumedProperties)
     {
         var schema = dependentEntityType.GetSchema() ?? "public";
         var tableName = dependentEntityType.GetTableName()
@@ -152,7 +152,7 @@ internal static class EfCoreCaptureModelBuilder
 
         var built = BuildTable(
             dependentEntityType, requiresFullReplicaIdentity: false,
-            consumedProperties.GetValueOrDefault(dependentEntityType.ClrType));
+            consumedProperties.GetValueOrDefault(dependentEntityType.Name));
         byQualifiedName[(schema, tableName)] = built;
         return built;
     }

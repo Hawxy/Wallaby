@@ -56,16 +56,70 @@ If option values need services (e.g. `IConfiguration`), use the provider-aware o
 [Reading configuration at startup](/configuration#reading-configuration-at-startup).
 :::
 
-## What gets tracked
+## Mappings
 
-Only entities you **declare** are captured and added to the publication: `Map<T>()` inside a sink's
-`WithMappings(...)` declares a table *and* routes it to that sink. Tables a mapping
-[`DependsOn`](#dependent-tables) are captured automatically. Captured tables must have a
-primary key. The same entity may be mapped under several sinks - it is captured once and each sink's
+### What gets tracked
+
+Only entities you **declare** are captured and added to the publication. `Map<T>()` inside a sink's
+`WithMappings(...)` declares a table *and* routes it to that sink. Captured tables must have a
+primary key. The same entity may be mapped under several sinks, it is captured once and each sink's
 mapping runs its own transform.
 
 Entities in a **TPH hierarchy** cannot be captured: hierarchy members share one table, so rows would
 materialize as one arbitrary type and lose subclass data. Map hierarchies with TPT or TPC instead.
+
+### Dependent tables
+
+When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
+own. Declare the relationship with `DependsOn(...)` so Wallaby captures the related table and fans its changes out to synthetic updates
+of your entity:
+
+```csharp
+sink.Map<Product>()
+    .ToDestination("products")
+    .DependsOn(p => p.Category)   // a referenced principal
+    .DependsOn(p => p.Labels)     // a many-to-many / skip-navigation join table
+    .UsingTransform(/* reads Category + Labels */);
+```
+
+The navigation is resolved against the EF model at startup; it must be a single one-hop navigation.
+A change to `categories` or the `product_labels` join table then re-emits the affected products through
+the same transform.
+
+A dependent table that isn't mapped & consumed is captured (and
+[published](/configuration#publication-column-lists)) as just its primary-key and lookup columns 
+to reduce the amount of data sent over the wire.
+
+### Declaring consumed columns
+
+Each mapping can optionally declare which properties its transform consumes, from either direction. 
+This is useful to reduce the amount of data sent over the wire:
+
+```csharp
+sink.WithMappings(m =>
+{
+    m.Map<Customer>()
+        .Consumes(c => c.Id, c => c.Email)        // only these (plus the primary key)
+        .UsingTransform(...);
+
+    m.Map<Product>()
+        .ConsumesAllExcept(p => p.Description)     // everything but these
+        .UsingTransform(...);
+});
+```
+
+The entity's captured column set is the **union across its mappings** - map `Product` to a second
+sink whose transform reads `Description` (or declares no selection at all) and the column is captured
+again automatically. Primary-key properties and columns `DependsOn(...)` resolves through
+are always captured. A mapping without a selection keeps the entity at consume-all.
+
+An unselected property is dropped from capture entirely. Its column is left out of the
+[publication column list](/configuration#publication-column-lists) (the value never leaves the server),
+skipped during materialization, and never read during backfill.
+
+::: warning
+Missing columns will result in missing data within your transforms. Ensure these remain in sync.
+:::
 
 ## Transforms
 
@@ -129,47 +183,6 @@ The registration itself can also live outside `AddWallaby` as a
 [mapping class](/mappings#mapping-classes): `sink.Apply<ProductSearchMapping>()`.
 :::
 
-## Dependent tables
-
-When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
-own. Declare the relationship with `DependsOn(...)` so Wallaby captures the related table and fans its changes out to synthetic updates
-of your entity:
-
-```csharp
-sink.Map<Product>()
-    .ToDestination("products")
-    .DependsOn(p => p.Category)   // a referenced principal
-    .DependsOn(p => p.Labels)     // a many-to-many / skip-navigation join table
-    .UsingTransform(/* reads Category + Labels */);
-```
-
-The navigation is resolved against the EF model at startup; it must be a single one-hop navigation.
-A change to `categories` or the `product_labels` join table then re-emits the affected products through
-the same transform.
-
-### Scaling fan-out
-
-A single change to a principal row can affect a large number of dependents (e.g. renaming a category with
-a million products). Wallaby keeps this bounded:
-
-- **Consolidated lookups**: All distinct keys changed for a dependent table in one transaction are resolved
-  with a single `IN (…)` query per relationship.
-- **Inline first page, offloaded tail**: The first [`MaxBatchSize`](/configuration#general-options) affected rows
-  are re-emitted inline. If more remain, the rest is handed to a *scoped backfill job* that re-snapshots
-  them asynchronously. This lets the trigger
-  transaction be acknowledged immediately, so a huge fan-out never stalls replication.
-- **On-demand processing**: The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
-  the instant a job is enqueued so the tail is picked up promptly. A periodic
-  [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a safety-net fallback.
-- **Coalescing**: Repeated changes to the same principal collapse into a single pending re-snapshot.
-- **Same-transaction de-duplication**: If a primary row is changed *and* one of its dependents changes in
-  the same transaction, the row is emitted once (its own change wins - the transform already re-reads the
-  dependent from current state).
-
-The offloaded tail is therefore **eventually consistent**: for a wide fan-out, the bulk of the re-index
-lands shortly *after* the trigger commits rather than in commit order with it. Sinks must be idempotent
-(upsert by id) and support at-least-once delivery.
-
 ## Replica identity in migrations
 
 Some captured tables need `REPLICA IDENTITY FULL` so previous rows appear in the changeset. This is required for
@@ -198,40 +211,30 @@ value, [drop it from the mapping's column selection](#declaring-consumed-columns
 the WAL cost of full identity.
 :::
 
-## Declaring consumed columns
+## Internals
 
-Each mapping can declare which properties its transform consumes, from either direction:
+### How fan-out scales
 
-```csharp
-sink.WithMappings(m =>
-{
-    m.Map<Customer>()
-        .Consumes(c => c.Id, c => c.Email)        // only these (plus the primary key)
-        .UsingTransform(...);
+A single change to a principal row can affect a large number of dependents (e.g. renaming a category with
+a million products). Wallaby keeps this bounded:
 
-    m.Map<Product>()
-        .ConsumesAllExcept(p => p.Description)     // everything but these
-        .UsingTransform(...);
-});
-```
+- **Consolidated lookups**: All distinct keys changed for a dependent table in one transaction are resolved
+  with a single `IN (…)` query per relationship.
+- **Inline first page, offloaded tail**: The first [`MaxBatchSize`](/configuration#general-options) affected rows
+  are re-emitted inline. If more remain, the rest is handed to a *scoped backfill job* that re-snapshots
+  them asynchronously. This lets the trigger
+  transaction be acknowledged immediately, so a huge fan-out never stalls replication.
+- **On-demand processing**: The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
+  the instant a job is enqueued so the tail is picked up promptly. A periodic
+  [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a safety-net fallback.
+- **Coalescing**: Repeated changes to the same principal collapse into a single pending re-snapshot.
+- **Same-transaction de-duplication**: If a primary row is changed *and* one of its dependents changes in
+  the same transaction, the row is emitted once (its own change wins - the transform already re-reads the
+  dependent from current state).
 
-The entity's captured column set is the **union across its mappings** - map `Product` to a second
-sink whose transform reads `Description` (or declares no selection at all) and the column is captured
-again automatically. Primary-key properties and columns a `DependsOn(...)` lookup resolves through
-are always captured; naming one in `ConsumesAllExcept` fails at startup. A mapping without a
-selection keeps the entity at consume-all.
-
-An unselected property is dropped from capture entirely: its column is left out of the
-[publication column list](/configuration#publication-column-lists) (the value never leaves the server),
-skipped during materialization, and never read during backfill, so an unchanged TOASTed value can no
-longer fail the change. Use `ConsumesAllExcept` for large TOAST-prone columns no transform reads.
-
-::: warning Declare everything the mapping touches
-The materialized entity keeps an unselected property's default value, so a transform that reads an
-undeclared property sees `default(T)` silently - keep `Consumes(...)` in sync with the transform body
-(and with `KeyedBy`/`ScopedBy` selectors, which read the same captured row). `ChangeEvent.Record`
-omits unselected properties and its indexer throws for them, so `Record`-based reads fail loudly.
-:::
+The offloaded tail is therefore **eventually consistent**: for a wide fan-out, the bulk of the re-index
+lands shortly *after* the trigger commits rather than in commit order with it. Sinks must be idempotent
+(upsert by id) and support at-least-once delivery.
 
 ## Next steps
 

@@ -21,7 +21,7 @@ internal sealed class EntityMaterializer : IRowMaterializer
     private readonly Dictionary<(string Schema, string Table), EntityPlan> _plans;
 
     public EntityMaterializer(
-        IModel model, IReadOnlyDictionary<Type, IReadOnlySet<string>>? consumedProperties = null)
+        IModel model, IReadOnlyDictionary<string, IReadOnlySet<string>>? consumedProperties = null)
     {
         _plans = new Dictionary<(string, string), EntityPlan>();
         foreach (var entityType in model.GetEntityTypes())
@@ -35,7 +35,7 @@ internal sealed class EntityMaterializer : IRowMaterializer
             if (_plans.ContainsKey((schema, table))) continue; // de-dup shared tables (TPH)
 
             _plans[(schema, table)] = BuildPlan(
-                entityType, table, consumedProperties?.GetValueOrDefault(entityType.ClrType));
+                entityType, table, consumedProperties?.GetValueOrDefault(entityType.Name));
         }
     }
 

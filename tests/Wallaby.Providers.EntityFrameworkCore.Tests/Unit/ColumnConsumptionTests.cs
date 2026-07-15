@@ -249,6 +249,45 @@ public class ColumnConsumptionTests
     }
 
     [Test]
+    public async Task A_dependent_only_table_narrows_to_its_lookup_columns()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        Expression<Func<Product, Category?>> navigation = p => p.Category;
+        var spec = new CaptureSpec
+        {
+            DeclaredEntities = [typeof(Product)],
+            DeclaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>
+            {
+                [typeof(Product)] = [navigation],
+            },
+        };
+
+        var categories = EfCoreCaptureModelBuilder.Build(ctx.Model, spec).FindByClrType(typeof(Category))!;
+
+        // Fan-out reads only the lookup key from a category change; no other column is consumed.
+        categories.Columns.Select(c => c.PropertyName).ShouldBe([nameof(Category.Id)]);
+    }
+
+    [Test]
+    public async Task A_dependent_that_is_also_declared_keeps_its_own_capture()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        Expression<Func<Product, Category?>> navigation = p => p.Category;
+        var spec = new CaptureSpec
+        {
+            DeclaredEntities = [typeof(Product), typeof(Category)],
+            DeclaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>
+            {
+                [typeof(Product)] = [navigation],
+            },
+        };
+
+        var categories = EfCoreCaptureModelBuilder.Build(ctx.Model, spec).FindByClrType(typeof(Category))!;
+
+        categories.Columns.ShouldContain(c => c.PropertyName == nameof(Category.Name));
+    }
+
+    [Test]
     public void Consumes_requires_a_direct_property_access()
     {
         Should.Throw<WallabyConfigurationException>(
