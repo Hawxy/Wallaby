@@ -20,9 +20,9 @@ internal sealed class EntityMaterializer : IRowMaterializer
 {
     private readonly Dictionary<(string Schema, string Table), EntityPlan> _plans;
 
-    public EntityMaterializer(IModel model, PropertyExclusions? exclusions = null)
+    public EntityMaterializer(
+        IModel model, IReadOnlyDictionary<Type, IReadOnlySet<string>>? consumedProperties = null)
     {
-        exclusions ??= PropertyExclusions.None;
         _plans = new Dictionary<(string, string), EntityPlan>();
         foreach (var entityType in model.GetEntityTypes())
         {
@@ -34,7 +34,8 @@ internal sealed class EntityMaterializer : IRowMaterializer
             var schema = entityType.GetSchema() ?? "public";
             if (_plans.ContainsKey((schema, table))) continue; // de-dup shared tables (TPH)
 
-            _plans[(schema, table)] = BuildPlan(entityType, table, exclusions);
+            _plans[(schema, table)] = BuildPlan(
+                entityType, table, consumedProperties?.GetValueOrDefault(entityType.ClrType));
         }
     }
 
@@ -110,8 +111,8 @@ internal sealed class EntityMaterializer : IRowMaterializer
             $"Column '{columnName}' on '{change.Schema}.{change.TableName}' was not carried in the change " +
             $"(an unchanged TOASTed value with no old tuple). Run: ALTER TABLE {change.Schema}.{change.TableName} " +
             "REPLICA IDENTITY FULL; — self-config warns with this DDL at startup (or fails when " +
-            "RequireFullReplicaIdentity is set). If no transform reads the value, exclude the property instead " +
-            "via UseEntityFrameworkCore(ef => ef.ExcludeProperty<T>(...)). See " +
+            "RequireFullReplicaIdentity is set). If no transform reads the value, drop it from capture via the " +
+            "mapping's column selection instead (e.g. .Map<T>().ConsumesAllExcept(e => e.Payload)). See " +
             "https://wallabycdc.net/providers/entity-framework-core/#replica-identity-in-migrations");
     }
 
@@ -154,7 +155,7 @@ internal sealed class EntityMaterializer : IRowMaterializer
         return changes;
     }
 
-    private static EntityPlan BuildPlan(IEntityType entityType, string table, PropertyExclusions exclusions)
+    private static EntityPlan BuildPlan(IEntityType entityType, string table, IReadOnlySet<string>? consumedProperties)
     {
         var storeObject = StoreObjectIdentifier.Table(table, entityType.GetSchema());
 
@@ -165,9 +166,9 @@ internal sealed class EntityMaterializer : IRowMaterializer
         {
             var columnName = property.GetColumnName(storeObject);
             if (columnName is null) continue;
-            // An excluded property never enters the plan, so its wire values (including unchanged
+            // An unselected property never enters the plan, so its wire values (including unchanged
             // TOAST markers) are skipped like any unmapped column.
-            if (exclusions.IsExcluded(entityType.ClrType, property.Name)) continue;
+            if (consumedProperties is not null && !consumedProperties.Contains(property.Name)) continue;
 
             // GetSetter() returns EF Core's compiled IClrPropertySetter, which already handles
             // backing fields, shadow properties (no-op), and the PropertyBag indexer used by

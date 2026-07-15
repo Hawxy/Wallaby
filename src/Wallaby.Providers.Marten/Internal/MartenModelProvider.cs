@@ -30,6 +30,14 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
                 "declares one); documents are self-contained.");
         }
 
+        if (spec.DeclaredColumnSelections.Count > 0)
+        {
+            throw new WallabyConfigurationException(
+                "Column selections (Consumes/ConsumesAllExcept) are not supported for Marten documents " +
+                $"('{spec.DeclaredColumnSelections.Keys.First().Name}' declares one); transforms receive the " +
+                "whole document body.");
+        }
+
         var plans = SelectMappings(spec).Select(mapping => BuildTablePlan(mapping, spec)).ToList();
         return new CapturePlan
         {

@@ -125,6 +125,22 @@ public class MartenModelProviderTests
     }
 
     [Test]
+    public void Column_selections_are_rejected_for_documents()
+    {
+        var spec = new CaptureSpec
+        {
+            DeclaredEntities = [typeof(PlainDoc)],
+            DeclaredColumnSelections = new Dictionary<Type, IReadOnlyList<ColumnSelection>>
+            {
+                [typeof(PlainDoc)] = [new ColumnSelection(ColumnSelectionMode.Include, [nameof(PlainDoc.Name)])],
+            },
+        };
+
+        Should.Throw<WallabyConfigurationException>(() => Provider().BuildCapturePlan(spec))
+            .Message.ShouldContain("Column selections");
+    }
+
+    [Test]
     public void Document_hierarchies_are_rejected()
     {
         var provider = Provider(o => o.Schema.For<BaseDoc>().AddSubClass<SubDoc>());

@@ -135,4 +135,40 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
         _registration.DeclaredDependencies.Add(navigation);
         return this;
     }
+
+    /// <summary>
+    /// Declare the properties this mapping's transform consumes via a raw selection. Provider packages
+    /// call this from their typed extensions (e.g. Wallaby.Providers.EntityFrameworkCore's <c>Consumes</c>/
+    /// <c>ConsumesAllExcept</c>); use those instead of calling this directly. Repeated same-mode calls
+    /// accumulate; mixing modes on one mapping fails.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public EntityMapBuilder<TEntity> SelectColumns(ColumnSelectionMode mode, IReadOnlyList<string> propertyNames)
+    {
+        ArgumentNullException.ThrowIfNull(propertyNames);
+        if (propertyNames.Count == 0)
+        {
+            throw new WallabyConfigurationException(
+                $"A column selection for '{typeof(TEntity).Name}' must name at least one property.");
+        }
+
+        if (_registration.ColumnSelection is { } existing)
+        {
+            if (existing.Mode != mode)
+            {
+                throw new WallabyConfigurationException(
+                    $"The mapping for '{typeof(TEntity).Name}' already declares a column selection in " +
+                    $"{existing.Mode} mode; Consumes(...) and ConsumesAllExcept(...) cannot be combined on one mapping.");
+            }
+            _registration.ColumnSelection = existing with
+            {
+                PropertyNames = [.. existing.PropertyNames, .. propertyNames],
+            };
+        }
+        else
+        {
+            _registration.ColumnSelection = new ColumnSelection(mode, propertyNames);
+        }
+        return this;
+    }
 }

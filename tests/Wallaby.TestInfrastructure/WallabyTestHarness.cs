@@ -41,6 +41,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private readonly List<EntityMapping> _mappings = [];
     private readonly Dictionary<Type, string?> _backfillTypes = [];
     private readonly Dictionary<Type, List<LambdaExpression>> _declaredDependencies = [];
+    private readonly Dictionary<Type, List<ColumnSelection>> _columnSelections = [];
     private readonly HashSet<Type> _capturedEntities = [];
     private bool _broadcast;
     private IEnrichmentSessionProvider? _sessionProvider;
@@ -140,6 +141,25 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     public WallabyTestHarness Capture<TEntity>()
     {
         _capturedEntities.Add(typeof(TEntity));
+        return this;
+    }
+
+    /// <summary>Declare an Include column selection (mirrors the production <c>Consumes</c> mapping extension).</summary>
+    public WallabyTestHarness Consumes<TEntity>(params string[] propertyNames)
+        => SelectColumns<TEntity>(ColumnSelectionMode.Include, propertyNames);
+
+    /// <summary>Declare an Exclude column selection (mirrors the production <c>ConsumesAllExcept</c> mapping extension).</summary>
+    public WallabyTestHarness ConsumesAllExcept<TEntity>(params string[] propertyNames)
+        => SelectColumns<TEntity>(ColumnSelectionMode.Exclude, propertyNames);
+
+    private WallabyTestHarness SelectColumns<TEntity>(ColumnSelectionMode mode, string[] propertyNames)
+    {
+        if (!_columnSelections.TryGetValue(typeof(TEntity), out var list))
+        {
+            list = [];
+            _columnSelections[typeof(TEntity)] = list;
+        }
+        list.Add(new ColumnSelection(mode, propertyNames));
         return this;
     }
 
@@ -435,6 +455,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         {
             DeclaredEntities = [.. _capturedEntities.Union(_mappings.Select(m => m.EntityClrType))],
             DeclaredDependencies = declared,
+            DeclaredColumnSelections = _columnSelections.ToDictionary(
+                kv => kv.Key, kv => (IReadOnlyList<ColumnSelection>)kv.Value),
             // Mirrors WallabyConfiguration.ToCaptureSpec: scoped destinations and custom document ids
             // must be computable on deletes, which needs full old-row values.
             RequiresFullReplicaIdentity = _mappings

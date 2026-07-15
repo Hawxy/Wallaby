@@ -19,22 +19,23 @@ namespace Wallaby.Providers.EntityFrameworkCore.Tests.Integration;
 public class PublicationColumnListTests(TestModelPostgresFixture pg)
 {
     private static WallabyModel BuildTestModel(
-        PropertyExclusions? exclusions = null, IReadOnlySet<Type>? requiresFullReplicaIdentity = null)
+        IReadOnlyDictionary<Type, IReadOnlyList<ColumnSelection>>? selections = null,
+        IReadOnlySet<Type>? requiresFullReplicaIdentity = null)
     {
         using var ctx = TestModelFactory.CreateModelOnlyContext();
         return EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec
         {
             DeclaredEntities = [typeof(Category), typeof(Product), typeof(Customer)],
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity ?? new HashSet<Type>(),
-        }, exclusions);
+            DeclaredColumnSelections = selections ?? new Dictionary<Type, IReadOnlyList<ColumnSelection>>(),
+        });
     }
 
-    private static PropertyExclusions Exclude(Action<EfCoreProviderOptions> configure)
+    private static Dictionary<Type, IReadOnlyList<ColumnSelection>> Selection<TEntity>(
+        ColumnSelectionMode mode, params string[] propertyNames) => new()
     {
-        var options = new EfCoreProviderOptions();
-        configure(options);
-        return options.Exclusions;
-    }
+        [typeof(TEntity)] = [new ColumnSelection(mode, propertyNames)],
+    };
 
     private PostgresSelfConfigurator CreateConfigurator(
         WallabyNames names, bool columnLists = true, bool manageTables = true) =>
@@ -84,8 +85,7 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     public async Task Publication_is_created_with_column_lists_matching_the_model()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
-        var exclusions = Exclude(o => o.ExcludeProperty<Product>(p => p.Description));
-        var model = BuildTestModel(exclusions);
+        var model = BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Description)));
 
         await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
 
@@ -121,12 +121,43 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
         (await ReadPublicationColumnsAsync(names.Publication))["products"]!
             .ShouldContain(nameof(Product.Description));
 
-        var excluded = BuildTestModel(Exclude(o => o.ExcludeProperty<Product>(p => p.Description)));
+        var excluded = BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Description)));
         await CreateConfigurator(names).EnsureConfiguredAsync(excluded, CancellationToken.None);
 
         var columns = await ReadPublicationColumnsAsync(names.Publication);
         columns.Count.ShouldBe(3); // membership intact
         columns["products"]!.ShouldNotContain(nameof(Product.Description));
+    }
+
+    [Test]
+    public async Task Consumes_selection_lists_only_named_columns_plus_the_primary_key()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        var model = BuildTestModel(Selection<Product>(ColumnSelectionMode.Include, nameof(Product.Name)));
+
+        await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
+
+        (await ReadPublicationColumnsAsync(names.Publication))["products"]!
+            .ShouldBe(["Id", "Name"], ignoreOrder: true);
+    }
+
+    [Test]
+    public async Task Selections_from_multiple_mappings_union_in_the_publication_list()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        var model = BuildTestModel(new Dictionary<Type, IReadOnlyList<ColumnSelection>>
+        {
+            [typeof(Product)] =
+            [
+                new ColumnSelection(ColumnSelectionMode.Include, [nameof(Product.Name)]),
+                new ColumnSelection(ColumnSelectionMode.Include, [nameof(Product.Price)]),
+            ],
+        });
+
+        await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
+
+        (await ReadPublicationColumnsAsync(names.Publication))["products"]!
+            .ShouldBe(["Id", "Name", "Price"], ignoreOrder: true);
     }
 
     [Test]
@@ -282,9 +313,9 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Excluded_toasted_column_never_arrives_and_does_not_poison_updates()
     {
-        // The full stack: ExcludeProperty -> publication column list -> stream -> materialize -> sink.
-        await using var harness = WallabyTestHarness
-            .ForTestModel(pg.ConnectionString, configure: ef => ef.ExcludeProperty<Product>(p => p.Description))
+        // The full stack: ConsumesAllExcept -> publication column list -> stream -> materialize -> sink.
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString)
+            .ConsumesAllExcept<Product>(nameof(Product.Description))
             .Broadcast().Capture<Product>();
         var capture = harness.AddCaptureSink();
         await harness.SelfConfigureAsync();
@@ -310,6 +341,28 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
         renamed.Document!.ContainsKey(nameof(Product.Description)).ShouldBeFalse();
         capture.For("products").ShouldAllBe(r =>
             r.Document == null || !r.Document.ContainsKey(nameof(Product.Description)));
+    }
+
+    [Test]
+    public async Task Consumes_selection_limits_the_delivered_record()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString)
+            .Consumes<Product>(nameof(Product.Name))
+            .Broadcast().Capture<Product>();
+        var capture = harness.AddCaptureSink();
+        await harness.SelfConfigureAsync();
+
+        var categoryId = await harness.Db.AddCategoryAsync();
+        await harness.Db.AddProductAsync(categoryId, "only-name");
+
+        await harness.RunUntilAsync(() => capture.For("products")
+            .Any(r => r.Document?.GetValueOrDefault("Name") as string == "only-name"));
+
+        var record = capture.For("products")
+            .First(r => r.Document?.GetValueOrDefault("Name") as string == "only-name").Document!;
+        record.ContainsKey(nameof(Product.Id)).ShouldBeTrue();
+        record.ContainsKey(nameof(Product.Price)).ShouldBeFalse();
+        record.ContainsKey(nameof(Product.CategoryId)).ShouldBeFalse();
     }
 
     [Test]

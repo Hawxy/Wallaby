@@ -41,7 +41,8 @@ You have a number of choices as to where streamed transactions spill:
 ### Publication column lists
 
 With `PublicationColumnLists` (the default), Wallaby publishes only the columns the capture model
-actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so excluded properties,
+actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so properties outside the
+mappings' [column selections](/providers/entity-framework-core/#declaring-consumed-columns),
 unmapped physical columns, and (for Marten) unmodeled `mt_*` metadata are filtered inside Postgres:
 they are never decoded by the WAL sender or sent over the wire. Column lists are reconciled on every
 startup; drift is applied atomically with a single `ALTER PUBLICATION ... SET TABLE`.

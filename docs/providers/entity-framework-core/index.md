@@ -194,26 +194,44 @@ Entities with large values - long text, big jsonb, bytea over ~2KB - also need `
 Postgres omits an *unchanged* TOASTed value from an update's new tuple, so under the default identity
 the value isn't carried in the change at all. Rather than deliver a document with the field silently
 nulled, Wallaby fails the change with the DDL above in the error message. If no transform reads the
-value, [exclude the property](#excluding-properties) instead of paying the WAL cost of full identity.
+value, [drop it from the mapping's column selection](#declaring-consumed-columns) instead of paying
+the WAL cost of full identity.
 :::
 
-## Excluding properties
+## Declaring consumed columns
 
-When a captured entity carries a large column that no transform reads (e.g. a big jsonb payload),
-exclude the property instead of turning on `REPLICA IDENTITY FULL` for it:
+Each mapping can declare which properties its transform consumes, from either direction:
 
 ```csharp
-cdc.UseEntityFrameworkCore<AppDbContext>(ef => ef
-    .ExcludeProperty<Product>(p => p.Description))
+sink.WithMappings(m =>
+{
+    m.Map<Customer>()
+        .Consumes(c => c.Id, c => c.Email)        // only these (plus the primary key)
+        .UsingTransform(...);
+
+    m.Map<Product>()
+        .ConsumesAllExcept(p => p.Description)     // everything but these
+        .UsingTransform(...);
+});
 ```
 
-An excluded property is dropped from capture entirely: its column is left out of the
+The entity's captured column set is the **union across its mappings** - map `Product` to a second
+sink whose transform reads `Description` (or declares no selection at all) and the column is captured
+again automatically. Primary-key properties and columns a `DependsOn(...)` lookup resolves through
+are always captured; naming one in `ConsumesAllExcept` fails at startup. A mapping without a
+selection keeps the entity at consume-all.
+
+An unselected property is dropped from capture entirely: its column is left out of the
 [publication column list](/configuration#publication-column-lists) (the value never leaves the server),
 skipped during materialization, and never read during backfill, so an unchanged TOASTed value can no
-longer fail the change. The materialized entity keeps the property's default value and
-`ChangeEvent.Record` omits it - a transform that *does* read the property would see the default, so
-only exclude what your transforms never touch. Primary-key properties and columns a `DependsOn(...)`
-lookup resolves through cannot be excluded; both fail at startup.
+longer fail the change. Use `ConsumesAllExcept` for large TOAST-prone columns no transform reads.
+
+::: warning Declare everything the mapping touches
+The materialized entity keeps an unselected property's default value, so a transform that reads an
+undeclared property sees `default(T)` silently - keep `Consumes(...)` in sync with the transform body
+(and with `KeyedBy`/`ScopedBy` selectors, which read the same captured row). `ChangeEvent.Record`
+omits unselected properties and its indexer throws for them, so `Record`-based reads fail loudly.
+:::
 
 ## Next steps
 

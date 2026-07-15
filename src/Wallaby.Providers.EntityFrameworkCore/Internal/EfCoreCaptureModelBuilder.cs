@@ -14,20 +14,22 @@ namespace Wallaby.Providers.EntityFrameworkCore.Internal;
 /// </summary>
 internal static class EfCoreCaptureModelBuilder
 {
-    public static WallabyModel Build(IModel model, CaptureSpec spec, PropertyExclusions? exclusions = null)
+    public static WallabyModel Build(
+        IModel model, CaptureSpec spec,
+        IReadOnlyDictionary<Type, IReadOnlySet<string>>? consumedProperties = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(spec);
-        exclusions ??= PropertyExclusions.None;
+        consumedProperties ??= ColumnConsumptionResolver.Resolve(model, spec);
 
-        var primaries = BuildPrimariesFromDeclared(model, spec, exclusions);
+        var primaries = BuildPrimariesFromDeclared(model, spec, consumedProperties);
 
-        var (allTables, bindings) = AttachDependents(model, primaries, spec, exclusions);
+        var (allTables, bindings) = AttachDependents(model, primaries, spec, consumedProperties);
         return new WallabyModel(allTables, bindings);
     }
 
     private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromDeclared(
-        IModel model, CaptureSpec spec, PropertyExclusions exclusions)
+        IModel model, CaptureSpec spec, IReadOnlyDictionary<Type, IReadOnlySet<string>> consumedProperties)
     {
         // An empty spec builds an empty model: with several providers registered, one of them may simply
         // have no mapped entities. "No mappings at all" is rejected once, at WallabyBuilder.Build().
@@ -66,7 +68,9 @@ internal static class EfCoreCaptureModelBuilder
                     "Use TPT or TPC mapping for captured hierarchies.");
             }
 
-            primaries.Add((entityType, BuildTable(entityType, spec.RequiresFullReplicaIdentity.Contains(clrType), exclusions)));
+            primaries.Add((entityType, BuildTable(
+                entityType, spec.RequiresFullReplicaIdentity.Contains(clrType),
+                consumedProperties.GetValueOrDefault(clrType))));
         }
 
         return primaries;
@@ -74,7 +78,7 @@ internal static class EfCoreCaptureModelBuilder
 
     private static (IReadOnlyList<CapturedTable> All, IReadOnlyList<DependentBinding> Bindings) AttachDependents(
         IModel model, List<(IEntityType EntityType, CapturedTable Table)> primaries, CaptureSpec spec,
-        PropertyExclusions exclusions)
+        IReadOnlyDictionary<Type, IReadOnlySet<string>> consumedProperties)
     {
         // Union of primary + dependent tables, de-duplicated by (schema, table). A table that is both
         // primary-mapped and the target of a DependsOn appears once — the primary capture is canonical.
@@ -96,7 +100,7 @@ internal static class EfCoreCaptureModelBuilder
             foreach (var expr in expressions)
             {
                 var resolution = DependencyAnalyzer.Analyze(entityType, expr);
-                var depTable = GetOrAddDependentTable(byQualifiedName, resolution.DependentEntityType, exclusions);
+                var depTable = GetOrAddDependentTable(byQualifiedName, resolution.DependentEntityType, consumedProperties);
                 var lookup = string.Join(",", resolution.Lookup.Select(l => $"{l.DependentColumn}>{l.PrimaryColumn}"));
                 if (!seen.Add((depTable.Schema, depTable.TableName, lookup)))
                 {
@@ -119,22 +123,22 @@ internal static class EfCoreCaptureModelBuilder
         return (byQualifiedName.Values.ToList(), bindings);
     }
 
-    // A DependsOn fan-out reads its lookup keys from the captured columns; an excluded column would
-    // fail the lookup at runtime, so reject the combination at build time.
+    // A DependsOn fan-out reads its lookup keys from the captured columns. The consumption resolver pins
+    // lookup properties into every effective set, so this is a safety net for shapes it cannot see.
     private static void EnsureLookupColumnCaptured(IEntityType primary, CapturedTable table, string columnName)
     {
         if (table.Columns.All(c => c.ColumnName != columnName))
         {
             throw new WallabyConfigurationException(
                 $"DependsOn(...) on '{primary.ClrType.Name}' resolves through column '{columnName}' of " +
-                $"'{table.QualifiedName}', which is excluded via ExcludeProperty(...). A dependency-lookup " +
+                $"'{table.QualifiedName}', which its column selections do not capture. A dependency-lookup " +
                 "column cannot be excluded.");
         }
     }
 
     private static CapturedTable GetOrAddDependentTable(
         Dictionary<(string Schema, string Table), CapturedTable> byQualifiedName, IEntityType dependentEntityType,
-        PropertyExclusions exclusions)
+        IReadOnlyDictionary<Type, IReadOnlySet<string>> consumedProperties)
     {
         var schema = dependentEntityType.GetSchema() ?? "public";
         var tableName = dependentEntityType.GetTableName()
@@ -146,13 +150,15 @@ internal static class EfCoreCaptureModelBuilder
             return existing;
         }
 
-        var built = BuildTable(dependentEntityType, requiresFullReplicaIdentity: false, exclusions);
+        var built = BuildTable(
+            dependentEntityType, requiresFullReplicaIdentity: false,
+            consumedProperties.GetValueOrDefault(dependentEntityType.ClrType));
         byQualifiedName[(schema, tableName)] = built;
         return built;
     }
 
     private static CapturedTable BuildTable(
-        IEntityType entityType, bool requiresFullReplicaIdentity, PropertyExclusions exclusions)
+        IEntityType entityType, bool requiresFullReplicaIdentity, IReadOnlySet<string>? consumedProperties)
     {
         var schema = entityType.GetSchema();
         var tableName = entityType.GetTableName()!;
@@ -169,8 +175,9 @@ internal static class EfCoreCaptureModelBuilder
         {
             var columnName = property.GetColumnName(storeObject);
             if (columnName is null) continue; // property not mapped to this table
-            // Excluded columns are dropped from the capture set entirely (materialization + backfill reads).
-            if (exclusions.IsExcluded(entityType.ClrType, property.Name)) continue;
+            // Unselected columns are dropped from the capture set entirely (publication column list,
+            // materialization, backfill reads).
+            if (consumedProperties is not null && !consumedProperties.Contains(property.Name)) continue;
 
             var column = new CapturedColumn
             {

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
@@ -55,5 +56,56 @@ public static class EfCoreEntityMapBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(navigation);
         return map.DependsOnNavigation(navigation);
+    }
+
+    /// <summary>
+    /// Declare that this mapping's transform consumes only the named properties. The entity's captured
+    /// column set is the union of its mappings' selections, plus primary-key and <c>DependsOn(...)</c>
+    /// lookup columns (always captured); a mapping without a selection keeps the entity at consume-all.
+    /// Unselected columns never leave the server — they are omitted from the publication column list,
+    /// materialization, and backfill — so the materialized entity keeps their default values and
+    /// <c>ChangeEvent.Record</c> omits them (its indexer throws for unselected keys; an entity property
+    /// read silently yields the default). Repeated calls accumulate.
+    /// </summary>
+    public static EntityMapBuilder<TEntity> Consumes<TEntity>(
+        this EntityMapBuilder<TEntity> map, params Expression<Func<TEntity, object?>>[] properties)
+        where TEntity : class
+        => map.SelectColumns(ColumnSelectionMode.Include, PropertyNames(properties, nameof(Consumes)));
+
+    /// <summary>
+    /// Declare that this mapping's transform consumes everything except the named properties. Intended
+    /// for large TOAST-prone columns (long text, big jsonb) no transform reads — under
+    /// <c>REPLICA IDENTITY DEFAULT</c> an unchanged TOASTed value is not carried in the change, which
+    /// otherwise fails the change. Primary-key properties and columns a <c>DependsOn(...)</c> lookup
+    /// resolves through cannot be excluded. The exclusion holds only while every mapping of the entity
+    /// declares a selection omitting the property.
+    /// </summary>
+    public static EntityMapBuilder<TEntity> ConsumesAllExcept<TEntity>(
+        this EntityMapBuilder<TEntity> map, params Expression<Func<TEntity, object?>>[] properties)
+        where TEntity : class
+        => map.SelectColumns(ColumnSelectionMode.Exclude, PropertyNames(properties, nameof(ConsumesAllExcept)));
+
+    private static string[] PropertyNames<TEntity>(
+        Expression<Func<TEntity, object?>>[] properties, string method)
+    {
+        ArgumentNullException.ThrowIfNull(properties);
+        var names = new string[properties.Length];
+        for (var i = 0; i < properties.Length; i++)
+        {
+            var body = properties[i].Body;
+            while (body is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
+            {
+                body = unary.Operand;
+            }
+
+            if (body is not MemberExpression { Member: PropertyInfo info, Expression: ParameterExpression })
+            {
+                throw new WallabyConfigurationException(
+                    $"{method}<{typeof(TEntity).Name}>(...) must select a property directly on the entity " +
+                    $"(e.g. e => e.Payload), got: {properties[i].Body}.");
+            }
+            names[i] = info.Name;
+        }
+        return names;
     }
 }

@@ -38,6 +38,9 @@ internal sealed class MappingRegistration
     /// </summary>
     public string? ProviderName => ExplicitProviderName ?? TransformProviderName;
 
+    /// <summary>The properties this mapping's transform consumes; null = all mapped properties.</summary>
+    public ColumnSelection? ColumnSelection { get; set; }
+
     /// <summary>Per-row scope key (e.g. tenant id) for enrichment-session + destination scoping.</summary>
     public Func<ChangeEvent, object?>? ScopeKeySelector { get; set; }
 
@@ -129,6 +132,8 @@ internal sealed class WallabyConfiguration
         var declaredEntities = new List<Type>();
         var requiresFullReplicaIdentity = new HashSet<Type>();
         var declaredDependencies = new Dictionary<Type, List<LambdaExpression>>();
+        var columnSelections = new Dictionary<Type, List<ColumnSelection>>();
+        var consumesAll = new HashSet<Type>();
         foreach (var mapping in AllMappings)
         {
             if (affinities[mapping.EntityClrType] != providerName)
@@ -154,6 +159,18 @@ internal sealed class WallabyConfiguration
                 }
                 dependencies.AddRange(mapping.DeclaredDependencies);
             }
+            if (mapping.ColumnSelection is { } selection)
+            {
+                if (!columnSelections.TryGetValue(mapping.EntityClrType, out var selections))
+                {
+                    columnSelections[mapping.EntityClrType] = selections = [];
+                }
+                selections.Add(selection);
+            }
+            else
+            {
+                consumesAll.Add(mapping.EntityClrType);
+            }
         }
 
         return new CaptureSpec
@@ -162,6 +179,11 @@ internal sealed class WallabyConfiguration
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
             DeclaredDependencies = declaredDependencies.ToDictionary(
                 d => d.Key, d => (IReadOnlyList<LambdaExpression>)d.Value),
+            // A mapping without a selection needs every column, so one such mapping keeps its entity at
+            // consume-all regardless of what other mappings declare.
+            DeclaredColumnSelections = columnSelections
+                .Where(s => !consumesAll.Contains(s.Key))
+                .ToDictionary(s => s.Key, s => (IReadOnlyList<ColumnSelection>)s.Value),
         };
     }
 }

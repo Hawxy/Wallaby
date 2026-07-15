@@ -23,4 +23,13 @@ public sealed class CaptureSpec
     /// </summary>
     public IReadOnlyDictionary<Type, IReadOnlyList<LambdaExpression>> DeclaredDependencies { get; init; }
         = new Dictionary<Type, IReadOnlyList<LambdaExpression>>();
+
+    /// <summary>
+    /// Per-entity column selections declared via provider mapping extensions (e.g. EF Core's
+    /// <c>Consumes</c>/<c>ConsumesAllExcept</c>). The entity's captured column set is the union of its
+    /// selections; entities absent here are captured whole (an entity with any selection-less mapping is
+    /// omitted by <c>WallabyConfiguration.ToCaptureSpec</c>).
+    /// </summary>
+    public IReadOnlyDictionary<Type, IReadOnlyList<ColumnSelection>> DeclaredColumnSelections { get; init; }
+        = new Dictionary<Type, IReadOnlyList<ColumnSelection>>();
 }
