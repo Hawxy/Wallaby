@@ -3,7 +3,7 @@ description: "Why change data capture beats publish-on-write for keeping search 
 ---
 
 <script setup>
-import PipelineFlow from './.vitepress/theme/PipelineFlow.vue'
+import InternalsFlow from './.vitepress/theme/InternalsFlow.vue'
 </script>
 
 # Why Wallaby?
@@ -30,7 +30,10 @@ where the goal is "the data changed, keep the downstream copy in sync".
 
 ## How It Works
 
-<PipelineFlow />
+Pick a flow to watch it move through the engine, click any stage for what it does, or take the
+diagram full screen:
+
+<InternalsFlow />
 
 - **Read + Materialize**: stream committed transactions from the logical replication slot in commit
   order, decode each row change, and materialize it into your mapped entity type through the registered [storage provider](/providers/overview).

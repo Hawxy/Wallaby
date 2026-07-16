@@ -129,7 +129,7 @@ public static class WallabyServiceCollectionExtensions
         // idle — no primary slot/stream. Decided at host start.
         services.AddSingleton<IHostedService>(sp =>
             sp.GetRequiredService<WallabyConfiguration>().CaptureIntended
-                ? (IHostedService)sp.GetRequiredService<WallabyBackgroundService>()
+                ? sp.GetRequiredService<WallabyBackgroundService>()
                 : sp.GetRequiredService<ExternalSlotProvisioningService>());
 
         return services;

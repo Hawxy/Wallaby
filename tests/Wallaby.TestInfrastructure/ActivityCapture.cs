@@ -31,5 +31,9 @@ public sealed class ActivityCapture : IDisposable
     /// <summary>The most recently completed activity with the given operation name, or null.</summary>
     public Activity? Last(string operationName) => _stopped.LastOrDefault(a => a.OperationName == operationName);
 
+    /// <summary>All completed activities with the given operation name, in completion order.</summary>
+    public IReadOnlyList<Activity> All(string operationName)
+        => [.. _stopped.Where(a => a.OperationName == operationName)];
+
     public void Dispose() => _listener.Dispose();
 }

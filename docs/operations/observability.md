@@ -57,7 +57,7 @@ The activity source `Wallaby` emits one span per unit of work:
 | --- | --- | --- |
 | `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk); status `Error` on fault |
 | `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count`, `wallaby.fanout.offloaded` (bindings whose tail was queued as a scoped backfill) |
-| `route` | Internal | `wallaby.batch.size` |
+| `route` | Internal | `wallaby.batch.size`, `wallaby.source` (`live`/`fanout`/`backfill`) |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |
 | `sink.deliver` | Producer | `wallaby.sink`, `wallaby.destination`, `wallaby.batch.size` (retries recorded as span events; status `Error` on terminal failure) |
 | `backfill` | Internal | `wallaby.table`, `wallaby.backfill.kind` (`table`/`fanout`), `wallaby.fanout.keys` (fanout only), `wallaby.backfill.rows` (one root span per backfill run; status `Error` on fault) |

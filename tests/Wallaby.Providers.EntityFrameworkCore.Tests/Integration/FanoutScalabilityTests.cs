@@ -67,6 +67,7 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         await harness.SelfConfigureAsync();
 
         using var synthetic = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.dependent.synthetic");
+        using var activities = new ActivityCapture(harness.Instrumentation);
 
         await harness.StartAsync();
         try
@@ -86,6 +87,9 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         productRecords.Count.ShouldBe(4);
         productRecords.Select(r => r.DocumentId).Distinct().Count().ShouldBe(4);
         synthetic.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(4L);
+
+        // The fan-out's route span is tagged so it is distinguishable from the live category change.
+        activities.All("route").ShouldContain(a => (string?)a.GetTagItem("wallaby.source") == "fanout");
     }
 
     [Test]
