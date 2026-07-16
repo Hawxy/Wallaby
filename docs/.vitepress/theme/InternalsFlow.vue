@@ -414,13 +414,20 @@ onUnmounted(() => {
 @media (min-width: 1100px) {
   .wb-int.is-expanded {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    /* the canvas column mirrors the scale formula (1.5x cap, width fit,
+       height fit), and the centered grid keeps the controls, caption,
+       and side panel hugging the diagram instead of the viewport edges
+       on ultrawide screens */
+    grid-template-columns:
+      min(1056px, calc(100vw - 410px), calc(0.8224 * (100vh - 220px)))
+      320px;
     grid-template-rows: auto 1fr auto;
     grid-template-areas:
       'controls controls'
       'frame    side'
       'caption  side';
     column-gap: 24px;
+    justify-content: center;
   }
 
   .wb-int.is-expanded .wb-int-controls {

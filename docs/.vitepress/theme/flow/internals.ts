@@ -146,7 +146,7 @@ export const nodes: IntNode[] = [
     id: 'queue', x: 496, y: 452, w: 188, h: 77,
     title: 'fan-out queue',
     subs: ['offloaded tail jobs', 'listen / notify'],
-    detail: 'The offloaded fan-out tail lands in a queue table inside the wallaby schema. LISTEN/NOTIFY wakes the drain worker the instant a job is enqueued; the poll interval is only a safety net. Repeat changes to the same principal coalesce into one pending job.',
+    detail: 'The offloaded fan-out tail lands in a queue table inside the wallaby schema. LISTEN/NOTIFY wakes the drain worker the instant a job is enqueued. Repeated changes to the same principal coalesce into one pending job.',
     links: [
       { text: 'how fan-out scales', href: '/providers/entity-framework-core/#how-fan-out-scales' },
       { text: 'fanoutpollinterval', href: '/configuration#advanced-options' },
@@ -158,7 +158,7 @@ export const nodes: IntNode[] = [
     subs: [],
     detail: 'A single row holding the last applied LSN, saved alongside acknowledgements (throttled to one write per CheckpointSaveInterval). If a recreated slot\'s consistent point is ever ahead of it, changes were missed - Wallaby logs the exact range and repairs it by re-backfill.',
     links: [
-      { text: 'slot-loss gap detection', href: '/why-wallaby#slot-loss-gap-detection' },
+      { text: 'slot-loss gap detection', href: '/how-it-works#slot-loss-gap-detection' },
       { text: 'configuration', href: '/configuration' },
     ],
   },
