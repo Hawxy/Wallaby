@@ -205,7 +205,7 @@ internal sealed class WallabyPipeline(
             RecordLiveKeys(appEvents);
         }
 
-        await DispatchChunkedAsync(appEvents, ct);
+        await DispatchChunkedAsync(appEvents, WallabyInstrumentation.SourceLive, ct);
 
         // Dependent fan-out: dispatch the first page per binding inline, offload any tail.
         if (sawDependentChange)
@@ -286,7 +286,7 @@ internal sealed class WallabyPipeline(
         {
             RecordLiveKeys(page);
         }
-        await DispatchAsync(page, ct);
+        await DispatchAsync(page, WallabyInstrumentation.SourceLive, ct);
     }
 
     private static readonly IReadOnlySet<(string, DocumentKey)> EmptyKeys = new HashSet<(string, DocumentKey)>();
@@ -335,7 +335,7 @@ internal sealed class WallabyPipeline(
                 RecordLiveKeys(events);
             }
 
-            await DispatchChunkedAsync(events, ct);
+            await DispatchChunkedAsync(events, WallabyInstrumentation.SourceFanout, ct);
 
             if (result.Continuation is not null && fanoutQueue is not null)
             {
@@ -393,7 +393,7 @@ internal sealed class WallabyPipeline(
                 _instr.RecordChange(slotName, ev.Action, backfill: true);
             }
 
-            await DispatchChunkedAsync(events, ct);
+            await DispatchChunkedAsync(events, WallabyInstrumentation.SourceBackfill, ct);
 
             // Release the backfill loop as applied only once the chunk is durably sunk, so its checkpoint
             // (and Status=Completed) can never advance past rows that failed to project or index.
@@ -414,8 +414,11 @@ internal sealed class WallabyPipeline(
         }
     }
 
-    /// <summary>Route and deliver a set of events, slicing it into batches of at most <c>maxBatchSize</c>.</summary>
-    private async Task DispatchChunkedAsync(IReadOnlyList<ChangeEvent> events, CancellationToken ct)
+    /// <summary>
+    /// Route and deliver a set of events, slicing it into batches of at most <c>maxBatchSize</c>.
+    /// <paramref name="source"/> tags each route span so live, fan-out, and backfill batches stay distinguishable.
+    /// </summary>
+    private async Task DispatchChunkedAsync(IReadOnlyList<ChangeEvent> events, string source, CancellationToken ct)
     {
         if (events.Count == 0)
         {
@@ -424,7 +427,7 @@ internal sealed class WallabyPipeline(
 
         if (events.Count <= maxBatchSize)
         {
-            await DispatchAsync(events, ct);
+            await DispatchAsync(events, source, ct);
             return;
         }
 
@@ -436,14 +439,15 @@ internal sealed class WallabyPipeline(
             {
                 slice.Add(events[start + i]);
             }
-            await DispatchAsync(slice, ct);
+            await DispatchAsync(slice, source, ct);
         }
     }
 
-    private async Task DispatchAsync(IReadOnlyList<ChangeEvent> events, CancellationToken ct)
+    private async Task DispatchAsync(IReadOnlyList<ChangeEvent> events, string source, CancellationToken ct)
     {
         using var activity = _instr.StartRoute();
         activity?.SetTag("wallaby.batch.size", events.Count);
+        activity?.SetTag(WallabyInstrumentation.SourceTag, source);
         var routed = await router.RouteAsync(events, ct);
         if (routed.Count > 0)
         {

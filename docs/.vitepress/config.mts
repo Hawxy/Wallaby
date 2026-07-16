@@ -47,6 +47,7 @@ export default defineConfig({
         text: 'Usage',
         items: [
           { text: 'Why Wallaby?', link: '/why-wallaby' },
+          { text: 'How It Works', link: '/how-it-works' },
           { text: 'Getting Started', link: '/getting-started' },
           { text: 'Mappings', link: '/mappings' },
           { text: 'Backfill', link: '/backfill' },

@@ -45,6 +45,7 @@ public sealed class WallabyInstrumentation : IDisposable
     // ---- low-cardinality attribute values ----
     internal const string SourceLive = "live";
     internal const string SourceBackfill = "backfill";
+    internal const string SourceFanout = "fanout";
     internal const string DeliverySuccess = "success";
     internal const string DeliveryRetryable = "retryable";
     internal const string DeliveryPermanent = "permanent";

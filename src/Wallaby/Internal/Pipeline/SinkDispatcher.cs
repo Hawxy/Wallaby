@@ -101,6 +101,7 @@ internal sealed class SinkDispatcher
         if (activity is not null)
         {
             activity.SetTag(WallabyInstrumentation.SinkTag, sinkName);
+            //TODO fix this - mislanding delivery destination due to record aggregation
             activity.SetTag(WallabyInstrumentation.DestinationTag, records.Count > 0 ? records[0].Destination : null);
             activity.SetTag("wallaby.batch.size", records.Count);
         }

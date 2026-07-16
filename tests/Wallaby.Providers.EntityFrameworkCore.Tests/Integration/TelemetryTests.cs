@@ -36,6 +36,9 @@ public class TelemetryTests(TestModelPostgresFixture pg)
         // A transaction root span and a sink-delivery span were emitted.
         activities.OperationNames.ShouldContain("transaction.process");
         activities.OperationNames.ShouldContain("sink.deliver");
+
+        // The route span carries the source, so live changes are distinguishable from fan-out and backfill.
+        activities.All("route").ShouldContain(a => (string?)a.GetTagItem("wallaby.source") == "live");
     }
 
     // Backfill metrics (wallaby.backfill.rows / wallaby.backfill.active) are asserted by
@@ -79,5 +82,8 @@ public class TelemetryTests(TestModelPostgresFixture pg)
         var chunk = activities.Last("backfill.chunk");
         chunk.ShouldNotBeNull();
         chunk.Links.ShouldContain(l => l.Context.TraceId == root.TraceId && l.Context.SpanId == root.SpanId);
+
+        // The chunk's route span is tagged as backfill-sourced.
+        activities.All("route").ShouldContain(a => (string?)a.GetTagItem("wallaby.source") == "backfill");
     }
 }

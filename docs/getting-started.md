@@ -39,7 +39,7 @@ It's highly recommended to deploy Wallaby as a separate service, not as an integ
 
 ## Next steps
 
-- [How it works](/why-wallaby#how-it-works): the capture pipeline end to end.
+- [How it works](/how-it-works): the capture pipeline end to end.
 - [Configuration](/configuration): all configuration options.
 - [Mappings](/mappings): routing entities to destinations, shaping and enriching documents.
 - [Backfill](/backfill): initial snapshots and version-triggered reindex.
