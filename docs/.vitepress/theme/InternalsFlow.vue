@@ -69,6 +69,21 @@ function d(edge: IntEdge) {
     .join(' ');
 }
 
+// pulses ride pathLength-normalized edges, so a fixed dash fraction would
+// shrink with the edge - size the dash in canvas pixels instead (clamped
+// so short hops still flash and long rails don't smear)
+function pulseStyle(edgeId: string) {
+  const edge = edges.find(e => e.id === edgeId)!;
+  let length = 0;
+  for (let i = 1; i < edge.points.length; i++) {
+    length += Math.abs(edge.points[i][0] - edge.points[i - 1][0])
+      + Math.abs(edge.points[i][1] - edge.points[i - 1][1]);
+  }
+  const dashPx = Math.min(48, Math.max(16, length * 0.25));
+  const dash = Math.min(0.75, dashPx / length);
+  return { strokeDasharray: `${dash} 2`, '--wb-pulse-dash': `${dash}` };
+}
+
 function runFx(fx: string) {
   if (fx === 'tick') {
     tickLsn();
@@ -264,6 +279,12 @@ onUnmounted(() => {
               <marker id="wb-int-arrow-blue" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
                 <path d="M 0 0 L 8 4 L 0 8 z" class="wb-int-arrow is-blue" />
               </marker>
+              <marker id="wb-int-arrow-amber-soft" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 z" class="wb-int-arrow is-amber-soft" />
+              </marker>
+              <marker id="wb-int-arrow-blue-soft" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 z" class="wb-int-arrow is-blue-soft" />
+              </marker>
             </defs>
             <path
               v-for="e in edges"
@@ -276,6 +297,15 @@ onUnmounted(() => {
                 'is-blue': activeEdges.has(e.id) ? stepBlue : visited.edgeTint.get(e.id),
                 'is-visited': !activeEdges.has(e.id) && visited.edgeTint.has(e.id),
               }"
+            />
+            <path
+              v-for="id in activeEdges"
+              :key="scenarioId + ':' + stepIndex + ':' + id"
+              :d="d(edges.find(e => e.id === id)!)"
+              pathLength="1"
+              class="wb-int-pulse"
+              :class="{ 'is-blue': stepBlue }"
+              :style="pulseStyle(id)"
             />
           </svg>
 
@@ -328,13 +358,6 @@ onUnmounted(() => {
             </FlowChip>
           </button>
 
-          <div
-            v-for="id in activeEdges"
-            :key="scenarioId + ':' + stepIndex + ':' + id"
-            class="wb-int-packet"
-            :class="{ 'is-blue': stepBlue }"
-            :style="{ offsetPath: `path('${d(edges.find(e => e.id === id)!)}')` }"
-          ></div>
         </div>
       </div>
     </div>
@@ -589,6 +612,14 @@ onUnmounted(() => {
   marker-end: url(#wb-int-arrow-blue);
 }
 
+.wb-int-wire.is-visited {
+  marker-end: url(#wb-int-arrow-amber-soft);
+}
+
+.wb-int-wire.is-visited.is-blue {
+  marker-end: url(#wb-int-arrow-blue-soft);
+}
+
 .wb-int-arrow {
   fill: var(--vp-c-border);
 }
@@ -599,6 +630,15 @@ onUnmounted(() => {
 
 .wb-int-arrow.is-blue {
   fill: var(--wb-accent-blue);
+}
+
+/* trail arrowheads keep the same soft tint as their visited wires */
+.wb-int-arrow.is-amber-soft {
+  fill: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+}
+
+.wb-int-arrow.is-blue-soft {
+  fill: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
 }
 
 .wb-int-wire.is-dashed {
@@ -675,36 +715,41 @@ onUnmounted(() => {
   border-color: var(--vp-c-brand-1);
 }
 
-/* --- packets ---------------------------------------------------------- */
+/* --- pulses ------------------------------------------------------------
+   Data movement is a bright dash riding the wire itself (pathLength
+   normalizes every edge to 1, so one keyframe set fits all), ending in
+   the arrowhead instead of colliding with it. */
 
-.wb-int-packet {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 5px;
-  height: 5px;
-  background: var(--vp-c-brand-1);
-  offset-rotate: 0deg;
+.wb-int-pulse {
+  fill: none;
+  stroke: var(--vp-c-brand-2);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  /* dash length is set inline per edge (--wb-pulse-dash); the gap of 2
+     always exceeds path (1) + dash, so only one dash is visible */
+  stroke-dashoffset: var(--wb-pulse-dash, 0.25);
+  filter: drop-shadow(0 0 3px var(--vp-c-brand-2));
   opacity: 0;
 }
 
-.wb-int-packet.is-blue {
-  background: var(--wb-accent-blue);
+.wb-int-pulse.is-blue {
+  stroke: var(--wb-accent-blue);
+  filter: drop-shadow(0 0 3px var(--wb-accent-blue));
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .wb-int-packet {
-    animation: wb-int-travel 1.1s linear;
+  .wb-int-pulse {
+    animation: wb-int-pulse-travel 1.1s linear;
   }
 }
 
-@keyframes wb-int-travel {
+@keyframes wb-int-pulse-travel {
   0% {
-    offset-distance: 0%;
+    stroke-dashoffset: var(--wb-pulse-dash, 0.25);
     opacity: 1;
   }
   100% {
-    offset-distance: 100%;
+    stroke-dashoffset: -1;
     opacity: 1;
   }
 }
