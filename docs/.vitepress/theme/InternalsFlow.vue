@@ -27,6 +27,8 @@ let inFlightLsn = lsn.value;
 const scenarioId = ref('live');
 const stepIndex = ref(-1); // -1 = idle, before the first step
 const playing = ref(true);
+// the walkthrough only runs while the diagram is on screen
+const inView = ref(false);
 const reduced = ref(false);
 const selected = ref<IntNode | null>(null);
 const isFullscreen = ref(false);
@@ -73,6 +75,10 @@ function runFx(fx: string) {
     inFlightLsn = lsn.value;
   } else if (fx === 'deliver') {
     for (const id of SINK_IDS) counts.value[id] += 6 + Math.floor(Math.random() * 34);
+  } else if (fx === 'deliver-partial') {
+    for (const id of SINK_IDS) {
+      if (id !== 'http') counts.value[id] += 6 + Math.floor(Math.random() * 34);
+    }
   } else if (fx === 'flush') {
     flushed.value = inFlightLsn;
     applied.value = inFlightLsn;
@@ -89,7 +95,7 @@ function applyStep(i: number, withFx: boolean) {
 
 function schedule(delay: number) {
   if (timer) clearTimeout(timer);
-  if (!playing.value) return;
+  if (!playing.value || !inView.value) return;
   timer = setTimeout(() => {
     const atEnd = stepIndex.value >= steps.value.length - 1;
     applyStep(atEnd ? 0 : stepIndex.value + 1, true);
@@ -171,6 +177,7 @@ const stageWrapStyle = computed(() => ({
 const stageStyle = computed(() => ({ transform: `scale(${scale.value})` }));
 
 let resizeObserver: ResizeObserver | undefined;
+let intersectionObserver: IntersectionObserver | undefined;
 
 onMounted(() => {
   reduced.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -180,7 +187,17 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(recomputeScale);
   if (frame.value) resizeObserver.observe(frame.value);
   recomputeScale();
-  if (playing.value) schedule(900);
+  // the observer fires immediately with the initial visibility, which is
+  // also what kicks off the first cycle
+  intersectionObserver = new IntersectionObserver(([entry]) => {
+    inView.value = entry.isIntersecting;
+    if (!entry.isIntersecting) {
+      if (timer) clearTimeout(timer);
+    } else if (playing.value) {
+      schedule(700);
+    }
+  }, { threshold: 0.15 });
+  if (root.value) intersectionObserver.observe(root.value);
 });
 
 onUnmounted(() => {
@@ -188,6 +205,7 @@ onUnmounted(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   document.removeEventListener('keydown', onKeydown);
   resizeObserver?.disconnect();
+  intersectionObserver?.disconnect();
 });
 </script>
 
@@ -236,6 +254,17 @@ onUnmounted(() => {
           </div>
 
           <svg class="wb-int-wires" :viewBox="`0 0 ${CANVAS.w} ${CANVAS.h}`" aria-hidden="true">
+            <defs>
+              <marker id="wb-int-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 z" class="wb-int-arrow" />
+              </marker>
+              <marker id="wb-int-arrow-amber" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 z" class="wb-int-arrow is-amber" />
+              </marker>
+              <marker id="wb-int-arrow-blue" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 z" class="wb-int-arrow is-blue" />
+              </marker>
+            </defs>
             <path
               v-for="e in edges"
               :key="e.id"
@@ -357,21 +386,65 @@ onUnmounted(() => {
   background: var(--vp-c-bg);
 }
 
+/* expanded on a wide screen: the detail panel moves beside the canvas
+   instead of below it, so stage details never sit off-screen */
+@media (min-width: 1100px) {
+  .wb-int.is-expanded {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      'controls controls'
+      'frame    side'
+      'caption  side';
+    column-gap: 24px;
+  }
+
+  .wb-int.is-expanded .wb-int-controls {
+    grid-area: controls;
+  }
+
+  .wb-int.is-expanded .wb-int-frame {
+    grid-area: frame;
+  }
+
+  .wb-int.is-expanded .wb-int-caption {
+    grid-area: caption;
+  }
+
+  .wb-int.is-expanded .wb-int-detail,
+  .wb-int.is-expanded .wb-int-hint {
+    grid-area: side;
+    align-self: start;
+    margin-top: 0;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+}
+
 /* --- controls --------------------------------------------------------- */
 
 .wb-int-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 8px 16px;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
 }
 
+/* the flow tabs read as one segmented bar: joined borders, square inner
+   corners, one row that scrolls rather than wraps when space runs out */
 .wb-int-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-int-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .wb-int-tab,
@@ -388,21 +461,71 @@ onUnmounted(() => {
   transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
+.wb-int-tab {
+  flex-shrink: 0;
+  position: relative;
+  margin-left: -1px;
+  border-radius: 0;
+}
+
+.wb-int-tab:first-child {
+  margin-left: 0;
+  border-radius: 2px 0 0 2px;
+}
+
+.wb-int-tab:last-child {
+  border-radius: 0 2px 2px 0;
+}
+
 .wb-int-tab:hover,
 .wb-int-btn:hover {
   border-color: var(--vp-c-brand-1);
   color: var(--vp-c-text-1);
+  z-index: 1;
 }
 
 .wb-int-tab.is-on {
   border-color: var(--vp-c-brand-1);
   color: var(--vp-c-brand-1);
   box-shadow: var(--wb-glow-amber);
+  z-index: 1;
 }
 
+/* transport cluster: ‹ play › joined, fullscreen set apart; fixed slot
+   widths so the toggling labels don't shift the row */
 .wb-int-buttons {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  /* when the row wraps, the transport cluster right-aligns instead of
+     dangling under the tabs */
+  margin-left: auto;
+}
+
+.wb-int-buttons .wb-int-btn {
+  position: relative;
+  margin-left: -1px;
+  border-radius: 0;
+}
+
+.wb-int-buttons .wb-int-btn:first-child {
+  margin-left: 0;
+  border-radius: 2px 0 0 2px;
+}
+
+.wb-int-buttons .wb-int-btn.is-play {
+  min-width: 58px;
+  text-align: center;
+}
+
+.wb-int-buttons .wb-int-btn.is-fs {
+  margin-left: 12px;
+  border-radius: 2px;
+  min-width: 96px;
+  text-align: center;
+}
+
+.wb-int-buttons .wb-int-btn:nth-last-child(2) {
+  border-radius: 0 2px 2px 0;
 }
 
 /* --- stage ------------------------------------------------------------ */
@@ -455,6 +578,27 @@ onUnmounted(() => {
   stroke: var(--vp-c-divider);
   stroke-width: 1;
   transition: stroke 0.4s;
+  marker-end: url(#wb-int-arrow);
+}
+
+.wb-int-wire.is-active {
+  marker-end: url(#wb-int-arrow-amber);
+}
+
+.wb-int-wire.is-active.is-blue {
+  marker-end: url(#wb-int-arrow-blue);
+}
+
+.wb-int-arrow {
+  fill: var(--vp-c-border);
+}
+
+.wb-int-arrow.is-amber {
+  fill: var(--vp-c-brand-1);
+}
+
+.wb-int-arrow.is-blue {
+  fill: var(--wb-accent-blue);
 }
 
 .wb-int-wire.is-dashed {

@@ -43,7 +43,8 @@ export type IntStep = {
   blue?: boolean;
   /** nodes drawn in the dashed "something is wrong" state */
   warn?: string[];
-  fx?: 'tick' | 'deliver' | 'flush';
+  /** deliver-partial skips the http sink - used by the outage walkthrough */
+  fx?: 'tick' | 'deliver' | 'deliver-partial' | 'flush';
 };
 
 export type IntScenario = {
@@ -227,7 +228,7 @@ export const edges: IntEdge[] = [
     label: 'snapshot rows', lx: 484, ly: 180, vertical: true,
   },
   {
-    id: 'backfill-tables', points: [[566, 127], [566, 26], [168, 26], [168, 44]],
+    id: 'backfill-tables', points: [[632, 127], [632, 26], [168, 26], [168, 44]],
     dashed: true, label: 'keyset reads', lx: 320, ly: 30,
   },
   { id: 'dispatch-meili', points: [[300, 554], [300, 644], [124, 644], [124, 674]] },
@@ -316,6 +317,22 @@ export const scenarios: IntScenario[] = [
       { nodes: ['backfill', 'tables'], edges: ['backfill-tables'], blue: true, caption: 'keyset snapshots re-read the tables…' },
       { nodes: ['materialize', 'route', 'transform', 'dispatch'], edges: ['backfill-materialize', 'materialize-route', 'route-transform', 'transform-dispatch'], blue: true, caption: '…and replay through the standard pipeline' },
       { nodes: SINKS, edges: ALL_SINK_DROPS, fx: 'deliver', blue: true, caption: 'idempotent upserts converge every sink - the gap is closed' },
+    ],
+  },
+  {
+    id: 'outage',
+    label: 'sink outage',
+    blurb: 'a sink goes down mid-delivery - retry, halt, recover, converge',
+    steps: [
+      { nodes: ['tables', 'wal', 'pub', 'slot'], edges: ['tables-wal', 'wal-pub', 'pub-slot'], fx: 'tick', caption: 'a transaction commits and streams off the slot as usual' },
+      { nodes: ['stream', 'assemble', 'materialize', 'route', 'transform', 'dispatch'], edges: ['slot-stream', 'stream-assemble', 'assemble-materialize', 'materialize-route', 'route-transform', 'transform-dispatch'], caption: 'decode ▸ materialize ▸ transform ▸ batch - business as usual' },
+      { nodes: ['meili', 'kafka'], warn: ['http'], edges: ALL_SINK_DROPS, fx: 'deliver-partial', caption: 'meilisearch and kafka accept their batches - but the http endpoint is down, and its batch fails' },
+      { nodes: ['dispatch'], warn: ['http'], edges: ['dispatch-http'], caption: 'the failing batch retries with backoff; the sinks that succeeded are done and simply wait' },
+      { nodes: ['slot'], warn: ['http', 'dispatch'], caption: 'if retries exhaust, the pipeline halts rather than skipping - and the unacknowledged slot keeps retaining wal, so nothing is lost' },
+      { nodes: ['stream'], edges: ['slot-stream'], caption: 'the endpoint recovers; wallaby restarts (damped by backoff) and re-streams from the last acknowledged position' },
+      { nodes: SINKS, edges: ALL_SINK_DROPS, fx: 'deliver', caption: 'the transaction redelivers to every sink - the ones that already saw it upsert the same documents again, harmlessly' },
+      { nodes: ['ack'], edges: ALL_SINK_ACKS, caption: 'now every sink has accepted' },
+      { nodes: ['slot', 'checkpoint'], edges: ['ack-slot', 'ack-checkpoint'], fx: 'flush', caption: 'acknowledge ▸ advance the slot ▸ save the checkpoint - the guarantee held: delayed, never dropped' },
     ],
   },
 ];
