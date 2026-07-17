@@ -1,0 +1,102 @@
+using Npgsql;
+using Wallaby.TestInfrastructure;
+
+namespace Wallaby.Client.Tests.Integration;
+
+/// <summary>
+/// Remote backfill control against a bare database — the client persists requests and reads status by
+/// table name; the host-side scheduling is covered by the EF Core end-to-end tests.
+/// </summary>
+[NotInParallel]
+[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
+public class BackfillClientTests(PostgresFixture pg)
+{
+    private async Task ExecAsync(string sql)
+    {
+        await using var cmd = pg.DataSource.CreateCommand(sql);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // Matches StateSchemaBootstrapper's backfill DDL — the client performs no DDL, so these tests
+    // simulate a Wallaby host having run against the database.
+    private Task EnsureBackfillTableAsync() => ExecAsync(
+        """
+        CREATE SCHEMA IF NOT EXISTS wallaby;
+        CREATE TABLE IF NOT EXISTS wallaby.backfill_state (
+            table_qualified   text        PRIMARY KEY,
+            status            text        NOT NULL,
+            transform_version text        NULL,
+            cursor_json       jsonb       NULL,
+            rows_copied       bigint      NOT NULL DEFAULT 0,
+            updated_at        timestamptz NOT NULL DEFAULT now()
+        );
+        """);
+
+    [Test]
+    public async Task Request_marks_the_table_requested_and_preserves_its_transform_version()
+    {
+        var table = $"public.orders_{Guid.NewGuid():N}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureBackfillTableAsync();
+            await ExecAsync(
+                $$"""
+                  INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied)
+                  VALUES ('{{table}}', 'Completed', 'v2', '{"k":1}', 42)
+                  """);
+
+            await client.RequestBackfillAsync(table);
+
+            await using var cmd = pg.DataSource.CreateCommand(
+                "SELECT status, transform_version, cursor_json, rows_copied FROM wallaby.backfill_state WHERE table_qualified = $1");
+            cmd.Parameters.AddWithValue(table);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            (await reader.ReadAsync()).ShouldBeTrue();
+            reader.GetString(0).ShouldBe("Requested");
+            reader.GetString(1).ShouldBe("v2");        // preserved: the host compares it to the deployed version
+            reader.IsDBNull(2).ShouldBeTrue();
+            reader.GetInt64(3).ShouldBe(0);
+
+            var status = await client.GetBackfillStatusAsync();
+            var entry = status.Single(s => s.Table == table);
+            entry.Status.ShouldBe(WallabyBackfillStatus.Requested);
+            entry.RowsCopied.ShouldBe(0);
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified = '{table}'");
+        }
+    }
+
+    [Test]
+    public async Task Request_for_a_table_without_a_row_inserts_a_fresh_request()
+    {
+        var table = $"public.labels_{Guid.NewGuid():N}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureBackfillTableAsync();
+
+            await client.RequestBackfillAsync(table);
+
+            var status = await client.GetBackfillStatusAsync();
+            status.Single(s => s.Table == table).Status.ShouldBe(WallabyBackfillStatus.Requested);
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified = '{table}'");
+        }
+    }
+
+    [Test]
+    public async Task A_database_wallaby_never_touched_reads_empty_and_refuses_requests()
+    {
+        await ExecAsync("CREATE DATABASE backfill_virgin");
+        var builder = new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Database = "backfill_virgin" };
+        await using var client = new WallabyControlClient(builder.ConnectionString);
+
+        (await client.GetBackfillStatusAsync()).ShouldBeEmpty();
+        await Should.ThrowAsync<InvalidOperationException>(() => client.RequestBackfillAsync("public.orders"));
+    }
+}

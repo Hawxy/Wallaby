@@ -1,28 +1,26 @@
 ---
 description: "Suspending Wallaby so RDS/Aurora can run a Postgres major-version upgrade: drop the managed replication slots, upgrade, resume, re-backfill."
-outline: deep
 ---
 
 # Major-Version Upgrades
 
 Managed platforms like RDS and Aurora refuse a Postgres major-version upgrade while **any logical
-replication slot exists** — the precheck fails with:
+replication slot exists**, failing the precheck with:
 
 > The cluster could not be upgraded because one or more databases have logical replication slots.
 > Please drop all logical replication slots and try again.
 
 Wallaby's **suspension** solves this: it drops every replication slot Wallaby manages (its primary slot
-*and* any [external slots](/external-slots)), then idles durably — across app restarts and the database
-outage during the upgrade — until you explicitly resume. On resume, Wallaby recreates its slots and
+*and* any [external slots](/external-slots)), then idles durably across app restarts and the database
+outage during the upgrade until you explicitly resume. On resume, Wallaby recreates its slots and
 publications and recovers via [slot-loss gap detection](/how-it-works#slot-loss-gap-detection): every
 mapped table is **fully re-backfilled**, so idempotent sinks converge on their own.
 
-There are two ways to drive it. Both share the same durable state (a `wallaby.control` row in the source
-database), so they interoperate.
+There are two ways to drive this feature. Both share the same durable state, so they interoperate.
 
 ## Option A: two-phase deployment
 
-No admin endpoint or extra tooling — suspension rides your normal deploy pipeline.
+No admin endpoint or extra tooling, suspension is managed via your deployment pipeline.
 
 1. **Deploy suspended.** Add `Suspend()` to your Wallaby registration and deploy it to every node:
 
@@ -36,28 +34,27 @@ No admin endpoint or extra tooling — suspension rides your normal deploy pipel
    });
    ```
 
-   On startup the nodes drop every managed slot and idle (role `Suspended`, health check
-   [`Degraded`](/operations/health-checks)). Verify no slots remain:
+   On startup the nodes drop every managed slot and idle. Optionally verify no slots remain:
 
    ```sql
    SELECT slot_name FROM pg_replication_slots;   -- must be empty for the precheck
    ```
 
 2. **Run the engine upgrade.** The suspension state lives in a regular table, so it survives
-   `pg_upgrade` and the outage; nodes ride out the downtime and stay suspended when the database
+   `pg_upgrade` and the outage. Nodes ride out the downtime and stay suspended when the database
    returns.
 
 3. **Deploy without the flag.** Remove `Suspend()` and deploy again. The flag-less nodes detect the
    configuration-driven suspension, resume automatically, recreate the slots, and re-backfill every
    mapped table.
 
-While the flagged build is deployed, the suspension is **re-asserted**: a remote `ResumeAsync` gets
+While the flagged build is deployed, the suspension is **re-asserted**, so a remote `ResumeAsync` gets
 re-suspended by the running nodes. Resume by deploying the flag-less build.
 
 ## Option B: runtime control (Wallaby.Client)
 
-Suspend and resume at runtime from **any process with a connection string** to the same database — an
-admin endpoint, an ops console, a deployment script. The app itself doesn't need to restart or redeploy.
+Suspend and resume at runtime from **any process with a connection string**. The app itself doesn't need to restart or redeploy.
+The client itself is covered in [External Control](/operations/external-control).
 
 ```bash
 dotnet add package Wallaby.Client
@@ -88,19 +85,18 @@ Or register it in a host's container (e.g. to expose from your own admin endpoin
 builder.Services.AddWallabyControlClient(connectionString);
 ```
 
-How a suspension completes:
+How a suspension executes:
 
 - A **running node** observes the request instantly (LISTEN/NOTIFY), winds down its streaming session,
   drops the slots under the cluster lock, and marks the suspension finalized.
-- With **no host running** (scaled to zero, or a provision-only worker that already exited), the client
+- If there's **no host running** (scaled to zero, or a provision-only worker that already exited), the client
   drops the slots itself after `HostGracePeriod` (default 15 s). This is safe against a live host: an
   actively streamed slot refuses the drop, so the client keeps waiting for the host instead.
 - `SuspendAsync` waits until every managed slot is verified gone (`Timeout`, default 2 minutes, then
   `WallabyControlTimeoutException` with the last observed state — the request stays persisted). Pass
   `WaitForCompletion = false` to fire-and-forget and poll `GetStateAsync`.
 
-A client-requested suspension is **never auto-resumed** — not by restarts, not by fresh deployments.
-Only an explicit `ResumeAsync` (or raw SQL) ends it.
+A client-requested suspension is **never auto-resumed**. Only an explicit `ResumeAsync` (or raw SQL) ends it.
 
 ### Raw SQL fallback
 
@@ -135,13 +131,7 @@ SELECT pg_notify('wallaby_control', '');
 
 ## Operational notes
 
-- **Upgrade Wallaby first.** Every node must run a suspension-aware Wallaby version before you suspend:
-  an old node knows nothing of `wallaby.control` and would recreate the slots mid-upgrade window.
-- **Privileges**: the client performs no DDL — `wallaby.control` is created by the Wallaby host at
-  startup, so `SuspendAsync` requires a suspension-aware host to have run against the database at least
-  once (it throws if the table is missing). Beyond that, suspending needs the same rights Wallaby itself
-  uses (drop its slots, update the `wallaby` schema's tables); `GetStateAsync` only reads.
-- **Health checks** report `Degraded` while suspended — deliberate but loud. Don't alert-page on it
+- **Health checks** report `Degraded` while suspended. Don't alert-page on it
   during a planned upgrade window; do alert if it persists after.
 - **Backfill requests** made while suspended stay persisted and are absorbed by the resume's full
   re-backfill.

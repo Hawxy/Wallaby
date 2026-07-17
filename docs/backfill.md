@@ -44,6 +44,24 @@ discarded and the table re-runs from the start.
 
 `GetStatusAsync()` is also available and returns the current state of every tracked table.
 
+### From outside the application
+
+The [Wallaby.Client](/operations/external-control) package drives the same mechanism from **any process
+with a connection string** — an ops console, a deployment script — with no Wallaby host reference. It
+has no entity model, so tables are addressed by schema-qualified name:
+
+```csharp
+await using var control = new WallabyControlClient(connectionString);
+
+await control.RequestBackfillAsync("public.products");
+
+var status = await control.GetBackfillStatusAsync();   // every tracked table's state
+```
+
+The request behaves exactly like the in-host manager's: persisted, served instantly by the current
+leader, and winning over an in-flight run. A request for a table Wallaby doesn't capture stays
+`Requested` until a mapping for it deploys.
+
 ## How it works
 
 Each table is snapshotted in keyset-paged chunks

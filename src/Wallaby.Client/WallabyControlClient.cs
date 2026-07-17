@@ -11,7 +11,8 @@ namespace Wallaby.Client;
 /// Wallaby host reference or running node required. Suspension durably drops every replication slot
 /// Wallaby manages (primary and external) so platforms like RDS/Aurora can run a major-version upgrade,
 /// and persists across restarts until <see cref="ResumeAsync"/>; on resume, Wallaby recreates its slots
-/// and re-backfills every mapped table to converge sinks.
+/// and re-backfills every mapped table to converge sinks. Backfills can also be requested directly via
+/// <see cref="RequestBackfillAsync"/>, addressed by schema-qualified table name.
 /// </summary>
 public sealed class WallabyControlClient : IAsyncDisposable
 {
@@ -158,6 +159,44 @@ public sealed class WallabyControlClient : IAsyncDisposable
         return Map(row, slots);
     }
 
+    /// <summary>
+    /// Request a (re)backfill of <paramref name="tableQualifiedName"/> (schema-qualified, e.g.
+    /// <c>public.orders</c>). The request is persisted — it survives restarts and is served by whichever
+    /// node holds leadership, signalled instantly via LISTEN/NOTIFY. A request made while the table is
+    /// already backfilling wins: the table re-runs from the start. A request for a table Wallaby does not
+    /// capture stays <see cref="WallabyBackfillStatus.Requested"/> until a mapping for it deploys.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The database has no <c>wallaby.backfill_state</c> table — no Wallaby host has run against it.
+    /// </exception>
+    public async Task RequestBackfillAsync(string tableQualifiedName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableQualifiedName);
+        try
+        {
+            await BackfillOperations.RequestAsync(_dataSource, tableQualifiedName, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            throw new InvalidOperationException(
+                "This database has no wallaby.backfill_state table: no Wallaby host has run against it. " +
+                "The host creates it at startup.", ex);
+        }
+        _logger.BackfillRequested(tableQualifiedName);
+    }
+
+    /// <summary>
+    /// The backfill state of every tracked table. Empty for a database no Wallaby host has run against.
+    /// </summary>
+    public async Task<IReadOnlyList<WallabyBackfillState>> GetBackfillStatusAsync(CancellationToken ct = default)
+    {
+        var rows = await BackfillOperations.ListStatesAsync(_dataSource, ct);
+        return rows
+            .Select(r => new WallabyBackfillState(
+                r.TableQualified, Enum.Parse<WallabyBackfillStatus>(r.Status), r.RowsCopied, r.UpdatedAt))
+            .ToList();
+    }
+
     private static WallabyControlState Map(ControlRow? row, IReadOnlyList<ManagedSlotRow> slots)
     {
         var mapped = slots.Count == 0
@@ -199,4 +238,7 @@ internal static partial class WallabyControlClientLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby resume requested (transitioned={Transitioned}).")]
     internal static partial void ResumeRequested(this ILogger logger, bool transitioned);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table '{Table}'.")]
+    internal static partial void BackfillRequested(this ILogger logger, string table);
 }

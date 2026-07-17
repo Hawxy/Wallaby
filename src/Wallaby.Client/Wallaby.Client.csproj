@@ -6,8 +6,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Remote control plane for Wallaby: suspend, resume, and inspect a Wallaby installation through its Postgres database from any process with a connection string — no Wallaby host required. Suspension drops every managed replication slot so platforms like RDS/Aurora can run a major-version upgrade.</Description>
-    <PackageTags>control-plane;operations;suspend;npgsql</PackageTags>
+    <Description>Remote control plane for Wallaby: suspend, resume, trigger backfills, and inspect a Wallaby installation through its Postgres database from any process with a connection string — no Wallaby host required. Suspension drops every managed replication slot so platforms like RDS/Aurora can run a major-version upgrade.</Description>
+    <PackageTags>control-plane;operations;suspend;backfill;npgsql</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
