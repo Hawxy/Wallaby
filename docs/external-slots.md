@@ -75,6 +75,11 @@ distinct from Wallaby's own slot/publication and from each other.
   DROP PUBLICATION elt_pub;
   ```
 
+  The one exception is a [suspension](/operations/major-version-upgrades): suspending Wallaby (e.g. for
+  an RDS/Aurora major-version upgrade) drops **every** managed slot, external ones included, because the
+  platform's precheck rejects any logical slot. The slot is recreated on resume, but the external
+  consumer's position is gone — it must re-sync.
+
 - **Slot headroom**: Wallaby's startup validation accounts for every slot it will create (its own plus all
   external ones) and fails fast with `max_replication_slots` guidance if there isn't room.
 - **Bookkeeping**: Each provisioned slot is recorded in `wallaby.slot_registry`; external slots are marked

@@ -7,6 +7,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Wallaby.AspNetCore.HealthChecks/Wallaby.AspNetCore.HealthChecks.csproj" />
+    <Project Path="src/Wallaby.Client/Wallaby.Client.csproj" />
     <Project Path="src/Wallaby.Providers.EntityFrameworkCore/Wallaby.Providers.EntityFrameworkCore.csproj" />
     <Project Path="src/Wallaby.Providers.Marten/Wallaby.Providers.Marten.csproj" />
     <Project Path="src/Wallaby.Sinks.Http/Wallaby.Sinks.Http.csproj" />
@@ -17,6 +18,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Wallaby.AotSmokeTest/Wallaby.AotSmokeTest.csproj" />
+    <Project Path="tests/Wallaby.Client.Tests/Wallaby.Client.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.Tests/Wallaby.Providers.EntityFrameworkCore.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.Marten.Tests/Wallaby.Providers.Marten.Tests.csproj" />
     <Project Path="tests/Wallaby.Sinks.Http.Tests/Wallaby.Sinks.Http.Tests.csproj" />

@@ -1,0 +1,202 @@
+using Npgsql;
+using Wallaby.Client.Internal;
+using Wallaby.TestInfrastructure;
+
+namespace Wallaby.Client.Tests.Integration;
+
+/// <summary>
+/// Exercises the control client against a bare database — no Wallaby host anywhere. The grace-period
+/// fallback makes the client itself drop the managed slots, which is the scaled-to-zero /
+/// provision-only-already-exited story for an RDS/Aurora upgrade.
+/// </summary>
+[NotInParallel]
+[ClassDataSource<PostgresFixture>(Shared = SharedType.PerTestSession)]
+public class ControlClientTests(PostgresFixture pg)
+{
+    // The wallaby.control row is installation-wide; leave the shared database running for other tests.
+    private async Task ResetControlAsync()
+    {
+        try
+        {
+            await using var cmd = pg.DataSource.CreateCommand("DELETE FROM wallaby.control");
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+        }
+    }
+
+    private async Task ExecAsync(string sql)
+    {
+        await using var cmd = pg.DataSource.CreateCommand(sql);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task<long> CountSlotsAsync(params string[] names)
+    {
+        await using var cmd = pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM pg_replication_slots WHERE slot_name = ANY($1)");
+        cmd.Parameters.AddWithValue(names);
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    // Matches StateSchemaBootstrapper's registry DDL; the client-only tests have no host to create it.
+    private Task EnsureRegistryAsync() => ExecAsync(
+        """
+        CREATE SCHEMA IF NOT EXISTS wallaby;
+        CREATE TABLE IF NOT EXISTS wallaby.slot_registry (
+            slot_name        text        PRIMARY KEY,
+            publication      text        NOT NULL,
+            consistent_point pg_lsn      NULL,
+            kind             text        NOT NULL DEFAULT 'primary',
+            created_at       timestamptz NOT NULL DEFAULT now()
+        );
+        """);
+
+    [Test]
+    public async Task A_database_wallaby_never_touched_reads_running()
+    {
+        // A dedicated database proves GetStateAsync needs no wallaby schema and performs no DDL.
+        await ExecAsync("CREATE DATABASE control_virgin");
+        var builder = new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Database = "control_virgin" };
+        await using var client = new WallabyControlClient(builder.ConnectionString);
+
+        var state = await client.GetStateAsync();
+
+        state.State.ShouldBe(WallabySuspensionState.Running);
+        state.Slots.ShouldBeEmpty();
+
+        // Resume needs no DDL either: with no control table there is nothing to resume.
+        (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);
+
+        // Reads never create the wallaby schema.
+        await using var virginSource = NpgsqlDataSource.Create(builder.ConnectionString);
+        await using var check = virginSource.CreateCommand(
+            "SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname = 'wallaby'");
+        (await check.ExecuteScalarAsync()).ShouldBe(0L);
+    }
+
+    [Test]
+    public async Task Suspend_without_a_host_drops_managed_slots_from_the_client()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var primary = $"cdc_slot_{suffix}";
+        var external = $"elt_slot_{suffix}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureRegistryAsync();
+            await ExecAsync($"SELECT pg_create_logical_replication_slot('{primary}', 'pgoutput')");
+            await ExecAsync($"SELECT pg_create_logical_replication_slot('{external}', 'pgoutput')");
+            await ExecAsync(
+                $"""
+                 INSERT INTO wallaby.slot_registry (slot_name, publication, kind)
+                 VALUES ('{primary}', 'pub_{suffix}', 'primary'), ('{external}', 'ext_pub_{suffix}', 'external')
+                 """);
+
+            var state = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                Reason = "PG18 upgrade",
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(60),
+            });
+
+            state.State.ShouldBe(WallabySuspensionState.Suspended);
+            state.Origin.ShouldBe(WallabySuspensionOrigin.Client);
+            state.Reason.ShouldBe("PG18 upgrade");
+            state.SuspendedAt.ShouldNotBeNull();
+            state.Slots.Count.ShouldBe(2);
+            state.Slots.ShouldAllBe(s => !s.ExistsOnServer);
+            (await CountSlotsAsync(primary, external)).ShouldBe(0);
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.slot_registry WHERE slot_name IN ('{primary}', '{external}')");
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task Double_suspend_is_a_noop_that_keeps_the_original_request()
+    {
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            var first = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                Reason = "original",
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+            first.State.ShouldBe(WallabySuspensionState.Suspended);
+
+            var second = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                Reason = "overwritten?",
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+
+            second.State.ShouldBe(WallabySuspensionState.Suspended);
+            second.Reason.ShouldBe("original");
+            second.RequestedAt.ShouldBe(first.RequestedAt);
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task Resume_ends_the_suspension_and_is_a_noop_when_running()
+    {
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await client.SuspendAsync(new WallabySuspendOptions
+            {
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+
+            var resumed = await client.ResumeAsync();
+            resumed.State.ShouldBe(WallabySuspensionState.Running);
+            resumed.ResumedAt.ShouldNotBeNull();
+
+            // Resume when nothing is suspended: an unchanged running state, no exception.
+            (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_stranded_suspend_request_converges_when_retried()
+    {
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            // Simulates a finalizer crash after the drops but before the mark: the request row persists
+            // with no slots left to drop.
+            await ControlOperations.EnsureControlTableAsync(pg.DataSource, CancellationToken.None);
+            await ControlOperations.RequestSuspendAsync(
+                pg.DataSource, ControlContract.OriginClient, "crashed mid-suspend", "test", CancellationToken.None);
+            (await client.GetStateAsync()).State.ShouldBe(WallabySuspensionState.SuspendRequested);
+
+            var state = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+
+            state.State.ShouldBe(WallabySuspensionState.Suspended);
+            state.Reason.ShouldBe("crashed mid-suspend");
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+}

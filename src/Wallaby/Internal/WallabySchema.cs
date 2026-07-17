@@ -20,4 +20,10 @@ internal static class WallabySchema
     /// the moment it is persisted.
     /// </summary>
     public const string BackfillNotifyChannel = "wallaby_backfill";
+
+    /// <summary>
+    /// LISTEN/NOTIFY channel signalled on suspend/resume transitions, so the runtime reacts the moment
+    /// the control row changes. The name is owned by the shared control contract.
+    /// </summary>
+    public const string ControlNotifyChannel = Client.Internal.ControlContract.NotifyChannel;
 }

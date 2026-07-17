@@ -1,4 +1,5 @@
 using Npgsql;
+using Wallaby.Client.Internal;
 
 namespace Wallaby.Internal.State;
 
@@ -71,6 +72,7 @@ internal sealed class StateSchemaBootstrapper
         DELETE FROM wallaby.fanout_queue WHERE status = 'Completed';
         """;
 
+    // Suspend/resume control row; DDL shared with the Wallaby.Client client via ControlContract.
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)
-        => PgExec.ExecuteAsync(connection, Ddl, ct);
+        => PgExec.ExecuteAsync(connection, Ddl + "\n" + ControlContract.TableDdl, ct);
 }

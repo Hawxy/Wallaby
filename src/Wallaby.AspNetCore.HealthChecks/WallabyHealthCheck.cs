@@ -14,9 +14,16 @@ public sealed class WallabyHealthCheck(IWallabyStatus status) : IHealthCheck
         var snapshot = status.Current;
         var data = Describe(snapshot);
 
-        var result = snapshot.Faulted
-            ? HealthCheckResult.Unhealthy("Wallaby background service terminated.", exception: null, data)
-            : HealthCheckResult.Healthy("Wallaby subsystem alive.", data);
+        var result = snapshot switch
+        {
+            { Faulted: true } => HealthCheckResult.Unhealthy(
+                "Wallaby background service terminated.", exception: null, data),
+            // Deliberate but loud: the node is alive (don't restart-loop it) while replication is
+            // deliberately stopped and its slots are dropped (e.g. for a database major-version upgrade).
+            { Role: WallabyNodeRole.Suspended } => HealthCheckResult.Degraded(
+                "Wallaby is suspended: managed replication slots are dropped until an explicit resume.", exception: null, data),
+            _ => HealthCheckResult.Healthy("Wallaby subsystem alive.", data),
+        };
 
         return Task.FromResult(result);
     }
@@ -35,6 +42,8 @@ public sealed class WallabyHealthCheck(IWallabyStatus status) : IHealthCheck
         };
         if (s.LastError is { } error) data["lastError"] = error;
         if (s.LeaderSince is { } leaderSince) data["leaderSince"] = leaderSince;
+        if (s.SuspendedSince is { } suspendedSince) data["suspendedSince"] = suspendedSince;
+        if (s.SuspensionReason is { } suspensionReason) data["suspensionReason"] = suspensionReason;
         if (s.LastProgressAt is { } progress) data["lastProgressAt"] = progress;
         if (s.LastIngestionLagSeconds >= 0) data["lastIngestionLagSeconds"] = s.LastIngestionLagSeconds;
         foreach (var (sink, at) in s.LastSinkDeliveryAt)

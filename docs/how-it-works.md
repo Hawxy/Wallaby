@@ -23,6 +23,8 @@ The replication slot is the only source of live changes, and a slot can be destr
 - The server invalidates it when it retains more WAL than `max_slot_wal_keep_size`.
 - A failover to a promoted replica loses it (before Postgres 17 slot sync, or on providers that don't sync slots).
 - It's accidentally dropped by someone.
+- Wallaby itself dropped it for a [suspension](/operations/major-version-upgrades) (e.g. an RDS/Aurora
+  major-version upgrade) — resuming deliberately recovers through this same mechanism.
   
 A freshly created slot only streams from its creation point forward, so everything between the last applied
 change and that point would be silently missed.

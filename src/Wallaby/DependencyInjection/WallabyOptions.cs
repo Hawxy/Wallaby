@@ -48,6 +48,18 @@ public sealed class WallabyOptions
     public SinkRetryOptions SinkRetry { get; set; } = new();
 
     /// <summary>
+    /// Deploy-time suspension flag (see <see cref="WallabyBuilder.Suspend"/>). While set, this node drops
+    /// every managed replication slot and idles instead of streaming — so a platform blocked by logical
+    /// slots (e.g. an RDS/Aurora major-version upgrade) can proceed. A node deployed without the flag
+    /// automatically resumes a flag-driven suspension; a runtime-requested one (Wallaby.Client's
+    /// <c>SuspendAsync</c>) persists until an explicit resume.
+    /// </summary>
+    public bool Suspended { get; set; }
+
+    /// <summary>Free-text reason recorded with a <see cref="Suspended"/> flag-driven suspension.</summary>
+    public string? SuspensionReason { get; set; }
+
+    /// <summary>
     /// Internal tuning knobs (HA election cadence, connection keepalives, buffering ceilings). The
     /// defaults are safe for almost all deployments.
     /// </summary>

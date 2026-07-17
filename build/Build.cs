@@ -94,6 +94,7 @@ class Build : NukeBuild
         "Wallaby.Sinks.Kafka",
         "Wallaby.Sinks.Meilisearch",
         "Wallaby.AspNetCore.HealthChecks",
+        "Wallaby.Client",
         "Wallaby.Testing",
     ];
 

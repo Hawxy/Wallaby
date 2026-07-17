@@ -164,6 +164,25 @@ public sealed class WallabyBuilder
     }
 
     /// <summary>
+    /// Deploy this node suspended: on startup it drops every replication slot Wallaby manages (primary and
+    /// external) and idles until resumed, so a platform blocked by logical slots — e.g. an RDS/Aurora
+    /// major-version upgrade precheck — can proceed. Enables a two-phase upgrade with no admin endpoint:
+    /// deploy with <c>Suspend()</c>, run the engine upgrade, then deploy without it — the flag-less node
+    /// resumes automatically, recreates the slots, and re-backfills every mapped table. While deployed, the
+    /// flag is re-asserted over remote resumes; a suspension requested at runtime (Wallaby.Client)
+    /// is never auto-resumed. Shorthand for <c>ConfigureOptions(o =&gt; o.Suspended = true)</c>.
+    /// </summary>
+    public WallabyBuilder Suspend(string? reason = null)
+    {
+        _configuration.OptionsActions.Add((_, options) =>
+        {
+            options.Suspended = true;
+            options.SuspensionReason = reason;
+        });
+        return this;
+    }
+
+    /// <summary>
     /// Spill pgoutput v2 streamed (large) transactions to local disk instead of the default database backend.
     /// Lowest source-DB impact and the truest memory bound, but needs a writable <paramref name="directory"/> —
     /// defaults to a per-slot folder under the OS temp path; mount a writable volume when the container's root

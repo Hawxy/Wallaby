@@ -14,6 +14,12 @@ public enum WallabyNodeRole
 
     /// <summary>The Wallaby background service has stopped (graceful shutdown or fatal fault).</summary>
     Stopped,
+
+    /// <summary>
+    /// The installation is suspended: every managed replication slot is dropped (e.g. for a database
+    /// major-version upgrade) and this node idles until an explicit resume.
+    /// </summary>
+    Suspended,
 }
 
 /// <summary>An immutable point-in-time view of a node's Wallaby status.</summary>
@@ -56,6 +62,12 @@ public sealed record WallabyStatusSnapshot
     /// poison scoped re-snapshot) with backoff; live replication is unaffected. Reset on a healthy pass.
     /// </summary>
     public int ConsecutiveFanoutFailures { get; init; }
+
+    /// <summary>When the current suspension was requested; null unless <see cref="Role"/> is <see cref="WallabyNodeRole.Suspended"/>.</summary>
+    public DateTimeOffset? SuspendedSince { get; init; }
+
+    /// <summary>The reason recorded with the current suspension, if any.</summary>
+    public string? SuspensionReason { get; init; }
 
     /// <summary>The replication slot name.</summary>
     public string SlotName { get; init; } = "";

@@ -51,10 +51,25 @@ internal sealed class WallabyStatus : IWallabyStatus
     }
 
     internal void EnterLeader(DateTimeOffset since) =>
-        Update(s => s with { Role = WallabyNodeRole.Leader, LeaderSince = since, Faulted = false });
+        Update(s => s with
+        {
+            Role = WallabyNodeRole.Leader, LeaderSince = since, Faulted = false,
+            SuspendedSince = null, SuspensionReason = null,
+        });
 
     internal void EnterStandby() =>
-        Update(s => s with { Role = WallabyNodeRole.Standby, LeaderSince = null });
+        Update(s => s with
+        {
+            Role = WallabyNodeRole.Standby, LeaderSince = null,
+            SuspendedSince = null, SuspensionReason = null,
+        });
+
+    internal void EnterSuspended(DateTimeOffset? since, string? reason) =>
+        Update(s => s with
+        {
+            Role = WallabyNodeRole.Suspended, LeaderSince = null,
+            SuspendedSince = since, SuspensionReason = reason,
+        });
 
     internal void RecordLeaderFailure(string error) =>
         Update(s => s with { ConsecutiveLeaderFailures = s.ConsecutiveLeaderFailures + 1, LastError = error });

@@ -34,6 +34,7 @@ You have a number of choices as to where streamed transactions spill:
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
+| `Suspended` / `SuspensionReason` | `false` / – | Deploy-time [suspension](/operations/major-version-upgrades) flag (set via `Suspend(reason?)` on the builder): the node drops every managed replication slot and idles instead of streaming, so a platform blocked by logical slots (e.g. an RDS/Aurora major-version upgrade) can proceed. A flag-less deployment auto-resumes it. |
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
 | `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
@@ -75,6 +76,7 @@ You shouldn't modify these unless you know what you're doing:
 | `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval is only a safety net for a missed notification. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 | `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
+| `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state — the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
 
 ## Options Pattern
 
