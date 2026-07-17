@@ -27,6 +27,23 @@ public class ProvisionOnlySuspensionTests(PostgresFixture pg)
         await using var client = new WallabyControlClient(pg.ConnectionString);
         try
         {
+            // The client performs no DDL — simulate a suspension-aware host having run once.
+            await ExecAsync(
+                """
+                CREATE SCHEMA IF NOT EXISTS wallaby;
+                CREATE TABLE IF NOT EXISTS wallaby.control (
+                    scope        text        PRIMARY KEY DEFAULT 'wallaby' CHECK (scope = 'wallaby'),
+                    state        text        NOT NULL DEFAULT 'Running',
+                    origin       text        NOT NULL DEFAULT 'client',
+                    reason       text        NULL,
+                    requested_by text        NULL,
+                    requested_at timestamptz NULL,
+                    suspended_at timestamptz NULL,
+                    resumed_at   timestamptz NULL,
+                    updated_at   timestamptz NOT NULL DEFAULT now()
+                );
+                """);
+
             // Suspend before the host exists (nothing to drop — finalizes instantly from the client).
             var suspended = await client.SuspendAsync(new WallabySuspendOptions
             {

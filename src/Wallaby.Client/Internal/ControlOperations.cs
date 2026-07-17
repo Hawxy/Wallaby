@@ -30,14 +30,6 @@ internal static class ControlOperations
 
     private const string Notify = $"SELECT pg_notify('{ControlContract.NotifyChannel}', '');";
 
-    /// <summary>Create the wallaby schema and control table if absent. Requires DDL rights on the schema.</summary>
-    public static async Task EnsureControlTableAsync(NpgsqlDataSource dataSource, CancellationToken ct)
-    {
-        await using var cmd = dataSource.CreateCommand(
-            "CREATE SCHEMA IF NOT EXISTS wallaby;\n" + ControlContract.TableDdl);
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
     /// <summary>
     /// Read the control row. Returns <c>null</c> when the row or the table doesn't exist (a database no
     /// Wallaby version with suspension support has touched) — both mean "running".

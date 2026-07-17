@@ -1,5 +1,4 @@
 using Npgsql;
-using Wallaby.Client.Internal;
 
 namespace Wallaby.Internal.State;
 
@@ -68,11 +67,24 @@ internal sealed class StateSchemaBootstrapper
         -- CREATE IF NOT EXISTS won't evolve an existing table; stale rows are cleared at session start.
         ALTER TABLE wallaby.stream_buffer ADD COLUMN IF NOT EXISTS subxid bigint NOT NULL DEFAULT 0;
 
+        -- Suspend/resume control row (singleton; wire format shared with Wallaby.Client via
+        -- ControlContract). Created only by the host — the remote client never performs DDL.
+        CREATE TABLE IF NOT EXISTS wallaby.control (
+            scope        text        PRIMARY KEY DEFAULT 'wallaby' CHECK (scope = 'wallaby'),
+            state        text        NOT NULL DEFAULT 'Running',
+            origin       text        NOT NULL DEFAULT 'client',
+            reason       text        NULL,
+            requested_by text        NULL,
+            requested_at timestamptz NULL,
+            suspended_at timestamptz NULL,
+            resumed_at   timestamptz NULL,
+            updated_at   timestamptz NOT NULL DEFAULT now()
+        );
+
         -- Finished fan-out jobs are deleted on completion; clear rows written before that behavior.
         DELETE FROM wallaby.fanout_queue WHERE status = 'Completed';
         """;
 
-    // Suspend/resume control row; DDL shared with the Wallaby.Client client via ControlContract.
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)
-        => PgExec.ExecuteAsync(connection, Ddl + "\n" + ControlContract.TableDdl, ct);
+        => PgExec.ExecuteAsync(connection, Ddl, ct);
 }

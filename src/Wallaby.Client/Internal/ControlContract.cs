@@ -3,7 +3,9 @@ namespace Wallaby.Client.Internal;
 /// <summary>
 /// The shared contract for the <c>wallaby.control</c> table and its notify channel. Compile-linked into
 /// both Wallaby (the host side) and Wallaby.Client (the remote client) so the two agree on the
-/// wire format without a package reference in either direction.
+/// wire format without a package reference in either direction. The table itself is created only by the
+/// host (<c>StateSchemaBootstrapper</c>); the client never performs DDL. A regular (logged) table so a
+/// suspension survives <c>pg_upgrade</c>; an absent row or table reads as <see cref="StateRunning"/>.
 /// </summary>
 internal static class ControlContract
 {
@@ -27,22 +29,4 @@ internal static class ControlContract
     /// deployed without the flag.
     /// </summary>
     public const string OriginConfiguration = "configuration";
-
-    /// <summary>
-    /// Idempotent DDL for the control table. A regular (logged) table so the suspension survives
-    /// <c>pg_upgrade</c>; an absent row or table reads as <see cref="StateRunning"/>.
-    /// </summary>
-    public const string TableDdl = """
-        CREATE TABLE IF NOT EXISTS wallaby.control (
-            scope        text        PRIMARY KEY DEFAULT 'wallaby' CHECK (scope = 'wallaby'),
-            state        text        NOT NULL DEFAULT 'Running',
-            origin       text        NOT NULL DEFAULT 'client',
-            reason       text        NULL,
-            requested_by text        NULL,
-            requested_at timestamptz NULL,
-            suspended_at timestamptz NULL,
-            resumed_at   timestamptz NULL,
-            updated_at   timestamptz NOT NULL DEFAULT now()
-        );
-        """;
 }

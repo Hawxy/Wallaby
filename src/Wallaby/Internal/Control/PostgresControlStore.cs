@@ -19,13 +19,16 @@ internal sealed class PostgresControlStore(WallabyDataSource dataSource, ILogger
         => await ReadAsync(ct) is { } row && row.State != ControlContract.StateRunning;
 
     /// <summary>
-    /// Assert the deployed <c>Suspend()</c> flag: ensure the control table and transition Running →
-    /// SuspendRequested with the configuration origin. A suspension already in force (either origin)
-    /// is left untouched.
+    /// Assert the deployed <c>Suspend()</c> flag: ensure the state schema (the gate runs before a leader
+    /// session can bootstrap it) and transition Running → SuspendRequested with the configuration origin.
+    /// A suspension already in force (either origin) is left untouched.
     /// </summary>
     public async Task<bool> RequestConfigurationSuspendAsync(string? reason, CancellationToken ct)
     {
-        await ControlOperations.EnsureControlTableAsync(dataSource.Source, ct);
+        await using (var connection = await dataSource.Source.OpenConnectionAsync(ct))
+        {
+            await new StateSchemaBootstrapper().EnsureAsync(connection, ct);
+        }
         return await ControlOperations.RequestSuspendAsync(
             dataSource.Source, ControlContract.OriginConfiguration, reason, Environment.MachineName, ct);
     }

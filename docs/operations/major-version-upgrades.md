@@ -137,9 +137,10 @@ SELECT pg_notify('wallaby_control', '');
 
 - **Upgrade Wallaby first.** Every node must run a suspension-aware Wallaby version before you suspend:
   an old node knows nothing of `wallaby.control` and would recreate the slots mid-upgrade window.
-- **Privileges**: suspending needs the same rights Wallaby itself uses (drop its slots, write the
-  `wallaby` schema). The first `SuspendAsync` against a database no suspension-aware version has touched
-  also creates `wallaby.control`, which needs DDL on the schema. `GetStateAsync` never needs DDL.
+- **Privileges**: the client performs no DDL — `wallaby.control` is created by the Wallaby host at
+  startup, so `SuspendAsync` requires a suspension-aware host to have run against the database at least
+  once (it throws if the table is missing). Beyond that, suspending needs the same rights Wallaby itself
+  uses (drop its slots, update the `wallaby` schema's tables); `GetStateAsync` only reads.
 - **Health checks** report `Degraded` while suspended — deliberate but loud. Don't alert-page on it
   during a planned upgrade window; do alert if it persists after.
 - **Backfill requests** made while suspended stay persisted and are absorbed by the resume's full

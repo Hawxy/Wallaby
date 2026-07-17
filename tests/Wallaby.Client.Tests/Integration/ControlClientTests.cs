@@ -53,6 +53,24 @@ public class ControlClientTests(PostgresFixture pg)
         );
         """);
 
+    // Matches StateSchemaBootstrapper's control DDL — the client performs no DDL itself, so these tests
+    // simulate a suspension-aware host having run against the database.
+    private Task EnsureControlTableAsync() => ExecAsync(
+        """
+        CREATE SCHEMA IF NOT EXISTS wallaby;
+        CREATE TABLE IF NOT EXISTS wallaby.control (
+            scope        text        PRIMARY KEY DEFAULT 'wallaby' CHECK (scope = 'wallaby'),
+            state        text        NOT NULL DEFAULT 'Running',
+            origin       text        NOT NULL DEFAULT 'client',
+            reason       text        NULL,
+            requested_by text        NULL,
+            requested_at timestamptz NULL,
+            suspended_at timestamptz NULL,
+            resumed_at   timestamptz NULL,
+            updated_at   timestamptz NOT NULL DEFAULT now()
+        );
+        """);
+
     [Test]
     public async Task A_database_wallaby_never_touched_reads_running()
     {
@@ -66,10 +84,13 @@ public class ControlClientTests(PostgresFixture pg)
         state.State.ShouldBe(WallabySuspensionState.Running);
         state.Slots.ShouldBeEmpty();
 
-        // Resume needs no DDL either: with no control table there is nothing to resume.
+        // Resume needs no control table: with none there is nothing to resume.
         (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);
 
-        // Reads never create the wallaby schema.
+        // Suspend refuses instead of creating the table: only the host performs DDL.
+        await Should.ThrowAsync<InvalidOperationException>(() => client.SuspendAsync());
+
+        // The client never creates the wallaby schema.
         await using var virginSource = NpgsqlDataSource.Create(builder.ConnectionString);
         await using var check = virginSource.CreateCommand(
             "SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname = 'wallaby'");
@@ -86,6 +107,7 @@ public class ControlClientTests(PostgresFixture pg)
         try
         {
             await EnsureRegistryAsync();
+            await EnsureControlTableAsync();
             await ExecAsync($"SELECT pg_create_logical_replication_slot('{primary}', 'pgoutput')");
             await ExecAsync($"SELECT pg_create_logical_replication_slot('{external}', 'pgoutput')");
             await ExecAsync(
@@ -122,6 +144,7 @@ public class ControlClientTests(PostgresFixture pg)
         await using var client = new WallabyControlClient(pg.ConnectionString);
         try
         {
+            await EnsureControlTableAsync();
             var first = await client.SuspendAsync(new WallabySuspendOptions
             {
                 Reason = "original",
@@ -153,6 +176,7 @@ public class ControlClientTests(PostgresFixture pg)
         await using var client = new WallabyControlClient(pg.ConnectionString);
         try
         {
+            await EnsureControlTableAsync();
             await client.SuspendAsync(new WallabySuspendOptions
             {
                 HostGracePeriod = TimeSpan.Zero,
@@ -180,7 +204,7 @@ public class ControlClientTests(PostgresFixture pg)
         {
             // Simulates a finalizer crash after the drops but before the mark: the request row persists
             // with no slots left to drop.
-            await ControlOperations.EnsureControlTableAsync(pg.DataSource, CancellationToken.None);
+            await EnsureControlTableAsync();
             await ControlOperations.RequestSuspendAsync(
                 pg.DataSource, ControlContract.OriginClient, "crashed mid-suspend", "test", CancellationToken.None);
             (await client.GetStateAsync()).State.ShouldBe(WallabySuspensionState.SuspendRequested);

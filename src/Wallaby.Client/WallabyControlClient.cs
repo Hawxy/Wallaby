@@ -50,9 +50,13 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// wait until every managed replication slot is verified dropped. If no host acts within
     /// <see cref="WallabySuspendOptions.HostGracePeriod"/>, this client drops the slots itself. The
     /// suspension survives restarts and the database outage during an engine upgrade; it ends only with
-    /// <see cref="ResumeAsync"/>. Requires DDL rights on the <c>wallaby</c> schema the first time it runs
-    /// against a database no suspension-aware Wallaby version has touched.
+    /// <see cref="ResumeAsync"/>. The client performs no DDL: the <c>wallaby.control</c> table is created
+    /// by the Wallaby host, so a suspension-aware host must have run against the database at least once.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The database has no <c>wallaby.control</c> table — no suspension-aware Wallaby version has run
+    /// against it.
+    /// </exception>
     /// <exception cref="WallabyControlTimeoutException">
     /// The <see cref="WallabySuspendOptions.Timeout"/> expired before every slot was dropped — typically a
     /// consumer actively streaming from a managed slot (e.g. a Wallaby version without suspension support,
@@ -62,10 +66,20 @@ public sealed class WallabyControlClient : IAsyncDisposable
         WallabySuspendOptions? options = null, CancellationToken ct = default)
     {
         options ??= new WallabySuspendOptions();
-        await ControlOperations.EnsureControlTableAsync(_dataSource, ct);
-        var transitioned = await ControlOperations.RequestSuspendAsync(
-            _dataSource, ControlContract.OriginClient, options.Reason,
-            options.RequestedBy ?? Environment.MachineName, ct);
+        bool transitioned;
+        try
+        {
+            transitioned = await ControlOperations.RequestSuspendAsync(
+                _dataSource, ControlContract.OriginClient, options.Reason,
+                options.RequestedBy ?? Environment.MachineName, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            throw new InvalidOperationException(
+                "This database has no wallaby.control table: no suspension-aware Wallaby version has run " +
+                "against it. Deploy a Wallaby host with suspension support first — it creates the control " +
+                "table at startup.", ex);
+        }
         _logger.SuspendRequested(transitioned);
 
         if (!options.WaitForCompletion)
