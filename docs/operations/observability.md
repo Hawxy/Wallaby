@@ -55,7 +55,7 @@ The activity source `Wallaby` emits one span per unit of work:
 
 | Span | Kind | Notable attributes |
 | --- | --- | --- |
-| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk); status `Error` on fault |
+| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk), `wallaby.heartbeat` (`true`, only on [idle-slot heartbeat](/how-it-works#idle-slots-and-wal-retention) transactions — filter these out in trace viewers); status `Error` on fault |
 | `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count`, `wallaby.fanout.offloaded` (bindings whose tail was queued as a scoped backfill) |
 | `route` | Internal | `wallaby.batch.size`, `wallaby.source` (`live`/`fanout`/`backfill`) |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |

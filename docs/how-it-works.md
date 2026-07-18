@@ -36,3 +36,23 @@ checkpoint was written. If so, Wallaby logs an error naming the missed LSN range
 mapped table for [re-backfill](/backfill), converging the sinks. An invalidated slot (`wal_status=lost`)
 is detected the same way, it is dropped and recreated, then repaired via the same path. Duplicates from
 the re-snapshot are absorbed by the idempotent upsert-by-id sink contract.
+
+## Idle slots and WAL retention
+
+A replication slot only lets the server recycle WAL up to the position the consumer has acknowledged,
+and Wallaby only acknowledges delivered transactions. Postgres skips transactions that touch no
+published table, so on a shared database where the mapped tables are quiet while other tables churn,
+Wallaby receives nothing, acknowledges nothing, and the slot pins an ever-growing range of WAL — until
+`max_slot_wal_keep_size` invalidates it and forces the full re-backfill described above.
+
+The leader closes this with a **heartbeat**: whenever no transaction has been acknowledged for
+[`HeartbeatInterval`](/configuration), it emits a tiny transactional message
+(`pg_logical_emit_message`) on a normal connection. The message flows through the replication stream
+as an empty committed transaction and is acknowledged through the ordinary delivery path, advancing
+`confirmed_flush_lsn` (and the checkpoint) with no tables, DDL, or extra grants involved. Heartbeats
+are suppressed while real traffic flows, so a busy system never emits them.
+
+::: tip
+`pg_logical_emit_message` is executable by any role by default. A hardened database that revokes
+default function `EXECUTE` privileges needs to re-grant it to Wallaby's role.
+:::

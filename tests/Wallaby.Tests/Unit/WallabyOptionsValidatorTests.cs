@@ -66,6 +66,17 @@ public class WallabyOptionsValidatorTests
     }
 
     [Test]
+    public void Negative_heartbeat_interval_fails()
+    {
+        var options = ValidOptions();
+        options.Advanced.HeartbeatInterval = TimeSpan.FromSeconds(-1);
+        Validate(options).Failed.ShouldBeTrue();
+
+        options.Advanced.HeartbeatInterval = TimeSpan.Zero;
+        Validate(options).Succeeded.ShouldBeTrue();
+    }
+
+    [Test]
     public void Sink_retry_base_delay_must_be_positive()
     {
         var options = ValidOptions();

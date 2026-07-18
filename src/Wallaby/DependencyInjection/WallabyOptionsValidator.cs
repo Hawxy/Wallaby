@@ -58,6 +58,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.CheckpointSaveInterval must be zero or greater.");
         }
+        if (options.Advanced.HeartbeatInterval < TimeSpan.Zero)
+        {
+            failures.Add("Advanced.HeartbeatInterval must be zero (disabled) or greater.");
+        }
         if (options.SinkRetry is null)
         {
             failures.Add("SinkRetry must not be null.");

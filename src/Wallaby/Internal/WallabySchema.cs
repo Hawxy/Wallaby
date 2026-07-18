@@ -11,6 +11,12 @@ internal static class WallabySchema
     public const string WatermarkHighPrefix = WatermarkPrefix + ".high";
 
     /// <summary>
+    /// Prefix of the generic WAL message the leader emits while the pipeline is idle, so the slot's
+    /// <c>confirmed_flush_lsn</c> keeps advancing when the mapped tables are quiet.
+    /// </summary>
+    public const string HeartbeatPrefix = Schema + ".heartbeat";
+
+    /// <summary>
     /// LISTEN/NOTIFY channel the fan-out queue uses to wake its worker the moment a job is enqueued.
     /// </summary>
     public const string FanoutNotifyChannel = "wallaby_fanout";

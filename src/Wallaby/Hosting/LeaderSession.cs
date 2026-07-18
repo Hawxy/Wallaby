@@ -122,6 +122,19 @@ internal sealed class LeaderSession(
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
         });
 
+        // Advances the slot while the mapped tables are idle. Never faults the session — the emitter
+        // logs and swallows per-tick errors, so a transiently-down database just skips ticks.
+        var heartbeatTask = options.Advanced.HeartbeatInterval > TimeSpan.Zero
+            ? Task.Run(async () =>
+            {
+                var emitter = new HeartbeatEmitter(
+                    dataSource.Source, () => pipeline.LastAcknowledgedLsn,
+                    options.Advanced.HeartbeatInterval, _logger);
+                try { await emitter.RunAsync(linked.Token); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            })
+            : Task.CompletedTask;
+
         // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
         var fanoutTask = components.FanoutQueue is not null
             ? Task.Run(async () =>
@@ -153,6 +166,7 @@ internal sealed class LeaderSession(
             await backfillTask; // never faults: the body records + swallows
             await fanoutTask;
             await controlTask;
+            await heartbeatTask;
         }
 
         ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks

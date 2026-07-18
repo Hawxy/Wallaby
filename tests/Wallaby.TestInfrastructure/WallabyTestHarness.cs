@@ -56,8 +56,10 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private WatermarkBackfillCoordinator? _coordinator;
     private DependentChangeResolver? _dependentResolver;
     private IFanoutQueueStore? _fanoutQueue;
+    private HeartbeatEmitter? _heartbeat;
     private Task? _pipelineTask;
     private Task? _backfillLoopTask;
+    private Task? _heartbeatTask;
 
     public WallabyTestHarness(string connectionString, IWallabyModelProvider modelProvider, WallabyNames? names = null)
     {
@@ -82,6 +84,15 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Idle-slot heartbeat interval (set before <see cref="StartAsync"/>). Opt-in: <see cref="TimeSpan.Zero"/>
+    /// (the default) disables the heartbeat so unrelated tests are unaffected.
+    /// </summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.Zero;
+
+    /// <summary>Heartbeats emitted since <see cref="StartAsync"/> (for suppression assertions).</summary>
+    public long HeartbeatsEmitted => _heartbeat?.EmittedCount ?? 0;
 
     /// <summary>Sink retry policy (set before <see cref="StartAsync"/>).</summary>
     public DependencyInjection.SinkRetryOptions SinkRetry { get; set; } = new();
@@ -272,6 +283,19 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
+
+        if (HeartbeatInterval > TimeSpan.Zero)
+        {
+            var emitter = new HeartbeatEmitter(
+                _dataSource, () => _pipeline.LastAcknowledgedLsn, HeartbeatInterval, NullLogger.Instance);
+            _heartbeat = emitter;
+            var token = _cts.Token;
+            _heartbeatTask = Task.Run(async () =>
+            {
+                try { await emitter.RunAsync(token); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            });
+        }
     }
 
     /// <summary>
@@ -383,6 +407,12 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             catch (Exception ex) { fault ??= ex; }
         }
 
+        if (_heartbeatTask is not null)
+        {
+            try { await _heartbeatTask; }
+            catch (OperationCanceledException) { }
+        }
+
         if (_stream is not null)
         {
             await _stream.DisposeAsync();
@@ -397,6 +427,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _cts = null;
         _pipelineTask = null;
         _backfillLoopTask = null;
+        _heartbeatTask = null;
+        _heartbeat = null;
         _stream = null;
         _spill = null;
         _pipeline = null;

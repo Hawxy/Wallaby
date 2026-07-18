@@ -31,6 +31,9 @@ internal sealed class TransactionAssembler(
     private readonly List<RawChange> _buffer = [];
     private readonly List<Watermark> _watermarks = [];
 
+    // True when the open non-streamed transaction carried a wallaby.heartbeat message.
+    private bool _sawHeartbeat;
+
     // Per-relation column read modes, aligned to the relation's column order; a null value means every
     // column reads with ColumnReadMode.Default (also cached, so unflagged and unmodeled tables pay the
     // model lookup once). Invalidated when the server re-sends a RelationMessage after a schema change.
@@ -52,14 +55,16 @@ internal sealed class TransactionAssembler(
             case BeginMessage:
                 _buffer.Clear();
                 _watermarks.Clear();
+                _sawHeartbeat = false;
                 return null;
 
             case CommitMessage commit:
                 var committed = Finalize(
-                    _buffer, _watermarks,
+                    _buffer, _watermarks, _sawHeartbeat,
                     (ulong)commit.CommitLsn, (ulong)commit.TransactionEndLsn, commit.TransactionCommitTimestamp);
                 _buffer.Clear();
                 _watermarks.Clear();
+                _sawHeartbeat = false;
                 return committed;
 
             // ---- streamed (large) transaction boundaries (v2) ----
@@ -97,6 +102,12 @@ internal sealed class TransactionAssembler(
             // ---- watermarks (only ever in tiny non-streamed transactions) ----
             case LogicalDecodingMessage msg when msg.Prefix.StartsWith(WallabySchema.WatermarkPrefix, StringComparison.Ordinal):
                 _watermarks.Add(new Watermark(msg.Prefix, await ReadAsStringAsync(msg.Data, ct)));
+                return null;
+
+            // ---- idle-slot heartbeats (only ever in tiny non-streamed transactions) ----
+            case LogicalDecodingMessage msg when msg.Prefix == WallabySchema.HeartbeatPrefix:
+                _ = await ReadAsStringAsync(msg.Data, ct);  // recycled-message rule: drain even an empty payload
+                _sawHeartbeat = true;
                 return null;
 
             // ---- DML: spill it for the open streamed xid, else buffer it for the non-streamed transaction ----
@@ -244,7 +255,8 @@ internal sealed class TransactionAssembler(
     }
 
     private static CommittedTransaction Finalize(
-        List<RawChange> buffer, List<Watermark> watermarks, ulong commitLsn, ulong endLsn, DateTime commitTimestamp)
+        List<RawChange> buffer, List<Watermark> watermarks, bool containsHeartbeat,
+        ulong commitLsn, ulong endLsn, DateTime commitTimestamp)
     {
         var timestamp = NormalizeTimestamp(commitTimestamp);
         var changes = new RawChange[buffer.Count];
@@ -264,6 +276,7 @@ internal sealed class TransactionAssembler(
             CommitTimestamp = timestamp,
             Changes = changes,
             Watermarks = watermarks.Count == 0 ? Array.Empty<Watermark>() : watermarks.ToArray(),
+            ContainsHeartbeat = containsHeartbeat,
         };
     }
 
