@@ -6,7 +6,9 @@ description: "Keeping Meilisearch indexes continuously in sync with Postgres tab
 
 The `Wallaby.Sinks.Meilisearch` package keeps Meilisearch indexes continuously in sync with your
 Postgres tables. Upserts are written with a stable primary key (so updates are idempotent) and
-deletions remove by that same id.
+deletions remove by that same id. The sink also supports
+[purge-then-backfill](/backfill#purging-before-a-backfill): a purge deletes all of an index's
+documents (the index and its settings survive) so the backfill rebuilds it from scratch.
 
 ## Install
 

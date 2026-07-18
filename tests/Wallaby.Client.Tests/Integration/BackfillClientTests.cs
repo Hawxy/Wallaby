@@ -28,8 +28,10 @@ public class BackfillClientTests(PostgresFixture pg)
             transform_version text        NULL,
             cursor_json       jsonb       NULL,
             rows_copied       bigint      NOT NULL DEFAULT 0,
+            purge             boolean     NOT NULL DEFAULT false,
             updated_at        timestamptz NOT NULL DEFAULT now()
         );
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS purge boolean NOT NULL DEFAULT false;
         """);
 
     [Test]
@@ -87,6 +89,36 @@ public class BackfillClientTests(PostgresFixture pg)
         {
             await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified = '{table}'");
         }
+    }
+
+    [Test]
+    public async Task Purge_request_sets_the_flag_and_survives_a_racing_plain_request()
+    {
+        var table = $"public.orders_{Guid.NewGuid():N}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureBackfillTableAsync();
+
+            await client.RequestBackfillAsync(table, purge: true);
+            (await ReadPurgeAsync(table)).ShouldBeTrue();
+
+            // Sticky-OR: a plain request does not clear a pending purge.
+            await client.RequestBackfillAsync(table);
+            (await ReadPurgeAsync(table)).ShouldBeTrue();
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified = '{table}'");
+        }
+    }
+
+    private async Task<bool> ReadPurgeAsync(string table)
+    {
+        await using var cmd = pg.DataSource.CreateCommand(
+            "SELECT purge FROM wallaby.backfill_state WHERE table_qualified = $1");
+        cmd.Parameters.AddWithValue(table);
+        return (bool)(await cmd.ExecuteScalarAsync())!;
     }
 
     [Test]

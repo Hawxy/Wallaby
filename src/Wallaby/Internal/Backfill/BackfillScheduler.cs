@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
 using Wallaby.Internal.State;
-using Wallaby.Model;
 
 namespace Wallaby.Internal.Backfill;
 
@@ -23,6 +22,9 @@ internal enum BackfillAction
     Resume, // continue an interrupted backfill from its cursor
 }
 
+/// <summary>The scheduler's decision for a table: the action, and whether a sink purge precedes it.</summary>
+internal readonly record struct BackfillDecision(BackfillAction Action, bool Purge);
+
 /// <summary>
 /// Decides which tables need backfilling at startup (and on demand) and runs them via the coordinator.
 /// Automatic triggers: a new table, a changed transform version, an interrupted (in-progress) backfill;
@@ -30,9 +32,10 @@ internal enum BackfillAction
 /// Intended to run on the leader.
 /// </summary>
 internal sealed class BackfillScheduler(
-    IReadOnlyList<(CapturedTable Table, string? TransformVersion)> tables,
+    IReadOnlyList<BackfillTable> tables,
     IBackfillStateStore store,
     WatermarkBackfillCoordinator coordinator,
+    SinkPurgeRunner purger,
     BackfillSchedulerOptions options,
     ILogger logger)
 {
@@ -65,43 +68,60 @@ internal sealed class BackfillScheduler(
 
     public async Task RunDueBackfillsAsync(CancellationToken ct)
     {
-        foreach (var (table, version) in tables)
+        foreach (var table in tables)
         {
-            var state = await store.GetAsync(table.QualifiedName, ct);
-            var action = DetermineAction(state, version, options);
-            if (action == BackfillAction.Skip)
+            var qualifiedName = table.Table.QualifiedName;
+            var state = await store.GetAsync(qualifiedName, ct);
+            var decision = Decide(state, table.TransformVersion, table.PurgeOnVersionChange, options);
+            if (decision.Action == BackfillAction.Skip)
             {
                 continue;
             }
 
-            if (action == BackfillAction.Fresh)
+            if (decision.Action == BackfillAction.Fresh)
             {
+                if (decision.Purge)
+                {
+                    // Purging before the snapshot read converges: the snapshot re-upserts every row that
+                    // exists at read time, and live changes win over snapshot rows within each chunk
+                    // window. Runs before the InProgress save so a crash in between re-detects the
+                    // request and re-purges (idempotent); the save clears the durable flag, so a
+                    // resumed backfill never purges away its own delivered chunks.
+                    await purger.PurgeAsync(table, ct);
+                }
+
                 // Reset the cursor so the coordinator starts from the beginning.
                 await store.SaveAsync(
-                    new BackfillState(table.QualifiedName, BackfillStatus.InProgress, version, null, 0, DateTimeOffset.UtcNow), ct);
+                    new BackfillState(
+                        qualifiedName, BackfillStatus.InProgress, table.TransformVersion, null, 0,
+                        DateTimeOffset.UtcNow),
+                    ct);
             }
 
-            logger.BackfillScheduled(action, table.QualifiedName, version);
-            await coordinator.BackfillTableAsync(table, version, ct);
+            logger.BackfillScheduled(decision.Action, qualifiedName, table.TransformVersion);
+            await coordinator.BackfillTableAsync(table.Table, table.TransformVersion, ct);
         }
     }
 
     /// <summary>Pure decision used by the scheduler (separated for testability).</summary>
-    public static BackfillAction DetermineAction(BackfillState? state, string? declaredVersion, BackfillSchedulerOptions options)
+    public static BackfillDecision Decide(
+        BackfillState? state, string? declaredVersion, bool purgeOnVersionChange, BackfillSchedulerOptions options)
     {
         if (state is null)
         {
-            return options.AutoBackfillNewTables ? BackfillAction.Fresh : BackfillAction.Skip;
+            return new(options.AutoBackfillNewTables ? BackfillAction.Fresh : BackfillAction.Skip, Purge: false);
         }
 
         return state.Status switch
         {
-            BackfillStatus.Requested => BackfillAction.Fresh,
-            BackfillStatus.NotStarted => BackfillAction.Fresh,
-            BackfillStatus.InProgress => BackfillAction.Resume,
+            BackfillStatus.Requested or BackfillStatus.NotStarted => new(BackfillAction.Fresh, state.Purge),
+            // Re-purging mid-run would delete the chunks the run already delivered.
+            BackfillStatus.InProgress => new(BackfillAction.Resume, Purge: false),
+            // A version-change Fresh fires from a Completed row (its flag is false — completion clears
+            // it), so the purge intent comes from the mappings' opt-in.
             BackfillStatus.Completed when options.AutoBackfillOnVersionChange && state.TransformVersion != declaredVersion
-                => BackfillAction.Fresh,
-            _ => BackfillAction.Skip,
+                => new(BackfillAction.Fresh, state.Purge || purgeOnVersionChange),
+            _ => new(BackfillAction.Skip, Purge: false),
         };
     }
 }

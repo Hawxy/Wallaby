@@ -5,19 +5,22 @@ namespace Wallaby.Testing;
 /// <summary>
 /// An <see cref="ISink"/> that records every delivered record for assertions. Thread-safe; supports
 /// waiting for expected records to arrive (Wallaby delivery is asynchronous), filtering by source table,
-/// and clearing between test phases.
+/// and clearing between test phases. Also implements <see cref="ISinkPurger"/>: a purge drops the
+/// records routed to the purged destination (like emptying an index) and is recorded in
+/// <see cref="Purges"/>.
 /// </summary>
 /// <param name="name">
 /// The sink's own name. Note that batch routing is keyed by the <em>registration</em> name (the name
 /// passed to <c>WallabyBuilder.AddSink</c> or <see cref="WallabyTestingServiceCollectionExtensions.ReplaceWallabySink"/>),
 /// so this value is informational unless the sink is registered via <c>AddSink(ISink)</c>.
 /// </param>
-public sealed class CaptureSink(string name = "capture") : ISink
+public sealed class CaptureSink(string name = "capture") : ISink, ISinkPurger
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
 
     private readonly List<SinkRecord> _records = [];
+    private readonly List<SinkPurgeRequest> _purges = [];
 
     /// <inheritdoc />
     public string Name { get; } = name;
@@ -32,19 +35,40 @@ public sealed class CaptureSink(string name = "capture") : ISink
         return Task.FromResult(DeliveryResult.Success);
     }
 
+    /// <inheritdoc />
+    public Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
+    {
+        lock (_records)
+        {
+            _records.RemoveAll(r => r.Destination == request.Destination);
+            _purges.Add(request);
+        }
+        return Task.CompletedTask;
+    }
+
     /// <summary>A snapshot of all records delivered so far, in delivery order.</summary>
     public IReadOnlyList<SinkRecord> Records
     {
         get { lock (_records) return _records.ToArray(); }
     }
 
+    /// <summary>A snapshot of the purge requests received so far, in order.</summary>
+    public IReadOnlyList<SinkPurgeRequest> Purges
+    {
+        get { lock (_records) return _purges.ToArray(); }
+    }
+
     /// <summary>Records whose source table matches <paramref name="tableName"/>.</summary>
     public IEnumerable<SinkRecord> For(string tableName) => Records.Where(r => r.Metadata.TableName == tableName);
 
-    /// <summary>Discard recorded records (e.g. to isolate one test from the previous one).</summary>
+    /// <summary>Discard recorded records and purge requests (e.g. to isolate one test from the previous one).</summary>
     public void Clear()
     {
-        lock (_records) _records.Clear();
+        lock (_records)
+        {
+            _records.Clear();
+            _purges.Clear();
+        }
     }
 
     /// <summary>

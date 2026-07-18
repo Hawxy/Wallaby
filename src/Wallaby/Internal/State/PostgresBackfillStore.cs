@@ -11,7 +11,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT status, transform_version, cursor_json, rows_copied, updated_at FROM wallaby.backfill_state WHERE table_qualified = @t",
+            "SELECT status, transform_version, cursor_json, rows_copied, updated_at, purge FROM wallaby.backfill_state WHERE table_qualified = @t",
             connection);
         cmd.Parameters.AddWithValue("t", tableQualifiedName);
 
@@ -24,7 +24,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at FROM wallaby.backfill_state",
+            "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at, purge FROM wallaby.backfill_state",
             connection);
 
         var results = new List<BackfillState>();
@@ -50,13 +50,14 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         // and the scheduler re-runs the table fresh.
         await using var cmd = new NpgsqlCommand(
             $"""
-            INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, updated_at)
-            VALUES (@t, @s, @v, @c::jsonb, @r, now())
+            INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, purge, updated_at)
+            VALUES (@t, @s, @v, @c::jsonb, @r, @p, now())
             ON CONFLICT (table_qualified) DO UPDATE
                 SET status = EXCLUDED.status,
                     transform_version = EXCLUDED.transform_version,
                     cursor_json = EXCLUDED.cursor_json,
                     rows_copied = EXCLUDED.rows_copied,
+                    purge = EXCLUDED.purge,
                     updated_at = EXCLUDED.updated_at
             {(guardRequested ? "WHERE wallaby.backfill_state.status <> 'Requested'" : string.Empty)}
             """,
@@ -66,30 +67,34 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         cmd.Parameters.AddWithValue("v", (object?)state.TransformVersion ?? DBNull.Value);
         cmd.Parameters.AddWithValue("c", (object?)state.CursorJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("r", state.RowsCopied);
+        cmd.Parameters.AddWithValue("p", state.Purge);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task RequestAsync(string tableQualifiedName, string? transformVersion, CancellationToken ct)
+    public async Task RequestAsync(string tableQualifiedName, string? transformVersion, bool purge, CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         // The trailing pg_notify rides the same auto-committed batch, so the wake-up is delivered
-        // atomically with the row becoming visible.
+        // atomically with the row becoming visible. Purge is sticky-OR: a pending purge mark is only
+        // cleared by the fresh run that serves it, never by a racing plain request.
         await using var cmd = new NpgsqlCommand(
             $"""
-            INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, updated_at)
-            VALUES (@t, 'Requested', @v, NULL, 0, now())
+            INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, purge, updated_at)
+            VALUES (@t, 'Requested', @v, NULL, 0, @p, now())
             ON CONFLICT (table_qualified) DO UPDATE
                 SET status = 'Requested',
                     transform_version = EXCLUDED.transform_version,
                     cursor_json = NULL,
                     rows_copied = 0,
+                    purge = wallaby.backfill_state.purge OR EXCLUDED.purge,
                     updated_at = now();
             SELECT pg_notify('{WallabySchema.BackfillNotifyChannel}', '');
             """,
             connection);
         cmd.Parameters.AddWithValue("t", tableQualifiedName);
         cmd.Parameters.AddWithValue("v", (object?)transformVersion ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("p", purge);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -122,8 +127,9 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         var cursorJson = reader.IsDBNull(columnOffset + 2) ? null : reader.GetString(columnOffset + 2);
         var rowsCopied = reader.GetInt64(columnOffset + 3);
         var updatedAt = reader.GetFieldValue<DateTime>(columnOffset + 4);
+        var purge = reader.GetBoolean(columnOffset + 5);
         return new BackfillState(
             tableQualified, status, transformVersion, cursorJson, rowsCopied,
-            new DateTimeOffset(DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)));
+            new DateTimeOffset(DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)), purge);
     }
 }

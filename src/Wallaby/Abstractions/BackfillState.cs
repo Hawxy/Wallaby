@@ -28,10 +28,15 @@ public enum BackfillStatus
 /// <param name="CursorJson">Serialized keyset cursor (last primary key) for resuming an in-progress backfill.</param>
 /// <param name="RowsCopied">Number of rows snapshotted so far.</param>
 /// <param name="UpdatedAt">When the row was last updated.</param>
+/// <param name="Purge">
+/// A sink purge is due before the next fresh run (see <see cref="ISinkPurger"/>); cleared when
+/// that run starts, so a resumed backfill never re-purges.
+/// </param>
 public sealed record BackfillState(
     string TableQualifiedName,
     BackfillStatus Status,
     string? TransformVersion,
     string? CursorJson,
     long RowsCopied,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool Purge = false);

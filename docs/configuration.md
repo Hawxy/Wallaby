@@ -34,6 +34,7 @@ You have a number of choices as to where streamed transactions spill:
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
+| `PurgeOnSlotGapRepair` | `false` | [Purge sink destinations](/backfill#purging-before-a-backfill) before the automatic re-backfill that repairs a [slot-loss gap](/how-it-works#slot-loss-gap-detection), so deletes missed in the gap also converge. Needs sinks that implement `ISinkPurger`; destinations are incomplete while the re-backfill runs. |
 | `Suspended` / `SuspensionReason` | `false` / – | Deploy-time [suspension](/operations/major-version-upgrades) flag (set via `Suspend(reason?)` on the builder): the node drops every managed replication slot and idles instead of streaming, so a platform blocked by logical slots (e.g. an RDS/Aurora major-version upgrade) can proceed. A flag-less deployment auto-resumes it. |
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |

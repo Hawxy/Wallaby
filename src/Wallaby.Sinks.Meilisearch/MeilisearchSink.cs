@@ -14,7 +14,7 @@ namespace Wallaby.Sinks.Meilisearch;
 /// <see cref="ClientNameFor"/>), so proxies, resilience handlers, and lifetimes are configured on the
 /// named client.
 /// </summary>
-public sealed class MeilisearchSink : ISink, ISinkInitializer
+public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 {
     private static readonly SearchValues<string> PermanentErrorCodes = SearchValues.Create(
         [
@@ -188,6 +188,26 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer
                 var updated = await index.UpdateSettingsAsync(config.Settings, ct);
                 await WaitAsync(index, updated, ct);
             }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
+    {
+        var indexName = request.Destination ?? _options.DefaultIndex
+            ?? throw new WallabyConfigurationException(
+                $"A purge for '{request.QualifiedTableName}' has no destination and no DefaultIndex is configured for sink '{Name}'.");
+
+        var index = CreateClient().Index(indexName);
+        try
+        {
+            var info = await index.DeleteAllDocumentsAsync(ct);
+            await WaitAsync(index, info, ct);
+        }
+        // The delete-all is enqueued and fails as a task, so an absent index surfaces from WaitAsync.
+        catch (MeilisearchTaskFailedException ex) when (ex.Code == "index_not_found")
+        {
+            // Nothing to purge; InitializeAsync creates configured indexes before the scheduler runs.
         }
     }
 

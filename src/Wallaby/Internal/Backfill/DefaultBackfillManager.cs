@@ -13,16 +13,22 @@ namespace Wallaby.Internal.Backfill;
 internal sealed class DefaultBackfillManager(WallabyModel model, IBackfillStateStore store) : IWallabyBackfillManager
 {
     public Task RequestBackfillAsync<TEntity>(CancellationToken ct = default) where TEntity : class
-        => RequestBackfillAsync(typeof(TEntity), ct);
+        => RequestBackfillAsync(typeof(TEntity), purge: false, ct);
 
-    public async Task RequestBackfillAsync(Type entityClrType, CancellationToken ct = default)
+    public Task RequestBackfillAsync<TEntity>(bool purge, CancellationToken ct = default) where TEntity : class
+        => RequestBackfillAsync(typeof(TEntity), purge, ct);
+
+    public Task RequestBackfillAsync(Type entityClrType, CancellationToken ct = default)
+        => RequestBackfillAsync(entityClrType, purge: false, ct);
+
+    public async Task RequestBackfillAsync(Type entityClrType, bool purge, CancellationToken ct = default)
     {
         var table = model.FindByClrType(entityClrType)
             ?? throw new WallabyConfigurationException(
                 $"Cannot request a backfill for '{entityClrType.FullName}': it is not a captured table.");
 
         var existing = await store.GetAsync(table.QualifiedName, ct);
-        await store.RequestAsync(table.QualifiedName, existing?.TransformVersion, ct);
+        await store.RequestAsync(table.QualifiedName, existing?.TransformVersion, purge, ct);
     }
 
     public Task<IReadOnlyList<BackfillState>> GetStatusAsync(CancellationToken ct = default)

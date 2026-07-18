@@ -61,7 +61,8 @@ public sealed record SinkBatch(string SinkName, IReadOnlyList<SinkRecord> Record
 /// <remarks>
 /// Registering a sink hands its lifetime to Wallaby: a sink that also implements
 /// <see cref="IAsyncDisposable"/> or <see cref="IDisposable"/> is disposed once at host shutdown,
-/// after streaming has stopped. Implement <see cref="ISinkInitializer"/> for one-time setup.
+/// after streaming has stopped. Implement <see cref="ISinkInitializer"/> for one-time setup and
+/// <see cref="ISinkPurger"/> to support purge-then-backfill convergence.
 /// </remarks>
 public interface ISink
 {
@@ -80,4 +81,34 @@ public interface ISinkInitializer
 {
     /// <summary>Perform idempotent one-time setup for the sink.</summary>
     Task InitializeAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// Identifies what a purge removes: everything the sink holds at one mapping's destination.
+/// </summary>
+/// <param name="TableSchema">Schema of the source table about to be backfilled.</param>
+/// <param name="TableName">Name of the source table about to be backfilled.</param>
+/// <param name="Destination">
+/// The sink-specific destination (index/topic/table) to empty. Null means the sink's default
+/// destination.
+/// </param>
+public sealed record SinkPurgeRequest(string TableSchema, string TableName, string? Destination)
+{
+    /// <summary>Schema-qualified source table name (e.g. <c>public.orders</c>).</summary>
+    public string QualifiedTableName => $"{TableSchema}.{TableName}";
+}
+
+/// <summary>
+/// Optional capability: a sink whose destinations can be emptied so that a fresh backfill converges
+/// the destination to exactly the current table contents (removing documents whose source rows
+/// disappeared without a delivered delete). Invoked before the backfill's snapshot read when a
+/// purge was requested.
+/// </summary>
+public interface ISinkPurger
+{
+    /// <summary>
+    /// Delete every document at the requested destination. Must be idempotent; throw to fail the
+    /// backfill run (the leader retries with backoff and the purge re-runs).
+    /// </summary>
+    Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct);
 }

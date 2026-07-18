@@ -18,21 +18,24 @@ internal static class BackfillOperations
     /// <summary>
     /// Persist a backfill request: mark the table's row <c>Requested</c> with progress reset, and signal
     /// the backfill channel so the leader's scheduler serves it immediately. An existing row keeps its
-    /// transform version (the host compares it against the deployed version); a table Wallaby has never
-    /// backfilled gets a fresh row. Throws <c>42P01</c> when no Wallaby host has ever run.
+    /// transform version (the host compares it against the deployed version) and its purge mark is
+    /// sticky-OR (a pending purge survives a plain request); a table Wallaby has never backfilled gets a
+    /// fresh row. Throws <c>42P01</c> when no Wallaby host has ever run.
     /// </summary>
     public static async Task RequestAsync(
-        NpgsqlDataSource dataSource, string tableQualifiedName, CancellationToken ct)
+        NpgsqlDataSource dataSource, string tableQualifiedName, bool purge, CancellationToken ct)
     {
         await using var cmd = dataSource.CreateCommand(
             $"""
-             INSERT INTO {BackfillContract.Table} (table_qualified, status, transform_version, cursor_json, rows_copied, updated_at)
-             VALUES (@t, '{BackfillContract.StatusRequested}', NULL, NULL, 0, now())
+             INSERT INTO {BackfillContract.Table} (table_qualified, status, transform_version, cursor_json, rows_copied, purge, updated_at)
+             VALUES (@t, '{BackfillContract.StatusRequested}', NULL, NULL, 0, @p, now())
              ON CONFLICT (table_qualified) DO UPDATE
-                 SET status = '{BackfillContract.StatusRequested}', cursor_json = NULL, rows_copied = 0, updated_at = now();
+                 SET status = '{BackfillContract.StatusRequested}', cursor_json = NULL, rows_copied = 0,
+                     purge = {BackfillContract.Table}.purge OR EXCLUDED.purge, updated_at = now();
              SELECT pg_notify('{BackfillContract.NotifyChannel}', '');
              """);
         cmd.Parameters.AddWithValue("t", tableQualifiedName);
+        cmd.Parameters.AddWithValue("p", purge);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

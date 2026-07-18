@@ -354,11 +354,26 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         var tables = _backfillTypes
-            .Select(kv => (_model!.FindByClrType(kv.Key)!, version ?? kv.Value))
+            .Select(kv => new BackfillTable(
+                _model!.FindByClrType(kv.Key)!, version ?? kv.Value, PurgeOnVersionChange: false,
+                PurgeTargetsFor(kv.Key)))
             .ToList();
         return new BackfillScheduler(
-            tables, new PostgresBackfillStore(_dataSource), _coordinator, new BackfillSchedulerOptions(), NullLogger.Instance);
+            tables, new PostgresBackfillStore(_dataSource), _coordinator,
+            new SinkPurgeRunner(_sinks, Instrumentation, NullLogger.Instance),
+            new BackfillSchedulerOptions(), NullLogger.Instance);
     }
+
+    // Broadcast routes every change to every sink under its default destination; mapping mode mirrors
+    // WallabyComponents.Build's per-mapping targets.
+    private List<SinkPurgeTarget> PurgeTargetsFor(Type entityClrType)
+        => _broadcast
+            ? _sinks.Keys.Select(name => new SinkPurgeTarget(name, Destination: null, Scoped: false)).ToList()
+            : _mappings
+                .Where(m => m.EntityClrType == entityClrType)
+                .Select(m => new SinkPurgeTarget(m.SinkName, m.Destination, m.DestinationSelector is not null))
+                .Distinct()
+                .ToList();
 
     /// <summary>Poll until the condition holds (or times out), surfacing any pipeline fault promptly.</summary>
     public Task WaitUntilAsync(Func<Task<bool>> predicate, TimeSpan? timeout = null)

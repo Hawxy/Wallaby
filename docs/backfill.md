@@ -44,6 +44,13 @@ discarded and the table re-runs from the start.
 
 `GetStatusAsync()` is also available and returns the current state of every tracked table.
 
+Pass `purge: true` to [empty the sink destinations first](#purging-before-a-backfill), so the backfill
+converges them to exactly the current table contents:
+
+```csharp
+await backfill.RequestBackfillAsync<Product>(purge: true);
+```
+
 ### From outside the application
 
 The [Wallaby.Client](/operations/external-control) package drives the same mechanism from **any process
@@ -54,6 +61,7 @@ has no entity model, so tables are addressed by schema-qualified name:
 await using var control = new WallabyControlClient(connectionString);
 
 await control.RequestBackfillAsync("public.products");
+await control.RequestBackfillAsync("public.products", purge: true);   // purge destinations first
 
 var status = await control.GetBackfillStatusAsync();   // every tracked table's state
 ```
@@ -61,6 +69,38 @@ var status = await control.GetBackfillStatusAsync();   // every tracked table's 
 The request behaves exactly like the in-host manager's: persisted, served instantly by the current
 leader, and winning over an in-flight run. A request for a table Wallaby doesn't capture stays
 `Requested` until a mapping for it deploys.
+
+## Purging before a backfill
+
+Backfill is upsert-only: it re-writes every row that exists, but it cannot remove documents whose
+source rows are gone (a [truncate](/how-it-works#truncate-is-not-propagated), deletes that fell inside
+a [slot-loss gap](/how-it-works#slot-loss-gap-detection)). To converge those, a backfill can **purge**
+its sink destinations first — empty them completely — so the snapshot rebuilds each destination to
+exactly the current table contents.
+
+A purge runs before a fresh backfill when:
+
+- a **manual request** asks for it (`RequestBackfillAsync(..., purge: true)`, in-host or via Wallaby.Client);
+- **slot-gap repair** is configured to purge (`PurgeOnSlotGapRepair`, default off), making slot-loss
+  recovery fully convergent;
+- a **version change** triggers the re-backfill and the mapping opted in
+  (`WithBackfillVersion("v4", purgeOnChange: true)`), so documents whose ids or shape changed don't
+  linger under old keys.
+
+Purging is an optional sink capability (`ISinkPurger`). The Meilisearch sink implements it (the index's
+documents are deleted; the index and its settings survive); a sink without the capability — the Kafka
+and HTTP sinks, or a custom sink that doesn't opt in — is skipped with a warning and its destinations
+keep any stale documents. The purge mark is persisted with the request and survives restarts; it is
+cleared only when the fresh run actually starts, and a resumed backfill never re-purges.
+
+Two caveats:
+
+- **The destination is temporarily incomplete** between the purge and the backfill's completion —
+  inherent to purge-and-rebuild. Don't opt in where an empty index mid-rebuild is worse than stale
+  documents.
+- **Purging is per destination, and backfill is per table.** A destination shared by several tables
+  loses the other tables' documents too, and only the requested table is re-backfilled. Scoped
+  (per-tenant) destinations cannot be enumerated and are skipped with a warning.
 
 ## How it works
 

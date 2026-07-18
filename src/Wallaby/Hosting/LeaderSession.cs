@@ -88,6 +88,7 @@ internal sealed class LeaderSession(
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
         var scheduler = new BackfillScheduler(
             components.BackfillTables, components.BackfillStore, components.Coordinator,
+            new SinkPurgeRunner(components.Sinks, instrumentation, _logger),
             new BackfillSchedulerOptions
             {
                 AutoBackfillNewTables = options.AutoBackfillNewTables,
@@ -235,13 +236,13 @@ internal sealed class LeaderSession(
             ["wallaby.lsn.consistent"] = consistentPoint,
         }));
 
-        foreach (var (table, _) in components.BackfillTables)
+        foreach (var table in components.BackfillTables)
         {
-            var existing = await components.BackfillStore.GetAsync(table.QualifiedName, ct);
+            var existing = await components.BackfillStore.GetAsync(table.Table.QualifiedName, ct);
             await components.BackfillStore.SaveAsync(
                 new BackfillState(
-                    table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
-                    null, 0, DateTimeOffset.UtcNow),
+                    table.Table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
+                    null, 0, DateTimeOffset.UtcNow, Purge: options.PurgeOnSlotGapRepair),
                 ct);
         }
 

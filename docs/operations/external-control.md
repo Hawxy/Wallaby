@@ -85,6 +85,7 @@ Only an explicit `ResumeAsync` ends it.
 
 ```csharp
 await control.RequestBackfillAsync("public.products");
+await control.RequestBackfillAsync("public.products", purge: true);   // purge destinations first
 
 var status = await control.GetBackfillStatusAsync();   // every tracked table's state
 ```
@@ -93,7 +94,8 @@ Identical semantics to the in-host manager: the request is persisted (it survive
 leader is signalled instantly, and a request made while the table is already backfilling wins — the
 table re-runs from the start. The client has no entity model, so tables are addressed by
 schema-qualified name; a request for a table Wallaby doesn't capture stays `Requested` until a mapping
-for it deploys. See [Backfill](/backfill) for how snapshots run.
+for it deploys. See [Backfill](/backfill) for how snapshots run and what
+[`purge: true`](/backfill#purging-before-a-backfill) converges.
 
 ## Requirements and privileges
 

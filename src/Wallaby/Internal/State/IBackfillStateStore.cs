@@ -18,9 +18,10 @@ internal interface IBackfillStateStore
 
     /// <summary>
     /// Mark a table <c>Requested</c> (cursor and row count reset) and signal the backfill notify channel,
-    /// atomically with the row becoming visible.
+    /// atomically with the row becoming visible. A true <paramref name="purge"/> marks a sink purge due
+    /// before the fresh run; false leaves a pending purge mark in place (sticky until served).
     /// </summary>
-    Task RequestAsync(string tableQualifiedName, string? transformVersion, CancellationToken ct);
+    Task RequestAsync(string tableQualifiedName, string? transformVersion, bool purge, CancellationToken ct);
 
     /// <summary>The subset of <paramref name="tableQualifiedNames"/> currently marked <c>Requested</c>.</summary>
     Task<IReadOnlyList<string>> ListRequestedAsync(IReadOnlyList<string> tableQualifiedNames, CancellationToken ct);

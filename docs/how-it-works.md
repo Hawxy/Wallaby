@@ -37,7 +37,10 @@ mapped table for [re-backfill](/backfill), converging the sinks. An invalidated 
 is detected the same way, it is dropped and recreated, then repaired via the same path. Duplicates from
 the re-snapshot are absorbed by the idempotent upsert-by-id sink contract. The re-backfill is
 upsert-only, so deletes (and truncates) that happened inside the missed range are not converged —
-removing those stale documents needs a destination purge.
+removing those stale documents needs a destination purge. Enable
+[`PurgeOnSlotGapRepair`](/configuration) to have the repair
+[purge sink destinations](/backfill#purging-before-a-backfill) before it re-backfills, making the
+recovery fully convergent.
 
 ## Idle slots and WAL retention
 
@@ -64,5 +67,5 @@ default function `EXECUTE` privileges needs to re-grant it to Wallaby's role.
 `TRUNCATE` of a captured table is replicated but names no rows, and the sink contract is
 upsert/delete-by-id, so there is nothing Wallaby can translate it into. When one arrives, Wallaby logs
 a warning naming the truncated table(s) and continues streaming — documents already delivered for
-those tables remain in their sinks, which now diverge from the database. To converge, purge the
-destination and re-run a [backfill](/backfill) for the affected tables.
+those tables remain in their sinks, which now diverge from the database. To converge, request a
+[backfill with `purge: true`](/backfill#purging-before-a-backfill) for the affected tables.

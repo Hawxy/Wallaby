@@ -67,6 +67,7 @@ The activity source `Wallaby` emits one span per unit of work:
 | `selfconfig` | Internal | `wallaby.slot`; server validation and publication/slot/state-schema setup (child of `leader.bootstrap` when hosted); status `Error` on fault |
 | `slot.repair` | Internal | child of `leader.bootstrap`: slot-loss gap detection (and re-backfill marking when one is found) |
 | `sink.initialize` | Internal | `wallaby.sink`; child of `leader.bootstrap`, one per sink with one-time setup |
+| `sink.purge` | Internal | `wallaby.sink`, `wallaby.table`, `wallaby.destination` (when the mapping declares one); one per destination [purged before a fresh backfill](/backfill#purging-before-a-backfill). A root span preceding the run's `backfill` span; status `Error` on fault |
 
 Live spans nest under the `transaction.process` root, so a single trace shows a committed transaction flowing
 through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the
