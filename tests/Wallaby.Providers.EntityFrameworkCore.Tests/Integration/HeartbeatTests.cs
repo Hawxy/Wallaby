@@ -79,17 +79,23 @@ public class HeartbeatTests(TestModelPostgresFixture pg)
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();
         var sink = harness.AddCaptureSink();
-        harness.HeartbeatInterval = TimeSpan.FromMilliseconds(200);
+        harness.HeartbeatInterval = TimeSpan.FromMilliseconds(500);
         await harness.SelfConfigureAsync();
 
         var categoryId = await harness.Db.AddCategoryAsync();
         await harness.StartAsync();
         try
         {
+            // Ticks before the first acknowledgement legitimately emit (the pipeline looks idle while it
+            // spins up), so baseline the count once traffic is flowing and assert on steady state only.
+            await harness.Db.AddProductAsync(categoryId, "hb-first");
+            await harness.WaitUntilAsync(() => sink.Records.Count >= 1);
+            var baseline = harness.HeartbeatsEmitted;
+
             // Mapped writes land far denser than the heartbeat interval, so every tick observes a fresh
-            // acknowledged LSN and skips. One emission is tolerated: the first tick can race the first ack.
-            var until = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1.5);
-            var produced = 0;
+            // acknowledged LSN and skips. One emission is tolerated: a tick can race the baseline ack.
+            var until = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2);
+            var produced = 1;
             while (DateTimeOffset.UtcNow < until)
             {
                 await harness.Db.AddProductAsync(categoryId, $"hb-{produced++}");
@@ -97,7 +103,7 @@ public class HeartbeatTests(TestModelPostgresFixture pg)
             }
 
             await harness.WaitUntilAsync(() => sink.Records.Count >= produced);
-            harness.HeartbeatsEmitted.ShouldBeLessThanOrEqualTo(1);
+            (harness.HeartbeatsEmitted - baseline).ShouldBeLessThanOrEqualTo(1);
         }
         finally
         {

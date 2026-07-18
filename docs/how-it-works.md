@@ -35,7 +35,9 @@ checkpoint is **behind the slot's consistent point**, the slot must have been re
 checkpoint was written. If so, Wallaby logs an error naming the missed LSN range and automatically marks every
 mapped table for [re-backfill](/backfill), converging the sinks. An invalidated slot (`wal_status=lost`)
 is detected the same way, it is dropped and recreated, then repaired via the same path. Duplicates from
-the re-snapshot are absorbed by the idempotent upsert-by-id sink contract.
+the re-snapshot are absorbed by the idempotent upsert-by-id sink contract. The re-backfill is
+upsert-only, so deletes (and truncates) that happened inside the missed range are not converged —
+removing those stale documents needs a destination purge.
 
 ## Idle slots and WAL retention
 
@@ -56,3 +58,11 @@ are suppressed while real traffic flows, so a busy system never emits them.
 `pg_logical_emit_message` is executable by any role by default. A hardened database that revokes
 default function `EXECUTE` privileges needs to re-grant it to Wallaby's role.
 :::
+
+## Truncate is not propagated
+
+`TRUNCATE` of a captured table is replicated but names no rows, and the sink contract is
+upsert/delete-by-id, so there is nothing Wallaby can translate it into. When one arrives, Wallaby logs
+a warning naming the truncated table(s) and continues streaming — documents already delivered for
+those tables remain in their sinks, which now diverge from the database. To converge, purge the
+destination and re-run a [backfill](/backfill) for the affected tables.

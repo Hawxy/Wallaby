@@ -138,6 +138,16 @@ internal sealed class WallabyPipeline(
             {
                 activity.SetTag("wallaby.heartbeat", true);
             }
+            if (transaction.TruncatedTables.Count > 0)
+            {
+                activity.SetTag("wallaby.truncate", string.Join(",", transaction.TruncatedTables));
+            }
+        }
+
+        // Warn before dispatch so the divergence is on record even if a sink faults below.
+        if (transaction.TruncatedTables.Count > 0)
+        {
+            logger.TruncateNotPropagated(string.Join(", ", transaction.TruncatedTables), slotName);
         }
 
         _instr.RecordIngestionLag(slotName, lagSeconds);
@@ -482,4 +492,10 @@ internal static partial class WallabyPipelineLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Slot '{Slot}' processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
     internal static partial void ProcessedRollup(this ILogger logger, string slot, long transactions, long changes, long seconds, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message =
+        "TRUNCATE of captured table(s) {Tables} was replicated on slot '{Slot}', but truncates are not " +
+        "propagated to sinks: documents already delivered for these tables remain, and their sinks now " +
+        "diverge from the database. Purge the destination and re-run a backfill to converge.")]
+    internal static partial void TruncateNotPropagated(this ILogger logger, string tables, string slot);
 }

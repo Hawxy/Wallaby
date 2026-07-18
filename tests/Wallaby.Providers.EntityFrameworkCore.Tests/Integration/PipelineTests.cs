@@ -77,4 +77,30 @@ public class PipelineTests(TestModelPostgresFixture pg)
         run2.ShouldContain("B");
         run2.ShouldNotContain("A"); // no re-delivery
     }
+
+    [Test]
+    public async Task Truncate_warns_and_pipeline_continues_delivering()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();
+        var capture = harness.AddCaptureSink();
+        await harness.SelfConfigureAsync();
+
+        var categoryId = await harness.Db.AddCategoryAsync();
+        await harness.Db.AddProductAsync(categoryId, "alpha");
+        await harness.RunUntilAsync(() => ProductNames(capture).Contains("alpha"));
+
+        // CASCADE covers the product_labels FK child; only the captured products table is published.
+        await using (var cmd = pg.DataSource.CreateCommand("TRUNCATE TABLE products CASCADE"))
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // The truncate transaction is processed and acknowledged, and the stream keeps flowing.
+        await harness.Db.AddProductAsync(categoryId, "beta");
+        await harness.RunUntilAsync(() => ProductNames(capture).Contains("beta"));
+
+        // Nothing was deleted downstream: the sink keeps the truncated rows and knowingly diverges.
+        ProductNames(capture).ShouldContain("alpha");
+        capture.For("products").ShouldAllBe(r => !r.IsDeletion);
+    }
 }
