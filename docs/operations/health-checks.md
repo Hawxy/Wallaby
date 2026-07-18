@@ -27,11 +27,14 @@ generic host if required.
 Registered as **`wallaby`** (tag `wallaby`). It reports:
 
 - **Unhealthy**: When the CDC background service has **terminated** (faulted out of its hosted loop).
+- **Degraded**: While the installation is [suspended](/operations/major-version-upgrades) — the node is
+  alive (an orchestrator shouldn't restart-loop it) but replication is deliberately stopped and the
+  managed slots are dropped. Expected during a planned upgrade window; alert if it persists after.
 - **Healthy**: In every other state: a **leader** streaming changes, a **standby** waiting to take over,
   or a node still **starting**.
 
 The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
-`leaderSince`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
+`leaderSince`, `suspendedSince`, `suspensionReason`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
 `consecutiveLeaderFailures`, `consecutiveFanoutFailures`, `slotName`, and one
 `lastSinkDeliveryAt:<sink>` entry per sink that has accepted a batch this session. A nonzero
 `consecutiveFanoutFailures` means the fan-out worker is stuck retrying with backoff. 

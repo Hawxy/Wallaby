@@ -23,6 +23,14 @@
     <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
   </ItemGroup>
 
+  <!-- The control-plane contract is shared with Wallaby.Client by source link (single source of
+       truth, no package reference in either direction). -->
+  <ItemGroup>
+    <Compile Include="..\Wallaby.Client\Internal\ControlContract.cs" Link="Internal\Control\ControlContract.cs" />
+    <Compile Include="..\Wallaby.Client\Internal\ControlOperations.cs" Link="Internal\Control\ControlOperations.cs" />
+    <Compile Include="..\Wallaby.Client\Internal\BackfillContract.cs" Link="Internal\Control\BackfillContract.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="DotNet.ReproducibleBuilds">
       <PrivateAssets>all</PrivateAssets>

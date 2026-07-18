@@ -45,6 +45,14 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan BackfillPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Fallback poll interval for the suspend/resume control state — how often the leader re-checks for a
+    /// suspension request and a suspended node re-checks for a resume. Both are primarily woken on demand
+    /// via LISTEN/NOTIFY the instant the control row changes; this interval is only a safety net in case a
+    /// notification is ever missed (e.g. a dropped listening connection).
+    /// </summary>
+    public TimeSpan ControlPollInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap
     /// detection and observability; the authoritative resume position is the slot's
     /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a

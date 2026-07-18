@@ -87,7 +87,9 @@ export default defineConfig({
         text: 'Operations',
         items: [
           { text: 'Observability', link: '/operations/observability' },
-          { text: 'Health Checks', link: '/operations/health-checks' }
+          { text: 'Health Checks', link: '/operations/health-checks' },
+          { text: 'External Control', link: '/operations/external-control' },
+          { text: 'Major-Version Upgrades', link: '/operations/major-version-upgrades' }
         ]
       }
     ],

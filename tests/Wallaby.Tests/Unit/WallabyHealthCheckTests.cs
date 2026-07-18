@@ -42,6 +42,25 @@ public class WallabyHealthCheckTests
     }
 
     [Test]
+    public async Task Degraded_while_suspended_with_context_in_data()
+    {
+        var since = DateTimeOffset.UtcNow;
+        var snapshot = Snap(WallabyNodeRole.Suspended) with
+        {
+            SuspendedSince = since,
+            SuspensionReason = "PG18 upgrade",
+        };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        // Deliberate but loud: the node is alive (don't restart-loop it) while replication is stopped.
+        result.Status.ShouldBe(HealthStatus.Degraded);
+        result.Data["suspendedSince"].ShouldBe(since);
+        result.Data["suspensionReason"].ShouldBe("PG18 upgrade");
+    }
+
+    [Test]
     public async Task Fanout_failures_stay_healthy_and_appear_in_data()
     {
         var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveFanoutFailures = 3 };

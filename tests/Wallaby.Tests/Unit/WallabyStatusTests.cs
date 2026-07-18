@@ -110,6 +110,38 @@ public class WallabyStatusTests
     }
 
     [Test]
+    public void EnterSuspended_sets_role_and_context()
+    {
+        var status = new WallabyStatus();
+        var since = DateTimeOffset.UtcNow;
+        status.EnterLeader(DateTimeOffset.UtcNow);
+
+        status.EnterSuspended(since, "PG18 upgrade");
+
+        var snapshot = status.Current;
+        snapshot.Role.ShouldBe(WallabyNodeRole.Suspended);
+        snapshot.LeaderSince.ShouldBeNull();
+        snapshot.SuspendedSince.ShouldBe(since);
+        snapshot.SuspensionReason.ShouldBe("PG18 upgrade");
+    }
+
+    [Test]
+    public void Resuming_into_leader_or_standby_clears_suspension_context()
+    {
+        var status = new WallabyStatus();
+        status.EnterSuspended(DateTimeOffset.UtcNow, "upgrade");
+
+        status.EnterStandby();
+        status.Current.SuspendedSince.ShouldBeNull();
+        status.Current.SuspensionReason.ShouldBeNull();
+
+        status.EnterSuspended(DateTimeOffset.UtcNow, "upgrade");
+        status.EnterLeader(DateTimeOffset.UtcNow);
+        status.Current.SuspendedSince.ShouldBeNull();
+        status.Current.SuspensionReason.ShouldBeNull();
+    }
+
+    [Test]
     public void Sink_deliveries_surface_in_the_snapshot()
     {
         var status = new WallabyStatus();

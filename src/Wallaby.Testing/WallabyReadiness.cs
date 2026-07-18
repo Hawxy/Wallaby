@@ -61,6 +61,57 @@ public static class WallabyReadiness
         }
     }
 
+    /// <summary>
+    /// Wait until the Wallaby node in <paramref name="services"/> is fully suspended: the node reports
+    /// <see cref="WallabyNodeRole.Suspended"/> and no slot Wallaby manages remains on the server. Throws
+    /// if the background service faults.
+    /// </summary>
+    /// <param name="services">The host's service provider.</param>
+    /// <param name="timeout">How long to wait before giving up; defaults to 30 seconds.</param>
+    /// <param name="ct">Cancels the wait.</param>
+    /// <exception cref="InvalidOperationException">The Wallaby background service faulted while waiting.</exception>
+    /// <exception cref="TimeoutException">The node did not suspend in time.</exception>
+    public static async Task WaitForSuspendedAsync(
+        IServiceProvider services, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var status = services.GetRequiredService<IWallabyStatus>();
+        var options = services.GetRequiredService<WallabyOptions>();
+
+        var effectiveTimeout = timeout ?? DefaultTimeout;
+        var deadline = DateTime.UtcNow + effectiveTimeout;
+
+        while (status.Current.Role != WallabyNodeRole.Suspended)
+        {
+            ThrowIfFaulted(status.Current);
+            await DelayOrTimeout(deadline, effectiveTimeout, "role to become Suspended", status, ct);
+        }
+
+        // Every registry-tracked slot is verified gone — the state a platform's upgrade precheck sees.
+        await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
+        while (true)
+        {
+            ThrowIfFaulted(status.Current);
+
+            try
+            {
+                await using var command = dataSource.CreateCommand(
+                    "SELECT count(*) FROM wallaby.slot_registry r JOIN pg_replication_slots s USING (slot_name)");
+                if (await command.ExecuteScalarAsync(ct) is 0L)
+                {
+                    return;
+                }
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                // No registry table: no host ever provisioned a slot (e.g. a Suspend()-flagged node on a
+                // fresh database), so none can exist.
+                return;
+            }
+
+            await DelayOrTimeout(deadline, effectiveTimeout, "managed replication slots to be dropped", status, ct);
+        }
+    }
+
     private static void ThrowIfFaulted(WallabyStatusSnapshot snapshot)
     {
         if (snapshot.Faulted)

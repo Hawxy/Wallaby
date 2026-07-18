@@ -8,12 +8,29 @@ using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
 using Wallaby.Internal.Backfill;
+using Wallaby.Internal.Control;
 using Wallaby.Internal.Pipeline;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Internal.State;
 
 namespace Wallaby.Hosting;
+
+/// <summary>Why a leader session ended (faults propagate as exceptions instead).</summary>
+internal enum LeaderSessionOutcome
+{
+    /// <summary>The workload ended without losing the lock or being suspended.</summary>
+    Ended,
+
+    /// <summary>The cluster lock was lost (connection dropped); the caller re-elects without treating it as a fault.</summary>
+    LeadershipLost,
+
+    /// <summary>
+    /// A suspension is in effect or was requested: the session wound down (or never started) without
+    /// touching slots, and the caller — still holding the lock — finalizes by dropping them.
+    /// </summary>
+    SuspendRequested,
+}
 
 /// <summary>
 /// One leadership term: self-configure, repair any slot-loss gap, initialize sinks, then run the live
@@ -35,12 +52,21 @@ internal sealed class LeaderSession(
     private readonly ILogger _logger = components.Logger;
 
     /// <summary>
-    /// Run the leader workload for the lifetime of leadership. Returns true if it ended because the
-    /// cluster lock was lost (so the caller re-elects without treating it as a fault); a real fault —
-    /// from the pipeline or a background task — propagates, and shutdown re-throws cancellation.
+    /// Run the leader workload for the lifetime of leadership. Returns how the workload ended (lost lock,
+    /// suspension, or a plain end); a real fault — from the pipeline or a background task — propagates,
+    /// and shutdown re-throws cancellation.
     /// </summary>
-    public async Task<bool> RunAsync(CancellationToken ct)
+    public async Task<LeaderSessionOutcome> RunAsync(CancellationToken ct)
     {
+        var controlStore = new PostgresControlStore(dataSource, _logger);
+
+        // A suspension in force must be honored before self-config can recreate any slot. Tolerates a
+        // database no suspension-aware version has touched (no control table reads as running).
+        if (await controlStore.IsSuspensionInEffectAsync(ct))
+        {
+            return LeaderSessionOutcome.SuspendRequested;
+        }
+
         await BootstrapAsync(ct);
 
         // Spill target for pgoutput v2 streamed (large) transactions. Leftovers from a prior crash are
@@ -85,6 +111,17 @@ internal sealed class LeaderSession(
             }
         });
 
+        // Watches for a suspension request (LISTEN + fallback poll) and cancels the workload so the
+        // session winds down and releases the slot; the caller then drops it. Its first read also closes
+        // the race where a suspension lands between this session's pre-check and slot creation. Never
+        // faults the session — transient read errors are retried inside.
+        var controlWatcher = new ControlStateWatcher(controlStore, options.Advanced.ControlPollInterval, _logger);
+        var controlTask = Task.Run(async () =>
+        {
+            try { await controlWatcher.RunAsync(linked, linked.Token); }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+        });
+
         // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
         var fanoutTask = components.FanoutQueue is not null
             ? Task.Run(async () =>
@@ -115,14 +152,23 @@ internal sealed class LeaderSession(
             await linked.CancelAsync();
             await backfillTask; // never faults: the body records + swallows
             await fanoutTask;
+            await controlTask;
         }
 
         ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks
+        if (controlWatcher.SuspendObserved)
+        {
+            // The stream's await using scope disposes on method exit, so by the time the caller sees this
+            // outcome the slot is released and free to drop while the cluster lock is still held.
+            return LeaderSessionOutcome.SuspendRequested;
+        }
         if (backgroundFault is not null)
         {
             ExceptionDispatchInfo.Capture(backgroundFault).Throw(); // fail the session so the caller retries with backoff
         }
-        return leadership.Lost.IsCancellationRequested; // otherwise: did we step down because the lock dropped?
+        return leadership.Lost.IsCancellationRequested // otherwise: did we step down because the lock dropped?
+            ? LeaderSessionOutcome.LeadershipLost
+            : LeaderSessionOutcome.Ended;
     }
 
     // Self-configure, repair any slot-loss gap, and initialize sinks — grouped under one bootstrap span so

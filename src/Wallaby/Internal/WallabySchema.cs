@@ -17,7 +17,13 @@ internal static class WallabySchema
 
     /// <summary>
     /// LISTEN/NOTIFY channel a manual backfill request signals, so the leader's scheduler serves it
-    /// the moment it is persisted.
+    /// the moment it is persisted. The name is owned by the shared backfill contract.
     /// </summary>
-    public const string BackfillNotifyChannel = "wallaby_backfill";
+    public const string BackfillNotifyChannel = Client.Internal.BackfillContract.NotifyChannel;
+
+    /// <summary>
+    /// LISTEN/NOTIFY channel signalled on suspend/resume transitions, so the runtime reacts the moment
+    /// the control row changes. The name is owned by the shared control contract.
+    /// </summary>
+    public const string ControlNotifyChannel = Client.Internal.ControlContract.NotifyChannel;
 }
