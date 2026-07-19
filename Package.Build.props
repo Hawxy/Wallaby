@@ -1,6 +1,6 @@
 <Project>
     <PropertyGroup>
-        <Version>1.0.0-beta.6</Version>
+        <Version>1.0.0-beta.7</Version>
         <Authors>JT</Authors>
         <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
@@ -11,7 +11,6 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageIcon>icon.png</PackageIcon>
-        <!-- Common tags first; each csproj sets its package-specific tags before this import. -->
         <PackageTags>postgres;postgresql;cdc;change-data-capture;logical-replication;$(PackageTags)</PackageTags>
     </PropertyGroup>
     <ItemGroup>
