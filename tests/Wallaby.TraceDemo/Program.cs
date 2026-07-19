@@ -92,9 +92,12 @@ try
         await harness.WaitUntilAsync(() => Delivered() >= 25, timeout);
     }
 
-    Console.WriteLine("Whole-table backfill of products (backfill root span + linked backfill.chunk spans)...");
+    Console.WriteLine("Purge-then-backfill of products (sink.purge span, then backfill root span + linked backfill.chunk spans)...");
+    await harness.BackfillManager.RequestBackfillAsync<Product>(purge: true);
+    // The purge empties the capture sink, so the count restarts at zero and the snapshot re-delivers
+    // the 21 surviving products.
     await harness.RunBackfillAsync();
-    await harness.WaitUntilAsync(() => Delivered() >= 46, timeout);
+    await harness.WaitUntilAsync(() => Delivered() >= 21, timeout);
 
     await harness.StopAsync();
     Console.WriteLine($"Scenario complete: {Delivered()} records delivered.");
@@ -120,7 +123,7 @@ Console.WriteLine("The dashboard container keeps running; remove it with: docker
 return 0;
 
 /// <summary>Fails the first delivery retryably (to make a sink retry visible in the trace), then delegates.</summary>
-file sealed class RetryOnceSink(ISink inner) : ISink
+file sealed class RetryOnceSink(CaptureSink inner) : ISink, ISinkPurger
 {
     private int _calls;
 
@@ -130,4 +133,6 @@ file sealed class RetryOnceSink(ISink inner) : ISink
         => Interlocked.Increment(ref _calls) == 1
             ? DeliveryResult.Retry("simulated transient failure (trace demo)")
             : await inner.DeliverAsync(batch, ct);
+
+    public Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct) => inner.PurgeAsync(request, ct);
 }

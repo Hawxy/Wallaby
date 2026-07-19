@@ -46,8 +46,11 @@ internal sealed class WallabyPipeline(
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
+    // Written by the pipeline loop, read cross-thread (heartbeat emitter, test harness).
+    private ulong _lastAcknowledgedLsn;
+
     /// <summary>The highest LSN acknowledged to the server. Useful for observing progress.</summary>
-    public ulong LastAcknowledgedLsn { get; private set; }
+    public ulong LastAcknowledgedLsn => Volatile.Read(ref _lastAcknowledgedLsn);
 
     // Steady-state throughput is summarized in one rollup line at most this often (per-transaction
     // detail stays at Debug). The loop only ticks on traffic, so an idle slot logs nothing.
@@ -78,6 +81,13 @@ internal sealed class WallabyPipeline(
                 // Barrier: no keepalive send may be in flight when the enumerator resumes reading
                 // (or is disposed on unwind).
                 await keepalive.EndTransactionAsync();
+            }
+
+            // Pure-heartbeat transactions exist only to advance the slot; keeping them out of the rollup
+            // preserves the idle-slot-logs-nothing invariant.
+            if (transaction.ContainsHeartbeat && processed == 0)
+            {
+                continue;
             }
 
             rollupTransactions++;
@@ -123,6 +133,21 @@ internal sealed class WallabyPipeline(
                 activity.SetTag("wallaby.watermark",
                     transaction.Watermarks[0].Prefix == WallabySchema.WatermarkLowPrefix ? "low" : "high");
             }
+            // Marks idle-slot heartbeat transactions, so they can be filtered in a trace viewer.
+            if (transaction.ContainsHeartbeat)
+            {
+                activity.SetTag("wallaby.heartbeat", true);
+            }
+            if (transaction.TruncatedTables.Count > 0)
+            {
+                activity.SetTag("wallaby.truncate", string.Join(",", transaction.TruncatedTables));
+            }
+        }
+
+        // Warn before dispatch so the divergence is on record even if a sink faults below.
+        if (transaction.TruncatedTables.Count > 0)
+        {
+            logger.TruncateNotPropagated(string.Join(", ", transaction.TruncatedTables), slotName);
         }
 
         _instr.RecordIngestionLag(slotName, lagSeconds);
@@ -147,7 +172,7 @@ internal sealed class WallabyPipeline(
                 ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
                 ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
                 await stream.AcknowledgeAsync(transaction.EndLsn, ct);
-                LastAcknowledgedLsn = transaction.EndLsn;
+                Volatile.Write(ref _lastAcknowledgedLsn, transaction.EndLsn);
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
                 status?.RecordProgress(transaction.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
             }
@@ -467,4 +492,10 @@ internal static partial class WallabyPipelineLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Slot '{Slot}' processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
     internal static partial void ProcessedRollup(this ILogger logger, string slot, long transactions, long changes, long seconds, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message =
+        "TRUNCATE of captured table(s) {Tables} was replicated on slot '{Slot}', but truncates are not " +
+        "propagated to sinks: documents already delivered for these tables remain, and their sinks now " +
+        "diverge from the database. Purge the destination and re-run a backfill to converge.")]
+    internal static partial void TruncateNotPropagated(this ILogger logger, string tables, string slot);
 }

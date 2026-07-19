@@ -70,6 +70,23 @@ public sealed class MySink : ISink, ISinkInitializer
 whenever a standby takes over leadership. Make it idempotent. If it throws, the leader session is retried
 (the pipeline won't stream into an unconfigured sink).
 
+## Purging
+
+To support [purge-then-backfill](/backfill#purging-before-a-backfill) — emptying a destination so a
+fresh backfill converges it to exactly the current table contents — implement `ISinkPurger`:
+
+```csharp
+public sealed class MySink : ISink, ISinkPurger
+{
+    public Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
+        => /* delete every document at request.Destination (null = the sink's default destination) */;
+}
+```
+
+`PurgeAsync` runs on the leader right before the backfill's snapshot read. Make it idempotent; throw to
+fail the backfill run (the purge re-runs on the retry). A sink without the capability is skipped with a
+warning when a purge is requested.
+
 ## Cleanup
 
 Registering a sink hands its lifetime to Wallaby. If your sink

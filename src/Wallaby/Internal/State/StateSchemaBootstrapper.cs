@@ -24,8 +24,12 @@ internal sealed class StateSchemaBootstrapper
             transform_version text        NULL,
             cursor_json       jsonb       NULL,
             rows_copied       bigint      NOT NULL DEFAULT 0,
+            purge             boolean     NOT NULL DEFAULT false,
             updated_at        timestamptz NOT NULL DEFAULT now()
         );
+
+        -- CREATE IF NOT EXISTS won't evolve an existing table.
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS purge boolean NOT NULL DEFAULT false;
 
         CREATE TABLE IF NOT EXISTS wallaby.slot_registry (
             slot_name        text        PRIMARY KEY,

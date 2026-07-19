@@ -26,7 +26,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var table = UniqueTable("orders");
 
         await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
-        await store.RequestAsync(table, "v1", CancellationToken.None);
+        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
 
         // The running backfill keeps writing progress (including its final Completed) — all no-ops now.
         await store.SaveProgressAsync(
@@ -71,7 +71,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         // Prime the subscription so it is LISTENing before the request — otherwise the NOTIFY is missed.
         await subscription.WaitAsync(TimeSpan.FromMilliseconds(100), CancellationToken.None);
 
-        await store.RequestAsync(UniqueTable("orders"), null, CancellationToken.None);
+        await store.RequestAsync(UniqueTable("orders"), null, purge: false, CancellationToken.None);
 
         var stopwatch = Stopwatch.StartNew();
         await subscription.WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
@@ -82,6 +82,25 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task Purge_mark_is_sticky_until_a_fresh_run_clears_it()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, "v1", purge: true, CancellationToken.None);
+        (await store.GetAsync(table, CancellationToken.None))!.Purge.ShouldBeTrue();
+
+        // A racing plain request must not clear the pending purge.
+        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+        (await store.GetAsync(table, CancellationToken.None))!.Purge.ShouldBeTrue();
+
+        // The scheduler's fresh-run transition clears it (Purge defaults false).
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+        (await store.GetAsync(table, CancellationToken.None))!.Purge.ShouldBeFalse();
+    }
+
+    [Test]
     public async Task List_requested_filters_to_the_given_tables()
     {
         await EnsureSchemaAsync();
@@ -89,7 +108,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var requested = UniqueTable("a");
         var inProgress = UniqueTable("b");
 
-        await store.RequestAsync(requested, null, CancellationToken.None);
+        await store.RequestAsync(requested, null, purge: false, CancellationToken.None);
         await store.SaveAsync(State(inProgress, BackfillStatus.InProgress), CancellationToken.None);
 
         var listed = await store.ListRequestedAsync(

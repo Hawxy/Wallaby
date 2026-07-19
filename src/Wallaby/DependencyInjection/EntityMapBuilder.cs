@@ -52,10 +52,18 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     }
 
     /// <summary>Bump this when the transform/projection changes to trigger an automatic re-backfill.</summary>
-    public EntityMapBuilder<TEntity> WithBackfillVersion(string version)
+    /// <param name="version">The declared transform/projection version.</param>
+    /// <param name="purgeOnChange">
+    /// Purge sink destinations before the re-backfill a version change triggers, so documents whose ids
+    /// or shape changed don't linger under old keys. Backfill is per table, so every non-scoped
+    /// (sink, destination) pair mapped to this entity's table is purged — including other mappings'.
+    /// Requires sinks to implement <see cref="Abstractions.ISinkPurger"/>.
+    /// </param>
+    public EntityMapBuilder<TEntity> WithBackfillVersion(string version, bool purgeOnChange = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         _registration.BackfillVersion = version;
+        _registration.PurgeOnBackfillVersionChange = purgeOnChange;
         return this;
     }
 

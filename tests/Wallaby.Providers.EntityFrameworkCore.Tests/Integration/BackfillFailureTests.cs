@@ -42,8 +42,8 @@ public class BackfillFailureTests(TestModelPostgresFixture pg)
             state.Status.ShouldBe(BackfillStatus.InProgress);
 
             // Which means the next scheduler pass resumes the table rather than skipping it.
-            BackfillScheduler.DetermineAction(state, version, new BackfillSchedulerOptions())
-                .ShouldBe(BackfillAction.Resume);
+            BackfillScheduler.Decide(state, version, purgeOnVersionChange: false, new BackfillSchedulerOptions())
+                .Action.ShouldBe(BackfillAction.Resume);
         }
         finally
         {

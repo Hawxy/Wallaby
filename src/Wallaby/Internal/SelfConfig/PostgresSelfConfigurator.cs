@@ -41,18 +41,22 @@ internal sealed class PostgresSelfConfigurator(
             await _stateSchema.EnsureAsync(connection, ct);
 
             var warnings = new List<string>();
-            var publicationCreated = await _publications.EnsureAsync(
+            var publication = await _publications.EnsureAsync(
                 connection, options.PublicationName, DesiredTables(model).ToList(), options.ManagePublicationTables,
                 warnings, ct);
+            if (!publication.ViaRoot)
+            {
+                await ValidatePartitionedCapturesAsync(connection, model, ct);
+            }
             var (slotCreated, consistentPoint) = await _slots.EnsureAsync(
                 connection, options.SlotName, options.PublicationName, kind: "primary", ct);
             await ValidateReplicaIdentityAsync(connection, model, warnings, ct);
             var externalResults = await EnsureExternalSlotsAsync(connection, ct);
 
-            logger.SelfConfigComplete(options.PublicationName, publicationCreated, options.SlotName, slotCreated);
+            logger.SelfConfigComplete(options.PublicationName, publication.Created, options.SlotName, slotCreated);
 
             return new SelfConfigResult(
-                options.PublicationName, options.SlotName, publicationCreated, slotCreated, consistentPoint, warnings,
+                options.PublicationName, options.SlotName, publication.Created, slotCreated, consistentPoint, warnings,
                 externalResults);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -100,12 +104,12 @@ internal sealed class PostgresSelfConfigurator(
             var tables = spec.Tables
                 .Select(t => PublicationTableSpec.WholeTable(t.Schema, t.Table))
                 .ToList();
-            var pubCreated = await _publications.EnsureAsync(
+            var publication = await _publications.EnsureAsync(
                 connection, spec.PublicationName, tables, reconcile: true, warnings: null, ct);
             var (slotCreated, _) = await _slots.EnsureAsync(
                 connection, spec.SlotName, spec.PublicationName, kind: "external", ct);
             logger.ExternalSlotConfigured(spec.SlotName, spec.PublicationName);
-            results.Add(new ExternalSlotResult(spec.SlotName, spec.PublicationName, pubCreated, slotCreated));
+            results.Add(new ExternalSlotResult(spec.SlotName, spec.PublicationName, publication.Created, slotCreated));
         }
 
         return results;
@@ -126,38 +130,135 @@ internal sealed class PostgresSelfConfigurator(
         }
     }
 
+    /// <summary>
+    /// A publication that does not publish via the partition root streams changes under leaf partition
+    /// names, which no captured table matches — silent data loss, so this always throws. Only reachable
+    /// for pre-existing unmanaged publications; managed ones are always fixed to publish via root.
+    /// </summary>
+    private async Task ValidatePartitionedCapturesAsync(
+        NpgsqlConnection connection, WallabyModel model, CancellationToken ct)
+    {
+        var partitioned = new List<string>();
+        await using (var cmd = new NpgsqlCommand(
+            """
+            SELECT n.nspname, c.relname
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN unnest(@schemas, @tables) AS d(s, t) ON n.nspname = d.s AND c.relname = d.t
+            WHERE c.relkind = 'p'
+            """,
+            connection))
+        {
+            cmd.Parameters.AddWithValue("schemas", model.Tables.Select(t => t.Schema).ToArray());
+            cmd.Parameters.AddWithValue("tables", model.Tables.Select(t => t.TableName).ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                partitioned.Add($"{reader.GetString(0)}.{reader.GetString(1)}");
+            }
+        }
+
+        if (partitioned.Count > 0)
+        {
+            throw new WallabyConfigurationException(
+                $"Publication '{options.PublicationName}' does not publish via the partition root, so changes on " +
+                $"partitioned table(s) {string.Join(", ", partitioned)} would arrive under leaf partition names " +
+                "and be dropped. Run: ALTER PUBLICATION " +
+                $"{PgExec.QuoteIdentifier(options.PublicationName)} SET (publish_via_partition_root = true); " +
+                "or set ManagePublicationTables=true to let Wallaby manage it.");
+        }
+    }
+
     private async Task ValidateReplicaIdentityAsync(
         NpgsqlConnection connection, WallabyModel model, List<string> warnings, CancellationToken ct)
     {
-        foreach (var table in model.Tables.Where(t => t.RequiresFullReplicaIdentity))
+        var required = model.Tables.Where(t => t.RequiresFullReplicaIdentity).ToList();
+        if (required.Count == 0)
         {
-            var relReplIdent = await PgExec.ScalarStringAsync(
-                connection,
-                """
-                SELECT c.relreplident::text
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = @s AND c.relname = @t
-                """,
-                ct,
-                ("s", table.Schema), ("t", table.TableName));
+            return;
+        }
+
+        // Replica identity governs WAL old-tuple content per physical relation, so a partitioned table
+        // must be FULL on every leaf; the root's own setting does not propagate. pg_partition_tree is
+        // empty for an ordinary table, which the relkind branch covers.
+        var physicalByRoot = new Dictionary<string, List<(string Schema, string Table, string ReplIdent)>>();
+        await using (var cmd = new NpgsqlCommand(
+            """
+            SELECT d.s, d.t, pn.nspname, pc.relname, pc.relreplident::text
+            FROM unnest(@schemas, @tables) AS d(s, t)
+            JOIN pg_namespace n ON n.nspname = d.s
+            JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = d.t
+            CROSS JOIN LATERAL (
+                SELECT pt.relid FROM pg_partition_tree(c.oid) pt WHERE pt.isleaf
+                UNION ALL
+                SELECT c.oid WHERE c.relkind <> 'p'
+            ) leaf(relid)
+            JOIN pg_class pc ON pc.oid = leaf.relid
+            JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+            """,
+            connection))
+        {
+            cmd.Parameters.AddWithValue("schemas", required.Select(t => t.Schema).ToArray());
+            cmd.Parameters.AddWithValue("tables", required.Select(t => t.TableName).ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var root = $"{reader.GetString(0)}.{reader.GetString(1)}";
+                if (!physicalByRoot.TryGetValue(root, out var list))
+                {
+                    physicalByRoot[root] = list = [];
+                }
+                list.Add((reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+            }
+        }
+
+        foreach (var table in required)
+        {
+            // A table missing from the catalog surfaces from publication DDL as run-your-migrations.
+            if (!physicalByRoot.TryGetValue(table.QualifiedName, out var physical))
+            {
+                continue;
+            }
 
             // relreplident: 'd' default, 'n' nothing, 'f' full, 'i' index.
-            if (relReplIdent != "f")
+            var notFull = physical.Where(p => p.ReplIdent != "f").ToList();
+            if (notFull.Count == 0)
             {
-                var ddl = $"ALTER TABLE {PgExec.QuoteTable(table.Schema, table.TableName)} REPLICA IDENTITY FULL;";
-                if (options.RequireFullReplicaIdentity)
-                {
-                    throw new WallabyConfigurationException(
-                        $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform but has '{relReplIdent}'. Run: {ddl}");
-                }
-
-                var warning =
-                    $"Table {table.QualifiedName} has REPLICA IDENTITY '{relReplIdent}'; old values and unchanged-TOAST " +
-                    $"columns may be unavailable on UPDATE/DELETE. To capture full rows, run: {ddl}";
-                warnings.Add(warning);
-                logger.ConfigurationWarning(warning);
+                continue;
             }
+
+            var isPartitioned = physical.Count > 1 ||
+                (physical[0].Schema, physical[0].Table) != (table.Schema, table.TableName);
+            var ddl = string.Join(" ", notFull.Select(p =>
+                $"ALTER TABLE {PgExec.QuoteTable(p.Schema, p.Table)} REPLICA IDENTITY FULL;"));
+
+            string message;
+            if (isPartitioned)
+            {
+                var leaves = string.Join(", ", notFull.Select(p => $"{p.Schema}.{p.Table}"));
+                message = options.RequireFullReplicaIdentity
+                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform, but " +
+                      $"partition(s) {leaves} are not FULL (identity is per leaf and does not propagate " +
+                      $"from the root). Run: {ddl} New partitions need the same treatment."
+                    : $"Table {table.QualifiedName} has partition(s) {leaves} without REPLICA IDENTITY FULL; " +
+                      $"old values and unchanged-TOAST columns may be unavailable on UPDATE/DELETE. To " +
+                      $"capture full rows, run: {ddl} New partitions need the same treatment.";
+            }
+            else
+            {
+                var relReplIdent = notFull[0].ReplIdent;
+                message = options.RequireFullReplicaIdentity
+                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform but has '{relReplIdent}'. Run: {ddl}"
+                    : $"Table {table.QualifiedName} has REPLICA IDENTITY '{relReplIdent}'; old values and unchanged-TOAST " +
+                      $"columns may be unavailable on UPDATE/DELETE. To capture full rows, run: {ddl}";
+            }
+
+            if (options.RequireFullReplicaIdentity)
+            {
+                throw new WallabyConfigurationException(message);
+            }
+            warnings.Add(message);
+            logger.ConfigurationWarning(message);
         }
     }
 }

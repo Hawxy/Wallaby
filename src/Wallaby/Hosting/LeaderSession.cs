@@ -88,6 +88,7 @@ internal sealed class LeaderSession(
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
         var scheduler = new BackfillScheduler(
             components.BackfillTables, components.BackfillStore, components.Coordinator,
+            new SinkPurgeRunner(components.Sinks, instrumentation, _logger),
             new BackfillSchedulerOptions
             {
                 AutoBackfillNewTables = options.AutoBackfillNewTables,
@@ -122,6 +123,19 @@ internal sealed class LeaderSession(
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
         });
 
+        // Advances the slot while the mapped tables are idle. Never faults the session — the emitter
+        // logs and swallows per-tick errors, so a transiently-down database just skips ticks.
+        var heartbeatTask = options.Advanced.HeartbeatInterval > TimeSpan.Zero
+            ? Task.Run(async () =>
+            {
+                var emitter = new HeartbeatEmitter(
+                    dataSource.Source, () => pipeline.LastAcknowledgedLsn,
+                    options.Advanced.HeartbeatInterval, _logger);
+                try { await emitter.RunAsync(linked.Token); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            })
+            : Task.CompletedTask;
+
         // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
         var fanoutTask = components.FanoutQueue is not null
             ? Task.Run(async () =>
@@ -153,6 +167,7 @@ internal sealed class LeaderSession(
             await backfillTask; // never faults: the body records + swallows
             await fanoutTask;
             await controlTask;
+            await heartbeatTask;
         }
 
         ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks
@@ -221,13 +236,13 @@ internal sealed class LeaderSession(
             ["wallaby.lsn.consistent"] = consistentPoint,
         }));
 
-        foreach (var (table, _) in components.BackfillTables)
+        foreach (var table in components.BackfillTables)
         {
-            var existing = await components.BackfillStore.GetAsync(table.QualifiedName, ct);
+            var existing = await components.BackfillStore.GetAsync(table.Table.QualifiedName, ct);
             await components.BackfillStore.SaveAsync(
                 new BackfillState(
-                    table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
-                    null, 0, DateTimeOffset.UtcNow),
+                    table.Table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
+                    null, 0, DateTimeOffset.UtcNow, Purge: options.PurgeOnSlotGapRepair),
                 ct);
         }
 

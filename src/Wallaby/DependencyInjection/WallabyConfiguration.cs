@@ -22,6 +22,9 @@ internal sealed class MappingRegistration
     public required Type EntityClrType { get; init; }
     public string? Destination { get; set; }
     public string? BackfillVersion { get; set; }
+
+    /// <summary>Purge this mapping's sink destinations before the fresh backfill a version change triggers.</summary>
+    public bool PurgeOnBackfillVersionChange { get; set; }
     public Func<IServiceProvider, IWallabyTransformInvoker>? TransformFactory { get; set; }
     public Func<ChangeEvent, string>? DocumentIdSelector { get; set; }
 

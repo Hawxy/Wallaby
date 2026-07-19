@@ -40,8 +40,8 @@ internal sealed class WallabyComponents : IAsyncDisposable
     public DependentChangeResolver? DependentResolver { get; init; }
     public IFanoutQueueStore? FanoutQueue { get; init; }
 
-    /// <summary>Every mapped table with the composite of its mappings' declared backfill versions.</summary>
-    public required IReadOnlyList<(CapturedTable Table, string? Version)> BackfillTables { get; init; }
+    /// <summary>Every mapped table with its composite backfill version and sink purge targets.</summary>
+    public required IReadOnlyList<BackfillTable> BackfillTables { get; init; }
 
     public static WallabyComponents Build(
         ResolvedProviderSet providers,
@@ -57,8 +57,9 @@ internal sealed class WallabyComponents : IAsyncDisposable
 
         var mappings = new List<EntityMapping>();
         // Backfill state is per table: a table mapped to several sinks appears once, with the composite
-        // of its mappings' declared versions as the version key.
-        var backfillByTable = new Dictionary<string, (CapturedTable Table, List<string> Versions)>(StringComparer.Ordinal);
+        // of its mappings' declared versions as the version key and every mapping's (sink, destination)
+        // pair as a purge target.
+        var backfillByTable = new Dictionary<string, BackfillTableAccumulator>(StringComparer.Ordinal);
         foreach (var sink in config.Sinks)
         {
             foreach (var registration in sink.Mappings)
@@ -81,16 +82,22 @@ internal sealed class WallabyComponents : IAsyncDisposable
 
                 if (!backfillByTable.TryGetValue(captured.QualifiedName, out var entry))
                 {
-                    backfillByTable[captured.QualifiedName] = entry = (captured, []);
+                    backfillByTable[captured.QualifiedName] = entry = new BackfillTableAccumulator(captured);
                 }
                 if (registration.BackfillVersion is not null)
                 {
                     entry.Versions.Add(registration.BackfillVersion);
                 }
+                entry.PurgeOnVersionChange |= registration.PurgeOnBackfillVersionChange;
+                entry.Targets.Add(new SinkPurgeTarget(
+                    sink.Name, registration.Destination, registration.DestinationSelector is not null));
             }
         }
         var backfillTables = backfillByTable.Values
-            .Select(v => (v.Table, BackfillVersioning.Compose(v.Versions)))
+            .Select(v => new BackfillTable(
+                v.Table, BackfillVersioning.Compose(v.Versions), v.PurgeOnVersionChange,
+                // Record equality dedupes: two mappings on the same sink+destination purge once.
+                v.Targets.Distinct().ToArray()))
             .ToList();
 
         var sinks = config.Sinks.ToDictionary(s => s.Name, s => s.Factory(services));
@@ -136,4 +143,12 @@ internal sealed class WallabyComponents : IAsyncDisposable
 
     /// <summary>Sinks are materialized once per host, so they are disposed here rather than per leader session.</summary>
     public ValueTask DisposeAsync() => SinkDisposal.DisposeAllAsync(Sinks.Values, Logger);
+
+    private sealed class BackfillTableAccumulator(CapturedTable table)
+    {
+        public CapturedTable Table { get; } = table;
+        public List<string> Versions { get; } = [];
+        public bool PurgeOnVersionChange { get; set; }
+        public List<SinkPurgeTarget> Targets { get; } = [];
+    }
 }

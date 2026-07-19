@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.State;
 using Wallaby.Model;
@@ -11,58 +12,82 @@ public class BackfillSchedulerTests
 {
     private static readonly BackfillSchedulerOptions Defaults = new();
 
-    private static BackfillState State(BackfillStatus status, string? version) =>
-        new("public.products", status, version, CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow);
+    private static BackfillState State(BackfillStatus status, string? version, bool purge = false) =>
+        new("public.products", status, version, CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow, purge);
+
+    private static BackfillDecision Decide(
+        BackfillState? state, string? declaredVersion, BackfillSchedulerOptions? options = null,
+        bool purgeOnVersionChange = false)
+        => BackfillScheduler.Decide(state, declaredVersion, purgeOnVersionChange, options ?? Defaults);
 
     [Test]
     public void New_table_is_fresh_when_auto_enabled()
     {
-        var action = BackfillScheduler.DetermineAction(state: null, declaredVersion: "v1", Defaults);
-        action.ShouldBe(BackfillAction.Fresh);
+        Decide(state: null, declaredVersion: "v1").ShouldBe(new BackfillDecision(BackfillAction.Fresh, Purge: false));
     }
 
     [Test]
     public void New_table_is_skipped_when_auto_disabled()
     {
         var options = new BackfillSchedulerOptions { AutoBackfillNewTables = false };
-        var action = BackfillScheduler.DetermineAction(state: null, declaredVersion: "v1", options);
-        action.ShouldBe(BackfillAction.Skip);
+        Decide(state: null, declaredVersion: "v1", options).Action.ShouldBe(BackfillAction.Skip);
     }
 
     [Test]
     public void Requested_is_fresh()
     {
-        var action = BackfillScheduler.DetermineAction(State(BackfillStatus.Requested, "v1"), "v1", Defaults);
-        action.ShouldBe(BackfillAction.Fresh);
+        Decide(State(BackfillStatus.Requested, "v1"), "v1")
+            .ShouldBe(new BackfillDecision(BackfillAction.Fresh, Purge: false));
+    }
+
+    [Test]
+    public void Requested_with_purge_mark_is_fresh_with_purge()
+    {
+        Decide(State(BackfillStatus.Requested, "v1", purge: true), "v1")
+            .ShouldBe(new BackfillDecision(BackfillAction.Fresh, Purge: true));
     }
 
     [Test]
     public void In_progress_resumes()
     {
-        var action = BackfillScheduler.DetermineAction(State(BackfillStatus.InProgress, "v1"), "v1", Defaults);
-        action.ShouldBe(BackfillAction.Resume);
+        Decide(State(BackfillStatus.InProgress, "v1"), "v1")
+            .ShouldBe(new BackfillDecision(BackfillAction.Resume, Purge: false));
+    }
+
+    [Test]
+    public void In_progress_never_purges_even_when_marked()
+    {
+        // Re-purging a resumed run would delete the chunks it already delivered.
+        Decide(State(BackfillStatus.InProgress, "v1", purge: true), "v1")
+            .ShouldBe(new BackfillDecision(BackfillAction.Resume, Purge: false));
     }
 
     [Test]
     public void Completed_same_version_is_skipped()
     {
-        var action = BackfillScheduler.DetermineAction(State(BackfillStatus.Completed, "v1"), "v1", Defaults);
-        action.ShouldBe(BackfillAction.Skip);
+        Decide(State(BackfillStatus.Completed, "v1"), "v1").Action.ShouldBe(BackfillAction.Skip);
     }
 
     [Test]
     public void Completed_changed_version_is_fresh()
     {
-        var action = BackfillScheduler.DetermineAction(State(BackfillStatus.Completed, "v1"), "v2", Defaults);
-        action.ShouldBe(BackfillAction.Fresh);
+        Decide(State(BackfillStatus.Completed, "v1"), "v2")
+            .ShouldBe(new BackfillDecision(BackfillAction.Fresh, Purge: false));
+    }
+
+    [Test]
+    public void Completed_changed_version_purges_when_mapping_opted_in()
+    {
+        Decide(State(BackfillStatus.Completed, "v1"), "v2", purgeOnVersionChange: true)
+            .ShouldBe(new BackfillDecision(BackfillAction.Fresh, Purge: true));
     }
 
     [Test]
     public void Completed_changed_version_is_skipped_when_auto_version_disabled()
     {
         var options = new BackfillSchedulerOptions { AutoBackfillOnVersionChange = false };
-        var action = BackfillScheduler.DetermineAction(State(BackfillStatus.Completed, "v1"), "v2", options);
-        action.ShouldBe(BackfillAction.Skip);
+        Decide(State(BackfillStatus.Completed, "v1"), "v2", options, purgeOnVersionChange: true)
+            .Action.ShouldBe(BackfillAction.Skip);
     }
 
     // ---- request loop ----
@@ -91,7 +116,7 @@ public class BackfillSchedulerTests
 
         public Task SaveAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
         public Task SaveProgressAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task RequestAsync(string t, string? v, CancellationToken ct) => Task.CompletedTask;
+        public Task RequestAsync(string t, string? v, bool purge, CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<BackfillState>>([]);
     }
@@ -124,7 +149,11 @@ public class BackfillSchedulerTests
         // Never opened: every pass skips, so the coordinator's data source is untouched.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
         var coordinator = new WatermarkBackfillCoordinator(dataSource, store, NullLogger.Instance);
-        var scheduler = new BackfillScheduler([(table, "v1")], store, coordinator, new BackfillSchedulerOptions(), NullLogger.Instance);
+        var scheduler = new BackfillScheduler(
+            [new BackfillTable(table, "v1", PurgeOnVersionChange: false, PurgeTargets: [])],
+            store, coordinator,
+            new SinkPurgeRunner(new Dictionary<string, ISink>(), WallabyInstrumentation.NoOp, NullLogger.Instance),
+            new BackfillSchedulerOptions(), NullLogger.Instance);
 
         await scheduler.RunAsync(TimeSpan.FromSeconds(30), stop.Token);
         return store.Events;

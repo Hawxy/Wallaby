@@ -56,8 +56,10 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     private WatermarkBackfillCoordinator? _coordinator;
     private DependentChangeResolver? _dependentResolver;
     private IFanoutQueueStore? _fanoutQueue;
+    private HeartbeatEmitter? _heartbeat;
     private Task? _pipelineTask;
     private Task? _backfillLoopTask;
+    private Task? _heartbeatTask;
 
     public WallabyTestHarness(string connectionString, IWallabyModelProvider modelProvider, WallabyNames? names = null)
     {
@@ -82,6 +84,15 @@ public sealed class WallabyTestHarness : IAsyncDisposable
 
     /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Idle-slot heartbeat interval (set before <see cref="StartAsync"/>). Opt-in: <see cref="TimeSpan.Zero"/>
+    /// (the default) disables the heartbeat so unrelated tests are unaffected.
+    /// </summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.Zero;
+
+    /// <summary>Heartbeats emitted since <see cref="StartAsync"/> (for suppression assertions).</summary>
+    public long HeartbeatsEmitted => _heartbeat?.EmittedCount ?? 0;
 
     /// <summary>Sink retry policy (set before <see cref="StartAsync"/>).</summary>
     public DependencyInjection.SinkRetryOptions SinkRetry { get; set; } = new();
@@ -272,6 +283,19 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         _pipelineTask = Task.Run(() => _pipeline.RunAsync(_cts.Token));
+
+        if (HeartbeatInterval > TimeSpan.Zero)
+        {
+            var emitter = new HeartbeatEmitter(
+                _dataSource, () => _pipeline.LastAcknowledgedLsn, HeartbeatInterval, NullLogger.Instance);
+            _heartbeat = emitter;
+            var token = _cts.Token;
+            _heartbeatTask = Task.Run(async () =>
+            {
+                try { await emitter.RunAsync(token); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            });
+        }
     }
 
     /// <summary>
@@ -330,11 +354,26 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         var tables = _backfillTypes
-            .Select(kv => (_model!.FindByClrType(kv.Key)!, version ?? kv.Value))
+            .Select(kv => new BackfillTable(
+                _model!.FindByClrType(kv.Key)!, version ?? kv.Value, PurgeOnVersionChange: false,
+                PurgeTargetsFor(kv.Key)))
             .ToList();
         return new BackfillScheduler(
-            tables, new PostgresBackfillStore(_dataSource), _coordinator, new BackfillSchedulerOptions(), NullLogger.Instance);
+            tables, new PostgresBackfillStore(_dataSource), _coordinator,
+            new SinkPurgeRunner(_sinks, Instrumentation, NullLogger.Instance),
+            new BackfillSchedulerOptions(), NullLogger.Instance);
     }
+
+    // Broadcast routes every change to every sink under its default destination; mapping mode mirrors
+    // WallabyComponents.Build's per-mapping targets.
+    private List<SinkPurgeTarget> PurgeTargetsFor(Type entityClrType)
+        => _broadcast
+            ? _sinks.Keys.Select(name => new SinkPurgeTarget(name, Destination: null, Scoped: false)).ToList()
+            : _mappings
+                .Where(m => m.EntityClrType == entityClrType)
+                .Select(m => new SinkPurgeTarget(m.SinkName, m.Destination, m.DestinationSelector is not null))
+                .Distinct()
+                .ToList();
 
     /// <summary>Poll until the condition holds (or times out), surfacing any pipeline fault promptly.</summary>
     public Task WaitUntilAsync(Func<Task<bool>> predicate, TimeSpan? timeout = null)
@@ -383,6 +422,12 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             catch (Exception ex) { fault ??= ex; }
         }
 
+        if (_heartbeatTask is not null)
+        {
+            try { await _heartbeatTask; }
+            catch (OperationCanceledException) { }
+        }
+
         if (_stream is not null)
         {
             await _stream.DisposeAsync();
@@ -397,6 +442,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _cts = null;
         _pipelineTask = null;
         _backfillLoopTask = null;
+        _heartbeatTask = null;
+        _heartbeat = null;
         _stream = null;
         _spill = null;
         _pipeline = null;

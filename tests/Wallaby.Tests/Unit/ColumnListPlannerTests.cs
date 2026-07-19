@@ -8,8 +8,8 @@ public class ColumnListPlannerTests
         => new("public", "products", columns);
 
     private static TableCatalogInfo Catalog(
-        string relReplIdent = "d", string[]? indexColumns = null, string[]? generated = null)
-        => new(relReplIdent, indexColumns ?? [], generated ?? []);
+        string relReplIdent = "d", string[]? indexColumns = null, string[]? generated = null, string relKind = "r")
+        => new(relKind, relReplIdent, indexColumns ?? [], generated ?? []);
 
     [Test]
     public void Whole_table_candidate_passes_through()
@@ -33,6 +33,20 @@ public class ColumnListPlannerTests
 
         effective.ShouldBeSameAs(candidate);
         warning.ShouldBeNull();
+    }
+
+    [Test]
+    public void Partitioned_table_demotes_to_whole_table_with_warning()
+    {
+        // Leaf replica identities aren't visible to the root-level catalog pass; a list missing a FULL
+        // leaf's identity errors the application's own UPDATE/DELETE.
+        var (effective, warning, omitted) = ColumnListPlanner.Plan(Listed("id", "name"), Catalog(relKind: "p"));
+
+        effective.Columns.ShouldBeNull();
+        warning.ShouldNotBeNull();
+        warning!.ShouldContain("partitioned");
+        warning.ShouldContain("public.products");
+        omitted.ShouldBeEmpty();
     }
 
     [Test]

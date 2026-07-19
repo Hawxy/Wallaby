@@ -55,7 +55,7 @@ The activity source `Wallaby` emits one span per unit of work:
 
 | Span | Kind | Notable attributes |
 | --- | --- | --- |
-| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk); status `Error` on fault |
+| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk), `wallaby.heartbeat` (`true`, only on [idle-slot heartbeat](/how-it-works#idle-slots-and-wal-retention) transactions — filter these out in trace viewers), `wallaby.truncate` (comma-joined table names, only on transactions that [truncated captured tables](/how-it-works#truncate-is-not-propagated)); status `Error` on fault |
 | `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count`, `wallaby.fanout.offloaded` (bindings whose tail was queued as a scoped backfill) |
 | `route` | Internal | `wallaby.batch.size`, `wallaby.source` (`live`/`fanout`/`backfill`) |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |
@@ -67,6 +67,7 @@ The activity source `Wallaby` emits one span per unit of work:
 | `selfconfig` | Internal | `wallaby.slot`; server validation and publication/slot/state-schema setup (child of `leader.bootstrap` when hosted); status `Error` on fault |
 | `slot.repair` | Internal | child of `leader.bootstrap`: slot-loss gap detection (and re-backfill marking when one is found) |
 | `sink.initialize` | Internal | `wallaby.sink`; child of `leader.bootstrap`, one per sink with one-time setup |
+| `sink.purge` | Internal | `wallaby.sink`, `wallaby.table`, `wallaby.destination` (when the mapping declares one); one per destination [purged before a fresh backfill](/backfill#purging-before-a-backfill). A root span preceding the run's `backfill` span; status `Error` on fault |
 
 Live spans nest under the `transaction.process` root, so a single trace shows a committed transaction flowing
 through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the

@@ -41,6 +41,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string SelfConfigActivity = "selfconfig";
     internal const string SlotRepairActivity = "slot.repair";
     internal const string SinkInitializeActivity = "sink.initialize";
+    internal const string SinkPurgeActivity = "sink.purge";
 
     // ---- low-cardinality attribute values ----
     internal const string SourceLive = "live";
@@ -160,6 +161,9 @@ public sealed class WallabyInstrumentation : IDisposable
     internal Activity? StartSelfConfig() => _activitySource.StartActivity(SelfConfigActivity);
     internal Activity? StartSlotRepair() => _activitySource.StartActivity(SlotRepairActivity);
     internal Activity? StartSinkInitialize() => _activitySource.StartActivity(SinkInitializeActivity);
+
+    /// <summary>One destination purge before a fresh backfill; a root span like <see cref="StartBackfill"/>.</summary>
+    internal Activity? StartSinkPurge() => _activitySource.StartActivity(SinkPurgeActivity);
 
     // ---- ingestion / pipeline ----
 

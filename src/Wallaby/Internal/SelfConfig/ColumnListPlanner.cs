@@ -1,10 +1,12 @@
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>Catalog facts about one physical table, read at reconcile time.</summary>
+/// <param name="RelKind"><c>pg_class.relkind</c>: 'r' ordinary, 'p' partitioned.</param>
 /// <param name="RelReplIdent"><c>pg_class.relreplident</c>: 'd' default, 'n' nothing, 'f' full, 'i' index.</param>
 /// <param name="ReplicaIdentityIndexColumns">Columns of the replica-identity index; empty unless 'i'.</param>
 /// <param name="GeneratedColumns">Stored generated columns (<c>attgenerated &lt;&gt; ''</c>).</param>
 internal sealed record TableCatalogInfo(
+    string RelKind,
     string RelReplIdent,
     IReadOnlyList<string> ReplicaIdentityIndexColumns,
     IReadOnlyList<string> GeneratedColumns);
@@ -28,6 +30,16 @@ internal static class ColumnListPlanner
         if (candidate.Columns is null || catalog is null)
         {
             return (candidate, null, []);
+        }
+
+        // Replica identity is governed per leaf partition, which this root-level pass cannot see; a
+        // list missing a FULL leaf's identity errors the application's own UPDATE/DELETE at DML time.
+        if (catalog.RelKind == "p")
+        {
+            return (candidate with { Columns = null },
+                $"Table {candidate.QualifiedName} is partitioned; publishing all columns " +
+                "(a column list cannot be validated against each partition's replica identity).",
+                []);
         }
 
         if (catalog.RelReplIdent == "f")

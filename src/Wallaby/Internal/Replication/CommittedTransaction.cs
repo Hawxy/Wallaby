@@ -32,6 +32,20 @@ internal sealed class CommittedTransaction
     public IReadOnlyList<Watermark> Watermarks { get; init; } = Array.Empty<Watermark>();
 
     /// <summary>
+    /// True when this transaction carried a <c>wallaby.heartbeat</c> message — an idle-slot heartbeat
+    /// emitted only to advance <c>confirmed_flush_lsn</c>. Used to tag its span and keep it out of the
+    /// throughput rollup; never set on streamed transactions (heartbeats are tiny).
+    /// </summary>
+    public bool ContainsHeartbeat { get; init; }
+
+    /// <summary>
+    /// Qualified names (<c>schema.table</c>) of captured tables truncated in this transaction, in arrival
+    /// order. Truncates are not propagated to sinks — the pipeline logs a warning that the affected sinks
+    /// now diverge until purged and re-backfilled. Empty for transactions without truncates.
+    /// </summary>
+    public IReadOnlyList<string> TruncatedTables { get; init; } = Array.Empty<string>();
+
+    /// <summary>
     /// True for a pgoutput v2 streamed (large) transaction whose changes were spilled out of memory rather
     /// than buffered in <see cref="Changes"/>. Read them in order via <c>Spill.ReadAsync(StreamXid)</c>; the
     /// consumer stamps each with this transaction's commit metadata and discards the spill when done.

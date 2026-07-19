@@ -53,6 +53,15 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan ControlPollInterval { get; set; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
+    /// How often the leader emits a tiny transactional heartbeat message (<c>pg_logical_emit_message</c>)
+    /// while the pipeline is idle, so the slot's <c>confirmed_flush_lsn</c> keeps advancing even when the
+    /// mapped tables are quiet while other tables churn WAL — preventing unbounded WAL retention (and
+    /// eventual <c>max_slot_wal_keep_size</c> slot invalidation) on shared databases. Suppressed while
+    /// real traffic is being acknowledged. <see cref="TimeSpan.Zero"/> disables the heartbeat.
+    /// </summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap
     /// detection and observability; the authoritative resume position is the slot's
     /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a

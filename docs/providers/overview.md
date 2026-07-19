@@ -14,7 +14,7 @@ Two providers are available:
   entity mappings; transforms receive a leased `DbContext`.
 - **[Marten](/providers/marten/)**: Captures Marten document tables and rehydrates each change through
   the store's own serializer; transforms receive a leased `IQuerySession`.
-
+  
 ## Combining providers
 
 Both providers can be registered in one Wallaby instance sharing a single replication

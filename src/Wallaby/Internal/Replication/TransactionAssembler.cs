@@ -21,8 +21,10 @@ namespace Wallaby.Internal.Replication;
 /// <see cref="StreamAbortMessage"/> the spill is discarded — wholly for a transaction abort, or truncated from
 /// the subtransaction's first change for a rolled-back savepoint.
 /// </para>
-/// Relation and truncate messages are not (yet) surfaced as changes. Generic WAL messages with the
-/// <c>wallaby.watermark.*</c> prefix are buffered as <see cref="Watermark"/>s for the backfill coordinator.
+/// Relation messages are not surfaced as changes. Truncates of captured tables are surfaced as
+/// <see cref="CommittedTransaction.TruncatedTables"/> (the pipeline warns; nothing reaches sinks).
+/// Generic WAL messages with the <c>wallaby.watermark.*</c> prefix are buffered as
+/// <see cref="Watermark"/>s for the backfill coordinator.
 /// </summary>
 internal sealed class TransactionAssembler(
     ITransactionSpill spill, int maxBufferedChangesPerTransaction = int.MaxValue, WallabyModel? model = null)
@@ -30,6 +32,15 @@ internal sealed class TransactionAssembler(
     // Non-streamed (small) transaction: changes between Begin and Commit (the common path).
     private readonly List<RawChange> _buffer = [];
     private readonly List<Watermark> _watermarks = [];
+
+    // True when the open non-streamed transaction carried a wallaby.heartbeat message.
+    private bool _sawHeartbeat;
+
+    // Qualified names of captured tables truncated in the open non-streamed transaction.
+    private readonly List<string> _truncatedTables = [];
+
+    // Same, keyed by streamed xid; lazy because truncates are rare.
+    private Dictionary<uint, List<string>>? _streamedTruncates;
 
     // Per-relation column read modes, aligned to the relation's column order; a null value means every
     // column reads with ColumnReadMode.Default (also cached, so unflagged and unmodeled tables pay the
@@ -52,14 +63,18 @@ internal sealed class TransactionAssembler(
             case BeginMessage:
                 _buffer.Clear();
                 _watermarks.Clear();
+                _sawHeartbeat = false;
+                _truncatedTables.Clear();
                 return null;
 
             case CommitMessage commit:
                 var committed = Finalize(
-                    _buffer, _watermarks,
+                    _buffer, _watermarks, _sawHeartbeat, _truncatedTables,
                     (ulong)commit.CommitLsn, (ulong)commit.TransactionEndLsn, commit.TransactionCommitTimestamp);
                 _buffer.Clear();
                 _watermarks.Clear();
+                _sawHeartbeat = false;
+                _truncatedTables.Clear();
                 return committed;
 
             // ---- streamed (large) transaction boundaries (v2) ----
@@ -73,6 +88,7 @@ internal sealed class TransactionAssembler(
 
             case StreamAbortMessage abort when abort.SubtransactionXid == abort.TransactionXid:
                 await spill.DiscardAsync(abort.TransactionXid, ct);  // whole transaction rolled back — drop its spill
+                _streamedTruncates?.Remove(abort.TransactionXid);
                 return null;
 
             case StreamAbortMessage abort:
@@ -92,11 +108,20 @@ internal sealed class TransactionAssembler(
                     IsStreamed = true,
                     StreamXid = streamCommit.TransactionXid,
                     Spill = spill,
+                    TruncatedTables = _streamedTruncates is not null
+                        && _streamedTruncates.Remove(streamCommit.TransactionXid, out var truncated)
+                        ? truncated : Array.Empty<string>(),
                 };
 
             // ---- watermarks (only ever in tiny non-streamed transactions) ----
             case LogicalDecodingMessage msg when msg.Prefix.StartsWith(WallabySchema.WatermarkPrefix, StringComparison.Ordinal):
                 _watermarks.Add(new Watermark(msg.Prefix, await ReadAsStringAsync(msg.Data, ct)));
+                return null;
+
+            // ---- idle-slot heartbeats (only ever in tiny non-streamed transactions) ----
+            case LogicalDecodingMessage msg when msg.Prefix == WallabySchema.HeartbeatPrefix:
+                _ = await ReadAsStringAsync(msg.Data, ct);  // recycled-message rule: drain even an empty payload
+                _sawHeartbeat = true;
                 return null;
 
             // ---- DML: spill it for the open streamed xid, else buffer it for the non-streamed transaction ----
@@ -129,8 +154,26 @@ internal sealed class TransactionAssembler(
                 _readModesByRelation.Remove(relation.RelationId);
                 return null;
 
+            // ---- truncate: never propagated as a change; captured tables are noted so the pipeline can warn ----
+            case TruncateMessage truncate:
+                // Recycled-message rule: resolve namespace/name now; the RelationMessages are only valid here.
+                foreach (var relation in truncate.Relations)
+                {
+                    if (model?.FindByRelation(relation.Namespace, relation.RelationName) is { } table)
+                    {
+                        var target = _currentStreamXid is { } streamXid
+                            ? StreamedTruncatesFor(streamXid)
+                            : _truncatedTables;
+                        if (!target.Contains(table.QualifiedName))
+                        {
+                            target.Add(table.QualifiedName);
+                        }
+                    }
+                }
+                return null;
+
             default:
-                // TruncateMessage, Begin/Commit-prepared, Type, etc.
+                // Begin/Commit-prepared, Type, etc.
                 return null;
         }
     }
@@ -243,8 +286,20 @@ internal sealed class TransactionAssembler(
         };
     }
 
+    // A truncate rolled back via savepoint may still be recorded here — accepted, the result is only a warning.
+    private List<string> StreamedTruncatesFor(uint xid)
+    {
+        _streamedTruncates ??= [];
+        if (!_streamedTruncates.TryGetValue(xid, out var list))
+        {
+            _streamedTruncates[xid] = list = [];
+        }
+        return list;
+    }
+
     private static CommittedTransaction Finalize(
-        List<RawChange> buffer, List<Watermark> watermarks, ulong commitLsn, ulong endLsn, DateTime commitTimestamp)
+        List<RawChange> buffer, List<Watermark> watermarks, bool containsHeartbeat, List<string> truncatedTables,
+        ulong commitLsn, ulong endLsn, DateTime commitTimestamp)
     {
         var timestamp = NormalizeTimestamp(commitTimestamp);
         var changes = new RawChange[buffer.Count];
@@ -264,6 +319,8 @@ internal sealed class TransactionAssembler(
             CommitTimestamp = timestamp,
             Changes = changes,
             Watermarks = watermarks.Count == 0 ? Array.Empty<Watermark>() : watermarks.ToArray(),
+            ContainsHeartbeat = containsHeartbeat,
+            TruncatedTables = truncatedTables.Count == 0 ? Array.Empty<string>() : truncatedTables.ToArray(),
         };
     }
 

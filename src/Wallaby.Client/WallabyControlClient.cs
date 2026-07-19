@@ -12,7 +12,7 @@ namespace Wallaby.Client;
 /// Wallaby manages (primary and external) so platforms like RDS/Aurora can run a major-version upgrade,
 /// and persists across restarts until <see cref="ResumeAsync"/>; on resume, Wallaby recreates its slots
 /// and re-backfills every mapped table to converge sinks. Backfills can also be requested directly via
-/// <see cref="RequestBackfillAsync"/>, addressed by schema-qualified table name.
+/// <see cref="RequestBackfillAsync(string, CancellationToken)"/>, addressed by schema-qualified table name.
 /// </summary>
 public sealed class WallabyControlClient : IAsyncDisposable
 {
@@ -169,12 +169,24 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// <exception cref="InvalidOperationException">
     /// The database has no <c>wallaby.backfill_state</c> table — no Wallaby host has run against it.
     /// </exception>
-    public async Task RequestBackfillAsync(string tableQualifiedName, CancellationToken ct = default)
+    public Task RequestBackfillAsync(string tableQualifiedName, CancellationToken ct = default)
+        => RequestBackfillAsync(tableQualifiedName, purge: false, ct);
+
+    /// <summary>
+    /// Request a (re)backfill of <paramref name="tableQualifiedName"/>, optionally purging sink
+    /// destinations first so the backfill converges them to exactly the current table contents
+    /// (sinks must implement <c>ISinkPurger</c>; see <see cref="RequestBackfillAsync(string, CancellationToken)"/>
+    /// for the request semantics).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The database has no <c>wallaby.backfill_state</c> table — no Wallaby host has run against it.
+    /// </exception>
+    public async Task RequestBackfillAsync(string tableQualifiedName, bool purge, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableQualifiedName);
         try
         {
-            await BackfillOperations.RequestAsync(_dataSource, tableQualifiedName, ct);
+            await BackfillOperations.RequestAsync(_dataSource, tableQualifiedName, purge, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
@@ -182,7 +194,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
                 "This database has no wallaby.backfill_state table: no Wallaby host has run against it. " +
                 "The host creates it at startup.", ex);
         }
-        _logger.BackfillRequested(tableQualifiedName);
+        _logger.BackfillRequested(tableQualifiedName, purge);
     }
 
     /// <summary>
@@ -239,6 +251,6 @@ internal static partial class WallabyControlClientLog
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby resume requested (transitioned={Transitioned}).")]
     internal static partial void ResumeRequested(this ILogger logger, bool transitioned);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table '{Table}'.")]
-    internal static partial void BackfillRequested(this ILogger logger, string table);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table '{Table}' (purge={Purge}).")]
+    internal static partial void BackfillRequested(this ILogger logger, string table, bool purge);
 }
