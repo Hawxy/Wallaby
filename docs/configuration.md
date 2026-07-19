@@ -4,21 +4,6 @@ description: "Wallaby's configuration options and how to set them, from slot and
 
 # Configuration
 
-## Large Transaction Handling
-
-Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's `logical_decoding_work_mem`
-(default 64 MB) is streamed before commit and spilled out of memory, then processed in `MaxBatchSize` pages. This ensures a 
-single huge transaction won't exhaust the worker's heap. Small transactions, which will be the majority, are kept as in-memory only.
-
-You have a number of choices as to where streamed transactions spill:
-
-- **`cdc.SpillToDatabase()`**: *(default)* Buffers transactions into `wallaby.stream_buffer` `UNLOGGED` table on the source database.
-  Disk-free and zero-config (works wherever Wallaby connects). Will cause I/O amplification on the DB during large transactions.  
-- **`cdc.SpillToDisk(path?)`**: Writes to local temp files. Needs a writable path and isn't suitable for read-only environments.
-- **`cdc.UseTransactionSpill(ctx => ...)`**: Provide your own custom `ITransactionSpill` backend (e.g. an object store). The
-  factory is handed a `SpillContext` (the source data source, slot name, and service provider) once per leader
-  session and should return a fresh instance. Your backend should spill to a durable/external store, not buffer in-memory.
-
 ## General Options
 
 `ConfigureOptions(o => ...)` exposes:
@@ -29,7 +14,7 @@ You have a number of choices as to where streamed transactions spill:
 | `SlotName` / `PublicationName` | `wallaby_cdc_slot` / `wallaby_cdc_pub` | Names Wallaby creates/uses. |
 | `ChunkSize` | `500` | Backfill keyset page size (1–100 000; chunk rows are held in memory). |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/providers/entity-framework-core/#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
-| `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. |
+| `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. When `false`, a publication used with a [partitioned table](/how-it-works#partitioned-tables) must have `publish_via_partition_root = true` set yourself — startup fails otherwise. |
 | `PublicationColumnLists` | `true` | Publish only each table's captured columns via [publication column lists](#publication-column-lists). Requires `ManagePublicationTables`. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
@@ -39,29 +24,6 @@ You have a number of choices as to where streamed transactions spill:
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
 | `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
-
-### Publication column lists
-
-With `PublicationColumnLists` (the default), Wallaby publishes only the columns the capture model
-actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so properties outside the
-mappings' [column selections](/providers/entity-framework-core/#declaring-consumed-columns),
-unmapped physical columns, and (for Marten) unmodeled `mt_*` metadata are filtered inside Postgres:
-they are never decoded by the WAL sender or sent over the wire. Column lists are reconciled on every
-startup; drift is applied atomically with a single `ALTER PUBLICATION ... SET TABLE`.
-
-Tables that require `REPLICA IDENTITY FULL` (scoped destinations, custom document ids, Marten
-soft-delete documents) and tables whose live replica identity is `FULL` always publish whole rows: a
-column list must cover the table's replica identity, and `FULL` covers every column.
-[External slots](/external-slots) are unaffected - their publications always carry whole tables for
-the third-party consumer.
-
-::: warning
-Flipping a column-listed table to `REPLICA IDENTITY FULL` while Wallaby is running makes that table's
-`UPDATE`/`DELETE` statements fail on the publisher until the next Wallaby startup reconciles it back to
-whole-row publishing. Restart Wallaby (or drop the identity change) after such a flip. Tables Wallaby
-itself flags for `REPLICA IDENTITY FULL` are never column-listed, so following Wallaby's own startup
-guidance is always safe.
-:::
 
 ### Advanced Options
 
@@ -114,3 +76,42 @@ builder.Services.AddWallaby(cdc =>
 The delegates run once, when the host first resolves Wallaby's services, and receive the **root** provider
 (scoped services are unavailable). Resolving Wallaby's own services inside them creates a resolution cycle,
 and their configuration errors surface at host start instead of at registration.
+
+## Large Transaction Handling
+
+Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's `logical_decoding_work_mem`
+(default 64 MB) is streamed before commit and spilled out of memory, then processed in `MaxBatchSize` pages. This ensures a 
+single huge transaction won't exhaust the worker's heap. Small transactions, which will be the majority, are kept as in-memory only.
+
+You have a number of choices as to where streamed transactions spill:
+
+- **`cdc.SpillToDatabase()`**: *(default)* Buffers transactions into `wallaby.stream_buffer` `UNLOGGED` table on the source database.
+  Disk-free and zero-config (works wherever Wallaby connects). Will cause I/O amplification on the DB during large transactions.  
+- **`cdc.SpillToDisk(path?)`**: Writes to local temp files. Needs a writable path and isn't suitable for read-only environments.
+- **`cdc.UseTransactionSpill(ctx => ...)`**: Provide your own custom `ITransactionSpill` backend (e.g. an object store). The
+  factory is handed a `SpillContext` (the source data source, slot name, and service provider) once per leader
+  session and should return a fresh instance. Your backend should spill to a durable/external store, not buffer in-memory.
+
+
+### Publication column lists
+
+With `PublicationColumnLists` (the default), Wallaby publishes only the columns the capture model
+actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so properties outside the
+mappings' [column selections](/providers/entity-framework-core/#declaring-consumed-columns),
+unmapped physical columns, and (for Marten) unmodeled `mt_*` metadata are filtered inside Postgres:
+they are never decoded by the WAL sender or sent over the wire. Column lists are reconciled on every
+startup; drift is applied atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+
+Tables that require `REPLICA IDENTITY FULL` (scoped destinations, custom document ids, Marten
+soft-delete documents) and tables whose live replica identity is `FULL` always publish whole rows: a
+column list must cover the table's replica identity, and `FULL` covers every column.
+[External slots](/external-slots) are unaffected - their publications always carry whole tables for
+the third-party consumer.
+
+::: warning
+Flipping a column-listed table to `REPLICA IDENTITY FULL` while Wallaby is running makes that table's
+`UPDATE`/`DELETE` statements fail on the publisher until the next Wallaby startup reconciles it back to
+whole-row publishing. Restart Wallaby (or drop the identity change) after such a flip. Tables Wallaby
+itself flags for `REPLICA IDENTITY FULL` are never column-listed, so following Wallaby's own startup
+guidance is always safe.
+:::

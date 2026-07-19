@@ -112,6 +112,11 @@ sink path** as live changes. If a row is changed live during the window, the liv
 
 Progress is persisted per table, so a backfill resumes from its last cursor after a restart.
 
+A [partitioned table](/how-it-works#partitioned-tables) is snapshotted through its root, so one
+backfill covers every partition. That makes a [purge backfill](#purging-before-a-backfill) the
+remediation for `ATTACH`/`DETACH PARTITION`: attached rows were never streamed and detached rows
+leave no delete events, so purge-then-backfill is what converges the sinks after a partition swap.
+
 ### Duplicates across failover
 
 Chunk delivery and cursor persistence are two steps, so there is a small window where a leader could die

@@ -4,14 +4,22 @@ using Npgsql;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
+/// Outcome of ensuring a publication: whether it was created, and whether it publishes via the
+/// partition root (always true for a managed publication after the ensure).
+/// </summary>
+internal readonly record struct PublicationEnsureResult(bool Created, bool ViaRoot);
+
+/// <summary>
 /// Creates a publication for the desired table set, or reconciles an existing one: membership drift is
 /// applied per table, column-list drift atomically via <c>SET TABLE</c>. Candidate column lists are
-/// resolved against live catalog state (<see cref="ColumnListPlanner"/>) before any DDL.
+/// resolved against live catalog state (<see cref="ColumnListPlanner"/>) before any DDL. Managed
+/// publications always set <c>publish_via_partition_root</c> so partitioned tables publish under the
+/// root's name and schema.
 /// </summary>
 internal sealed class PublicationReconciler(ILogger logger)
 {
-    /// <summary>Ensure <paramref name="pub"/> exists with the desired tables; true if it was created.</summary>
-    public async Task<bool> EnsureAsync(
+    /// <summary>Ensure <paramref name="pub"/> exists with the desired tables.</summary>
+    public async Task<PublicationEnsureResult> EnsureAsync(
         NpgsqlConnection connection,
         string pub,
         IReadOnlyList<PublicationTableSpec> desiredTables,
@@ -19,33 +27,55 @@ internal sealed class PublicationReconciler(ILogger logger)
         List<string>? warnings,
         CancellationToken ct)
     {
-        // null = publication absent; otherwise its puballtables flag.
-        var allTables = (bool?)await PgExec.ScalarAsync(
-            connection, "SELECT puballtables FROM pg_publication WHERE pubname = @p", ct, ("p", pub));
+        // null = publication absent.
+        (bool AllTables, bool ViaRoot)? existing = null;
+        await using (var probe = new NpgsqlCommand(
+            "SELECT puballtables, pubviaroot FROM pg_publication WHERE pubname = @p", connection))
+        {
+            probe.Parameters.AddWithValue("p", pub);
+            await using var reader = await probe.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                existing = (reader.GetBoolean(0), reader.GetBoolean(1));
+            }
+        }
 
         var resolved = await ResolveColumnListsAsync(connection, desiredTables, warnings, ct);
 
-        if (allTables is null)
+        if (existing is null)
         {
             var tableList = string.Join(", ", resolved.Select(FormatTableClause));
             await ExecutePublicationDdlAsync(
-                connection, pub, $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList}", ct);
+                connection, pub,
+                $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList} " +
+                "WITH (publish_via_partition_root = true)", ct);
             logger.PublicationCreated(pub, resolved.Count);
-            return true;
+            return new PublicationEnsureResult(Created: true, ViaRoot: true);
         }
 
         if (reconcile)
         {
-            if (allTables == true)
+            if (existing.Value.AllTables)
             {
                 throw new WallabyConfigurationException(
                     $"Publication '{pub}' is FOR ALL TABLES; Wallaby cannot reconcile its membership. " +
                     "Recreate it as FOR TABLE, or set ManagePublicationTables=false to use it as-is.");
             }
+            if (!existing.Value.ViaRoot)
+            {
+                // Safe with an existing slot: transactions committed before this ALTER decode under the
+                // historic catalog (leaf names for partitioned tables), which no captured table matches
+                // anyway; everything after decodes under the root.
+                await PgExec.ExecuteAsync(
+                    connection,
+                    $"ALTER PUBLICATION {PgExec.QuoteIdentifier(pub)} SET (publish_via_partition_root = true)", ct);
+                logger.PublicationViaRootEnabled(pub);
+            }
             await ReconcileTablesAsync(connection, pub, resolved, ct);
+            return new PublicationEnsureResult(Created: false, ViaRoot: true);
         }
 
-        return false;
+        return new PublicationEnsureResult(Created: false, ViaRoot: existing.Value.ViaRoot);
     }
 
     /// <summary>
@@ -66,7 +96,7 @@ internal sealed class PublicationReconciler(ILogger logger)
         var catalog = new Dictionary<(string Schema, string Table), TableCatalogInfo>();
         await using (var cmd = new NpgsqlCommand(
             """
-            SELECT n.nspname, c.relname, c.relreplident::text,
+            SELECT n.nspname, c.relname, c.relkind::text, c.relreplident::text,
                    COALESCE((SELECT array_agg(a.attname::text)
                              FROM pg_index i
                              JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)
@@ -88,8 +118,9 @@ internal sealed class PublicationReconciler(ILogger logger)
             {
                 catalog[(reader.GetString(0), reader.GetString(1))] = new TableCatalogInfo(
                     reader.GetString(2),
-                    reader.GetFieldValue<string[]>(3),
-                    reader.GetFieldValue<string[]>(4));
+                    reader.GetString(3),
+                    reader.GetFieldValue<string[]>(4),
+                    reader.GetFieldValue<string[]>(5));
             }
         }
 
@@ -244,6 +275,9 @@ internal static partial class PublicationReconcilerLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Created publication '{Publication}' for {TableCount} table(s).")]
     internal static partial void PublicationCreated(this ILogger logger, string publication, int tableCount);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Enabled publish_via_partition_root on publication '{Publication}'.")]
+    internal static partial void PublicationViaRootEnabled(this ILogger logger, string publication);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Added table {Table} to publication '{Publication}'.")]
     internal static partial void TableAddedToPublication(this ILogger logger, string table, string publication);
