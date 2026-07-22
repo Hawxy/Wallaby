@@ -181,6 +181,7 @@ internal sealed class WallabyPipeline(
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             activity?.AddException(ex);
+            logger.TransactionHalted(ex, slotName, transaction.EndLsn);
             throw;
         }
 
@@ -498,4 +499,9 @@ internal static partial class WallabyPipelineLog
         "propagated to sinks: documents already delivered for these tables remain, and their sinks now " +
         "diverge from the database. Purge the destination and re-run a backfill to converge.")]
     internal static partial void TruncateNotPropagated(this ILogger logger, string tables, string slot);
+
+    [LoggerMessage(Level = LogLevel.Error, Message =
+        "Delivery of the transaction ending at LSN {EndLsn} on slot '{Slot}' failed and is halted; the " +
+        "leader will restart and retry this transaction. Delivery does not advance until the cause is resolved.")]
+    internal static partial void TransactionHalted(this ILogger logger, Exception ex, string slot, ulong endLsn);
 }

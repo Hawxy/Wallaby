@@ -30,6 +30,19 @@ public class SinkDispatcherTests
     }
 
     [Test]
+    public async Task Permanent_failure_names_the_sink_and_the_batch_tables()
+    {
+        var dispatcher = new SinkDispatcher(FailingSink(), NullLogger.Instance);
+
+        var ex = await Should.ThrowAsync<SinkDeliveryException>(
+            async () => await dispatcher.DispatchAsync(OneRecord(), CancellationToken.None));
+
+        ex.SinkName.ShouldBe("sink");
+        ex.Message.ShouldContain("boom");
+        ex.Message.ShouldContain("public.products");
+    }
+
+    [Test]
     public async Task Retryable_failures_honor_the_configured_attempt_limit()
     {
         var attempts = 0;

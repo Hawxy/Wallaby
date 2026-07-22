@@ -18,7 +18,10 @@ internal sealed class SinkRetryableException(string sinkName, string error, Exce
 
 /// <summary>Raised when a sink permanently fails (or retries are exhausted); halts the pipeline.</summary>
 internal sealed class SinkDeliveryException(string sinkName, string error, Exception? inner)
-    : Exception($"Sink '{sinkName}' failed to deliver: {error}", inner);
+    : Exception($"Sink '{sinkName}' failed to deliver: {error}", inner)
+{
+    public string SinkName { get; } = sinkName;
+}
 
 /// <summary>
 /// Groups routed documents by sink (preserving commit order) and delivers each group as a
@@ -134,7 +137,10 @@ internal sealed class SinkDispatcher
                         }));
                         throw new SinkRetryableException(name, result.Error ?? "(unspecified)", result.Exception);
                     default:
-                        throw new SinkDeliveryException(name, result.Error ?? "(unspecified)", result.Exception);
+                        throw new SinkDeliveryException(
+                            name,
+                            $"{result.Error ?? "(unspecified)"} (records from {DescribeTables(state.SinkBatch)})",
+                            result.Exception);
                 }
             }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity, Attempts: new StrongBox<int>()), ct);
         }
@@ -144,6 +150,22 @@ internal sealed class SinkDispatcher
             activity?.AddException(ex);
             throw;
         }
+    }
+
+    // Distinct source tables of a failed batch, for the halt diagnostics.
+    private static string DescribeTables(SinkBatch batch)
+    {
+        var tables = new List<string>();
+        foreach (var record in batch.Records)
+        {
+            var table = record.Metadata.QualifiedTableName;
+            if (!tables.Contains(table))
+            {
+                tables.Add(table);
+            }
+        }
+
+        return tables.Count == 0 ? "(none)" : string.Join(", ", tables);
     }
 
     private static List<(string SinkName, List<SinkRecord> Records)> GroupBySinkPreservingOrder(

@@ -6,18 +6,28 @@ namespace Wallaby.AspNetCore.HealthChecks;
 /// <summary>
 /// Wallaby liveness health check
 /// </summary>
-public sealed class WallabyHealthCheck(IWallabyStatus status) : IHealthCheck
+public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheckOptions? options = null) : IHealthCheck
 {
+    private readonly WallabyHealthCheckOptions _options = options ?? new();
+
     /// <inheritdoc />
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         var snapshot = status.Current;
         var data = Describe(snapshot);
+        var crashLoopThreshold = _options.CrashLoopFailureThreshold;
 
         var result = snapshot switch
         {
             { Faulted: true } => HealthCheckResult.Unhealthy(
                 "Wallaby background service terminated.", exception: null, data),
+            // A leader that keeps failing without acknowledging progress is crash-looping (poison event,
+            // permanently rejecting sink, ...): delivery is stalled even though the process is alive.
+            { ConsecutiveLeaderFailures: var failures } when crashLoopThreshold > 0 && failures >= crashLoopThreshold =>
+                HealthCheckResult.Unhealthy(
+                    $"Wallaby leader is crash-looping ({failures} consecutive failures)." +
+                    (snapshot.LastError is { } lastError ? $" Last error: {lastError}" : string.Empty),
+                    exception: null, data),
             // Deliberate but loud: the node is alive (don't restart-loop it) while replication is
             // deliberately stopped and its slots are dropped (e.g. for a database major-version upgrade).
             { Role: WallabyNodeRole.Suspended } => HealthCheckResult.Degraded(

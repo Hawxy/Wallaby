@@ -1,3 +1,4 @@
+using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Providers;
@@ -101,8 +102,19 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         }
 
                         var transformStart = WallabyInstrumentation.StartTimer();
-                        // A transform exception always propagates and halts the pipeline
-                        var documents = await mapping.Transform.InvokeAsync(session, subset, ct);
+                        IReadOnlyDictionary<DocumentKey, WallabyDocument?> documents;
+                        try
+                        {
+                            // A transform exception always propagates and halts the pipeline.
+                            documents = await mapping.Transform.InvokeAsync(session, subset, ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            throw new InvalidOperationException(
+                                $"Transform for {entityName} (sink '{mapping.SinkName}', destination '{destination}') " +
+                                $"failed on a batch of {subset.Count} change(s) from {subset[0].Metadata.QualifiedTableName} " +
+                                $"starting at commit {new NpgsqlLogSequenceNumber(subset[0].Metadata.CommitLsn)}: {ex.Message}", ex);
+                        }
                         _instr.RecordTransformDuration(entityName, mapping.SinkName, transformStart);
 
                         foreach (var change in subset)
