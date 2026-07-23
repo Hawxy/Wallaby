@@ -13,8 +13,15 @@ internal sealed class WallabyDataSource : IAsyncDisposable
     public WallabyDataSource(string connectionString)
     {
         ConnectionString = connectionString;
-        var source = NpgsqlDataSource.Create(connectionString);
-        
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        // Auto-prepare the hot bookkeeping statements (checkpoint upsert, fanout queue, control
+        // reads) unless the consumer configured auto-prepare explicitly.
+        if (builder.MaxAutoPrepare == 0 && !builder.ShouldSerialize("Max Auto Prepare"))
+        {
+            builder.MaxAutoPrepare = 64;
+        }
+        var source = NpgsqlDataSource.Create(builder);
+
         if(source is NpgsqlMultiHostDataSource multiHostDataSource)
             Source = multiHostDataSource.WithTargetSession(TargetSessionAttributes.Primary);
         else

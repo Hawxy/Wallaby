@@ -144,8 +144,8 @@ internal sealed class KeysetPager
     private readonly string[] _columnNames;
     private readonly ColumnReadMode[] _readModes;
     private readonly int[] _pkIndexInColumns;
-    private readonly string _firstPageSqlPrefix;
-    private readonly string _nextPageSqlPrefix;
+    private readonly string _firstPageSql;
+    private readonly string _nextPageSql;
 
     public KeysetPager(CapturedTable table, KeysetFilter? filter = null)
     {
@@ -179,13 +179,14 @@ internal sealed class KeysetPager
             ? $"WHERE {BuildKeysetPredicate()} "
             : $"WHERE {filter.PredicateSql} AND {BuildKeysetPredicate()} ";
 
-        _firstPageSqlPrefix = $"SELECT {columns} {fromOrderBy}{firstWhere}ORDER BY {orderBy} LIMIT ";
-        _nextPageSqlPrefix = $"SELECT {columns} {fromOrderBy}{nextWhere}ORDER BY {orderBy} LIMIT ";
+        // The limit is a parameter so each table's page SQL has stable text and can auto-prepare.
+        _firstPageSql = $"SELECT {columns} {fromOrderBy}{firstWhere}ORDER BY {orderBy} LIMIT @limit";
+        _nextPageSql = $"SELECT {columns} {fromOrderBy}{nextWhere}ORDER BY {orderBy} LIMIT @limit";
     }
 
     public async Task<BackfillChunk> ReadChunkAsync(NpgsqlConnection connection, object?[]? cursor, int limit, CancellationToken ct)
     {
-        var sql = (cursor is null ? _firstPageSqlPrefix : _nextPageSqlPrefix) + limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var sql = cursor is null ? _firstPageSql : _nextPageSql;
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         if (_filter is not null)
@@ -202,6 +203,7 @@ internal sealed class KeysetPager
                 cmd.Parameters.AddWithValue($"p{i}", cursor[i] ?? DBNull.Value);
             }
         }
+        cmd.Parameters.AddWithValue("limit", limit);
 
         var rows = new List<RawChange>(limit);
         RawColumn[]? lastRow = null;
