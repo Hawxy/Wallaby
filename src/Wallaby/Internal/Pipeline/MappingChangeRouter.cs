@@ -98,6 +98,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         {
                             activity.SetTag(WallabyInstrumentation.EntityTag, entityName);
                             activity.SetTag(WallabyInstrumentation.SinkTag, mapping.SinkName);
+                            activity.SetTag(WallabyInstrumentation.DestinationTag, destination);
                             activity.SetTag("wallaby.batch.size", subset.Count);
                         }
 

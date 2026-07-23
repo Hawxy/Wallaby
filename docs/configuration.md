@@ -88,9 +88,10 @@ You have a number of choices as to where streamed transactions spill:
 - **`cdc.SpillToDatabase()`**: *(default)* Buffers transactions into `wallaby.stream_buffer` `UNLOGGED` table on the source database.
   Disk-free and zero-config (works wherever Wallaby connects). Will cause I/O amplification on the DB during large transactions.  
 - **`cdc.SpillToDisk(path?)`**: Writes to local temp files. Needs a writable path and isn't suitable for read-only environments.
-- **`cdc.UseTransactionSpill(ctx => ...)`**: Provide your own custom `ITransactionSpill` backend (e.g. an object store). The
-  factory is handed a `SpillContext` (the source data source, slot name, and service provider) once per leader
-  session and should return a fresh instance. Your backend should spill to a durable/external store, not buffer in-memory.
+- **`cdc.UseTransactionSpill(ctx => ...)`**: Provide your own custom `ITransactionSpill` backend (e.g. an object store).
+
+See [Transaction Spill](/transaction-spill) for the backends in detail and the contract a custom
+implementation must honor.
 
 
 ### Publication column lists

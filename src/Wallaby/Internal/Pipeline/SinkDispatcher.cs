@@ -104,8 +104,7 @@ internal sealed class SinkDispatcher
         if (activity is not null)
         {
             activity.SetTag(WallabyInstrumentation.SinkTag, sinkName);
-            //TODO fix this - mislanding delivery destination due to record aggregation
-            activity.SetTag(WallabyInstrumentation.DestinationTag, records.Count > 0 ? records[0].Destination : null);
+            activity.SetTag(WallabyInstrumentation.DestinationTag, DescribeDestinations(records));
             activity.SetTag("wallaby.batch.size", records.Count);
         }
 
@@ -150,6 +149,26 @@ internal sealed class SinkDispatcher
             activity?.AddException(ex);
             throw;
         }
+    }
+
+    // Distinct destinations across the batch, in first-seen order — a per-sink batch can mix
+    // destinations when a scoped mapping resolves them per scope key.
+    private static string? DescribeDestinations(List<SinkRecord> records)
+    {
+        List<string>? destinations = null;
+        foreach (var record in records)
+        {
+            if (record.Destination is { } destination)
+            {
+                destinations ??= [];
+                if (!destinations.Contains(destination))
+                {
+                    destinations.Add(destination);
+                }
+            }
+        }
+
+        return destinations is null ? null : string.Join(", ", destinations);
     }
 
     // Distinct source tables of a failed batch, for the halt diagnostics.

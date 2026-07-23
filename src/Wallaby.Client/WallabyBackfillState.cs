@@ -1,6 +1,10 @@
 namespace Wallaby.Client;
 
 /// <summary>Lifecycle of a table's backfill, as tracked in <c>wallaby.backfill_state</c>.</summary>
+/// <remarks>
+/// Member names are parsed from the strings the host's <c>BackfillStatus</c> persists in
+/// <c>wallaby.backfill_state</c>; the two enums must stay name-aligned.
+/// </remarks>
 public enum WallabyBackfillStatus
 {
     /// <summary>No backfill has been recorded for the table.</summary>

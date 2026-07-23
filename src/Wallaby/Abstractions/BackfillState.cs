@@ -1,6 +1,10 @@
 namespace Wallaby.Abstractions;
 
 /// <summary>Lifecycle status of a per-table backfill.</summary>
+/// <remarks>
+/// Member names are persisted in <c>wallaby.backfill_state</c> and parsed back (also by
+/// <c>Wallaby.Client</c>'s <c>WallabyBackfillStatus</c>); never rename.
+/// </remarks>
 public enum BackfillStatus
 {
     /// <summary>No backfill has been recorded for the table.</summary>

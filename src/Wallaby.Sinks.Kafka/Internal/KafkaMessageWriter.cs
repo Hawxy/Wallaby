@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Wallaby.Abstractions;
-using Wallaby.Sinks.Internal;
 
 namespace Wallaby.Sinks.Kafka.Internal;
 

@@ -1,19 +1,21 @@
 using System.Collections;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using Wallaby.Abstractions;
 
-namespace Wallaby.Sinks.Internal;
+namespace Wallaby.Sinks;
 
 /// <summary>
-/// The record-level JSON shared by the sink envelope writers (HTTP and Kafka): metadata, document
-/// values, and the idempotency key. Common scalar values are written directly with
-/// <see cref="Utf8JsonWriter"/> (reflection-free); other value types go through the consumer's
-/// <see cref="JsonSerializerOptions"/>, falling back to reflection-based serialization only where the
-/// host supports it. Each sink keeps its own envelope shape around these pieces.
+/// The record-level JSON shared by sink envelope writers (used by the HTTP and Kafka sinks, and
+/// available to custom sinks): metadata, document values, and the idempotency key. Common scalar
+/// values are written directly with <see cref="Utf8JsonWriter"/> (reflection-free); other value types
+/// go through the consumer's <see cref="JsonSerializerOptions"/>, falling back to reflection-based
+/// serialization only where the host supports it. Each sink keeps its own envelope shape around
+/// these pieces.
 /// </summary>
-internal static class SinkEnvelopeJson
+public static class SinkEnvelopeJson
 {
     /// <summary>
     /// An opaque per-record deduplication key. Unique per delivered change; separate backfill runs of the
@@ -28,6 +30,10 @@ internal static class SinkEnvelopeJson
             : $"{metadata.CommitLsn}:{metadata.CommitIdx}:{scope}:{record.DocumentId}";
     }
 
+    /// <summary>
+    /// Writes a <c>"metadata"</c> object property carrying the record's source provenance:
+    /// schema, table, action, commit position, commit timestamp when known, and the backfill flag.
+    /// </summary>
     public static void WriteMetadata(Utf8JsonWriter writer, ChangeMetadata metadata)
     {
         writer.WriteStartObject("metadata");
@@ -38,7 +44,9 @@ internal static class SinkEnvelopeJson
             ChangeAction.Insert => "insert",
             ChangeAction.Update => "update",
             ChangeAction.Delete => "delete",
-            _ => "read",
+            ChangeAction.Read => "read",
+            // The action strings are a wire contract.
+            _ => throw new UnreachableException($"Unmapped ChangeAction '{metadata.Action}'."),
         });
         // As a string: the ulong LSN can exceed the safe-integer range of JavaScript consumers.
         writer.WriteString("commitLsn", metadata.CommitLsn.ToString(CultureInfo.InvariantCulture));
@@ -51,7 +59,10 @@ internal static class SinkEnvelopeJson
         writer.WriteEndObject();
     }
 
-    /// <summary><paramref name="serializerOptionsName"/> is the sink's serializer-options setting, named in the no-fallback error.</summary>
+    /// <summary>
+    /// Writes the document's field bag as a JSON object at the writer's current position.
+    /// <paramref name="serializerOptionsName"/> is the sink's serializer-options setting, named in the no-fallback error.
+    /// </summary>
     public static void WriteDocument(Utf8JsonWriter writer, IReadOnlyDictionary<string, object?> document,
         string documentId, JsonSerializerOptions? serializerOptions, string serializerOptionsName)
     {

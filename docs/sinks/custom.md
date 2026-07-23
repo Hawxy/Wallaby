@@ -119,6 +119,26 @@ cdc.AddSink("my-sink", sp => new MySink(sp.GetRequiredService<HttpClient>()))
 `AddSink` returns a sink-scoped builder: declare the entities the sink receives in `WithMappings(...)`,
 or continue the chain via its `Wallaby` property for a sink registered without mappings.
 
+## Envelope helpers
+
+If your sink emits a JSON envelope, `SinkEnvelopeJson` provides the record-level pieces the
+built-in [HTTP](/sinks/http) and [Kafka](/sinks/kafka) sinks share — reflection-free (AOT-safe)
+document/metadata writing and a stable deduplication key:
+
+```csharp
+using var writer = new Utf8JsonWriter(buffer);
+writer.WriteStartObject();
+writer.WriteString("id", record.DocumentId);
+writer.WriteString("idempotencyKey", SinkEnvelopeJson.IdempotencyKey(record));
+writer.WritePropertyName("document");
+SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId,
+    serializerOptions: null, serializerOptionsName: "MySinkOptions.SerializerOptions");
+SinkEnvelopeJson.WriteMetadata(writer, record.Metadata);  // a "metadata" property
+writer.WriteEndObject();
+```
+
+The envelope shape around these pieces is yours to define.
+
 ## The delegate sink
 
 For in-process handlers (tests, side-effects, quick integrations), you can skip the class and use a lambda:
