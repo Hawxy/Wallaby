@@ -20,7 +20,7 @@ internal sealed class PostgresSelfConfigurator(
     WallabyInstrumentation? instrumentation = null) : ISelfConfigurator
 {
     private readonly ServerValidator _validator = new(logger);
-    private readonly StateSchemaBootstrapper _stateSchema = new();
+    private readonly StateSchemaBootstrapper _stateSchema = new(logger);
     private readonly PublicationReconciler _publications = new(logger);
     private readonly SlotProvisioner _slots = new(logger);
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;

@@ -27,7 +27,7 @@ internal sealed class PostgresControlStore(WallabyDataSource dataSource, ILogger
     {
         await using (var connection = await dataSource.Source.OpenConnectionAsync(ct))
         {
-            await new StateSchemaBootstrapper().EnsureAsync(connection, ct);
+            await new StateSchemaBootstrapper(logger).EnsureAsync(connection, ct);
         }
         return await ControlOperations.RequestSuspendAsync(
             dataSource.Source, ControlContract.OriginConfiguration, reason, Environment.MachineName, ct);
