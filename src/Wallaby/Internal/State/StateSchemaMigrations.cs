@@ -9,10 +9,10 @@ namespace Wallaby.Internal.State;
 /// <remarks>
 /// Rules for authoring a new step:
 /// <list type="bullet">
-/// <item>Append only, with the next version number — never edit a shipped step.</item>
+/// <item>Append only, with the next version number; never edit a shipped step.</item>
 /// <item>Steps must be idempotent (<c>IF NOT EXISTS</c> / <c>ADD COLUMN IF NOT EXISTS</c>): a step
 /// interrupted before its version stamp re-applies cleanly.</item>
-/// <item>New columns must carry <c>NOT NULL DEFAULT ...</c> — all host and client SQL uses explicit
+/// <item>New columns must carry <c>NOT NULL DEFAULT ...</c>; all host and client SQL uses explicit
 /// column lists, so defaults keep older writers working during rolling upgrades.</item>
 /// <item>Never rename columns: the remote client tolerates missing tables (42P01) but not missing
 /// columns, and the host's binary COPY into <c>stream_buffer</c> is position-sensitive.</item>
@@ -89,7 +89,7 @@ internal static class StateSchemaMigrations
         ALTER TABLE wallaby.stream_buffer ADD COLUMN IF NOT EXISTS subxid bigint NOT NULL DEFAULT 0;
 
         -- Suspend/resume control row (singleton; wire format shared with Wallaby.Client via
-        -- ControlContract). Created only by the host — the remote client never performs DDL.
+        -- ControlContract). Created only by the host; the remote client never performs DDL.
         CREATE TABLE IF NOT EXISTS wallaby.control (
             scope        text        PRIMARY KEY DEFAULT 'wallaby' CHECK (scope = 'wallaby'),
             state        text        NOT NULL DEFAULT 'Running',

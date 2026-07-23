@@ -8,7 +8,7 @@ namespace Wallaby.Tests.Unit;
 
 /// <summary>
 /// The batcher against a scripted stream (an unbounded channel: buffered items complete reads
-/// synchronously, an empty channel pends — the same completion shapes the replication enumerator has).
+/// synchronously, an empty channel pends; the same completion shapes the replication enumerator has).
 /// </summary>
 public class TransactionBatcherTests
 {

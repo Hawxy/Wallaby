@@ -8,12 +8,12 @@ namespace Wallaby.Internal.Pipeline;
 /// <summary>
 /// Routes change events using per-entity <see cref="EntityMapping"/>s. An entity type may carry several
 /// mappings (at most one per sink); each runs its own transform over the transaction's insert/update/read
-/// changes — <em>sub-grouped by scope key</em> (e.g. tenant) so each invocation gets a same-scope enrichment
-/// session and only that scope's changes — producing a document per source key; a missing or null document
+/// changes, <em>sub-grouped by scope key</em> (e.g. tenant) so each invocation gets a same-scope enrichment
+/// session and only that scope's changes, producing a document per source key; a missing or null document
 /// becomes a deletion. Deletes are routed directly by key (no transform), but still resolve their scope key
 /// so a scoped destination is honored. Sessions come from each mapping's <see cref="EntityMapping.Sessions"/>:
-/// one lease per distinct (session provider, scope key) per batch — a type's mappings share a provider and so
-/// share a session, while mappings on different providers lease independently — all disposed at the end.
+/// one lease per distinct (session provider, scope key) per batch: a type's mappings share a provider and so
+/// share a session, while mappings on different providers lease independently; all are disposed at the end.
 /// </summary>
 internal sealed class MappingChangeRouter : IChangeRouter
 {
@@ -45,7 +45,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
 
                 // Collapse to the last change per key in commit order. A key inserted/updated and then
                 // deleted (or deleted and then re-inserted) within the same batch must resolve to its
-                // FINAL action — exactly one routed record per mapping, never both an upsert and a
+                // FINAL action: exactly one routed record per mapping, never both an upsert and a
                 // deletion. (Groups preserve source order, and the batch is in commit order.)
                 var lastByKey = new Dictionary<DocumentKey, ChangeEvent>();
                 foreach (var change in group)
@@ -53,8 +53,8 @@ internal sealed class MappingChangeRouter : IChangeRouter
                     lastByKey[change.Key] = change;
                 }
 
-                // Split the collapsed changes once — the final action is mapping-independent. A key whose
-                // final action is a delete is routed directly by key without a transform (the row is gone —
+                // Split the collapsed changes once; the final action is mapping-independent. A key whose
+                // final action is a delete is routed directly by key without a transform (the row is gone;
                 // a scoped destination still resolves the key from the old row); the rest go through each
                 // mapping's transform.
                 List<ChangeEvent>? deletes = null;

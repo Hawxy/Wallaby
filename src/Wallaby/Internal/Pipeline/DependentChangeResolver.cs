@@ -16,7 +16,7 @@ internal sealed record FanoutResult(IReadOnlyList<RawChange> FirstPage, ScopedFa
 /// distinct lookup values seen across the transaction into a single keyset-paginated query (no N+1), and
 /// reads only the <em>first page</em> inline. When a binding's affected set exceeds one page, the
 /// remainder is handed back as a <see cref="ScopedFanoutSpec"/> so the pipeline can offload it to a
-/// scoped backfill — keeping the trigger transaction's synchronous work (and its acknowledgement) bounded.
+/// scoped backfill, keeping the trigger transaction's synchronous work (and its acknowledgement) bounded.
 /// </summary>
 internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, WallabyModel model, WallabyInstrumentation? instrumentation = null)
 {
@@ -119,7 +119,7 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
         }
 
         activity?.SetTag("wallaby.dependent.count", totalSynthetic);
-        // How many bindings' tails were handed to the fan-out queue — the scoped backfills that will
+        // How many bindings' tails were handed to the fan-out queue: the scoped backfills that will
         // appear later as their own traces.
         activity?.SetTag("wallaby.fanout.offloaded", offloaded);
         return results;

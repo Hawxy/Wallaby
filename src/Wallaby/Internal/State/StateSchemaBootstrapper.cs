@@ -11,7 +11,7 @@ namespace Wallaby.Internal.State;
 /// <see cref="StateSchemaMigrations"/> steps are recorded in <c>wallaby.schema_version</c>; a database
 /// whose schema version is newer than this build fails fast (never run a downgraded binary against a
 /// migrated schema). At the current version the bootstrap is a single read and runs no DDL.
-/// Migrations are serialized across nodes by a dedicated advisory lock — the leader, the provision-only
+/// Migrations are serialized across nodes by a dedicated advisory lock: the leader, the provision-only
 /// service, and the configuration-suspend gate can all bootstrap concurrently.
 /// </summary>
 internal sealed class StateSchemaBootstrapper(ILogger? logger = null)
@@ -84,7 +84,7 @@ internal sealed class StateSchemaBootstrapper(ILogger? logger = null)
     }
 
     // Missing ledger (or missing schema entirely) reads as version 0: a fresh database, or one
-    // bootstrapped by a pre-versioning beta — both adopted by the baseline step.
+    // bootstrapped by a pre-versioning beta; both adopted by the baseline step.
     private static async Task<long> TryReadVersionAsync(NpgsqlConnection connection, CancellationToken ct)
     {
         try

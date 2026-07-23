@@ -9,7 +9,7 @@ namespace Wallaby.Internal.Backfill;
 internal sealed record BackfillChunk(IReadOnlyList<RawChange> Rows, object?[]? NextCursor, bool HasMore);
 
 /// <summary>
-/// An optional <c>WHERE</c> filter ANDed into every page a <see cref="KeysetPager"/> reads — used to
+/// An optional <c>WHERE</c> filter ANDed into every page a <see cref="KeysetPager"/> reads, used to
 /// restrict a snapshot to the rows affected by a dependent fan-out. <see cref="PredicateSql"/> references
 /// <c>@f0..@fN</c> placeholders matched positionally to <see cref="Parameters"/>.
 /// </summary>
@@ -24,7 +24,7 @@ internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> 
     /// <summary>
     /// Build filters matching <paramref name="columns"/> against the distinct value
     /// <paramref name="tuples"/> (each tuple has one value per column). A single-column lookup binds one
-    /// typed-array parameter — <c>"col" = ANY(@f0)</c> — so it is always exactly one filter regardless of
+    /// typed-array parameter (<c>"col" = ANY(@f0)</c>), so it is always exactly one filter regardless of
     /// value count. A composite lookup produces row-value lists
     /// <c>("a","b") IN ((@f0,@f1), (@f2,@f3), …)</c>, split into multiple filters so none binds more than
     /// <paramref name="maxParametersPerQuery"/> parameters; the caller runs one paged scan per filter.
@@ -40,7 +40,7 @@ internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> 
             return [single];
         }
 
-        // Composite keys — and the rare single-column element type with no typed-array mapping — use
+        // Composite keys (and the rare single-column element type with no typed-array mapping) use
         // parameter-per-value row-value lists, split to stay under the budget.
         return ForComposite(columns, tuples, maxParametersPerQuery);
     }
@@ -133,7 +133,7 @@ internal sealed record KeysetFilter(string PredicateSql, IReadOnlyList<object?> 
 }
 
 /// <summary>
-/// Reads a table in primary-key order using keyset (cursor) pagination — never OFFSET — so pages are
+/// Reads a table in primary-key order using keyset (cursor) pagination, never OFFSET, so pages are
 /// stable under concurrent writes. Rows are emitted as <see cref="ChangeAction.Read"/> changes. An
 /// optional <see cref="KeysetFilter"/> restricts the scan (e.g. to a dependent fan-out's affected rows).
 /// </summary>
@@ -163,7 +163,7 @@ internal sealed class KeysetPager
             var idx = Array.IndexOf(_columnNames, pkName);
             if (idx < 0)
             {
-                // PK column not in capture set — shouldn't happen, but guard anyway.
+                // PK column not in capture set; shouldn't happen, but guard anyway.
                 throw new InvalidOperationException(
                     $"Primary key column '{pkName}' is not part of the captured columns for {table.Schema}.{table.TableName}.");
             }

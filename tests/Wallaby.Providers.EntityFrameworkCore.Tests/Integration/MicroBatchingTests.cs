@@ -42,7 +42,7 @@ public class MicroBatchingTests(TestModelPostgresFixture pg)
         var names = capture.For("products").Select(NameOf).Where(n => n?.StartsWith("burst_") is true).ToList();
         names.ShouldBe(expected);
 
-        // 30 source transactions produced fewer acknowledgements — the point of micro-batching.
+        // 30 source transactions produced fewer acknowledgements, the point of micro-batching.
         activities.All("ack").Count.ShouldBeLessThan(30);
         activities.All("sink.deliver").Count.ShouldBeLessThan(30);
     }

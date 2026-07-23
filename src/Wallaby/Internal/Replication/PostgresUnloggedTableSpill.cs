@@ -74,7 +74,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         if (count != expected)
         {
             throw new InvalidOperationException(
-                $"Spill read-back for xid {xid} returned {count} of {expected} buffered changes — the stream " +
+                $"Spill read-back for xid {xid} returned {count} of {expected} buffered changes; the stream " +
                 "buffer was modified externally (e.g. another node cleared it during a leadership handover). " +
                 "Failing the transaction so nothing partial is delivered; the slot re-streams it.");
         }
@@ -113,7 +113,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         if (deleted > 0)
         {
             // A flush drains the whole batch, so everything still pending was appended after the flushed
-            // first change — it all goes, even entries carrying only descendant subxids.
+            // first change; it all goes, even entries carrying only descendant subxids.
             batch.Clear();
             return;
         }

@@ -7,7 +7,7 @@ namespace Wallaby.Tests.Integration;
 /// <summary>
 /// The state-schema migrator against real databases: fresh bootstrap, fast-path re-run, adoption of a
 /// deployed (pre-versioning) schema, the newer-schema guard, ordered synthetic steps, and the
-/// concurrent-bootstrap race. Each test creates an isolated database — the shared session schema is
+/// concurrent-bootstrap race. Each test creates an isolated database; the shared session schema is
 /// never dropped, so schema-state tests can't run against it.
 /// </summary>
 [NotInParallel]

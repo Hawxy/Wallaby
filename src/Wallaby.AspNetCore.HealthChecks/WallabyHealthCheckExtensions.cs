@@ -2,7 +2,8 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Wallaby.Abstractions;
 using Wallaby.AspNetCore.HealthChecks;
 
-// ReSharper disable once CheckNamespace — extension lives in the DI namespace so it's discoverable without an extra using.
+// ReSharper disable once CheckNamespace
+// The extension lives in the DI namespace so it's discoverable without an extra using.
 namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>Registers Wallaby's health check.</summary>

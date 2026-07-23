@@ -28,10 +28,10 @@ Registered as **`wallaby`** (tag `wallaby`). It reports:
 
 - **Unhealthy**: When the CDC background service has **terminated** (faulted out of its hosted loop), or
   when the leader is **crash-looping**: sessions keep dying before a single transaction is fully delivered
-  and acknowledged (a poison event — e.g. a throwing transform or a sink permanently rejecting a batch).
+  and acknowledged (a poison event, e.g. a throwing transform or a sink permanently rejecting a batch).
   Delivery does not advance in that state, so after `CrashLoopFailureThreshold` consecutive leader-session
   failures (default **3**) the check goes Unhealthy and its description carries the last error.
-- **Degraded**: While the installation is [suspended](/operations/major-version-upgrades) — the node is
+- **Degraded**: While the installation is [suspended](/operations/major-version-upgrades): the node is
   alive (an orchestrator shouldn't restart-loop it) but replication is deliberately stopped and the
   managed slots are dropped. Expected during a planned upgrade window; alert if it persists after.
 - **Healthy**: In every other state: a **leader** streaming changes, a **standby** waiting to take over,

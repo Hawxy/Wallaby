@@ -27,7 +27,7 @@ internal sealed class SinkDeliveryException(string sinkName, string error, Excep
 /// Groups routed documents by sink (preserving commit order) and delivers each group as a
 /// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. Sinks are independent,
 /// so their batches are delivered concurrently; per-sink ordering is preserved (one batch per sink, records
-/// in commit order). A permanent failure (or exhausted retries) on any sink halts the pipeline — after
+/// in commit order). A permanent failure (or exhausted retries) on any sink halts the pipeline, after
 /// every in-flight delivery has settled, so no batch is abandoned mid-write.
 /// </summary>
 internal sealed class SinkDispatcher
@@ -93,7 +93,7 @@ internal sealed class SinkDispatcher
     private async Task DeliverGroupAsync(string sinkName, List<SinkRecord> records, CancellationToken ct)
     {
         // Defensive: mappings are attached to a registered sink by construction, so a routed name is
-        // always registered — unless a custom router produced a stray name.
+        // always registered, unless a custom router produced a stray name.
         if (!_sinks.TryGetValue(sinkName, out var sink))
         {
             throw new SinkDeliveryException(sinkName, "no sink is registered with this name", inner: null);
@@ -151,7 +151,7 @@ internal sealed class SinkDispatcher
         }
     }
 
-    // Distinct destinations across the batch, in first-seen order — a per-sink batch can mix
+    // Distinct destinations across the batch, in first-seen order; a per-sink batch can mix
     // destinations when a scoped mapping resolves them per scope key.
     private static string? DescribeDestinations(List<SinkRecord> records)
     {

@@ -8,7 +8,7 @@ namespace Wallaby.Providers.EntityFrameworkCore.Tests.Integration;
 /// <summary>
 /// Keepalive behaviour while the consumer is stuck in sink delivery and not reading the replication
 /// stream. The fixture's <c>wal_sender_timeout=2s</c> means the server disconnects a client that goes
-/// silent — a delivery slower than that only survives because keepalives flow while it runs.
+/// silent; a delivery slower than that only survives because keepalives flow while it runs.
 /// </summary>
 [NotInParallel]
 [ClassDataSource<ShortWalSenderTimeoutPostgresFixture>(Shared = SharedType.PerTestSession)]
@@ -104,7 +104,7 @@ public class KeepaliveTests(ShortWalSenderTimeoutPostgresFixture pg)
         await harness.SelfConfigureAsync();
 
         // A pre-committed burst coalesces into batches, leaving the batcher's next read pending while
-        // the 5s delivery (far past wal_sender_timeout=2s) runs — the ack then overlaps that read.
+        // the 5s delivery (far past wal_sender_timeout=2s) runs; the ack then overlaps that read.
         var categoryId = await harness.Db.AddCategoryAsync();
         for (var i = 0; i < 5; i++)
         {
@@ -142,7 +142,7 @@ public class KeepaliveTests(ShortWalSenderTimeoutPostgresFixture pg)
         await harness.StartAsync();
         await sink.Entered.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Cancellation must unwind the hung delivery, the keepalive loop, and the retry pipeline —
+        // Cancellation must unwind the hung delivery, the keepalive loop, and the retry pipeline;
         // a stop that hangs here means shutdown is held hostage by a stuck sink.
         var stop = harness.StopAsync();
         var finished = await Task.WhenAny(stop, Task.Delay(TimeSpan.FromSeconds(10)));

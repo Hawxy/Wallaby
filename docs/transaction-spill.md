@@ -7,7 +7,7 @@ description: "How Wallaby buffers streamed large transactions out of memory, and
 Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's
 `logical_decoding_work_mem` (default 64 MB) is streamed before its commit. The spill buffers those
 streamed changes out of process memory until the commit arrives, so a single huge transaction can't
-exhaust the worker's heap. Small transactions — the overwhelming majority — never touch it.
+exhaust the worker's heap. Small transactions, the overwhelming majority, never touch it.
 
 ## Choosing a backend
 
@@ -17,8 +17,8 @@ cdc.SpillToDisk("/var/spill");    // local temp files (path optional)
 cdc.UseTransactionSpill(ctx => new S3Spill(ctx.SlotName)); // your own backend
 ```
 
-- **`SpillToDatabase()`** *(default)* is disk-free and zero-config — it works wherever Wallaby
-  connects — at the cost of I/O amplification on the source database during large transactions.
+- **`SpillToDatabase()`** *(default)* is disk-free and zero-config (it works wherever Wallaby
+  connects), at the cost of I/O amplification on the source database during large transactions.
 - **`SpillToDisk(path?)`** writes append-only files under the given path (default
   `%TEMP%/wallaby/<slot>`). It needs a writable path, so it isn't suitable for read-only
   environments.
@@ -44,26 +44,23 @@ public readonly record struct SpillContext(
 ```
 
 Changes are appended per transaction (`xid`) as they stream and read back **in append order** at
-the commit. An implementation owns its own serialization of `RawChange` — the abstraction deals
+the commit. An implementation owns its own serialization of `RawChange`; the abstraction deals
 purely in changes.
 
-## The contract a backend must honor
+## Implementation Guidance
 
-- **Single-threaded.** All calls come from the replication loop; there are never concurrent calls
-  for the same `xid`.
 - **Savepoint truncation.** `DiscardSubtransactionAsync(xid, subxid)` handles a rolled-back
   savepoint: remove the changes appended with `subxid` *and every change appended after its first
   one* (a later change can only belong to the aborted subtransaction or one nested inside it,
   which aborts with it). It must be a no-op when `subxid` never appended anything. Changes
   appended afterwards must survive and be returned by a later `ReadAsync`.
 - **All-or-nothing reads.** If the backing store no longer holds everything appended for an `xid`,
-  `ReadAsync` should fail rather than yield a partial buffer — a partial read that succeeded would
+  `ReadAsync` should fail rather than yield a partial buffer; a partial read that succeeded would
   be delivered and acknowledged as if complete.
 - **No durability across restarts.** A streamed transaction that never commits (a crash) is
-  re-streamed from the slot, so the spill need not survive a restart — `ClearAsync` drops any
+  re-streamed from the slot, so the spill need not survive a restart; `ClearAsync` drops any
   leftovers on startup.
 
-::: tip
-Only a backend that spills to durable/external storage actually bounds memory; an in-RAM store
-would merely relocate it.
+::: warning
+Do not implement an in-memory spill as you may exhaust system resources.
 :::

@@ -315,7 +315,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         {
             return 0;
         }
-        // The interval is unused here — DrainFanoutAsync only invokes DrainOnceAsync, not the polling loop.
+        // The interval is unused here; DrainFanoutAsync only invokes DrainOnceAsync, not the polling loop.
         var worker = new FanoutQueueWorker(_fanoutQueue, _coordinator, _model!, NullLogger.Instance, TimeSpan.FromSeconds(1));
         return await worker.DrainOnceAsync(_cts.Token);
     }
@@ -470,7 +470,7 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         {
             if (_pipelineTask is not null)
             {
-                await StopAsync(); // throws when the pipeline faulted — cleanup below must still run
+                await StopAsync(); // throws when the pipeline faulted; cleanup below must still run
             }
         }
         finally

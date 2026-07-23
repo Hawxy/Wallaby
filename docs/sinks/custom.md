@@ -72,8 +72,8 @@ whenever a standby takes over leadership. Make it idempotent. If it throws, the 
 
 ## Purging
 
-To support [purge-then-backfill](/backfill#purging-before-a-backfill) — emptying a destination so a
-fresh backfill converges it to exactly the current table contents — implement `ISinkPurger`:
+To support [purge-then-backfill](/backfill#purging-before-a-backfill) (emptying a destination so a
+fresh backfill converges it to exactly the current table contents), implement `ISinkPurger`:
 
 ```csharp
 public sealed class MySink : ISink, ISinkPurger
@@ -122,7 +122,7 @@ or continue the chain via its `Wallaby` property for a sink registered without m
 ## Envelope helpers
 
 If your sink emits a JSON envelope, `SinkEnvelopeJson` provides the record-level pieces the
-built-in [HTTP](/sinks/http) and [Kafka](/sinks/kafka) sinks share — reflection-free (AOT-safe)
+built-in [HTTP](/sinks/http) and [Kafka](/sinks/kafka) sinks share: reflection-free (AOT-safe)
 document/metadata writing and a stable deduplication key:
 
 ```csharp

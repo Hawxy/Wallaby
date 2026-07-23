@@ -32,7 +32,7 @@ internal static class KafkaMessageWriter
     private static readonly byte[] DeleteOperation = Encoding.UTF8.GetBytes("delete");
     private static readonly byte[] UpsertOperation = Encoding.UTF8.GetBytes("upsert");
 
-    /// <summary>Headers for any record — present on tombstones too, where they are the only metadata.</summary>
+    /// <summary>Headers for any record; present on tombstones too, where they are the only metadata.</summary>
     public static Headers BuildHeaders(SinkRecord record) => new()
     {
         { OperationHeader, record.IsDeletion ? DeleteOperation : UpsertOperation },

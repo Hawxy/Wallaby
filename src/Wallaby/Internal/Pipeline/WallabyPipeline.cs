@@ -11,11 +11,11 @@ namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
 /// The live replication pipeline: reads committed transactions, materializes change events, routes them
-/// to sinks, and — only after all sinks accept the batch — acknowledges the commit to the server and
+/// to sinks, and, only after all sinks accept the batch, acknowledges the commit to the server and
 /// records the checkpoint. This ordering preserves at-least-once delivery.
 /// <para>
 /// Dependent-table changes fan out to synthetic updates of the affected primary rows. The first page per
-/// binding is dispatched inline (excluding any primary key already changed live in the same transaction —
+/// binding is dispatched inline (excluding any primary key already changed live in the same transaction;
 /// live wins); when more rows remain, the tail is enqueued as a scoped backfill so the transaction can be
 /// acknowledged without waiting on a potentially huge re-index. Every dispatch is sliced into batches of
 /// at most <c>maxBatchSize</c> records so no sink/transform sees an unbounded batch.
@@ -171,7 +171,7 @@ internal sealed class WallabyPipeline(
         int processed;
         try
         {
-            // A streamed (large) transaction's changes live in the spill, not in memory — process them in
+            // A streamed (large) transaction's changes live in the spill, not in memory; process them in
             // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
             processed = transaction.IsStreamed
                 ? await ProcessStreamedAsync(transaction, ct)
@@ -208,7 +208,7 @@ internal sealed class WallabyPipeline(
 
     // Coalesced batch of small transactions: one delivery and one acknowledgement (at the last
     // transaction's EndLsn) for the whole batch, changes concatenated in commit order. Boundary
-    // transactions (streamed, watermark-carrying) never reach here — the batcher keeps them solo. A
+    // transactions (streamed, watermark-carrying) never reach here; the batcher keeps them solo. A
     // failure acks nothing: the entire batch re-streams on the next leader session (at-least-once).
     private async Task<long> ProcessBatchAsync(IReadOnlyList<CommittedTransaction> batch, CancellationToken ct)
     {
@@ -351,8 +351,8 @@ internal sealed class WallabyPipeline(
         return transaction.Changes.Count;
     }
 
-    // Streamed (large) transaction: read the spilled changes back in append order in bounded pages — never
-    // materializing the whole transaction — stamping each with the commit metadata, then resolve fan-out and
+    // Streamed (large) transaction: read the spilled changes back in append order in bounded pages (never
+    // materializing the whole transaction), stamping each with the commit metadata, then resolve fan-out and
     // discard the spill. Streamed transactions carry no watermarks (those are tiny, never-streamed transactions).
     private async Task<int> ProcessStreamedAsync(CommittedTransaction transaction, CancellationToken ct)
     {
@@ -413,7 +413,7 @@ internal sealed class WallabyPipeline(
     }
 
     // Materialize raw changes into change events, returning whether any change can trigger dependent
-    // fan-out — so transactions that touched no dependent table skip the fan-out resolve entirely.
+    // fan-out, so transactions that touched no dependent table skip the fan-out resolve entirely.
     private bool MaterializeInto(List<ChangeEvent> appEvents, IReadOnlyList<RawChange> changes)
     {
         var sawDependentChange = false;
@@ -508,7 +508,7 @@ internal sealed class WallabyPipeline(
         foreach (var ev in events)
         {
             // Avoid forcing DocumentKey materialization unless a backfill window is recording for the
-            // same table — the common steady-state hot path.
+            // same table; skipping it is the common steady-state hot path.
             if (backfill!.IsRecording(ev.Metadata.QualifiedTableName))
             {
                 backfill.RecordLiveKey(ev.Metadata.QualifiedTableName, ev.Key);

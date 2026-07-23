@@ -91,7 +91,7 @@ export default defineConfig({
           { text: 'Health Checks', link: '/operations/health-checks' },
           { text: 'External Control', link: '/operations/external-control' },
           { text: 'Upgrading Wallaby', link: '/operations/upgrades' },
-          { text: 'Major-Version Upgrades', link: '/operations/major-version-upgrades' }
+          { text: 'Postgres Upgrades', link: '/operations/major-version-upgrades' }
         ]
       }
     ],

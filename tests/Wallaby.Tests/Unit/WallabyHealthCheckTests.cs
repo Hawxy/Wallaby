@@ -68,7 +68,7 @@ public class WallabyHealthCheckTests
 
         var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
-        // A stuck-retrying fan-out is degraded, not dead — a restart wouldn't fix it, so the node stays Healthy.
+        // A stuck-retrying fan-out is degraded, not dead; a restart wouldn't fix it, so the node stays Healthy.
         result.Status.ShouldBe(HealthStatus.Healthy);
         result.Data["consecutiveFanoutFailures"].ShouldBe(3);
     }

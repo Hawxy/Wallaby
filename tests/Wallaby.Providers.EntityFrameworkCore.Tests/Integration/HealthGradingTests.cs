@@ -13,7 +13,7 @@ namespace Wallaby.Providers.EntityFrameworkCore.Tests.Integration;
 
 /// <summary>
 /// Proves a permanently rejecting sink drives the leader into a crash-loop that the health check grades
-/// Unhealthy — with the halt cause in the status — and that recovery returns the check to Healthy.
+/// Unhealthy (with the halt cause in the status) and that recovery returns the check to Healthy.
 /// </summary>
 [NotInParallel]
 [ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]

@@ -3,7 +3,7 @@ namespace Wallaby.Abstractions;
 /// <summary>
 /// The kind of change represented by a <see cref="ChangeEvent"/>.
 /// </summary>
-/// <remarks>Member names map to the sink-envelope <c>action</c> strings — a wire contract; never rename.</remarks>
+/// <remarks>Member names map to the sink-envelope <c>action</c> strings, a wire contract; never rename.</remarks>
 public enum ChangeAction
 {
     /// <summary>A row was inserted.</summary>

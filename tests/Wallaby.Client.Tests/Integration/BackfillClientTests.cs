@@ -4,7 +4,7 @@ using Wallaby.TestInfrastructure;
 namespace Wallaby.Client.Tests.Integration;
 
 /// <summary>
-/// Remote backfill control against a bare database — the client persists requests and reads status by
+/// Remote backfill control against a bare database; the client persists requests and reads status by
 /// table name; the host-side scheduling is covered by the EF Core end-to-end tests.
 /// </summary>
 [NotInParallel]

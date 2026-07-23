@@ -22,7 +22,7 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
             failures.Add(
-                "A connection string must be supplied — via UseConnectionString(...), " +
+                "A connection string must be supplied: via UseConnectionString(...), " +
                 "Configure<WallabyOptions>, or configuration binding.");
         }
         if (string.IsNullOrWhiteSpace(options.SlotName) || string.IsNullOrWhiteSpace(options.PublicationName))

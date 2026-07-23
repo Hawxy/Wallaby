@@ -32,7 +32,7 @@ internal sealed class ChangeEventFactory(IRowMaterializer materializer)
 
         if (!materialized || row is null)
         {
-            return null; // table not part of the model — benign skip
+            return null; // table not part of the model; benign skip
         }
 
         var metadata = new ChangeMetadata(

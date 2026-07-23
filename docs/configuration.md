@@ -14,7 +14,7 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `SlotName` / `PublicationName` | `wallaby_cdc_slot` / `wallaby_cdc_pub` | Names Wallaby creates/uses. |
 | `ChunkSize` | `500` | Backfill keyset page size (1–100 000; chunk rows are held in memory). |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/providers/entity-framework-core/#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
-| `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. When `false`, a publication used with a [partitioned table](/how-it-works#partitioned-tables) must have `publish_via_partition_root = true` set yourself — startup fails otherwise. |
+| `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. When `false`, a publication used with a [partitioned table](/how-it-works#partitioned-tables) must have `publish_via_partition_root = true` set yourself; startup fails otherwise. |
 | `PublicationColumnLists` | `true` | Publish only each table's captured columns via [publication column lists](#publication-column-lists). Requires `ManagePublicationTables`. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
@@ -32,7 +32,7 @@ You shouldn't modify these unless you know what you're doing:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `MaxTransactionsPerBatch` | `100` | Max committed transactions coalesced into one delivery batch — one sink dispatch and one acknowledgement at the last transaction's LSN. Coalescing is opportunistic: transactions are added only while the stream already has more buffered, so a quiet slot delivers each transaction immediately with no added latency. On a delivery failure nothing in the batch is acknowledged and the whole batch is redelivered (at-least-once; idempotent sinks converge). `1` disables coalescing (1–10 000). |
+| `MaxTransactionsPerBatch` | `100` | Max committed transactions coalesced into one delivery batch: one sink dispatch and one acknowledgement at the last transaction's LSN. Coalescing is opportunistic: transactions are added only while the stream already has more buffered, so a quiet slot delivers each transaction immediately with no added latency. On a delivery failure nothing in the batch is acknowledged and the whole batch is redelivered (at-least-once; idempotent sinks converge). `1` disables coalescing (1–10 000). |
 | `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
@@ -40,8 +40,8 @@ You shouldn't modify these unless you know what you're doing:
 | `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval is only a safety net for a missed notification. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 | `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
-| `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing — see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
-| `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state — the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
+| `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing; see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
+| `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
 
 ## Options Pattern
 
@@ -60,7 +60,7 @@ builder.Services.PostConfigure<WallabyOptions>(o => o.SlotName = "tests_slot");
 
 ## Reading configuration at startup
 
-When option values need services, use the provider-aware value hooks — `UseConnectionString`,
+When option values need services, use the provider-aware value hooks: `UseConnectionString`,
 `ConfigureOptions`, and the sinks' options overloads all accept an `IServiceProvider`-taking delegate
 that runs on first resolution, while the registration itself stays eager:
 
@@ -80,20 +80,7 @@ and their configuration errors surface at host start instead of at registration.
 
 ## Large Transaction Handling
 
-Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's `logical_decoding_work_mem`
-(default 64 MB) is streamed before commit and spilled out of memory, then processed in `MaxBatchSize` pages. This ensures a 
-single huge transaction won't exhaust the worker's heap. Small transactions, which will be the majority, are kept as in-memory only.
-
-You have a number of choices as to where streamed transactions spill:
-
-- **`cdc.SpillToDatabase()`**: *(default)* Buffers transactions into `wallaby.stream_buffer` `UNLOGGED` table on the source database.
-  Disk-free and zero-config (works wherever Wallaby connects). Will cause I/O amplification on the DB during large transactions.  
-- **`cdc.SpillToDisk(path?)`**: Writes to local temp files. Needs a writable path and isn't suitable for read-only environments.
-- **`cdc.UseTransactionSpill(ctx => ...)`**: Provide your own custom `ITransactionSpill` backend (e.g. an object store).
-
-See [Transaction Spill](/transaction-spill) for the backends in detail and the contract a custom
-implementation must honor.
-
+See [Transaction Spill](/transaction-spill).
 
 ### Publication column lists
 

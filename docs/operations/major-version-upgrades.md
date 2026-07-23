@@ -2,7 +2,7 @@
 description: "Suspending Wallaby so RDS/Aurora can run a Postgres major-version upgrade: drop the managed replication slots, upgrade, resume, re-backfill."
 ---
 
-# Major-Version Upgrades
+# Upgrading Postgres
 
 Managed platforms like RDS and Aurora refuse a Postgres major-version upgrade while **any logical
 replication slot exists**, failing the precheck with:

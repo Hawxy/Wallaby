@@ -1,12 +1,11 @@
 ---
-description: "How Wallaby versions and migrates its internal state schema across package upgrades, and why downgrades are refused."
+description: "How Wallaby versions and migrates its internal state schema across package upgrades."
 ---
 
 # Upgrading Wallaby
 
-Wallaby keeps its bookkeeping state (checkpoints, backfill progress, the fan-out queue, the control row)
-in a `wallaby` schema co-located in the source database. That schema is **versioned**: every shape it can
-have is an ordered migration step, and a `wallaby.schema_version` ledger records each applied step with a
+Wallaby keeps its bookkeeping state in a `wallaby` schema co-located in the source database. 
+That schema is **versioned** and a `wallaby.schema_version` ledger records each applied step with a
 timestamp and the package version that applied it.
 
 ## What happens on startup
@@ -14,27 +13,23 @@ timestamp and the package version that applied it.
 When a node becomes leader (or the provision-only service starts), Wallaby compares the database's schema
 version to the version the binary requires:
 
-- **Equal** — nothing to do; the bootstrap is a single read and runs no DDL.
-- **Behind** (or a fresh/pre-1.0 database with no ledger) — the pending migration steps are applied in
-  order and stamped, atomically, under a dedicated advisory lock so concurrent nodes serialize instead of
-  racing DDL. A database created by a 1.0.0 beta is adopted in place: the baseline step is the same
-  idempotent DDL those betas ran, so adoption changes nothing and stamps version 1.
-- **Ahead** — the node **refuses to start** with a `WallabyConfigurationException`. A schema version newer
-  than the binary means a newer Wallaby has already migrated this database; running an older build against
+- **Equal**: nothing to do; the bootstrap is a single read and runs no DDL.
+- **Behind**: the pending migration steps are applied in order and stamped, atomically, under a dedicated advisory lock. 
+- **Ahead**: the node **refuses to start** with a `WallabyConfigurationException`. A schema version newer
+  than the binary means a newer Wallaby has already migrated this database and running an older build against
   it risks silent misbehavior, so roll the package forward instead of downgrading in place.
 
 ## Rolling upgrades
 
 Deployments that run several nodes (leader + standbys, blue/green) can upgrade one node at a time:
 
-- Migration steps are **additive** — new columns always carry a server-side `DEFAULT`, and columns are
-  never renamed — so a not-yet-upgraded node keeps reading and writing correctly against an
+- Migration steps are **additive** (new columns always carry a server-side `DEFAULT`, and columns are
+  never renamed), so a not-yet-upgraded node keeps reading and writing correctly against an
   already-migrated schema.
-- The first upgraded node to win leadership applies the migration; the rest fast-path past it.
+- The first upgraded node to win leadership applies the migration, the rest fast-path past it.
 - The remote [control client](/operations/external-control) tolerates schema drift in the same way: it
   performs no DDL and treats missing tables as benign.
 
-The one direction that is not supported is **downgrading a deployed binary below the schema version** —
-that is exactly what the startup guard blocks. If you must roll back a Wallaby upgrade that shipped a
-schema change, restore the database (or drop the `wallaby` schema and accept a full
-[re-backfill](/backfill)).
+The one direction that is not supported is **downgrading a deployed binary below the schema version**.
+If you must roll back a Wallaby upgrade that shipped a schema change, restore the database 
+(or drop the `wallaby` schema and accept a full [re-backfill](/backfill)).

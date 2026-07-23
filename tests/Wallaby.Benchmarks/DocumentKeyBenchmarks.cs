@@ -4,7 +4,7 @@ using Wallaby.Abstractions;
 namespace Wallaby.Benchmarks;
 
 /// <summary>
-/// Hash/lookup cost of <see cref="DocumentKey"/> as a dictionary key — the router's per-change
+/// Hash/lookup cost of <see cref="DocumentKey"/> as a dictionary key: the router's per-change
 /// collapse and transform-output probes.
 /// </summary>
 [MemoryDiagnoser]

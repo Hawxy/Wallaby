@@ -5,7 +5,7 @@ using Wallaby.TestInfrastructure;
 namespace Wallaby.Client.Tests.Integration;
 
 /// <summary>
-/// Exercises the control client against a bare database — no Wallaby host anywhere. The grace-period
+/// Exercises the control client against a bare database; no Wallaby host anywhere. The grace-period
 /// fallback makes the client itself drop the managed slots, which is the scaled-to-zero /
 /// provision-only-already-exited story for an RDS/Aurora upgrade.
 /// </summary>
