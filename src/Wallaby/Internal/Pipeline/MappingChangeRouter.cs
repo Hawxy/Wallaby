@@ -33,7 +33,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
         IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var routed = new List<RoutedDocument>();
-        var sessions = new Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>();
+        Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>? sessions = null;
         try
         {
             foreach (var (type, group) in GroupByTypePreservingOrder(changes))
@@ -90,7 +90,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                     foreach (var (scopeKey, subset) in GroupByScopePreservingOrder(mapping, upserts))
                     {
                         var destination = mapping.ResolveDestination(scopeKey);
-                        var session = GetOrCreateSession(sessions, mapping.Sessions, scopeKey);
+                        var session = GetOrCreateSession(sessions ??= [], mapping.Sessions, scopeKey);
                         var entityName = mapping.EntityClrType.Name;
 
                         using var activity = _instr.StartTransform();
@@ -136,9 +136,12 @@ internal sealed class MappingChangeRouter : IChangeRouter
         }
         finally
         {
-            foreach (var lease in sessions.Values)
+            if (sessions is not null)
             {
-                await lease.DisposeAsync();
+                foreach (var lease in sessions.Values)
+                {
+                    await lease.DisposeAsync();
+                }
             }
         }
 
@@ -173,6 +176,12 @@ internal sealed class MappingChangeRouter : IChangeRouter
     private static List<(object? ScopeKey, List<ChangeEvent> Changes)> GroupByScopePreservingOrder(
         EntityMapping mapping, List<ChangeEvent> changes)
     {
+        // An unscoped mapping is one group with a null key: no dictionary, no copies.
+        if (mapping.ScopeKeySelector is null)
+        {
+            return [(null, changes)];
+        }
+
         var byKey = new Dictionary<object, List<ChangeEvent>>();
         var groups = new List<(object?, List<ChangeEvent>)>();
 

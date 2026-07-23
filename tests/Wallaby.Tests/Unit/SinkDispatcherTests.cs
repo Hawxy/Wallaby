@@ -21,6 +21,33 @@ public class SinkDispatcherTests
     };
 
     [Test]
+    public async Task Records_group_per_sink_preserving_order()
+    {
+        var delivered = new System.Collections.Concurrent.ConcurrentDictionary<string, List<string>>();
+        Task<DeliveryResult> Capture(SinkBatch batch)
+        {
+            delivered[batch.SinkName] = [.. batch.Records.Select(r => r.DocumentId)];
+            return Task.FromResult(DeliveryResult.Success);
+        }
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["a"] = new DelegateSink("a", (batch, _) => Capture(batch)),
+            ["b"] = new DelegateSink("b", (batch, _) => Capture(batch)),
+        };
+        IReadOnlyList<RoutedDocument> routed =
+        [
+            new RoutedDocument("a", new SinkRecord(null, "1", new WallabyDocument { ["x"] = 1 }, IsDeletion: false, Meta)),
+            new RoutedDocument("b", new SinkRecord(null, "2", new WallabyDocument { ["x"] = 2 }, IsDeletion: false, Meta)),
+            new RoutedDocument("a", new SinkRecord(null, "3", new WallabyDocument { ["x"] = 3 }, IsDeletion: false, Meta)),
+        ];
+
+        await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(routed, CancellationToken.None);
+
+        delivered["a"].ShouldBe(["1", "3"]);
+        delivered["b"].ShouldBe(["2"]);
+    }
+
+    [Test]
     public async Task Permanent_failure_halts()
     {
         var dispatcher = new SinkDispatcher(FailingSink(), NullLogger.Instance);
