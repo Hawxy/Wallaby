@@ -42,6 +42,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.MaxBufferedChangesPerTransaction must be greater than zero.");
         }
+        if (options.Advanced.MaxTransactionsPerBatch is <= 0 or > 10_000)
+        {
+            failures.Add("Advanced.MaxTransactionsPerBatch must be between 1 and 10000.");
+        }
         if (options.Advanced.KeepaliveInterval <= TimeSpan.Zero)
         {
             failures.Add("Advanced.KeepaliveInterval must be greater than zero.");

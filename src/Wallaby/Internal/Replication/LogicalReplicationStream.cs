@@ -86,14 +86,17 @@ internal sealed class LogicalReplicationStream(
     /// <summary>
     /// Create the keepalive guard for a pipeline run: a single timer loop that sends a status update on
     /// each tick falling inside a <see cref="KeepaliveGuard.BeginTransaction"/>/<see
-    /// cref="KeepaliveGuard.EndTransactionAsync"/> window — i.e. while a transaction is being processed,
+    /// cref="KeepaliveGuard.EndTransactionAsync"/> window — i.e. while a batch is being processed,
     /// when the consumer isn't pulling from the stream and Npgsql can't answer the server's keepalives.
     /// The update reports the last <see cref="AcknowledgeAsync"/> position (it never calls
     /// <c>SetReplicationStatus</c>), so <c>confirmed_flush_lsn</c> is not advanced past durable delivery.
+    /// <paramref name="readInFlight"/> reports whether the batcher left a stream read in flight — Npgsql
+    /// answers the server's keepalives itself while reading, so the guard skips those ticks.
     /// Cancelling <paramref name="abort"/> (shutdown/lost lock) aborts an in-flight send, so teardown
     /// can't be blocked by a wedged connection.
     /// </summary>
-    public KeepaliveGuard StartKeepalive(TimeSpan interval, CancellationToken abort) => new(this, interval, abort);
+    public KeepaliveGuard StartKeepalive(TimeSpan interval, CancellationToken abort, Func<bool>? readInFlight = null)
+        => new(this, interval, abort, readInFlight);
 
     private async Task SendKeepaliveAsync(CancellationToken abort)
     {
@@ -115,11 +118,15 @@ internal sealed class LogicalReplicationStream(
     }
 
     /// <summary>
-    /// One long-lived timer loop per pipeline run — the per-transaction hot path is just a flag write on
-    /// begin and an uncontended gate acquire on end, with no timer/task churn per transaction. Sending is
-    /// only safe while the replication enumerator is suspended (no concurrent socket read), which is
-    /// exactly the Begin/End window; <see cref="EndTransactionAsync"/> is the barrier that lets reading
-    /// resume.
+    /// One long-lived timer loop per pipeline run — the per-batch hot path is just a flag write on
+    /// begin and an uncontended gate acquire on end, with no timer/task churn per batch. The guard's
+    /// sends stay out of windows where the enumerator is reading: the Begin/End bracket covers the
+    /// processing side, and the <c>readInFlight</c> probe covers a batcher read left pending across a
+    /// flush (Npgsql answers the server's keepalives itself during reads, so no guard send is needed
+    /// then). The one deliberate overlap is the pipeline's batch ack while such a read is pending — the
+    /// same <c>SendFeedback</c> path Npgsql's own <c>WalReceiverStatusInterval</c> timer (default 10s,
+    /// active in every deployment) already exercises concurrently with reads, with all feedback writers
+    /// serialized inside Npgsql; re-verify on Npgsql major upgrades.
     /// </summary>
     internal sealed class KeepaliveGuard : IAsyncDisposable
     {
@@ -127,15 +134,18 @@ internal sealed class LogicalReplicationStream(
         private readonly CancellationToken _abort;
         private readonly PeriodicTimer _timer;
         private readonly Task _loop;
+        private readonly Func<bool>? _readInFlight;
         // Serializes keepalive sends against EndTransactionAsync, so processing never hands the
         // connection back to the enumerator while a send is in flight.
         private readonly SemaphoreSlim _gate = new(1, 1);
         private volatile bool _processing;
 
-        internal KeepaliveGuard(LogicalReplicationStream stream, TimeSpan interval, CancellationToken abort)
+        internal KeepaliveGuard(
+            LogicalReplicationStream stream, TimeSpan interval, CancellationToken abort, Func<bool>? readInFlight = null)
         {
             _stream = stream;
             _abort = abort;
+            _readInFlight = readInFlight;
             _timer = new PeriodicTimer(interval);
             _loop = RunAsync();
         }
@@ -168,7 +178,8 @@ internal sealed class LogicalReplicationStream(
             {
                 while (await _timer.WaitForNextTickAsync(_abort))
                 {
-                    if (!_processing)
+                    // Skip while a batcher read is in flight — Npgsql answers keepalives during reads.
+                    if (!_processing || _readInFlight?.Invoke() is true)
                     {
                         continue;
                     }
@@ -178,7 +189,7 @@ internal sealed class LogicalReplicationStream(
                     {
                         // Re-check under the gate: EndTransactionAsync may have won it in between, and
                         // the enumerator may be reading again — sending now would race the socket read.
-                        if (_processing)
+                        if (_processing && _readInFlight?.Invoke() is not true)
                         {
                             await _stream.SendKeepaliveAsync(_abort);
                         }

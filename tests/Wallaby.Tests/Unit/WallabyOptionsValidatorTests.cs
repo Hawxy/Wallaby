@@ -55,6 +55,20 @@ public class WallabyOptionsValidatorTests
     }
 
     [Test]
+    public void Max_transactions_per_batch_is_capped()
+    {
+        var options = ValidOptions();
+        options.Advanced.MaxTransactionsPerBatch = 1;
+        Validate(options).Succeeded.ShouldBeTrue();
+
+        options.Advanced.MaxTransactionsPerBatch = 10_001;
+        Validate(options).Failed.ShouldBeTrue();
+
+        options.Advanced.MaxTransactionsPerBatch = 0;
+        Validate(options).Failed.ShouldBeTrue();
+    }
+
+    [Test]
     public void Negative_checkpoint_save_interval_fails()
     {
         var options = ValidOptions();

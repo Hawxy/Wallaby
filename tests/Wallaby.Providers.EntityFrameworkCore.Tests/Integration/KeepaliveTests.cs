@@ -95,6 +95,39 @@ public class KeepaliveTests(ShortWalSenderTimeoutPostgresFixture pg)
     }
 
     [Test]
+    public async Task A_slow_coalesced_batch_with_a_pending_read_survives_the_walsender_timeout()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();
+        var sink = new SlowSink("slow", TimeSpan.FromSeconds(5));
+        harness.AddSink(sink);
+        harness.KeepaliveInterval = TimeSpan.FromMilliseconds(250);
+        await harness.SelfConfigureAsync();
+
+        // A pre-committed burst coalesces into batches, leaving the batcher's next read pending while
+        // the 5s delivery (far past wal_sender_timeout=2s) runs — the ack then overlaps that read.
+        var categoryId = await harness.Db.AddCategoryAsync();
+        for (var i = 0; i < 5; i++)
+        {
+            await harness.Db.AddProductAsync(categoryId, $"batch_{i}");
+        }
+
+        await harness.StartAsync();
+        try
+        {
+            // More traffic while the slow delivery runs, so the pending read completes mid-processing.
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            await harness.Db.AddProductAsync(categoryId, "late_a");
+            await harness.Db.AddProductAsync(categoryId, "late_b");
+
+            await harness.WaitUntilAsync(() => sink.Delivered >= 7, TimeSpan.FromSeconds(60));
+        }
+        finally
+        {
+            await harness.StopAsync();
+        }
+    }
+
+    [Test]
     public async Task Stopping_while_a_sink_hangs_completes_cleanly()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString).Broadcast().Capture<Product>();

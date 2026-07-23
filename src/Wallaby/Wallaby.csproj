@@ -21,6 +21,7 @@
     <InternalsVisibleTo Include="Wallaby.Providers.Marten.Tests" />
     <InternalsVisibleTo Include="Wallaby.Sinks.Meilisearch.Tests" />
     <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
+    <InternalsVisibleTo Include="Wallaby.Benchmarks" />
   </ItemGroup>
 
   <!-- The control-plane contract is shared with Wallaby.Client by source link (single source of

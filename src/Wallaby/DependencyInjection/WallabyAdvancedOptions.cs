@@ -15,6 +15,16 @@ public sealed class WallabyAdvancedOptions
     /// </summary>
     public int MaxBufferedChangesPerTransaction { get; set; } = 1_000_000;
 
+    /// <summary>
+    /// Maximum number of committed transactions coalesced into one delivery batch — one sink dispatch
+    /// and one acknowledgement at the last transaction's LSN. Coalescing is opportunistic: transactions
+    /// are added only while the stream already has more buffered, so a quiet slot delivers each
+    /// transaction immediately with no added latency. The record cap is <see cref="WallabyOptions.MaxBatchSize"/>.
+    /// A delivery failure acknowledges nothing and the whole batch is redelivered on the next leader
+    /// session (at-least-once; idempotent sinks converge). 1 disables coalescing.
+    /// </summary>
+    public int MaxTransactionsPerBatch { get; set; } = 100;
+
     /// <summary>How long a standby node waits before retrying to acquire leadership.</summary>
     public TimeSpan StandbyRetryInterval { get; set; } = TimeSpan.FromSeconds(10);
 

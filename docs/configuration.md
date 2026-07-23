@@ -32,6 +32,7 @@ You shouldn't modify these unless you know what you're doing:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
+| `MaxTransactionsPerBatch` | `100` | Max committed transactions coalesced into one delivery batch — one sink dispatch and one acknowledgement at the last transaction's LSN. Coalescing is opportunistic: transactions are added only while the stream already has more buffered, so a quiet slot delivers each transaction immediately with no added latency. On a delivery failure nothing in the batch is acknowledged and the whole batch is redelivered (at-least-once; idempotent sinks converge). `1` disables coalescing (1–10 000). |
 | `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |

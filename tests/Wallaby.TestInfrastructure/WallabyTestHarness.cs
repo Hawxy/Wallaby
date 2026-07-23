@@ -82,6 +82,12 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>Maximum records per dispatched batch and per inline fan-out page (set before <see cref="StartAsync"/>).</summary>
     public int MaxBatchSize { get; set; } = 1000;
 
+    /// <summary>
+    /// Maximum committed transactions coalesced into one delivery batch (set before <see cref="StartAsync"/>).
+    /// Defaults to the production default; set to 1 for tests that assert per-transaction granularity.
+    /// </summary>
+    public int MaxTransactionsPerBatch { get; set; } = 100;
+
     /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -271,7 +277,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _pipeline = new WallabyPipeline(
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, NullLogger.Instance, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
-            MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation);
+            MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation,
+            maxTransactionsPerBatch: MaxTransactionsPerBatch);
 
         // Mirror the production lifecycle: run one-time sink setup before streaming begins.
         foreach (var sink in _sinks.Values)
