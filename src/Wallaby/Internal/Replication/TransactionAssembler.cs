@@ -238,7 +238,7 @@ internal sealed class TransactionAssembler(
         return modes;
     }
 
-    private async Task<RawChange> DecodeInsertAsync(InsertMessage message, CancellationToken ct)
+    private async ValueTask<RawChange> DecodeInsertAsync(InsertMessage message, CancellationToken ct)
     {
         var readModes = ReadModesFor(message.Relation);
         var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, ct);
@@ -253,7 +253,7 @@ internal sealed class TransactionAssembler(
         };
     }
 
-    private async Task<RawChange> DecodeUpdateAsync(
+    private async ValueTask<RawChange> DecodeUpdateAsync(
         UpdateMessage message, Npgsql.Replication.PgOutput.ReplicationTuple? oldRow, CancellationToken ct)
     {
         var readModes = ReadModesFor(message.Relation);
@@ -271,7 +271,7 @@ internal sealed class TransactionAssembler(
         };
     }
 
-    private async Task<RawChange> DecodeDeleteAsync(
+    private async ValueTask<RawChange> DecodeDeleteAsync(
         DeleteMessage message, Npgsql.Replication.PgOutput.ReplicationTuple oldOrKey, CancellationToken ct)
     {
         var oldValues = await PgOutputDecoder.ReadTupleAsync(oldOrKey, ReadModesFor(message.Relation), ct);
