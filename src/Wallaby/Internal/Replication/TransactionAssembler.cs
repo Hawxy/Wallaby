@@ -18,7 +18,7 @@ namespace Wallaby.Internal.Replication;
 /// <b>spilled</b> (via <see cref="ITransactionSpill"/>) rather than buffered in memory, so a single huge
 /// transaction can't exhaust the heap; on <see cref="StreamCommitMessage"/> a spill-backed
 /// <see cref="CommittedTransaction"/> is returned (the pipeline reads the changes back in pages), and on
-/// <see cref="StreamAbortMessage"/> the spill is discarded — wholly for a transaction abort, or truncated from
+/// <see cref="StreamAbortMessage"/> the spill is discarded: wholly for a transaction abort, or truncated from
 /// the subtransaction's first change for a rolled-back savepoint.
 /// </para>
 /// Relation messages are not surfaced as changes. Truncates of captured tables are surfaced as
@@ -87,7 +87,7 @@ internal sealed class TransactionAssembler(
                 return null;
 
             case StreamAbortMessage abort when abort.SubtransactionXid == abort.TransactionXid:
-                await spill.DiscardAsync(abort.TransactionXid, ct);  // whole transaction rolled back — drop its spill
+                await spill.DiscardAsync(abort.TransactionXid, ct);  // whole transaction rolled back; drop its spill
                 _streamedTruncates?.Remove(abort.TransactionXid);
                 return null;
 
@@ -178,7 +178,7 @@ internal sealed class TransactionAssembler(
         }
     }
 
-    // messageXid is the streamed DML message's own xid — the subtransaction's when made inside a
+    // messageXid is the streamed DML message's own xid: the subtransaction's when made inside a
     // savepoint, the toplevel's otherwise (and null on non-streamed messages).
     private async ValueTask RouteAsync(RawChange change, uint? messageXid, CancellationToken ct)
     {
@@ -238,7 +238,7 @@ internal sealed class TransactionAssembler(
         return modes;
     }
 
-    private async Task<RawChange> DecodeInsertAsync(InsertMessage message, CancellationToken ct)
+    private async ValueTask<RawChange> DecodeInsertAsync(InsertMessage message, CancellationToken ct)
     {
         var readModes = ReadModesFor(message.Relation);
         var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, ct);
@@ -253,7 +253,7 @@ internal sealed class TransactionAssembler(
         };
     }
 
-    private async Task<RawChange> DecodeUpdateAsync(
+    private async ValueTask<RawChange> DecodeUpdateAsync(
         UpdateMessage message, Npgsql.Replication.PgOutput.ReplicationTuple? oldRow, CancellationToken ct)
     {
         var readModes = ReadModesFor(message.Relation);
@@ -271,7 +271,7 @@ internal sealed class TransactionAssembler(
         };
     }
 
-    private async Task<RawChange> DecodeDeleteAsync(
+    private async ValueTask<RawChange> DecodeDeleteAsync(
         DeleteMessage message, Npgsql.Replication.PgOutput.ReplicationTuple oldOrKey, CancellationToken ct)
     {
         var oldValues = await PgOutputDecoder.ReadTupleAsync(oldOrKey, ReadModesFor(message.Relation), ct);
@@ -286,7 +286,7 @@ internal sealed class TransactionAssembler(
         };
     }
 
-    // A truncate rolled back via savepoint may still be recorded here — accepted, the result is only a warning.
+    // A truncate rolled back via savepoint may still be recorded here; accepted, the result is only a warning.
     private List<string> StreamedTruncatesFor(uint xid)
     {
         _streamedTruncates ??= [];

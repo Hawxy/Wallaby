@@ -15,6 +15,16 @@ public sealed class WallabyAdvancedOptions
     /// </summary>
     public int MaxBufferedChangesPerTransaction { get; set; } = 1_000_000;
 
+    /// <summary>
+    /// Maximum number of committed transactions coalesced into one delivery batch: one sink dispatch
+    /// and one acknowledgement at the last transaction's LSN. Coalescing is opportunistic: transactions
+    /// are added only while the stream already has more buffered, so a quiet slot delivers each
+    /// transaction immediately with no added latency. The record cap is <see cref="WallabyOptions.MaxBatchSize"/>.
+    /// A delivery failure acknowledges nothing and the whole batch is redelivered on the next leader
+    /// session (at-least-once; idempotent sinks converge). 1 disables coalescing.
+    /// </summary>
+    public int MaxTransactionsPerBatch { get; set; } = 100;
+
     /// <summary>How long a standby node waits before retrying to acquire leadership.</summary>
     public TimeSpan StandbyRetryInterval { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -23,7 +33,7 @@ public sealed class WallabyAdvancedOptions
 
     /// <summary>
     /// How often, while a single transaction is being processed, Wallaby sends a replication status
-    /// update to keep the connection alive — covering slow transforms/sinks when the consumer isn't
+    /// update to keep the connection alive, covering slow transforms/sinks when the consumer isn't
     /// reading the stream (so Npgsql can't answer the server's keepalives). Keep it well under the
     /// server's <c>wal_sender_timeout</c> (default 60s).
     /// </summary>
@@ -45,7 +55,7 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan BackfillPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Fallback poll interval for the suspend/resume control state — how often the leader re-checks for a
+    /// Fallback poll interval for the suspend/resume control state: how often the leader re-checks for a
     /// suspension request and a suspended node re-checks for a resume. Both are primarily woken on demand
     /// via LISTEN/NOTIFY the instant the control row changes; this interval is only a safety net in case a
     /// notification is ever missed (e.g. a dropped listening connection).
@@ -55,7 +65,7 @@ public sealed class WallabyAdvancedOptions
     /// <summary>
     /// How often the leader emits a tiny transactional heartbeat message (<c>pg_logical_emit_message</c>)
     /// while the pipeline is idle, so the slot's <c>confirmed_flush_lsn</c> keeps advancing even when the
-    /// mapped tables are quiet while other tables churn WAL — preventing unbounded WAL retention (and
+    /// mapped tables are quiet while other tables churn WAL, preventing unbounded WAL retention (and
     /// eventual <c>max_slot_wal_keep_size</c> slot invalidation) on shared databases. Suppressed while
     /// real traffic is being acknowledged. <see cref="TimeSpan.Zero"/> disables the heartbeat.
     /// </summary>

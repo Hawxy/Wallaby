@@ -29,5 +29,6 @@ public class MappingChangeRouterTelemetryTests
         captured.ShouldNotBeNull();
         captured!.GetTagItem("wallaby.entity").ShouldBe("Doc");
         captured.GetTagItem("wallaby.sink").ShouldBe("sink");
+        captured.GetTagItem("wallaby.destination").ShouldBe("dest");
     }
 }

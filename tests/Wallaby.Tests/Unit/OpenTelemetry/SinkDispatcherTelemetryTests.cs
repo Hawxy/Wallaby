@@ -109,6 +109,63 @@ public class SinkDispatcherTelemetryTests
     }
 
     [Test]
+    public async Task Delivery_span_tags_the_single_destination()
+    {
+        var instr = new WallabyInstrumentation();
+        using var activities = new ActivityCapture(instr);
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)),
+        };
+
+        await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr)
+            .DispatchAsync(OneRecord(), CancellationToken.None);
+
+        activities.Last("sink.deliver")!.GetTagItem("wallaby.destination").ShouldBe("products");
+    }
+
+    [Test]
+    public async Task Delivery_span_tags_every_distinct_destination_in_a_mixed_batch()
+    {
+        var instr = new WallabyInstrumentation();
+        using var activities = new ActivityCapture(instr);
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)),
+        };
+        // One per-sink batch mixing scoped destinations (e.g. per-tenant indexes).
+        IReadOnlyList<RoutedDocument> routed =
+        [
+            new RoutedDocument("sink", new SinkRecord("products_t1", "1", new WallabyDocument { ["x"] = 1 }, IsDeletion: false, Meta)),
+            new RoutedDocument("sink", new SinkRecord("products_t2", "2", new WallabyDocument { ["x"] = 2 }, IsDeletion: false, Meta)),
+            new RoutedDocument("sink", new SinkRecord("products_t1", "3", new WallabyDocument { ["x"] = 3 }, IsDeletion: false, Meta)),
+        ];
+
+        await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr)
+            .DispatchAsync(routed, CancellationToken.None);
+
+        activities.Last("sink.deliver")!.GetTagItem("wallaby.destination").ShouldBe("products_t1, products_t2");
+    }
+
+    [Test]
+    public async Task Delivery_span_omits_the_destination_tag_for_default_destination_batches()
+    {
+        var instr = new WallabyInstrumentation();
+        using var activities = new ActivityCapture(instr);
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => Task.FromResult(DeliveryResult.Success)),
+        };
+        IReadOnlyList<RoutedDocument> routed =
+            [new RoutedDocument("sink", new SinkRecord(Destination: null, "1", new WallabyDocument { ["x"] = 1 }, IsDeletion: false, Meta))];
+
+        await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr)
+            .DispatchAsync(routed, CancellationToken.None);
+
+        activities.Last("sink.deliver")!.GetTagItem("wallaby.destination").ShouldBeNull();
+    }
+
+    [Test]
     public async Task Permanent_failure_records_a_failure_and_marks_the_span_as_error()
     {
         var instr = new WallabyInstrumentation();

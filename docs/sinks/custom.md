@@ -72,8 +72,8 @@ whenever a standby takes over leadership. Make it idempotent. If it throws, the 
 
 ## Purging
 
-To support [purge-then-backfill](/backfill#purging-before-a-backfill) — emptying a destination so a
-fresh backfill converges it to exactly the current table contents — implement `ISinkPurger`:
+To support [purge-then-backfill](/backfill#purging-before-a-backfill) (emptying a destination so a
+fresh backfill converges it to exactly the current table contents), implement `ISinkPurger`:
 
 ```csharp
 public sealed class MySink : ISink, ISinkPurger
@@ -118,6 +118,26 @@ cdc.AddSink("my-sink", sp => new MySink(sp.GetRequiredService<HttpClient>()))
 
 `AddSink` returns a sink-scoped builder: declare the entities the sink receives in `WithMappings(...)`,
 or continue the chain via its `Wallaby` property for a sink registered without mappings.
+
+## Envelope helpers
+
+If your sink emits a JSON envelope, `SinkEnvelopeJson` provides the record-level pieces the
+built-in [HTTP](/sinks/http) and [Kafka](/sinks/kafka) sinks share: reflection-free (AOT-safe)
+document/metadata writing and a stable deduplication key:
+
+```csharp
+using var writer = new Utf8JsonWriter(buffer);
+writer.WriteStartObject();
+writer.WriteString("id", record.DocumentId);
+writer.WriteString("idempotencyKey", SinkEnvelopeJson.IdempotencyKey(record));
+writer.WritePropertyName("document");
+SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId,
+    serializerOptions: null, serializerOptionsName: "MySinkOptions.SerializerOptions");
+SinkEnvelopeJson.WriteMetadata(writer, record.Metadata);  // a "metadata" property
+writer.WriteEndObject();
+```
+
+The envelope shape around these pieces is yours to define.
 
 ## The delegate sink
 

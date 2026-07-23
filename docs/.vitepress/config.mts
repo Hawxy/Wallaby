@@ -53,6 +53,7 @@ export default defineConfig({
           { text: 'Backfill', link: '/backfill' },
           { text: 'External Slots', link: '/external-slots' },
           { text: 'Configuration', link: '/configuration' },
+          { text: 'Transaction Spill', link: '/transaction-spill' },
           { text: 'Testing', link: '/testing' },
         ]
       },
@@ -89,7 +90,8 @@ export default defineConfig({
           { text: 'Observability', link: '/operations/observability' },
           { text: 'Health Checks', link: '/operations/health-checks' },
           { text: 'External Control', link: '/operations/external-control' },
-          { text: 'Major-Version Upgrades', link: '/operations/major-version-upgrades' }
+          { text: 'Upgrading Wallaby', link: '/operations/upgrades' },
+          { text: 'Postgres Upgrades', link: '/operations/major-version-upgrades' }
         ]
       }
     ],

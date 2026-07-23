@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Wallaby.Abstractions;
-using Wallaby.Sinks.Internal;
 
 namespace Wallaby.Sinks.Kafka.Internal;
 
@@ -30,10 +29,13 @@ internal static class KafkaMessageWriter
     /// <summary>Header carrying the commit LSN (decimal string; <c>0</c> for backfill reads).</summary>
     public const string CommitLsnHeader = "wallaby.commit-lsn";
 
-    /// <summary>Headers for any record — present on tombstones too, where they are the only metadata.</summary>
+    private static readonly byte[] DeleteOperation = Encoding.UTF8.GetBytes("delete");
+    private static readonly byte[] UpsertOperation = Encoding.UTF8.GetBytes("upsert");
+
+    /// <summary>Headers for any record; present on tombstones too, where they are the only metadata.</summary>
     public static Headers BuildHeaders(SinkRecord record) => new()
     {
-        { OperationHeader, Encoding.UTF8.GetBytes(record.IsDeletion ? "delete" : "upsert") },
+        { OperationHeader, record.IsDeletion ? DeleteOperation : UpsertOperation },
         { IdempotencyKeyHeader, Encoding.UTF8.GetBytes(IdempotencyKey(record)) },
         { TableHeader, Encoding.UTF8.GetBytes(record.Metadata.QualifiedTableName) },
         { CommitLsnHeader, Encoding.UTF8.GetBytes(record.Metadata.CommitLsn.ToString(CultureInfo.InvariantCulture)) },

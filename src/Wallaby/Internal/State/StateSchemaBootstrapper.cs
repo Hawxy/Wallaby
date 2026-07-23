@@ -1,94 +1,118 @@
+using System.Reflection;
+using Microsoft.Extensions.Logging;
 using Npgsql;
+using Wallaby.Internal.Cluster;
 
 namespace Wallaby.Internal.State;
 
 /// <summary>
-/// Creates the internal <c>wallaby</c> schema and its bookkeeping tables (idempotently). State is
-/// co-located in the source database so backfill watermarking and checkpointing observe a consistent
-/// view of the data.
+/// Creates and migrates the internal <c>wallaby</c> schema. State is co-located in the source database
+/// so backfill watermarking and checkpointing observe a consistent view of the data. Applied
+/// <see cref="StateSchemaMigrations"/> steps are recorded in <c>wallaby.schema_version</c>; a database
+/// whose schema version is newer than this build fails fast (never run a downgraded binary against a
+/// migrated schema). At the current version the bootstrap is a single read and runs no DDL.
+/// Migrations are serialized across nodes by a dedicated advisory lock: the leader, the provision-only
+/// service, and the configuration-suspend gate can all bootstrap concurrently.
 /// </summary>
-internal sealed class StateSchemaBootstrapper
+internal sealed class StateSchemaBootstrapper(ILogger? logger = null)
 {
-    private const string Ddl = """
+    // Distinct from both leadership lock keys; pinned the same way (see PostgresAdvisoryLock.StableKey).
+    private static readonly long MigrationLockKey = PostgresAdvisoryLock.StableKey("wallaby_schema_migration");
+
+    private static readonly string AppliedBy =
+        typeof(StateSchemaBootstrapper).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "unknown";
+
+    private const string VersionTableDdl = """
         CREATE SCHEMA IF NOT EXISTS wallaby;
 
-        CREATE TABLE IF NOT EXISTS wallaby.checkpoint (
-            slot_name     text        PRIMARY KEY,
-            confirmed_lsn pg_lsn      NOT NULL,
-            updated_at    timestamptz NOT NULL DEFAULT now()
+        CREATE TABLE IF NOT EXISTS wallaby.schema_version (
+            version    int         PRIMARY KEY,
+            applied_at timestamptz NOT NULL DEFAULT now(),
+            applied_by text        NOT NULL
         );
-
-        CREATE TABLE IF NOT EXISTS wallaby.backfill_state (
-            table_qualified   text        PRIMARY KEY,
-            status            text        NOT NULL,
-            transform_version text        NULL,
-            cursor_json       jsonb       NULL,
-            rows_copied       bigint      NOT NULL DEFAULT 0,
-            purge             boolean     NOT NULL DEFAULT false,
-            updated_at        timestamptz NOT NULL DEFAULT now()
-        );
-
-        -- CREATE IF NOT EXISTS won't evolve an existing table.
-        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS purge boolean NOT NULL DEFAULT false;
-
-        CREATE TABLE IF NOT EXISTS wallaby.slot_registry (
-            slot_name        text        PRIMARY KEY,
-            publication      text        NOT NULL,
-            consistent_point pg_lsn      NULL,
-            kind             text        NOT NULL DEFAULT 'primary',
-            created_at       timestamptz NOT NULL DEFAULT now()
-        );
-
-        CREATE TABLE IF NOT EXISTS wallaby.fanout_queue (
-            table_qualified text        NOT NULL,
-            lookup_hash     text        NOT NULL,
-            lookup_columns  text[]      NOT NULL,
-            lookup_values   jsonb       NOT NULL,
-            status          text        NOT NULL,
-            cursor_json     jsonb       NULL,
-            rows_copied     bigint      NOT NULL DEFAULT 0,
-            requested_at    timestamptz NOT NULL DEFAULT now(),
-            updated_at      timestamptz NOT NULL DEFAULT now(),
-            PRIMARY KEY (table_qualified, lookup_hash)
-        );
-
-        -- Serves the worker's due-job scan: WHERE status IN (...) ORDER BY requested_at LIMIT 1.
-        CREATE INDEX IF NOT EXISTS fanout_queue_due_idx
-            ON wallaby.fanout_queue (requested_at)
-            WHERE status IN ('Requested', 'InProgress');
-
-        -- Disk-free spill for pgoutput v2 streamed transactions buffered until commit. 
-        -- Used only by the database spill backend (PostgresUnloggedTableSpill);
-        CREATE UNLOGGED TABLE IF NOT EXISTS wallaby.stream_buffer (
-            slot_name text   NOT NULL,
-            xid       bigint NOT NULL,
-            subxid    bigint NOT NULL DEFAULT 0,
-            seq       bigint NOT NULL,
-            payload   bytea  NOT NULL,
-            PRIMARY KEY (slot_name, xid, seq)
-        );
-
-        -- CREATE IF NOT EXISTS won't evolve an existing table; stale rows are cleared at session start.
-        ALTER TABLE wallaby.stream_buffer ADD COLUMN IF NOT EXISTS subxid bigint NOT NULL DEFAULT 0;
-
-        -- Suspend/resume control row (singleton; wire format shared with Wallaby.Client via
-        -- ControlContract). Created only by the host — the remote client never performs DDL.
-        CREATE TABLE IF NOT EXISTS wallaby.control (
-            scope        text        PRIMARY KEY DEFAULT 'wallaby' CHECK (scope = 'wallaby'),
-            state        text        NOT NULL DEFAULT 'Running',
-            origin       text        NOT NULL DEFAULT 'client',
-            reason       text        NULL,
-            requested_by text        NULL,
-            requested_at timestamptz NULL,
-            suspended_at timestamptz NULL,
-            resumed_at   timestamptz NULL,
-            updated_at   timestamptz NOT NULL DEFAULT now()
-        );
-
-        -- Finished fan-out jobs are deleted on completion; clear rows written before that behavior.
-        DELETE FROM wallaby.fanout_queue WHERE status = 'Completed';
         """;
 
+    private const string ReadVersionSql = "SELECT coalesce(max(version), 0) FROM wallaby.schema_version";
+
     public Task EnsureAsync(NpgsqlConnection connection, CancellationToken ct)
-        => PgExec.ExecuteAsync(connection, Ddl, ct);
+        => EnsureAsync(connection, StateSchemaMigrations.Steps, StateSchemaMigrations.CurrentVersion, ct);
+
+    internal async Task EnsureAsync(
+        NpgsqlConnection connection, IReadOnlyList<(int Version, string Ddl)> steps, int currentVersion,
+        CancellationToken ct)
+    {
+        var dbVersion = await TryReadVersionAsync(connection, ct);
+        GuardNewerSchema(dbVersion, currentVersion);
+        if (dbVersion == currentVersion)
+        {
+            return;
+        }
+
+        // The ledger and all DDL are created under the migration lock, so concurrent bootstrappers
+        // serialize here instead of racing CREATE TABLE. The lock is transaction-scoped and the whole
+        // pending range applies atomically: an interrupted run leaves the previous version intact.
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        await PgExec.ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(@key)", ct, ("key", MigrationLockKey));
+        await PgExec.ExecuteAsync(connection, VersionTableDdl, ct);
+
+        // Another node may have migrated while this one waited on the lock.
+        var lockedVersion = await PgExec.ScalarLongAsync(connection, ReadVersionSql, ct);
+        GuardNewerSchema(lockedVersion, currentVersion);
+        if (lockedVersion == currentVersion)
+        {
+            await tx.CommitAsync(ct);
+            return;
+        }
+
+        foreach (var (version, ddl) in steps)
+        {
+            if (version <= lockedVersion)
+            {
+                continue;
+            }
+
+            await PgExec.ExecuteAsync(connection, ddl, ct);
+            await PgExec.ExecuteAsync(
+                connection,
+                "INSERT INTO wallaby.schema_version (version, applied_by) VALUES (@v, @by)",
+                ct, ("v", version), ("by", AppliedBy));
+        }
+
+        await tx.CommitAsync(ct);
+        logger?.SchemaMigrated(lockedVersion, currentVersion);
+    }
+
+    // Missing ledger (or missing schema entirely) reads as version 0: a fresh database, or one
+    // bootstrapped by a pre-versioning beta; both adopted by the baseline step.
+    private static async Task<long> TryReadVersionAsync(NpgsqlConnection connection, CancellationToken ct)
+    {
+        try
+        {
+            return await PgExec.ScalarLongAsync(connection, ReadVersionSql, ct);
+        }
+        catch (PostgresException ex) when (
+            ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.InvalidSchemaName)
+        {
+            return 0;
+        }
+    }
+
+    private static void GuardNewerSchema(long dbVersion, int currentVersion)
+    {
+        if (dbVersion > currentVersion)
+        {
+            throw new WallabyConfigurationException(
+                $"The wallaby state schema is at version {dbVersion}, but this Wallaby build supports up to " +
+                $"version {currentVersion}. A newer Wallaby has migrated this database; upgrade the package " +
+                "instead of running an older build against it.");
+        }
+    }
+}
+
+/// <summary>Source-generated log messages for <see cref="StateSchemaBootstrapper"/>.</summary>
+internal static partial class StateSchemaBootstrapperLog
+{
+    [LoggerMessage(Level = LogLevel.Information, Message = "Migrated the wallaby state schema from version {FromVersion} to {ToVersion}.")]
+    internal static partial void SchemaMigrated(this ILogger logger, long fromVersion, int toVersion);
 }

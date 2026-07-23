@@ -10,17 +10,18 @@
     <PackageTags>backfill;streaming;npgsql</PackageTags>
   </PropertyGroup>
 
+  <!-- First-party grants only (WallabyConfiguration/ResolvedProviderSet access); third parties
+       extend via the public SPI (ISink, IWallabyModelProvider, ITransactionSpill, ...). -->
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Testing" />
     <InternalsVisibleTo Include="Wallaby.Providers.Marten" />
-    <InternalsVisibleTo Include="Wallaby.Sinks.Http" />
-    <InternalsVisibleTo Include="Wallaby.Sinks.Kafka" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.Marten.Tests" />
     <InternalsVisibleTo Include="Wallaby.Sinks.Meilisearch.Tests" />
     <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
+    <InternalsVisibleTo Include="Wallaby.Benchmarks" />
   </ItemGroup>
 
   <!-- The control-plane contract is shared with Wallaby.Client by source link (single source of

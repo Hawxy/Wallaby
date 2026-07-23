@@ -11,11 +11,11 @@ namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
 /// The live replication pipeline: reads committed transactions, materializes change events, routes them
-/// to sinks, and — only after all sinks accept the batch — acknowledges the commit to the server and
+/// to sinks, and, only after all sinks accept the batch, acknowledges the commit to the server and
 /// records the checkpoint. This ordering preserves at-least-once delivery.
 /// <para>
 /// Dependent-table changes fan out to synthetic updates of the affected primary rows. The first page per
-/// binding is dispatched inline (excluding any primary key already changed live in the same transaction —
+/// binding is dispatched inline (excluding any primary key already changed live in the same transaction;
 /// live wins); when more rows remain, the tail is enqueued as a scoped backfill so the transaction can be
 /// acknowledged without waiting on a potentially huge re-index. Every dispatch is sliced into batches of
 /// at most <c>maxBatchSize</c> records so no sink/transform sees an unbounded batch.
@@ -42,7 +42,8 @@ internal sealed class WallabyPipeline(
     DependentChangeResolver? dependentResolver = null,
     IFanoutQueueStore? fanoutQueue = null,
     WallabyInstrumentation? instrumentation = null,
-    WallabyStatus? status = null)
+    WallabyStatus? status = null,
+    int maxTransactionsPerBatch = 1)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
@@ -64,17 +65,24 @@ internal sealed class WallabyPipeline(
         var rollupTransactions = 0L;
         var rollupChanges = 0L;
 
-        // One keepalive guard for the whole run; each transaction's processing (when the stream isn't
-        // being read, so Npgsql can't answer the server's keepalives) is bracketed with Begin/End below.
-        await using var keepalive = stream.StartKeepalive(keepaliveInterval, ct);
+        // Small committed transactions are coalesced into bounded batches (one dispatch + one ack); the
+        // batcher yields solo batches for streamed/watermark transactions and whenever the stream idles.
+        await using var batcher = new TransactionBatcher(stream.ReadAsync(ct), maxTransactionsPerBatch, maxBatchSize, ct);
 
-        await foreach (var transaction in stream.ReadAsync(ct))
+        // One keepalive guard for the whole run; each batch's processing is bracketed with Begin/End
+        // below. While the batcher has a read in flight, Npgsql itself answers the server's keepalives,
+        // so the guard skips those ticks.
+        await using var keepalive = stream.StartKeepalive(keepaliveInterval, ct, () => batcher.ReadInFlight);
+
+        while (await batcher.ReadBatchAsync() is { } batch)
         {
             long processed;
             keepalive.BeginTransaction();
             try
             {
-                processed = await ProcessTransactionAsync(transaction, ct);
+                processed = batch.Count == 1
+                    ? await ProcessTransactionAsync(batch[0], ct)
+                    : await ProcessBatchAsync(batch, ct);
             }
             finally
             {
@@ -85,17 +93,25 @@ internal sealed class WallabyPipeline(
 
             // Pure-heartbeat transactions exist only to advance the slot; keeping them out of the rollup
             // preserves the idle-slot-logs-nothing invariant.
-            if (transaction.ContainsHeartbeat && processed == 0)
+            var realTransactions = 0L;
+            foreach (var transaction in batch)
+            {
+                if (!(transaction.ContainsHeartbeat && transaction.Changes.Count == 0))
+                {
+                    realTransactions++;
+                }
+            }
+            if (realTransactions == 0)
             {
                 continue;
             }
 
-            rollupTransactions++;
+            rollupTransactions += realTransactions;
             rollupChanges += processed;
             if (Stopwatch.GetElapsedTime(rollupStart) is var window && window >= RollupInterval)
             {
                 logger.ProcessedRollup(
-                    slotName, rollupTransactions, rollupChanges, (long)window.TotalSeconds, transaction.EndLsn);
+                    slotName, rollupTransactions, rollupChanges, (long)window.TotalSeconds, batch[^1].EndLsn);
                 rollupTransactions = 0;
                 rollupChanges = 0;
                 rollupStart = Stopwatch.GetTimestamp();
@@ -155,7 +171,7 @@ internal sealed class WallabyPipeline(
         int processed;
         try
         {
-            // A streamed (large) transaction's changes live in the spill, not in memory — process them in
+            // A streamed (large) transaction's changes live in the spill, not in memory; process them in
             // bounded pages. A normal transaction keeps the in-memory path (and carries any backfill watermarks).
             processed = transaction.IsStreamed
                 ? await ProcessStreamedAsync(transaction, ct)
@@ -181,6 +197,7 @@ internal sealed class WallabyPipeline(
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             activity?.AddException(ex);
+            logger.TransactionHalted(ex, slotName, transaction.EndLsn);
             throw;
         }
 
@@ -189,27 +206,108 @@ internal sealed class WallabyPipeline(
         return processed;
     }
 
+    // Coalesced batch of small transactions: one delivery and one acknowledgement (at the last
+    // transaction's EndLsn) for the whole batch, changes concatenated in commit order. Boundary
+    // transactions (streamed, watermark-carrying) never reach here; the batcher keeps them solo. A
+    // failure acks nothing: the entire batch re-streams on the next leader session (at-least-once).
+    private async Task<long> ProcessBatchAsync(IReadOnlyList<CommittedTransaction> batch, CancellationToken ct)
+    {
+        var last = batch[^1];
+        var lagSeconds = batch[0].CommitTimestamp is { } oldestTs
+            ? Math.Max(0, (DateTimeOffset.UtcNow - oldestTs).TotalSeconds)
+            : -1;
+        var totalChanges = 0;
+        foreach (var transaction in batch)
+        {
+            // This path has no watermark/spill handling; a boundary transaction reaching it would be
+            // silently dropped (and a backfill window would hang waiting on its high watermark).
+            Debug.Assert(!transaction.IsStreamed && transaction.Watermarks.Count == 0,
+                "Boundary transactions must be solo batches.");
+            totalChanges += transaction.Changes.Count;
+        }
+
+        using var activity = _instr.StartTransaction();
+        if (activity is not null)
+        {
+            activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
+            activity.SetTag("wallaby.batch.txn_count", batch.Count);
+            activity.SetTag("wallaby.txn.lsn.commit", (long)batch[0].CommitLsn);
+            activity.SetTag("wallaby.txn.lsn.end", (long)last.EndLsn);
+            activity.SetTag("wallaby.txn.size", totalChanges);
+            if (lagSeconds >= 0)
+            {
+                activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
+            }
+        }
+
+        // Warn before dispatch so the divergence is on record even if a sink faults below.
+        foreach (var transaction in batch)
+        {
+            if (transaction.TruncatedTables.Count > 0)
+            {
+                logger.TruncateNotPropagated(string.Join(", ", transaction.TruncatedTables), slotName);
+            }
+        }
+
+        _instr.RecordIngestionLag(slotName, lagSeconds);
+
+        try
+        {
+            var appEvents = new List<ChangeEvent>(totalChanges);
+            var sawDependentChange = false;
+            foreach (var transaction in batch)
+            {
+                sawDependentChange |= MaterializeInto(appEvents, transaction.Changes);
+            }
+
+            foreach (var ev in appEvents)
+            {
+                _instr.RecordChange(slotName, ev.Action, backfill: false);
+            }
+
+            if (backfill is not null)
+            {
+                RecordLiveKeys(appEvents);
+            }
+
+            await DispatchChunkedAsync(appEvents, WallabyInstrumentation.SourceLive, ct);
+
+            // Dependent fan-out once over the whole batch, with a batch-wide live-key index: a primary
+            // key changed live anywhere in the batch suppresses its synthetic re-emit (live wins).
+            if (sawDependentChange)
+            {
+                await ResolveAndDispatchFanoutAsync(ToAsync(batch, ct), BuildLiveKeyIndex(appEvents), ct);
+            }
+
+            using (var ackActivity = _instr.StartAck())
+            {
+                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
+                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)last.EndLsn);
+                ackActivity?.SetTag("wallaby.batch.txn_count", batch.Count);
+                await stream.AcknowledgeAsync(last.EndLsn, ct);
+                Volatile.Write(ref _lastAcknowledgedLsn, last.EndLsn);
+                await checkpoints.SaveAsync(slotName, new Checkpoint(last.EndLsn, DateTimeOffset.UtcNow), ct);
+                status?.RecordProgress(last.EndLsn, lagSeconds, DateTimeOffset.UtcNow);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
+            logger.TransactionBatchHalted(ex, slotName, batch.Count, batch[0].CommitLsn, last.EndLsn);
+            throw;
+        }
+
+        logger.TransactionBatchProcessed(slotName, batch.Count, totalChanges, last.EndLsn);
+        return totalChanges;
+    }
+
     // Normal transaction: materialize the in-memory changes, dispatch them (with watermark/backfill handling),
     // and resolve dependent fan-out. Unchanged from the pre-streaming behaviour.
     private async Task<int> ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
     {
         var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
-        var sawDependentChange = false;
-        foreach (var raw in transaction.Changes)
-        {
-            // Note while passing whether any change can trigger fan-out, so transactions that touched
-            // no dependent table skip the fan-out resolve (and its live-key index) entirely.
-            if (!sawDependentChange && dependentResolver is not null && dependentResolver.HasBindingFor(raw.Schema, raw.TableName))
-            {
-                sawDependentChange = true;
-            }
-
-            var changeEvent = changeEventFactory.Create(raw);
-            if (changeEvent is not null)
-            {
-                appEvents.Add(changeEvent);
-            }
-        }
+        var sawDependentChange = MaterializeInto(appEvents, transaction.Changes);
 
         foreach (var ev in appEvents)
         {
@@ -253,8 +351,8 @@ internal sealed class WallabyPipeline(
         return transaction.Changes.Count;
     }
 
-    // Streamed (large) transaction: read the spilled changes back in append order in bounded pages — never
-    // materializing the whole transaction — stamping each with the commit metadata, then resolve fan-out and
+    // Streamed (large) transaction: read the spilled changes back in append order in bounded pages (never
+    // materializing the whole transaction), stamping each with the commit metadata, then resolve fan-out and
     // discard the spill. Streamed transactions carry no watermarks (those are tiny, never-streamed transactions).
     private async Task<int> ProcessStreamedAsync(CommittedTransaction transaction, CancellationToken ct)
     {
@@ -314,6 +412,27 @@ internal sealed class WallabyPipeline(
         await DispatchAsync(page, WallabyInstrumentation.SourceLive, ct);
     }
 
+    // Materialize raw changes into change events, returning whether any change can trigger dependent
+    // fan-out, so transactions that touched no dependent table skip the fan-out resolve entirely.
+    private bool MaterializeInto(List<ChangeEvent> appEvents, IReadOnlyList<RawChange> changes)
+    {
+        var sawDependentChange = false;
+        foreach (var raw in changes)
+        {
+            if (!sawDependentChange && dependentResolver is not null && dependentResolver.HasBindingFor(raw.Schema, raw.TableName))
+            {
+                sawDependentChange = true;
+            }
+
+            var changeEvent = changeEventFactory.Create(raw);
+            if (changeEvent is not null)
+            {
+                appEvents.Add(changeEvent);
+            }
+        }
+        return sawDependentChange;
+    }
+
     private static readonly IReadOnlySet<(string, DocumentKey)> EmptyKeys = new HashSet<(string, DocumentKey)>();
 
     // Adapt an in-memory change list to the async stream the fan-out resolver consumes (so the same resolver
@@ -325,6 +444,21 @@ internal sealed class WallabyPipeline(
         {
             ct.ThrowIfCancellationRequested();
             yield return change;
+        }
+        await Task.CompletedTask;
+    }
+
+    // Same adaptation over a whole batch's transactions, in commit order.
+    private static async IAsyncEnumerable<RawChange> ToAsync(
+        IReadOnlyList<CommittedTransaction> batch, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var transaction in batch)
+        {
+            foreach (var change in transaction.Changes)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return change;
+            }
         }
         await Task.CompletedTask;
     }
@@ -374,7 +508,7 @@ internal sealed class WallabyPipeline(
         foreach (var ev in events)
         {
             // Avoid forcing DocumentKey materialization unless a backfill window is recording for the
-            // same table — the common steady-state hot path.
+            // same table; skipping it is the common steady-state hot path.
             if (backfill!.IsRecording(ev.Metadata.QualifiedTableName))
             {
                 backfill.RecordLiveKey(ev.Metadata.QualifiedTableName, ev.Key);
@@ -498,4 +632,19 @@ internal static partial class WallabyPipelineLog
         "propagated to sinks: documents already delivered for these tables remain, and their sinks now " +
         "diverge from the database. Purge the destination and re-run a backfill to converge.")]
     internal static partial void TruncateNotPropagated(this ILogger logger, string tables, string slot);
+
+    [LoggerMessage(Level = LogLevel.Error, Message =
+        "Delivery of the transaction ending at LSN {EndLsn} on slot '{Slot}' failed and is halted; the " +
+        "leader will restart and retry this transaction. Delivery does not advance until the cause is resolved.")]
+    internal static partial void TransactionHalted(this ILogger logger, Exception ex, string slot, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed a batch of {Transactions} transaction(s) ({Changes} change(s)) for slot '{Slot}'; acknowledged LSN {EndLsn}.")]
+    internal static partial void TransactionBatchProcessed(this ILogger logger, string slot, int transactions, long changes, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Error, Message =
+        "Delivery of a batch of {Transactions} transaction(s) (LSNs {FirstCommitLsn}..{EndLsn}) on slot '{Slot}' " +
+        "failed and is halted; nothing in the batch was acknowledged, and the leader will restart and redeliver " +
+        "it. Delivery does not advance until the cause is resolved.")]
+    internal static partial void TransactionBatchHalted(
+        this ILogger logger, Exception ex, string slot, int transactions, ulong firstCommitLsn, ulong endLsn);
 }

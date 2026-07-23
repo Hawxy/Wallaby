@@ -1,3 +1,4 @@
+using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.Model;
 using Wallaby.Providers;
@@ -9,16 +10,29 @@ namespace Wallaby.Internal.Pipeline;
 /// attaching commit/source metadata. Returns null when the change's table is not part of the model.
 /// <para>
 /// A materialization <em>failure</em> (e.g. a bad value/conversion or a missing key) is a poison change that
-/// always halts the pipeline
+/// always halts the pipeline; it is rethrown annotated with the change's table and commit position.
 /// </para>
 /// </summary>
 internal sealed class ChangeEventFactory(IRowMaterializer materializer)
 {
     public ChangeEvent? Create(RawChange change)
     {
-        if (!materializer.TryMaterialize(change, out var row))
+        bool materialized;
+        MaterializedRow? row;
+        try
         {
-            return null; // table not part of the model — benign skip
+            materialized = materializer.TryMaterialize(change, out row);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Materialization failed for a {change.Action} on {change.QualifiedName} " +
+                $"(commit {new NpgsqlLogSequenceNumber(change.CommitLsn)}, change #{change.CommitIdx}): {ex.Message}", ex);
+        }
+
+        if (!materialized || row is null)
+        {
+            return null; // table not part of the model; benign skip
         }
 
         var metadata = new ChangeMetadata(

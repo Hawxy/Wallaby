@@ -27,7 +27,7 @@ internal enum LeaderSessionOutcome
 
     /// <summary>
     /// A suspension is in effect or was requested: the session wound down (or never started) without
-    /// touching slots, and the caller — still holding the lock — finalizes by dropping them.
+    /// touching slots, and the caller (still holding the lock) finalizes by dropping them.
     /// </summary>
     SuspendRequested,
 }
@@ -53,7 +53,7 @@ internal sealed class LeaderSession(
 
     /// <summary>
     /// Run the leader workload for the lifetime of leadership. Returns how the workload ended (lost lock,
-    /// suspension, or a plain end); a real fault — from the pipeline or a background task — propagates,
+    /// suspension, or a plain end); a real fault (from the pipeline or a background task) propagates,
     /// and shutdown re-throws cancellation.
     /// </summary>
     public async Task<LeaderSessionOutcome> RunAsync(CancellationToken ct)
@@ -80,7 +80,8 @@ internal sealed class LeaderSession(
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
             options.SlotName, _logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
-            components.DependentResolver, components.FanoutQueue, instrumentation, status);
+            components.DependentResolver, components.FanoutQueue, instrumentation, status,
+            options.Advanced.MaxTransactionsPerBatch);
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
         // connection dropped) so a standby that can take over isn't left waiting while we stream on with
@@ -115,7 +116,7 @@ internal sealed class LeaderSession(
         // Watches for a suspension request (LISTEN + fallback poll) and cancels the workload so the
         // session winds down and releases the slot; the caller then drops it. Its first read also closes
         // the race where a suspension lands between this session's pre-check and slot creation. Never
-        // faults the session — transient read errors are retried inside.
+        // faults the session; transient read errors are retried inside.
         var controlWatcher = new ControlStateWatcher(controlStore, options.Advanced.ControlPollInterval, _logger);
         var controlTask = Task.Run(async () =>
         {
@@ -123,7 +124,7 @@ internal sealed class LeaderSession(
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
         });
 
-        // Advances the slot while the mapped tables are idle. Never faults the session — the emitter
+        // Advances the slot while the mapped tables are idle. Never faults the session: the emitter
         // logs and swallows per-tick errors, so a transiently-down database just skips ticks.
         var heartbeatTask = options.Advanced.HeartbeatInterval > TimeSpan.Zero
             ? Task.Run(async () =>
@@ -157,7 +158,7 @@ internal sealed class LeaderSession(
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
-            // Shutdown (ct), lost-lock, or a background fault cancelled the workload — distinguished below.
+            // Shutdown (ct), lost-lock, or a background fault cancelled the workload, distinguished below.
             // An OCE while the workload is NOT being cancelled (e.g. a sink-thrown TaskCanceledException
             // from an HTTP timeout) is a real fault and propagates like any other exception.
         }
@@ -186,7 +187,7 @@ internal sealed class LeaderSession(
             : LeaderSessionOutcome.Ended;
     }
 
-    // Self-configure, repair any slot-loss gap, and initialize sinks — grouped under one bootstrap span so
+    // Self-configure, repair any slot-loss gap, and initialize sinks, grouped under one bootstrap span so
     // a slow startup (slot creation, index setup) is visible as a single trace per leadership term.
     private async Task BootstrapAsync(CancellationToken ct)
     {

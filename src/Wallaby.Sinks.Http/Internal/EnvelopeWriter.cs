@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text.Json;
 using Wallaby.Abstractions;
-using Wallaby.Sinks.Internal;
 
 namespace Wallaby.Sinks.Http.Internal;
 

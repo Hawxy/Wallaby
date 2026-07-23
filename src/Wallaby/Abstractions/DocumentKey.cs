@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Wallaby.Abstractions;
 
 /// <summary>
@@ -36,10 +38,11 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
     /// <inheritdoc />
     public override int GetHashCode()
     {
+        // Indexed to avoid the interface enumerator allocation; this runs once per change routed.
         var hash = new HashCode();
-        foreach (var value in Values)
+        for (var i = 0; i < Values.Count; i++)
         {
-            hash.Add(value);
+            hash.Add(Values[i]);
         }
         return hash.ToHashCode();
     }
@@ -49,7 +52,21 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
     /// joined with <c>|</c>). Suitable as a default sink document id.
     /// </summary>
     public override string ToString()
-        => Values.Count == 1
-            ? Values[0]?.ToString() ?? string.Empty
-            : string.Join("|", Values.Select(v => v?.ToString() ?? string.Empty));
+    {
+        if (Values.Count == 1)
+        {
+            return Values[0]?.ToString() ?? string.Empty;
+        }
+
+        var sb = new StringBuilder();
+        for (var i = 0; i < Values.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append('|');
+            }
+            sb.Append(Values[i]);
+        }
+        return sb.ToString();
+    }
 }

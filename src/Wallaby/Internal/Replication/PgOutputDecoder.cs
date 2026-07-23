@@ -15,7 +15,7 @@ internal static class PgOutputDecoder
     /// aligned to the relation's column order; null means every column reads with
     /// <see cref="ColumnReadMode.Default"/>.
     /// </summary>
-    public static async Task<RawColumn[]> ReadTupleAsync(
+    public static async ValueTask<RawColumn[]> ReadTupleAsync(
         ReplicationTuple tuple, ColumnReadMode[]? readModes, CancellationToken ct)
     {
         var columns = new RawColumn[tuple.NumColumns];

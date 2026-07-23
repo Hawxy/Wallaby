@@ -4,7 +4,7 @@ using Wallaby.TestInfrastructure;
 namespace Wallaby.Client.Tests.Integration;
 
 /// <summary>
-/// Remote backfill control against a bare database — the client persists requests and reads status by
+/// Remote backfill control against a bare database; the client persists requests and reads status by
 /// table name; the host-side scheduling is covered by the EF Core end-to-end tests.
 /// </summary>
 [NotInParallel]
@@ -17,22 +17,9 @@ public class BackfillClientTests(PostgresFixture pg)
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // Matches StateSchemaBootstrapper's backfill DDL — the client performs no DDL, so these tests
-    // simulate a Wallaby host having run against the database.
-    private Task EnsureBackfillTableAsync() => ExecAsync(
-        """
-        CREATE SCHEMA IF NOT EXISTS wallaby;
-        CREATE TABLE IF NOT EXISTS wallaby.backfill_state (
-            table_qualified   text        PRIMARY KEY,
-            status            text        NOT NULL,
-            transform_version text        NULL,
-            cursor_json       jsonb       NULL,
-            rows_copied       bigint      NOT NULL DEFAULT 0,
-            purge             boolean     NOT NULL DEFAULT false,
-            updated_at        timestamptz NOT NULL DEFAULT now()
-        );
-        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS purge boolean NOT NULL DEFAULT false;
-        """);
+    // The client performs no DDL, so these tests simulate a Wallaby host having run against the
+    // database with the real bootstrapper (single source of truth for the wallaby DDL).
+    private Task EnsureBackfillTableAsync() => WallabyStateSchema.EnsureAsync(pg.DataSource);
 
     [Test]
     public async Task Request_marks_the_table_requested_and_preserves_its_transform_version()

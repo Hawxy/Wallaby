@@ -1,3 +1,4 @@
+using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Providers;
@@ -7,12 +8,12 @@ namespace Wallaby.Internal.Pipeline;
 /// <summary>
 /// Routes change events using per-entity <see cref="EntityMapping"/>s. An entity type may carry several
 /// mappings (at most one per sink); each runs its own transform over the transaction's insert/update/read
-/// changes — <em>sub-grouped by scope key</em> (e.g. tenant) so each invocation gets a same-scope enrichment
-/// session and only that scope's changes — producing a document per source key; a missing or null document
+/// changes, <em>sub-grouped by scope key</em> (e.g. tenant) so each invocation gets a same-scope enrichment
+/// session and only that scope's changes, producing a document per source key; a missing or null document
 /// becomes a deletion. Deletes are routed directly by key (no transform), but still resolve their scope key
 /// so a scoped destination is honored. Sessions come from each mapping's <see cref="EntityMapping.Sessions"/>:
-/// one lease per distinct (session provider, scope key) per batch — a type's mappings share a provider and so
-/// share a session, while mappings on different providers lease independently — all disposed at the end.
+/// one lease per distinct (session provider, scope key) per batch: a type's mappings share a provider and so
+/// share a session, while mappings on different providers lease independently; all are disposed at the end.
 /// </summary>
 internal sealed class MappingChangeRouter : IChangeRouter
 {
@@ -32,7 +33,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
         IReadOnlyList<ChangeEvent> changes, CancellationToken ct)
     {
         var routed = new List<RoutedDocument>();
-        var sessions = new Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>();
+        Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>? sessions = null;
         try
         {
             foreach (var (type, group) in GroupByTypePreservingOrder(changes))
@@ -44,7 +45,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
 
                 // Collapse to the last change per key in commit order. A key inserted/updated and then
                 // deleted (or deleted and then re-inserted) within the same batch must resolve to its
-                // FINAL action — exactly one routed record per mapping, never both an upsert and a
+                // FINAL action: exactly one routed record per mapping, never both an upsert and a
                 // deletion. (Groups preserve source order, and the batch is in commit order.)
                 var lastByKey = new Dictionary<DocumentKey, ChangeEvent>();
                 foreach (var change in group)
@@ -52,8 +53,8 @@ internal sealed class MappingChangeRouter : IChangeRouter
                     lastByKey[change.Key] = change;
                 }
 
-                // Split the collapsed changes once — the final action is mapping-independent. A key whose
-                // final action is a delete is routed directly by key without a transform (the row is gone —
+                // Split the collapsed changes once; the final action is mapping-independent. A key whose
+                // final action is a delete is routed directly by key without a transform (the row is gone;
                 // a scoped destination still resolves the key from the old row); the rest go through each
                 // mapping's transform.
                 List<ChangeEvent>? deletes = null;
@@ -89,7 +90,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                     foreach (var (scopeKey, subset) in GroupByScopePreservingOrder(mapping, upserts))
                     {
                         var destination = mapping.ResolveDestination(scopeKey);
-                        var session = GetOrCreateSession(sessions, mapping.Sessions, scopeKey);
+                        var session = GetOrCreateSession(sessions ??= [], mapping.Sessions, scopeKey);
                         var entityName = mapping.EntityClrType.Name;
 
                         using var activity = _instr.StartTransform();
@@ -97,12 +98,24 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         {
                             activity.SetTag(WallabyInstrumentation.EntityTag, entityName);
                             activity.SetTag(WallabyInstrumentation.SinkTag, mapping.SinkName);
+                            activity.SetTag(WallabyInstrumentation.DestinationTag, destination);
                             activity.SetTag("wallaby.batch.size", subset.Count);
                         }
 
                         var transformStart = WallabyInstrumentation.StartTimer();
-                        // A transform exception always propagates and halts the pipeline
-                        var documents = await mapping.Transform.InvokeAsync(session, subset, ct);
+                        IReadOnlyDictionary<DocumentKey, WallabyDocument?> documents;
+                        try
+                        {
+                            // A transform exception always propagates and halts the pipeline.
+                            documents = await mapping.Transform.InvokeAsync(session, subset, ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            throw new InvalidOperationException(
+                                $"Transform for {entityName} (sink '{mapping.SinkName}', destination '{destination}') " +
+                                $"failed on a batch of {subset.Count} change(s) from {subset[0].Metadata.QualifiedTableName} " +
+                                $"starting at commit {new NpgsqlLogSequenceNumber(subset[0].Metadata.CommitLsn)}: {ex.Message}", ex);
+                        }
                         _instr.RecordTransformDuration(entityName, mapping.SinkName, transformStart);
 
                         foreach (var change in subset)
@@ -123,9 +136,12 @@ internal sealed class MappingChangeRouter : IChangeRouter
         }
         finally
         {
-            foreach (var lease in sessions.Values)
+            if (sessions is not null)
             {
-                await lease.DisposeAsync();
+                foreach (var lease in sessions.Values)
+                {
+                    await lease.DisposeAsync();
+                }
             }
         }
 
@@ -160,6 +176,12 @@ internal sealed class MappingChangeRouter : IChangeRouter
     private static List<(object? ScopeKey, List<ChangeEvent> Changes)> GroupByScopePreservingOrder(
         EntityMapping mapping, List<ChangeEvent> changes)
     {
+        // An unscoped mapping is one group with a null key: no dictionary, no copies.
+        if (mapping.ScopeKeySelector is null)
+        {
+            return [(null, changes)];
+        }
+
         var byKey = new Dictionary<object, List<ChangeEvent>>();
         var groups = new List<(object?, List<ChangeEvent>)>();
 

@@ -24,6 +24,14 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
     // flushed) this gives the exact row count a read-back must return.
     private readonly Dictionary<uint, long> _truncatedFlushed = [];
 
+    // One pooled connection reused across all operations for the spill's lifetime (calls come from the
+    // single-threaded replication loop). A broken connection propagates and halts the leader session,
+    // which disposes this spill and builds a fresh one.
+    private NpgsqlConnection? _connection;
+
+    private async ValueTask<NpgsqlConnection> GetConnectionAsync(CancellationToken ct)
+        => _connection ??= await dataSource.OpenConnectionAsync(ct);
+
     public async ValueTask AppendAsync(uint xid, uint subxid, RawChange change, CancellationToken ct)
     {
         if (!_pending.TryGetValue(xid, out var batch))
@@ -48,10 +56,10 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         var expected = _nextSeq.GetValueOrDefault(xid) - _truncatedFlushed.GetValueOrDefault(xid);
         var count = 0L;
 
-        await using (var connection = await dataSource.OpenConnectionAsync(ct))
+        var connection = await GetConnectionAsync(ct);
+        await using (var cmd = new NpgsqlCommand(
+            "SELECT payload FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x ORDER BY seq", connection))
         {
-            await using var cmd = new NpgsqlCommand(
-                "SELECT payload FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x ORDER BY seq", connection);
             cmd.Parameters.AddWithValue("s", slotName);
             cmd.Parameters.AddWithValue("x", (long)xid);
 
@@ -66,7 +74,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         if (count != expected)
         {
             throw new InvalidOperationException(
-                $"Spill read-back for xid {xid} returned {count} of {expected} buffered changes — the stream " +
+                $"Spill read-back for xid {xid} returned {count} of {expected} buffered changes; the stream " +
                 "buffer was modified externally (e.g. another node cleared it during a leadership handover). " +
                 "Failing the transaction so nothing partial is delivered; the slot re-streams it.");
         }
@@ -78,7 +86,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         _nextSeq.Remove(xid);
         _truncatedFlushed.Remove(xid);
         await PgExec.ExecuteAsync(
-            dataSource, "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x", ct,
+            await GetConnectionAsync(ct), "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x", ct,
             ("s", slotName), ("x", (long)xid));
     }
 
@@ -87,7 +95,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         // Truncate flushed rows from the subtransaction's first change onward; min(seq) is NULL (deleting
         // nothing) when the subxid never flushed.
         var deleted = await PgExec.ExecuteAsync(
-            dataSource,
+            await GetConnectionAsync(ct),
             "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x AND seq >= " +
             "(SELECT min(seq) FROM wallaby.stream_buffer WHERE slot_name = @s AND xid = @x AND subxid = @sub)",
             ct, ("s", slotName), ("x", (long)xid), ("sub", (long)subxid));
@@ -105,7 +113,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         if (deleted > 0)
         {
             // A flush drains the whole batch, so everything still pending was appended after the flushed
-            // first change — it all goes, even entries carrying only descendant subxids.
+            // first change; it all goes, even entries carrying only descendant subxids.
             batch.Clear();
             return;
         }
@@ -123,15 +131,19 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         _nextSeq.Clear();
         _truncatedFlushed.Clear();
         await PgExec.ExecuteAsync(
-            dataSource, "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s", ct, ("s", slotName));
+            await GetConnectionAsync(ct), "DELETE FROM wallaby.stream_buffer WHERE slot_name = @s", ct, ("s", slotName));
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _pending.Clear();
         _nextSeq.Clear();
         _truncatedFlushed.Clear();
-        return ValueTask.CompletedTask;
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync();
+            _connection = null;
+        }
     }
 
     private async Task FlushAsync(uint xid, CancellationToken ct)
@@ -142,7 +154,7 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
         }
 
         var seq = _nextSeq.GetValueOrDefault(xid);
-        await using var connection = await dataSource.OpenConnectionAsync(ct);
+        var connection = await GetConnectionAsync(ct);
         await using (var importer = await connection.BeginBinaryImportAsync(
             "COPY wallaby.stream_buffer (slot_name, xid, subxid, seq, payload) FROM STDIN (FORMAT BINARY)", ct))
         {

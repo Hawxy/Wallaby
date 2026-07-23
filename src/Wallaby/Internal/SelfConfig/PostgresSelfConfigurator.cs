@@ -20,7 +20,7 @@ internal sealed class PostgresSelfConfigurator(
     WallabyInstrumentation? instrumentation = null) : ISelfConfigurator
 {
     private readonly ServerValidator _validator = new(logger);
-    private readonly StateSchemaBootstrapper _stateSchema = new();
+    private readonly StateSchemaBootstrapper _stateSchema = new(logger);
     private readonly PublicationReconciler _publications = new(logger);
     private readonly SlotProvisioner _slots = new(logger);
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
@@ -132,7 +132,7 @@ internal sealed class PostgresSelfConfigurator(
 
     /// <summary>
     /// A publication that does not publish via the partition root streams changes under leaf partition
-    /// names, which no captured table matches — silent data loss, so this always throws. Only reachable
+    /// names, which no captured table matches: silent data loss, so this always throws. Only reachable
     /// for pre-existing unmanaged publications; managed ones are always fixed to publish via root.
     /// </summary>
     private async Task ValidatePartitionedCapturesAsync(

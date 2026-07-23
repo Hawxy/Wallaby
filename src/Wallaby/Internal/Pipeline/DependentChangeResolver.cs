@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
@@ -17,14 +16,10 @@ internal sealed record FanoutResult(IReadOnlyList<RawChange> FirstPage, ScopedFa
 /// distinct lookup values seen across the transaction into a single keyset-paginated query (no N+1), and
 /// reads only the <em>first page</em> inline. When a binding's affected set exceeds one page, the
 /// remainder is handed back as a <see cref="ScopedFanoutSpec"/> so the pipeline can offload it to a
-/// scoped backfill — keeping the trigger transaction's synchronous work (and its acknowledgement) bounded.
+/// scoped backfill, keeping the trigger transaction's synchronous work (and its acknowledgement) bounded.
 /// </summary>
 internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, WallabyModel model, WallabyInstrumentation? instrumentation = null)
 {
-    // Separator used to build an in-memory dedup key from a lookup tuple. The unit-separator control
-    // char is extremely unlikely to collide with a primary-key value's textual form.
-    private const char TupleSeparator = (char)31;
-
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     /// <summary>Whether a change to the given table can trigger any dependent fan-out.</summary>
@@ -75,7 +70,7 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
                     perBinding[binding] = acc;
                 }
 
-                if (acc.Seen.Add(TupleKey(values)))
+                if (acc.Seen.Add(values))
                 {
                     acc.Tuples.Add(values);
                 }
@@ -124,7 +119,7 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
         }
 
         activity?.SetTag("wallaby.dependent.count", totalSynthetic);
-        // How many bindings' tails were handed to the fan-out queue — the scoped backfills that will
+        // How many bindings' tails were handed to the fan-out queue: the scoped backfills that will
         // appear later as their own traces.
         activity?.SetTag("wallaby.fanout.offloaded", offloaded);
         return results;
@@ -177,24 +172,46 @@ internal sealed class DependentChangeResolver(NpgsqlDataSource dataSource, Walla
         return true;
     }
 
-    private static string TupleKey(object?[] values)
-    {
-        var sb = new StringBuilder();
-        for (var i = 0; i < values.Length; i++)
-        {
-            if (i > 0)
-            {
-                sb.Append(TupleSeparator);
-            }
-            sb.Append(values[i]?.ToString() ?? string.Empty);
-        }
-        return sb.ToString();
-    }
-
     private sealed class BindingAccumulator
     {
-        public HashSet<string> Seen { get; } = [];
+        public HashSet<object?[]> Seen { get; } = new(LookupTupleComparer.Instance);
         public List<object?[]> Tuples { get; } = [];
         public RawChange Representative { get; set; } = null!;
+    }
+
+    // Structural equality over lookup tuples, so deduping a tuple allocates nothing.
+    private sealed class LookupTupleComparer : IEqualityComparer<object?[]>
+    {
+        public static readonly LookupTupleComparer Instance = new();
+
+        public bool Equals(object?[]? x, object?[]? y)
+        {
+            if (ReferenceEquals(x, y))
+            {
+                return true;
+            }
+            if (x is null || y is null || x.Length != y.Length)
+            {
+                return false;
+            }
+            for (var i = 0; i < x.Length; i++)
+            {
+                if (!object.Equals(x[i], y[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public int GetHashCode(object?[] values)
+        {
+            var hash = new HashCode();
+            for (var i = 0; i < values.Length; i++)
+            {
+                hash.Add(values[i]);
+            }
+            return hash.ToHashCode();
+        }
     }
 }

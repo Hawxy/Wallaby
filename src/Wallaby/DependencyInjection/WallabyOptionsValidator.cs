@@ -22,7 +22,7 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
             failures.Add(
-                "A connection string must be supplied — via UseConnectionString(...), " +
+                "A connection string must be supplied: via UseConnectionString(...), " +
                 "Configure<WallabyOptions>, or configuration binding.");
         }
         if (string.IsNullOrWhiteSpace(options.SlotName) || string.IsNullOrWhiteSpace(options.PublicationName))
@@ -41,6 +41,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         if (options.Advanced.MaxBufferedChangesPerTransaction <= 0)
         {
             failures.Add("Advanced.MaxBufferedChangesPerTransaction must be greater than zero.");
+        }
+        if (options.Advanced.MaxTransactionsPerBatch is <= 0 or > 10_000)
+        {
+            failures.Add("Advanced.MaxTransactionsPerBatch must be between 1 and 10000.");
         }
         if (options.Advanced.KeepaliveInterval <= TimeSpan.Zero)
         {

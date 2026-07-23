@@ -18,13 +18,16 @@ internal sealed class SinkRetryableException(string sinkName, string error, Exce
 
 /// <summary>Raised when a sink permanently fails (or retries are exhausted); halts the pipeline.</summary>
 internal sealed class SinkDeliveryException(string sinkName, string error, Exception? inner)
-    : Exception($"Sink '{sinkName}' failed to deliver: {error}", inner);
+    : Exception($"Sink '{sinkName}' failed to deliver: {error}", inner)
+{
+    public string SinkName { get; } = sinkName;
+}
 
 /// <summary>
 /// Groups routed documents by sink (preserving commit order) and delivers each group as a
 /// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. Sinks are independent,
 /// so their batches are delivered concurrently; per-sink ordering is preserved (one batch per sink, records
-/// in commit order). A permanent failure (or exhausted retries) on any sink halts the pipeline — after
+/// in commit order). A permanent failure (or exhausted retries) on any sink halts the pipeline, after
 /// every in-flight delivery has settled, so no batch is abandoned mid-write.
 /// </summary>
 internal sealed class SinkDispatcher
@@ -90,7 +93,7 @@ internal sealed class SinkDispatcher
     private async Task DeliverGroupAsync(string sinkName, List<SinkRecord> records, CancellationToken ct)
     {
         // Defensive: mappings are attached to a registered sink by construction, so a routed name is
-        // always registered — unless a custom router produced a stray name.
+        // always registered, unless a custom router produced a stray name.
         if (!_sinks.TryGetValue(sinkName, out var sink))
         {
             throw new SinkDeliveryException(sinkName, "no sink is registered with this name", inner: null);
@@ -101,8 +104,7 @@ internal sealed class SinkDispatcher
         if (activity is not null)
         {
             activity.SetTag(WallabyInstrumentation.SinkTag, sinkName);
-            //TODO fix this - mislanding delivery destination due to record aggregation
-            activity.SetTag(WallabyInstrumentation.DestinationTag, records.Count > 0 ? records[0].Destination : null);
+            activity.SetTag(WallabyInstrumentation.DestinationTag, DescribeDestinations(records));
             activity.SetTag("wallaby.batch.size", records.Count);
         }
 
@@ -134,7 +136,10 @@ internal sealed class SinkDispatcher
                         }));
                         throw new SinkRetryableException(name, result.Error ?? "(unspecified)", result.Exception);
                     default:
-                        throw new SinkDeliveryException(name, result.Error ?? "(unspecified)", result.Exception);
+                        throw new SinkDeliveryException(
+                            name,
+                            $"{result.Error ?? "(unspecified)"} (records from {DescribeTables(state.SinkBatch)})",
+                            result.Exception);
                 }
             }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity, Attempts: new StrongBox<int>()), ct);
         }
@@ -144,6 +149,42 @@ internal sealed class SinkDispatcher
             activity?.AddException(ex);
             throw;
         }
+    }
+
+    // Distinct destinations across the batch, in first-seen order; a per-sink batch can mix
+    // destinations when a scoped mapping resolves them per scope key.
+    private static string? DescribeDestinations(List<SinkRecord> records)
+    {
+        List<string>? destinations = null;
+        foreach (var record in records)
+        {
+            if (record.Destination is { } destination)
+            {
+                destinations ??= [];
+                if (!destinations.Contains(destination))
+                {
+                    destinations.Add(destination);
+                }
+            }
+        }
+
+        return destinations is null ? null : string.Join(", ", destinations);
+    }
+
+    // Distinct source tables of a failed batch, for the halt diagnostics.
+    private static string DescribeTables(SinkBatch batch)
+    {
+        var tables = new List<string>();
+        foreach (var record in batch.Records)
+        {
+            var table = record.Metadata.QualifiedTableName;
+            if (!tables.Contains(table))
+            {
+                tables.Add(table);
+            }
+        }
+
+        return tables.Count == 0 ? "(none)" : string.Join(", ", tables);
     }
 
     private static List<(string SinkName, List<SinkRecord> Records)> GroupBySinkPreservingOrder(

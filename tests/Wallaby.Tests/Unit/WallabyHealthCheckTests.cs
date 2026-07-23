@@ -68,8 +68,70 @@ public class WallabyHealthCheckTests
 
         var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
-        // A stuck-retrying fan-out is degraded, not dead — a restart wouldn't fix it, so the node stays Healthy.
+        // A stuck-retrying fan-out is degraded, not dead; a restart wouldn't fix it, so the node stays Healthy.
         result.Status.ShouldBe(HealthStatus.Healthy);
         result.Data["consecutiveFanoutFailures"].ShouldBe(3);
+    }
+
+    [Test]
+    public async Task Crash_looping_leader_is_unhealthy_with_last_error_in_description()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with
+        {
+            ConsecutiveLeaderFailures = 3,
+            LastError = "SinkDeliveryException: Sink 'meili' failed to deliver",
+        };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        result.Status.ShouldBe(HealthStatus.Unhealthy);
+        result.Description.ShouldNotBeNull();
+        result.Description.ShouldContain("crash-looping (3 consecutive failures)");
+        result.Description.ShouldContain("Sink 'meili' failed to deliver");
+    }
+
+    [Test]
+    public async Task Leader_failures_below_the_threshold_stay_healthy()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveLeaderFailures = 2 };
+
+        (await CheckAsync(snapshot)).ShouldBe(HealthStatus.Healthy);
+    }
+
+    [Test]
+    public async Task Crash_loop_threshold_is_configurable()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveLeaderFailures = 5 };
+        var options = new WallabyHealthCheckOptions { CrashLoopFailureThreshold = 6 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot), options);
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        result.Status.ShouldBe(HealthStatus.Healthy);
+    }
+
+    [Test]
+    public async Task Zero_threshold_disables_crash_loop_grading()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveLeaderFailures = 100 };
+        var options = new WallabyHealthCheckOptions { CrashLoopFailureThreshold = 0 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot), options);
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        result.Status.ShouldBe(HealthStatus.Healthy);
+    }
+
+    [Test]
+    public async Task Termination_takes_precedence_over_crash_loop()
+    {
+        var snapshot = Snap(WallabyNodeRole.Stopped, faulted: true) with { ConsecutiveLeaderFailures = 5 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        result.Status.ShouldBe(HealthStatus.Unhealthy);
+        result.Description.ShouldBe("Wallaby background service terminated.");
     }
 }

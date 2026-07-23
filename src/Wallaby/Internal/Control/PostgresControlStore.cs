@@ -27,7 +27,7 @@ internal sealed class PostgresControlStore(WallabyDataSource dataSource, ILogger
     {
         await using (var connection = await dataSource.Source.OpenConnectionAsync(ct))
         {
-            await new StateSchemaBootstrapper().EnsureAsync(connection, ct);
+            await new StateSchemaBootstrapper(logger).EnsureAsync(connection, ct);
         }
         return await ControlOperations.RequestSuspendAsync(
             dataSource.Source, ControlContract.OriginConfiguration, reason, Environment.MachineName, ct);
@@ -35,7 +35,7 @@ internal sealed class PostgresControlStore(WallabyDataSource dataSource, ILogger
 
     /// <summary>
     /// Auto-resume for a node deployed without the <c>Suspend()</c> flag: ends a configuration-origin
-    /// suspension only — a client-requested one stays in force until an explicit remote resume.
+    /// suspension only; a client-requested one stays in force until an explicit remote resume.
     /// </summary>
     public Task<bool> ResumeConfigurationSuspensionAsync(CancellationToken ct)
         => ControlOperations.ResumeAsync(dataSource.Source, configurationOriginOnly: true, ct);
