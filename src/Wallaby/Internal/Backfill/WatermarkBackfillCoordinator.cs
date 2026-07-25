@@ -47,7 +47,10 @@ internal sealed class WatermarkBackfillCoordinator(
     /// <summary>Snapshot a whole table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
     public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
     {
-        var pager = new KeysetPager(table);
+        // One token per run, deliberately not persisted: a crash-resume re-delivers under a fresh token,
+        // which is harmless (upsert-only) and avoids a state column.
+        var runId = Guid.NewGuid().ToString("N");
+        var pager = new KeysetPager(table, backfillRunId: runId);
         var pkColumns = table.PrimaryKey.Select(c => c.ColumnName).ToArray();
         var pkTypes = table.PrimaryKey.Select(c => c.ClrType).ToArray();
         var existing = await store.GetAsync(table.QualifiedName, ct);
@@ -108,12 +111,14 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
+        // Hoisted above the batch loop so one scoped run shares one token across all its filter batches.
+        var runId = Guid.NewGuid().ToString("N");
         var rowsCopied = startRows;
         for (var b = startBatch; b < filters.Count; b++)
         {
             var batch = b;
             var isLastBatch = batch == filters.Count - 1;
-            var pager = new KeysetPager(spec.PrimaryTable, filters[batch]);
+            var pager = new KeysetPager(spec.PrimaryTable, filters[batch], runId);
 
             rowsCopied = await RunChunkLoopAsync(
                 pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,

@@ -98,8 +98,9 @@ Each request is a JSON envelope; `records` preserves commit order:
 
 - `operation` is `upsert` (apply `document` under `id`) or `delete` (remove `id`); a delete carries no `document`.
 - `idempotencyKey` is an opaque string unique to each delivered change - store it to
-  [reject redelivered duplicates](#delivery-semantics). Backfill rows share their key across backfill runs
-  (backfill is upsert-only, so replays are harmless).
+  [reject redelivered duplicates](#delivery-semantics). A backfill row's key embeds a per-run token
+  (echoed as `metadata.backfillRunId`): stable within one run, **new for every run**, so a re-backfill
+  (e.g. a `WithBackfillVersion` bump) is never suppressed by stored keys.
 - `destination` is the mapping's `ToDestination(...)` value (or a [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) result); `null` when the mapping declares none.
 - `metadata.action` is what the change meant in the source model: `insert`, `update`, `delete`, or `read`
   (a backfill row). Providers may substitute meaning - e.g. Marten surfaces a soft-delete `UPDATE` as
@@ -114,7 +115,11 @@ Each request is a JSON envelope; `records` preserves commit order:
 Delivery is **at-least-once**: a crash can redeliver a batch your receiver already processed, so apply
 records idempotently - upsert by `id`, delete by `id`, and treat a delete for an unknown id as success.
 If your receiver has side effects beyond state (e.g. sends an email per record), store each record's
-`idempotencyKey` and skip keys you have seen; `(commitLsn, commitIdx)` orders live changes.
+`idempotencyKey` and skip keys you have seen; `(commitLsn, commitIdx)` orders live changes. Two caveats
+for backfill rows: a deliberate re-backfill arrives under **new** keys (its side effects run again by
+design), and a backfill interrupted by a crash resumes under a fresh run token, so rows it already
+delivered can re-arrive with keys you have not seen. Gate side effects on document **state**, not on the
+key alone, when duplicate effects are costly.
 
 The response status classifies the outcome:
 

@@ -42,7 +42,8 @@ internal sealed class ChangeEventFactory(IRowMaterializer materializer)
             change.CommitTimestamp,
             change.CommitLsn,
             change.CommitIdx,
-            IsBackfill: change.Action == ChangeAction.Read);
+            IsBackfill: change.Action == ChangeAction.Read,
+            change.BackfillRunId);
 
         return new ChangeEvent(
             row.Action,

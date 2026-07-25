@@ -25,7 +25,8 @@ public class EnvelopeSnapshotTests
             }, metadata: Meta(commitIdx: 0, timestamp: timestamp, lsn: 27271208)),
             Delete("43", Meta(commitIdx: 1, timestamp: timestamp, lsn: 27271208, action: ChangeAction.Delete)),
             Upsert("7", new Dictionary<string, object?> { ["name"] = "Backfilled" },
-                metadata: Meta(backfill: true, lsn: 0, action: ChangeAction.Read))), CancellationToken.None);
+                metadata: Meta(backfill: true, lsn: 0, action: ChangeAction.Read,
+                    backfillRunId: "3f2c8a41d96e4f0f9c2b7e5a1d6b8c90"))), CancellationToken.None);
 
         var body = Encoding.UTF8.GetString(handler.Requests.ShouldHaveSingleItem().Body);
 

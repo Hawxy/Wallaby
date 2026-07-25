@@ -18,21 +18,25 @@ namespace Wallaby.Sinks;
 public static class SinkEnvelopeJson
 {
     /// <summary>
-    /// An opaque per-record deduplication key. Unique per delivered change; separate backfill runs of the
-    /// same row intentionally share a key (backfill is upsert-only, so replays are harmless).
+    /// An opaque per-record deduplication key. Unique per delivered change. Backfill keys embed a per-run
+    /// token, so separate runs over the same row (e.g. a version-triggered re-backfill) produce distinct
+    /// keys; within one run the key is stable across its chunks. A run interrupted by a crash resumes
+    /// under a fresh token, so its rows can re-deliver with new keys (backfill is upsert-only, so replays
+    /// are harmless to idempotent consumers).
     /// </summary>
     public static string IdempotencyKey(SinkRecord record)
     {
         var metadata = record.Metadata;
         var scope = record.Destination ?? metadata.QualifiedTableName;
         return metadata.IsBackfill
-            ? $"backfill:{scope}:{record.DocumentId}"
+            ? $"backfill:{metadata.BackfillRunId ?? "0"}:{scope}:{record.DocumentId}"
             : $"{metadata.CommitLsn}:{metadata.CommitIdx}:{scope}:{record.DocumentId}";
     }
 
     /// <summary>
     /// Writes a <c>"metadata"</c> object property carrying the record's source provenance:
-    /// schema, table, action, commit position, commit timestamp when known, and the backfill flag.
+    /// schema, table, action, commit position, commit timestamp when known, the backfill flag, and the
+    /// backfill run id when present.
     /// </summary>
     public static void WriteMetadata(Utf8JsonWriter writer, ChangeMetadata metadata)
     {
@@ -56,6 +60,10 @@ public static class SinkEnvelopeJson
             writer.WriteString("commitTimestamp", timestamp);
         }
         writer.WriteBoolean("isBackfill", metadata.IsBackfill);
+        if (metadata.BackfillRunId is { } runId)
+        {
+            writer.WriteString("backfillRunId", runId);
+        }
         writer.WriteEndObject();
     }
 
