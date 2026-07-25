@@ -121,12 +121,49 @@ public static class ValueCoercion
             };
         }
 
+        // Under PerInstance array nullability a value-type array decodes as T[] when no element is
+        // NULL, so a Nullable<T>[] target may receive a T[] value; widen it per element.
+        if (target.IsArray && rawValue is Array && WidenArray(rawValue, target) is { } widened)
+        {
+            return widened;
+        }
+
         if (rawValue is IConvertible)
         {
             return Convert.ChangeType(rawValue, target, CultureInfo.InvariantCulture);
         }
 
         return rawValue;
+    }
+
+    // Explicit per-type arms (not Array.CreateInstance) so the widening stays NativeAOT-compatible.
+    private static object? WidenArray(object raw, Type target) => raw switch
+    {
+        bool[] a when target == typeof(bool?[]) => Widen(a),
+        short[] a when target == typeof(short?[]) => Widen(a),
+        int[] a when target == typeof(int?[]) => Widen(a),
+        long[] a when target == typeof(long?[]) => Widen(a),
+        uint[] a when target == typeof(uint?[]) => Widen(a),
+        decimal[] a when target == typeof(decimal?[]) => Widen(a),
+        double[] a when target == typeof(double?[]) => Widen(a),
+        float[] a when target == typeof(float?[]) => Widen(a),
+        Guid[] a when target == typeof(Guid?[]) => Widen(a),
+        DateTime[] a when target == typeof(DateTime?[]) => Widen(a),
+        DateTimeOffset[] a when target == typeof(DateTimeOffset?[]) => Widen(a),
+        DateOnly[] a when target == typeof(DateOnly?[]) => Widen(a),
+        TimeOnly[] a when target == typeof(TimeOnly?[]) => Widen(a),
+        TimeSpan[] a when target == typeof(TimeSpan?[]) => Widen(a),
+        _ => null,
+    };
+
+    private static T?[] Widen<T>(T[] source) where T : struct
+    {
+        var result = new T?[source.Length];
+        for (var i = 0; i < source.Length; i++)
+        {
+            result[i] = source[i];
+        }
+        return result;
     }
 
     private static Dictionary<string, object> BuildEnumMap(Type enumType)

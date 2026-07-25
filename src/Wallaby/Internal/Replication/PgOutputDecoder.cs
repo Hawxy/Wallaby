@@ -1,4 +1,6 @@
 using Npgsql.Replication.PgOutput;
+using Npgsql.Replication.PgOutput.Messages;
+using NpgsqlTypes;
 using Wallaby.Model;
 
 namespace Wallaby.Internal.Replication;
@@ -13,23 +15,37 @@ internal static class PgOutputDecoder
     /// <summary>
     /// Read all columns of a replication tuple, copying values out. <paramref name="readModes"/> is
     /// aligned to the relation's column order; null means every column reads with
-    /// <see cref="ColumnReadMode.Default"/>.
+    /// <see cref="ColumnReadMode.Default"/>. <paramref name="relation"/> and <paramref name="walStart"/>
+    /// identify the source table and change for decode-failure context.
     /// </summary>
     public static async ValueTask<RawColumn[]> ReadTupleAsync(
-        ReplicationTuple tuple, ColumnReadMode[]? readModes, CancellationToken ct)
+        ReplicationTuple tuple, ColumnReadMode[]? readModes, RelationMessage relation,
+        NpgsqlLogSequenceNumber walStart, CancellationToken ct)
     {
         var columns = new RawColumn[tuple.NumColumns];
         var i = 0;
         await foreach (var value in tuple.WithCancellation(ct))
         {
             var columnName = value.GetFieldName();
-            columns[i] = value.IsUnchangedToastedValue
-                ? new RawColumn { ColumnName = columnName, Value = null, IsUnchangedToast = true }
-                : new RawColumn
+            if (value.IsUnchangedToastedValue)
+            {
+                columns[i] = new RawColumn { ColumnName = columnName, Value = null, IsUnchangedToast = true };
+            }
+            else
+            {
+                object? decoded;
+                try
                 {
-                    ColumnName = columnName,
-                    Value = await ColumnValueReader.ReadAsync(value, readModes?[i] ?? ColumnReadMode.Default, ct),
-                };
+                    decoded = await ColumnValueReader.ReadAsync(value, readModes?[i] ?? ColumnReadMode.Default, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to decode column '{columnName}' of {relation.Namespace}.{relation.RelationName} " +
+                        $"at WAL position {walStart}: {ex.Message}", ex);
+                }
+                columns[i] = new RawColumn { ColumnName = columnName, Value = decoded };
+            }
             i++;
         }
         return columns;

@@ -25,6 +25,11 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
 | `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
 
+Wallaby adjusts two Npgsql settings on the connections it builds from `ConnectionString`, each only
+when your connection string doesn't set it explicitly: `Max Auto Prepare=64` (auto-prepares the hot
+bookkeeping statements) and `Array Nullability Mode=PerInstance` (an array column holding a `NULL`
+element decodes as `Nullable<T>[]` instead of failing the stream).
+
 ### Advanced Options
 
 Internal tuning knobs live under `o.Advanced`. These defaults should work for 99% of deployments. 

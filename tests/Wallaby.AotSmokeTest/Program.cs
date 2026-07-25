@@ -2,9 +2,13 @@
 // runtime — spilled-change codecs, keyset cursors, Marten capture-plan derivation, and document
 // materialization through a source-generated System.Text.Json serializer. Exits non-zero on the first
 // failed check, so a CI publish + run catches both ILC-time and runtime AOT regressions.
+using System.Collections;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Marten;
+using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.AotSmokeTest;
 using Wallaby.Internal.Backfill;
@@ -16,9 +20,71 @@ using Weasel.Core;
 
 var failures = 0;
 
-Check("spill codec round-trips scalars and arrays", () =>
+Check("spill codec round-trips every tagged type", () =>
 {
     var guid = Guid.NewGuid();
+    var utc = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+    var dto = new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.FromHours(5));
+
+    // One column per spill tag: scalars, "a:" arrays, and "an:" nullable-element arrays. A value
+    // slipping off its tag onto the reflection-JSON fallback fails this check under AOT.
+    (string Name, object? Value)[] fixture =
+    [
+        ("null", null),
+        ("b", true),
+        ("u8", (byte)200),
+        ("i16", (short)7),
+        ("i32", 42),
+        ("i64", 9_999_999_999L),
+        ("u32", 4_000_000_000u),
+        ("u64", 18_000_000_000_000_000_000ul),
+        ("dec", 12.3400m),
+        ("f64", 3.141592653589793d),
+        ("f32", 1.5f),
+        ("s", "kanga"),
+        ("c", 'x'),
+        ("g", guid),
+        ("dt", utc),
+        ("dto", dto),
+        ("d", new DateOnly(2024, 1, 2)),
+        ("t", new TimeOnly(3, 4, 5)),
+        ("ts", TimeSpan.FromMinutes(90)),
+        ("ip", IPAddress.Parse("2001:db8::1")),
+        ("mac", PhysicalAddress.Parse("00-11-22-33-44-55")),
+        ("bits", new BitArray(new[] { true, false, true })),
+        ("bytes", new byte[] { 1, 2, 255 }),
+        ("a_s", new[] { "a", null, "c" }),
+        ("a_b", new[] { true, false }),
+        ("a_i16", new short[] { 1, 2 }),
+        ("a_i32", new[] { 1, 2 }),
+        ("a_i64", new[] { 9_999_999_999L }),
+        ("a_u32", new[] { 1u, 4_000_000_000u }),
+        ("a_dec", new[] { 1.50m }),
+        ("a_f64", new[] { 1.25 }),
+        ("a_f32", new[] { 1.5f }),
+        ("a_g", new[] { guid }),
+        ("a_dt", new[] { utc }),
+        ("a_dto", new[] { dto }),
+        ("a_d", new[] { new DateOnly(2024, 1, 2) }),
+        ("a_t", new[] { new TimeOnly(3, 4, 5) }),
+        ("a_ts", new[] { TimeSpan.FromMinutes(1) }),
+        ("a_ip", new[] { IPAddress.Loopback, null }),
+        ("an_b", new bool?[] { true, null }),
+        ("an_i16", new short?[] { 1, null }),
+        ("an_i32", new int?[] { 1, null, 3 }),
+        ("an_i64", new long?[] { null, 9_999_999_999L }),
+        ("an_u32", new uint?[] { 1u, null }),
+        ("an_dec", new decimal?[] { 1.50m, null }),
+        ("an_f64", new double?[] { 1.25, null }),
+        ("an_f32", new float?[] { 1.5f, null }),
+        ("an_g", new Guid?[] { guid, null }),
+        ("an_dt", new DateTime?[] { utc, null }),
+        ("an_dto", new DateTimeOffset?[] { dto, null }),
+        ("an_d", new DateOnly?[] { new DateOnly(2024, 1, 2), null }),
+        ("an_t", new TimeOnly?[] { new TimeOnly(3, 4, 5), null }),
+        ("an_ts", new TimeSpan?[] { TimeSpan.FromMinutes(1), null }),
+    ];
+
     var change = new RawChange
     {
         RelationId = 1,
@@ -27,23 +93,18 @@ Check("spill codec round-trips scalars and arrays", () =>
         Action = ChangeAction.Insert,
         NewValues =
         [
-            new RawColumn { ColumnName = "id", Value = guid },
-            new RawColumn { ColumnName = "count", Value = 42 },
-            new RawColumn { ColumnName = "name", Value = "kanga" },
-            new RawColumn { ColumnName = "tags", Value = new[] { "a", null, "c" } },
-            new RawColumn { ColumnName = "nums", Value = new[] { 1L, 2L } },
+            .. fixture.Select(f => new RawColumn { ColumnName = f.Name, Value = f.Value }),
             new RawColumn { ColumnName = "toasted", IsUnchangedToast = true },
         ],
     };
 
     var r = SpillCodec.Decode(SpillCodec.Encode(change)).NewValues;
 
-    AssertEqual(guid, r[0].Value, "guid");
-    AssertEqual(42, r[1].Value, "int");
-    AssertEqual("kanga", r[2].Value, "string");
-    AssertSequence(new[] { "a", null, "c" }, (string?[])r[3].Value!, "string array");
-    AssertSequence(new long?[] { 1L, 2L }, ((long[])r[4].Value!).Cast<long?>(), "long array");
-    if (!r[5].IsUnchangedToast) throw new InvalidOperationException("toast flag lost");
+    for (var i = 0; i < fixture.Length; i++)
+    {
+        AssertValue(fixture[i].Value, r[i].Value, fixture[i].Name);
+    }
+    if (!r[fixture.Length].IsUnchangedToast) throw new InvalidOperationException("toast flag lost");
 });
 
 Check("spill fallback is guarded by reflection availability", () =>
@@ -54,14 +115,14 @@ Check("spill fallback is guarded by reflection availability", () =>
         Schema = "public",
         TableName = "t",
         Action = ChangeAction.Insert,
-        NewValues = [new RawColumn { ColumnName = "exotic", Value = new int?[] { 1, null } }],
+        NewValues = [new RawColumn { ColumnName = "exotic", Value = new NpgsqlPoint(1.5, -2.5) }],
     };
 
     if (JsonSerializer.IsReflectionEnabledByDefault)
     {
         // JIT/untrimmed host (e.g. dotnet run): the fallback round-trips.
         var r = SpillCodec.Decode(SpillCodec.Encode(change)).NewValues;
-        AssertSequence(new int?[] { 1, null }, (int?[])r[0].Value!, "fallback array");
+        AssertEqual(new NpgsqlPoint(1.5, -2.5), r[0].Value, "fallback point");
         return;
     }
 
@@ -159,6 +220,28 @@ static void AssertSequence<T>(IEnumerable<T> expected, IEnumerable<T> actual, st
     {
         throw new InvalidOperationException($"{what}: sequences differ");
     }
+}
+
+// CLR-type fidelity matters (the materializer coerces from exactly what the decoder produced), so the
+// runtime type must survive alongside the value; arrays and BitArray compare element-wise.
+static void AssertValue(object? expected, object? actual, string what)
+{
+    if (expected is null)
+    {
+        if (actual is not null) throw new InvalidOperationException($"{what}: expected null, got '{actual}'");
+        return;
+    }
+    if (actual?.GetType() != expected.GetType())
+    {
+        throw new InvalidOperationException(
+            $"{what}: expected type {expected.GetType()}, got {actual?.GetType().ToString() ?? "null"}");
+    }
+    if (expected is IEnumerable expectedItems and not string)
+    {
+        AssertSequence(expectedItems.Cast<object?>(), ((IEnumerable)actual!).Cast<object?>(), what);
+        return;
+    }
+    AssertEqual(expected, actual, what);
 }
 
 namespace Wallaby.AotSmokeTest

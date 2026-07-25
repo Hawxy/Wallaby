@@ -169,6 +169,97 @@ public class ReplicationDecoderTests(TestModelPostgresFixture pg)
         }
     }
 
+    [Test]
+    public async Task A_null_array_element_decodes_per_instance_and_round_trips_through_spill()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        var tableName = names.Named("array_probe");
+        await ExecAsync($"CREATE TABLE {tableName} (id int PRIMARY KEY, nums int[])");
+        try
+        {
+            var configurator = new PostgresSelfConfigurator(
+                pg.DataSource,
+                new SelfConfigOptions { SlotName = names.Slot, PublicationName = names.Publication },
+                NullLogger.Instance);
+            await configurator.EnsureConfiguredAsync(new WallabyModel([ProbeTable(tableName)]), CancellationToken.None);
+
+            await ExecAsync($"INSERT INTO {tableName} (id, nums) VALUES (1, ARRAY[1, NULL, 3]), (2, ARRAY[4, 5])");
+
+            var collected = await CollectAsync(names, c => c.TableName == tableName, count: 2);
+
+            // PerInstance decoding: the element type follows the row's contents.
+            var withNull = collected.Single(c => Convert.ToInt32(Value(c.NewValues, "id")) == 1);
+            Value(withNull.NewValues, "nums").ShouldBeOfType<int?[]>().ShouldBe(new int?[] { 1, null, 3 });
+            var withoutNull = collected.Single(c => Convert.ToInt32(Value(c.NewValues, "id")) == 2);
+            Value(withoutNull.NewValues, "nums").ShouldBeOfType<int[]>().ShouldBe([4, 5]);
+
+            // The spill preserves the null element and the CLR array type.
+            var spilled = SpillCodec.Decode(SpillCodec.Encode(withNull));
+            Value(spilled.NewValues, "nums").ShouldBeOfType<int?[]>().ShouldBe(new int?[] { 1, null, 3 });
+        }
+        finally
+        {
+            await ExecAsync($"DROP TABLE IF EXISTS {tableName}");
+        }
+    }
+
+    [Test]
+    public async Task A_decode_failure_names_the_column_and_table()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        var tableName = names.Named("overflow_probe");
+        await ExecAsync($"CREATE TABLE {tableName} (id int PRIMARY KEY, amount numeric)");
+        try
+        {
+            var configurator = new PostgresSelfConfigurator(
+                pg.DataSource,
+                new SelfConfigOptions { SlotName = names.Slot, PublicationName = names.Publication },
+                NullLogger.Instance);
+            await configurator.EnsureConfiguredAsync(new WallabyModel([ProbeTable(tableName)]), CancellationToken.None);
+
+            // numeric holds values no System.Decimal can represent; the read throws at decode time.
+            await ExecAsync($"INSERT INTO {tableName} (id, amount) VALUES (1, '1e40'::numeric)");
+
+            var ex = await Should.ThrowAsync<InvalidOperationException>(
+                () => CollectAsync(names, c => c.TableName == tableName, count: 1));
+
+            ex.Message.ShouldContain("amount");
+            ex.Message.ShouldContain(tableName);
+            ex.Message.ShouldContain("WAL position");
+            ex.InnerException.ShouldNotBeNull();
+        }
+        finally
+        {
+            await ExecAsync($"DROP TABLE IF EXISTS {tableName}");
+        }
+    }
+
+    private static CapturedTable ProbeTable(string tableName) => new()
+    {
+        EntityClrType = typeof(object),
+        Schema = "public",
+        TableName = tableName,
+        Columns = [],
+        PrimaryKey = [],
+    };
+
+    private async Task<List<RawChange>> CollectAsync(ReplicationScope names, Func<RawChange, bool> filter, int count)
+    {
+        var collected = new List<RawChange>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var spill = new PostgresUnloggedTableSpill(pg.DataSource, names.Slot);
+        await using var stream = new LogicalReplicationStream(pg.ConnectionString, names.Slot, names.Publication, spill);
+        await foreach (var txn in stream.ReadAsync(cts.Token))
+        {
+            collected.AddRange(txn.Changes.Where(filter));
+            if (collected.Count >= count)
+            {
+                break;
+            }
+        }
+        return collected;
+    }
+
     private async Task ExecAsync(string sql)
     {
         await using var cmd = pg.DataSource.CreateCommand(sql);

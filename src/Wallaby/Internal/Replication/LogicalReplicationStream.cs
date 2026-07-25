@@ -24,7 +24,7 @@ internal sealed class LogicalReplicationStream(
     string connectionString, string slotName, string publicationName, ITransactionSpill spill,
     int maxBufferedChangesPerTransaction = int.MaxValue, WallabyModel? model = null) : IAsyncDisposable
 {
-    private readonly LogicalReplicationConnection _connection = new(connectionString);
+    private readonly LogicalReplicationConnection _connection = new(WithArrayNullability(connectionString));
     private readonly PgOutputReplicationSlot _slot = new(slotName);
     // Serializes all status-update writes (acks + keepalives) so they never overlap on the connection.
     private readonly SemaphoreSlim _statusLock = new(1, 1);
@@ -115,6 +115,18 @@ internal sealed class LogicalReplicationStream(
     {
         await _connection.DisposeAsync();
         _statusLock.Dispose();
+    }
+
+    // NULL array elements throw at decode under Npgsql's default ArrayNullabilityMode.Never; PerInstance
+    // decodes them as Nullable<T>[] instead. Applied unless the consumer configured the mode explicitly.
+    private static string WithArrayNullability(string connectionString)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        if (!builder.ShouldSerialize("Array Nullability Mode"))
+        {
+            builder.ArrayNullabilityMode = ArrayNullabilityMode.PerInstance;
+        }
+        return builder.ConnectionString;
     }
 
     /// <summary>
