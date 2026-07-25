@@ -122,7 +122,15 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
             await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, resumedCapture)))
             {
                 await WallabyReadiness.WaitForStreamingAsync(node.Services);
-                await resumedCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
+                try
+                {
+                    await resumedCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
+                }
+                catch (TimeoutException ex)
+                {
+                    // TEMP diagnostics: dump the wallaby state tables only after the failure has happened.
+                    throw new TimeoutException(ex.Message + await DumpStateAsync(names), ex);
+                }
             }
         }
         finally
@@ -235,6 +243,46 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         });
         services.ReplaceWallabySink("capture", capture);
         return services;
+    }
+
+    // TEMP diagnostics for the intermittent phase-2 timeout.
+    private async Task<string> DumpStateAsync(WallabyNames names)
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        var sb = new System.Text.StringBuilder("\n--- state dump ---\n");
+        foreach (var (label, sql) in new (string, string)[]
+        {
+            ("checkpoint", "SELECT slot_name, confirmed_lsn::text, updated_at::text FROM wallaby.checkpoint"),
+            ("backfill_state", "SELECT table_qualified, status, coalesce(transform_version,'<null>'), rows_copied::text, updated_at::text FROM wallaby.backfill_state"),
+            ("slot_registry", "SELECT slot_name, coalesce(consistent_point::text,'<null>'), kind FROM wallaby.slot_registry"),
+            ("control", "SELECT state, origin, coalesce(reason,'<null>'), updated_at::text FROM wallaby.control"),
+            ("pg_replication_slots", "SELECT slot_name, active::text, confirmed_flush_lsn::text FROM pg_replication_slots"),
+            ("fanout_queue", "SELECT table_qualified, status, attempts::text FROM wallaby.fanout_queue"),
+        })
+        {
+            sb.Append(label).Append(":\n");
+            try
+            {
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var fields = new string[reader.FieldCount];
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        fields[i] = reader.IsDBNull(i) ? "<null>" : reader.GetValue(i).ToString() ?? "";
+                    }
+                    sb.Append("  ").AppendJoin(" | ", fields).Append('\n');
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.Append("  <query failed: ").Append(ex.Message).Append(">\n");
+            }
+        }
+        sb.Append("this test's slot: ").Append(names.Slot).Append('\n');
+        return sb.ToString();
     }
 
     private async Task<bool> SlotExistsAsync(string slot)

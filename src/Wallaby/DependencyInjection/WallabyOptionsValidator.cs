@@ -54,6 +54,18 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.KeepaliveInterval must be greater than zero.");
         }
+        if (options.Advanced.StandbyRetryInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.StandbyRetryInterval must be greater than zero.");
+        }
+        if (options.Advanced.LeaderRetryInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.LeaderRetryInterval must be greater than zero.");
+        }
+        if (options.Advanced.ControlPollInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.ControlPollInterval must be greater than zero.");
+        }
         if (options.Advanced.FanoutPollInterval <= TimeSpan.Zero)
         {
             failures.Add("Advanced.FanoutPollInterval must be greater than zero.");

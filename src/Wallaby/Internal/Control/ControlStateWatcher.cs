@@ -37,7 +37,11 @@ internal sealed class ControlStateWatcher(PostgresControlStore store, TimeSpan p
             }
             catch (Exception ex)
             {
+                // The LISTEN connection is equally unreachable, so WaitAsync would return at once; pace here.
                 logger.ControlReadFailed(ex);
+                try { await Task.Delay(pollInterval, ct); }
+                catch (OperationCanceledException) { return; }
+                continue;
             }
 
             await subscription.WaitAsync(pollInterval, ct);

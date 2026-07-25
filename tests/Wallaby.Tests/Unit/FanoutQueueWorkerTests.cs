@@ -10,6 +10,10 @@ namespace Wallaby.Tests.Unit;
 
 public class FanoutQueueWorkerTests
 {
+    // Port 1 refuses immediately, so a test that intentionally reaches the coordinator fails fast.
+    private const string UnreachableConnectionString =
+        "Host=127.0.0.1;Port=1;Username=u;Password=p;Database=d;Timeout=2";
+
     private sealed class FakeQueue(params FanoutJobRow[] jobs) : IFanoutQueueStore
     {
         private readonly Queue<FanoutJobRow> _due = new(jobs);
@@ -72,14 +76,15 @@ public class FanoutQueueWorkerTests
     [Test]
     public async Task A_failing_job_is_recorded_and_does_not_starve_the_jobs_behind_it()
     {
-        // Both jobs die deserializing their lookup values. What matters is that the second is still
-        // attempted: an unhandled failure would abort the drain and starve everything behind the first.
+        // Both jobs die when the coordinator opens its unreachable connection. What matters is that the
+        // second is still attempted: an unhandled failure would abort the drain and starve everything
+        // behind the first.
         var queue = new FakeQueue(
-            new FanoutJobRow("public.widgets", "hash1", BackfillStatus.Requested, ["col"], "{ not json", null, 0),
-            new FanoutJobRow("public.widgets", "hash2", BackfillStatus.Requested, ["col"], "also not json", null, 0, Attempts: 4));
+            new FanoutJobRow("public.widgets", "hash1", BackfillStatus.Requested, ["col"], "[[1]]", null, 0),
+            new FanoutJobRow("public.widgets", "hash2", BackfillStatus.Requested, ["col"], "[[2]]", null, 0, Attempts: 4));
 
         var status = new WallabyStatus();
-        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        await using var dataSource = NpgsqlDataSource.Create(UnreachableConnectionString);
         var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
         var worker = new FanoutQueueWorker(
             queue, coordinator, new WallabyModel([WidgetsTable()]), NullLogger.Instance, TimeSpan.FromSeconds(1),
@@ -93,6 +98,25 @@ public class FanoutQueueWorkerTests
         // The counter reflects the worst job's persisted streak (4 prior failures + this one), not a
         // per-pass tally.
         status.Current.ConsecutiveFanoutFailures.ShouldBe(5);
+    }
+
+    [Test]
+    public async Task A_job_with_unreadable_lookup_values_is_dropped_not_retried()
+    {
+        var queue = new FakeQueue(new FanoutJobRow(
+            "public.widgets", "hash1", BackfillStatus.Requested, ["col"], "not json", null, 0));
+
+        // The coordinator is never reached: the values fail to deserialize first.
+        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
+        var worker = new FanoutQueueWorker(
+            queue, coordinator, new WallabyModel([WidgetsTable()]), NullLogger.Instance, TimeSpan.FromSeconds(1));
+
+        var ran = await worker.DrainOnceAsync(CancellationToken.None);
+
+        ran.ShouldBe(0);
+        queue.Completed.ShouldBe(1); // dropped...
+        queue.Failed.ShouldBeEmpty(); // ...not backed off
     }
 
     [Test]

@@ -67,7 +67,20 @@ internal sealed class LeaderSession(
             return LeaderSessionOutcome.SuspendRequested;
         }
 
-        await BootstrapAsync(ct);
+        // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
+        // connection dropped) so a standby that can take over isn't left waiting while we stream on with
+        // a stale lock. Bootstrap runs under the same token: an ex-leader must not keep issuing DDL.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
+
+        try
+        {
+            await BootstrapAsync(linked.Token);
+        }
+        catch (OperationCanceledException) when (leadership.Lost.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // A lock loss during bootstrap is a normal step-down, not a fault.
+            return LeaderSessionOutcome.LeadershipLost;
+        }
 
         // Spill target for pgoutput v2 streamed (large) transactions. Leftovers from a prior crash are
         // cleared by the stream once it exclusively holds the slot.
@@ -83,10 +96,6 @@ internal sealed class LeaderSession(
             components.DependentResolver, components.FanoutQueue, instrumentation, status,
             options.Advanced.MaxTransactionsPerBatch, components.BackfillStore);
 
-        // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
-        // connection dropped) so a standby that can take over isn't left waiting while we stream on with
-        // a stale lock.
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
         var scheduler = new BackfillScheduler(
             components.BackfillTables, components.BackfillStore, components.Coordinator,
             new SinkPurgeRunner(components.Sinks, instrumentation, _logger),

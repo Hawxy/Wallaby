@@ -111,6 +111,16 @@ public static class ValueCoercion
             };
         }
 
+        // Keyset cursors persist bytea values as base64 strings.
+        if (target == typeof(byte[]))
+        {
+            return rawValue switch
+            {
+                string base64 => Convert.FromBase64String(base64),
+                _ => rawValue,
+            };
+        }
+
         if (rawValue is IConvertible)
         {
             return Convert.ChangeType(rawValue, target, CultureInfo.InvariantCulture);

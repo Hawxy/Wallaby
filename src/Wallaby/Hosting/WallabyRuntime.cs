@@ -230,6 +230,11 @@ internal sealed class WallabyRuntime
 
     private async Task DelaySafeAsync(TimeSpan delay, CancellationToken ct)
     {
+        // A non-positive value (reachable via post-validation configuration) would throw or spin; floor it.
+        if (delay <= TimeSpan.Zero)
+        {
+            delay = TimeSpan.FromSeconds(1);
+        }
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) { }
     }

@@ -139,7 +139,20 @@ internal sealed class FanoutQueueWorker(
             return false;
         }
 
-        var values = KeysetCodec.DeserializeTuples(job.LookupValuesJson, columnTypes);
+        IReadOnlyList<object?[]> values;
+        try
+        {
+            values = KeysetCodec.DeserializeTuples(job.LookupValuesJson, columnTypes);
+        }
+        catch (Exception ex)
+        {
+            // The job's scope is unreadable and a retry replays the same bytes, so drop it loudly instead.
+            // Complete only deletes an InProgress row, so a trigger that re-arms it concurrently survives.
+            logger.FanoutValuesRejected(job.TableQualified, ex);
+            await store.MarkInProgressAsync(job.TableQualified, job.LookupHash, null, ct);
+            await store.CompleteAsync(job.TableQualified, job.LookupHash, ct);
+            return false;
+        }
         var spec = new ScopedFanoutSpec(lookup.Table, job.LookupColumns, values);
 
         // Requested = run fresh; an orphaned InProgress (leader crashed mid-run) resumes from its cursor.
@@ -211,4 +224,7 @@ internal static partial class FanoutQueueWorkerLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Fan-out job cursor for {Table} does not match the table's current primary key; rerunning the scoped backfill from scratch.")]
     internal static partial void FanoutCursorRejected(this ILogger logger, string table);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out job for {Table} has unreadable lookup values; dropping it. The affected rows were not re-synced — re-trigger the change or re-backfill the table to converge.")]
+    internal static partial void FanoutValuesRejected(this ILogger logger, string table, Exception ex);
 }
