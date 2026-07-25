@@ -80,8 +80,23 @@ internal sealed class WallabyStatus : IWallabyStatus
     internal void RecordFanoutFailure(string error) =>
         Update(s => s with { ConsecutiveFanoutFailures = s.ConsecutiveFanoutFailures + 1, LastError = error });
 
-    internal void ResetFanoutFailures() =>
-        Update(s => s.ConsecutiveFanoutFailures == 0 ? s : s with { ConsecutiveFanoutFailures = 0 });
+    /// <summary>A fan-out job failed; <paramref name="attempts"/> is its persisted failure streak.</summary>
+    internal void RecordFanoutJobFailure(string error, int attempts) =>
+        Update(s => s with
+        {
+            ConsecutiveFanoutFailures = Math.Max(s.ConsecutiveFanoutFailures, attempts),
+            LastError = error,
+        });
+
+    /// <summary>
+    /// Reconcile the counter with the store's worst pending job. Persisted attempts are the source of
+    /// truth: healthy jobs draining can't mask a backed-off failing job, and a recovered job's deleted
+    /// row lowers the value on its own.
+    /// </summary>
+    internal void SetFanoutStreak(int attempts) =>
+        Update(s => s.ConsecutiveFanoutFailures == attempts ? s : s with { ConsecutiveFanoutFailures = attempts });
+
+    internal void ResetFanoutFailures() => SetFanoutStreak(0);
 
     internal void RecordProgress(ulong lsn, double lagSeconds, DateTimeOffset at) =>
         Update(s => s with

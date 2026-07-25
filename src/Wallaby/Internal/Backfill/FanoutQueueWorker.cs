@@ -11,6 +11,7 @@ namespace Wallaby.Internal.Backfill;
 /// model, and runs each as a scoped backfill via the <see cref="WatermarkBackfillCoordinator"/>. A finished
 /// job's row is removed only if it is still <c>InProgress</c>, so a trigger that re-arms it mid-run is
 /// not lost (it re-runs on the next pass).
+/// <para>Each job is isolated: a failure backs off that job alone and the rest of the queue keeps draining.</para>
 /// </summary>
 internal sealed class FanoutQueueWorker(
     IFanoutQueueStore store, WatermarkBackfillCoordinator coordinator, WallabyModel model, ILogger logger,
@@ -18,9 +19,9 @@ internal sealed class FanoutQueueWorker(
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
-    // Base delay before retrying after a failed drain pass. A pass fails when a job errors (e.g. a poison
-    // scoped re-snapshot); the job is left in place to retry — never dropped — so the delay grows
-    // exponentially to a cap, keeping a deterministically-failing job from hot-looping the worker.
+    // Base delay before retrying after a failed drain pass. A pass fails when the queue itself is
+    // unreachable (individual job failures are handled per job), so the delay grows exponentially to a cap
+    // rather than hot-looping against a down database.
     private static readonly TimeSpan BaseErrorRetryDelay = TimeSpan.FromSeconds(1);
 
     // Per-table lookups (table, column types, PK types), built once and shared by every job.
@@ -40,7 +41,12 @@ internal sealed class FanoutQueueWorker(
             {
                 var drained = await DrainOnceAsync(ct);
                 backoff.Reset();
-                status?.ResetFanoutFailures();
+                if (status is not null)
+                {
+                    // The failure counter mirrors the worst pending job's persisted attempts, so a clean
+                    // pass can't mask a failing job that is merely backed off right now.
+                    status.SetFanoutStreak(await store.MaxAttemptsAsync(ct));
+                }
                 if (_instr.FanoutQueueDepthEnabled)
                 {
                     // Sampled once per pass into a cached field, so the metric exporter never touches the DB.
@@ -66,7 +72,7 @@ internal sealed class FanoutQueueWorker(
         }
     }
 
-    /// <summary>Process every currently-due job exactly once; returns how many actually ran (deferred jobs don't count).</summary>
+    /// <summary>Process every currently-due job exactly once; returns how many actually ran (deferred and failed jobs don't count).</summary>
     public async Task<int> DrainOnceAsync(CancellationToken ct)
     {
         var processed = new HashSet<string>();
@@ -94,9 +100,31 @@ internal sealed class FanoutQueueWorker(
         return count;
     }
 
-    // Returns true if the job actually ran; false if it was deferred (so callers don't treat a deferred
-    // job as progress and hot-loop on it).
+    // Returns true if the job actually ran; false if it was deferred or failed (so callers don't treat
+    // either as progress and hot-loop on it).
     private async Task<bool> RunJobAsync(FanoutJobRow job, CancellationToken ct)
+    {
+        try
+        {
+            return await RunJobCoreAsync(job, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Left to escape, the failure would abort the drain and this job would be re-read at the head
+            // of the queue on every later pass, starving the rest.
+            var error = $"{ex.GetType().Name}: {ex.Message}";
+            logger.FanoutJobFailed(job.TableQualified, job.Attempts + 1, ex);
+            status?.RecordFanoutJobFailure(error, job.Attempts + 1);
+            await store.FailAsync(job.TableQualified, job.LookupHash, error, ct);
+            return false;
+        }
+    }
+
+    private async Task<bool> RunJobCoreAsync(FanoutJobRow job, CancellationToken ct)
     {
         if (!_tablesByName.TryGetValue(job.TableQualified, out var lookup) ||
             !TryResolveColumnTypes(lookup.ColumnTypesByName, job.LookupColumns, out var columnTypes))
@@ -107,7 +135,7 @@ internal sealed class FanoutQueueWorker(
             {
                 logger.UnknownFanoutTable(job.TableQualified);
             }
-            await store.DeferAsync(job.TableQualified, job.LookupHash, ct);
+            await store.DeferAsync(job.TableQualified, job.LookupHash, pollInterval, ct);
             return false;
         }
 
@@ -174,6 +202,9 @@ internal static partial class FanoutQueueWorkerLog
 {
     [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker pass failed; retrying.")]
     internal static partial void WorkerPassFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out job for {Table} failed (attempt {Attempt}); it will retry with backoff while the rest of the queue continues to drain.")]
+    internal static partial void FanoutJobFailed(this ILogger logger, string table, int attempt, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Fan-out job for {Table} references a table/column not in the current model; deferring it (it will retry once the model includes it — if a binding was removed, clear it from wallaby.fanout_queue).")]
     internal static partial void UnknownFanoutTable(this ILogger logger, string table);

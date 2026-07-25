@@ -43,7 +43,8 @@ internal sealed class WallabyPipeline(
     IFanoutQueueStore? fanoutQueue = null,
     WallabyInstrumentation? instrumentation = null,
     WallabyStatus? status = null,
-    int maxTransactionsPerBatch = 1)
+    int maxTransactionsPerBatch = 1,
+    IBackfillStateStore? backfillStore = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
@@ -463,10 +464,16 @@ internal sealed class WallabyPipeline(
         await Task.CompletedTask;
     }
 
+    // Wide tails offload to the fan-out queue as the resolver cuts them; without a queue the callback is
+    // null and the resolver keeps the tail inline (dropped past its valve, matching prior behavior).
+    private readonly Func<ScopedFanoutSpec, CancellationToken, Task>? _enqueueTail = fanoutQueue is null
+        ? null
+        : fanoutQueue.EnqueueAsync;
+
     private async Task ResolveAndDispatchFanoutAsync(
         IAsyncEnumerable<RawChange> changes, IReadOnlySet<(string, DocumentKey)> liveIndex, CancellationToken ct)
     {
-        var results = await dependentResolver!.ResolveFirstPagesAsync(changes, maxBatchSize, ct);
+        var results = await dependentResolver!.ResolveFirstPagesAsync(changes, maxBatchSize, _enqueueTail, ct);
         if (results.Count == 0)
         {
             return;
@@ -474,6 +481,12 @@ internal sealed class WallabyPipeline(
 
         foreach (var result in results)
         {
+            if (result.RebackfillTable is { } wide)
+            {
+                await RequestWholeTableRebackfillAsync(wide, ct);
+                continue;
+            }
+
             var events = new List<ChangeEvent>(result.FirstPage.Count);
             foreach (var raw in result.FirstPage)
             {
@@ -495,11 +508,18 @@ internal sealed class WallabyPipeline(
             }
 
             await DispatchChunkedAsync(events, WallabyInstrumentation.SourceFanout, ct);
+        }
+    }
 
-            if (result.Continuation is not null && fanoutQueue is not null)
-            {
-                await fanoutQueue.EnqueueAsync(result.Continuation, ct);
-            }
+    // Warned unconditionally: the request only takes effect for a table the scheduler backfills, so an
+    // operator has to see it even when it lands as a no-op.
+    private async Task RequestWholeTableRebackfillAsync(CapturedTable table, CancellationToken ct)
+    {
+        logger.FanoutKeyCapExceeded(table.QualifiedName);
+        if (backfillStore is not null)
+        {
+            // The scheduler writes the declared version as the fresh run starts, so null loses nothing.
+            await backfillStore.RequestAsync(table.QualifiedName, transformVersion: null, purge: false, ct);
         }
     }
 
@@ -640,6 +660,13 @@ internal static partial class WallabyPipelineLog
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Processed a batch of {Transactions} transaction(s) ({Changes} change(s)) for slot '{Slot}'; acknowledged LSN {EndLsn}.")]
     internal static partial void TransactionBatchProcessed(this ILogger logger, string slot, int transactions, long changes, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message =
+        "A dependent fan-out touched more distinct lookup keys in one transaction than " +
+        "Advanced.MaxFanoutKeysPerTransaction allows, so {Table} is being re-backfilled whole instead of by " +
+        "scope. This only converges if {Table} is one of the backfilled tables; if it is not, re-index it " +
+        "manually or raise the cap.")]
+    internal static partial void FanoutKeyCapExceeded(this ILogger logger, string table);
 
     [LoggerMessage(Level = LogLevel.Error, Message =
         "Delivery of a batch of {Transactions} transaction(s) (LSNs {FirstCommitLsn}..{EndLsn}) on slot '{Slot}' " +

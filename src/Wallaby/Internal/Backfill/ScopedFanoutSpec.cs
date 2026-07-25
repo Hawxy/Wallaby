@@ -19,6 +19,7 @@ internal sealed record ScopedFanoutSpec(
 /// <summary>
 /// A persisted fan-out job as read from <c>wallaby.fanout_queue</c>. The lookup values and cursor are kept
 /// as raw JSON; the worker coerces them to CLR types against the resolved primary table's columns.
+/// <paramref name="Attempts"/> counts the failed runs so far and drives the job's retry backoff.
 /// </summary>
 internal sealed record FanoutJobRow(
     string TableQualified,
@@ -27,4 +28,5 @@ internal sealed record FanoutJobRow(
     IReadOnlyList<string> LookupColumns,
     string LookupValuesJson,
     string? CursorJson,
-    long RowsCopied);
+    long RowsCopied,
+    int Attempts = 0);

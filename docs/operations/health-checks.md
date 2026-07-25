@@ -34,21 +34,31 @@ Registered as **`wallaby`** (tag `wallaby`). It reports:
 - **Degraded**: While the installation is [suspended](/operations/major-version-upgrades): the node is
   alive (an orchestrator shouldn't restart-loop it) but replication is deliberately stopped and the
   managed slots are dropped. Expected during a planned upgrade window; alert if it persists after.
+  Also when [dependent fan-out](/providers/entity-framework-core/#dependent-tables) keeps failing: after
+  `FanoutFailureThreshold` consecutive job failures (default **5**) the documents that depend on those
+  tables are going stale, while live replication carries on unaffected - so this is loud but is not a
+  restart signal either.
 - **Healthy**: In every other state: a **leader** streaming changes, a **standby** waiting to take over,
   or a node still **starting**.
 
-The crash-loop threshold is adjustable (set it to `0` to disable that arm):
+Both thresholds are adjustable (set either to `0` to disable that arm):
 
 ```csharp
-builder.Services.AddHealthChecks().AddWallaby(configure: o => o.CrashLoopFailureThreshold = 5);
+builder.Services.AddHealthChecks().AddWallaby(configure: o =>
+{
+    o.CrashLoopFailureThreshold = 5;
+    o.FanoutFailureThreshold = 10;
+});
 ```
 
 The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
 `leaderSince`, `suspendedSince`, `suspensionReason`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
 `consecutiveLeaderFailures`, `consecutiveFanoutFailures`, `slotName`, and one
 `lastSinkDeliveryAt:<sink>` entry per sink that has accepted a batch this session. A nonzero
-`consecutiveFanoutFailures` means the fan-out worker is stuck retrying with backoff. 
-Live replication keeps flowing, so the node stays Healthy, but the value is worth alerting on.
+`consecutiveFanoutFailures` means one or more fan-out jobs are failing and retrying with backoff; the rest
+of the queue keeps draining. The value is the worst failing job's persisted attempt count, so it holds
+while that job is backed off (healthy jobs draining alongside cannot mask it) and clears once the job
+finally completes.
 
 `consecutiveLeaderFailures` (the counter behind the crash-loop grade) only resets on real progress or a
 clean step-down - not just because a failing session ran for a while first - so the grade holds even when

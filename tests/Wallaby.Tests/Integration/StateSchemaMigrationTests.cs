@@ -66,7 +66,9 @@ public class StateSchemaMigrationTests(PostgresFixture pg)
         await EnsureAsync(db);
         await EnsureAsync(db);
 
-        (await ScalarAsync(db, "SELECT count(*) FROM wallaby.schema_version")).ShouldBe(1);
+        // One ledger row per step, written once: the second run applies nothing.
+        (await ScalarAsync(db, "SELECT count(*) FROM wallaby.schema_version"))
+            .ShouldBe(StateSchemaMigrations.Steps.Count);
     }
 
     [Test]
@@ -140,7 +142,9 @@ public class StateSchemaMigrationTests(PostgresFixture pg)
 
         await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => EnsureAsync(db)));
 
-        (await ScalarAsync(db, "SELECT count(*) FROM wallaby.schema_version")).ShouldBe(1);
+        // One ledger row per step regardless of how many entrants raced.
+        (await ScalarAsync(db, "SELECT count(*) FROM wallaby.schema_version"))
+            .ShouldBe(StateSchemaMigrations.Steps.Count);
         (await ScalarAsync(db, "SELECT count(*) FROM pg_tables WHERE schemaname = 'wallaby'")).ShouldBe(7);
     }
 }

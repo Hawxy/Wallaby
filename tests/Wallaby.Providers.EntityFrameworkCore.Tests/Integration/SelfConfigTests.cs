@@ -73,7 +73,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
 
         // Due-job index on the fan-out queue exists.
         (await PgExec.ScalarLongAsync(conn,
-            "SELECT count(*) FROM pg_indexes WHERE schemaname = 'wallaby' AND indexname = 'fanout_queue_due_idx'",
+            "SELECT count(*) FROM pg_indexes WHERE schemaname = 'wallaby' AND indexname = 'fanout_queue_next_attempt_idx'",
             default)).ShouldBe(1L);
 
         // Slot registry row recorded.

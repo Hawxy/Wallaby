@@ -104,7 +104,8 @@ internal sealed class WallabyComponents : IAsyncDisposable
         var backfillStore = new PostgresBackfillStore(dataSource.Source);
         var checkpointsDirect = new PostgresCheckpointStore(dataSource.Source);
         var dependentResolver = model.DependentBindings.Count > 0
-            ? new DependentChangeResolver(dataSource.Source, model, instrumentation)
+            ? new DependentChangeResolver(
+                dataSource.Source, model, instrumentation, options.Advanced.MaxFanoutKeysPerTransaction)
             : null;
 
         return new WallabyComponents

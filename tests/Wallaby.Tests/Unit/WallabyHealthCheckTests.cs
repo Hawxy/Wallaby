@@ -61,16 +61,45 @@ public class WallabyHealthCheckTests
     }
 
     [Test]
-    public async Task Fanout_failures_stay_healthy_and_appear_in_data()
+    public async Task Fanout_failures_below_the_threshold_stay_healthy_and_appear_in_data()
     {
         var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveFanoutFailures = 3 };
         var check = new WallabyHealthCheck(new FakeStatus(snapshot));
 
         var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
-        // A stuck-retrying fan-out is degraded, not dead; a restart wouldn't fix it, so the node stays Healthy.
         result.Status.ShouldBe(HealthStatus.Healthy);
         result.Data["consecutiveFanoutFailures"].ShouldBe(3);
+    }
+
+    [Test]
+    public async Task Persistently_failing_fanout_is_degraded_not_unhealthy()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with
+        {
+            ConsecutiveFanoutFailures = 5,
+            LastError = "JsonException: bad lookup values",
+        };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        // Live replication is unaffected, so a restart wouldn't fix it: loud, but not a restart signal.
+        result.Status.ShouldBe(HealthStatus.Degraded);
+        result.Description.ShouldNotBeNull();
+        result.Description.ShouldContain("5 consecutive job failures");
+        result.Description.ShouldContain("bad lookup values");
+    }
+
+    [Test]
+    public async Task Zero_threshold_disables_fanout_grading()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveFanoutFailures = 100 };
+        var options = new WallabyHealthCheckOptions { FanoutFailureThreshold = 0 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot), options);
+
+        (await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None))
+            .Status.ShouldBe(HealthStatus.Healthy);
     }
 
     [Test]

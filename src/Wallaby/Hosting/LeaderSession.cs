@@ -81,7 +81,7 @@ internal sealed class LeaderSession(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
             options.SlotName, _logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
             components.DependentResolver, components.FanoutQueue, instrumentation, status,
-            options.Advanced.MaxTransactionsPerBatch);
+            options.Advanced.MaxTransactionsPerBatch, components.BackfillStore);
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
         // connection dropped) so a standby that can take over isn't left waiting while we stream on with

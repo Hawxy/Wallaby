@@ -207,6 +207,51 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Very_wide_fanout_is_offloaded_in_bounded_chunk_jobs()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        harness.FanoutChunkSize = 2;
+        var capture = harness.AddCaptureSink();
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
+        harness.DependsOn<Product, Category?>(p => p.Category);
+
+        // Seed before self-config so only the batch rename below streams.
+        var catIds = new List<int>();
+        for (var i = 0; i < 5; i++)
+        {
+            var id = await harness.Db.AddCategoryAsync($"C{i}");
+            await harness.Db.AddProductAsync(id, $"chunk_p{i}");
+            catIds.Add(id);
+        }
+
+        await harness.SelfConfigureAsync();
+        await harness.ClearFanoutQueueAsync();
+
+        await harness.StartAsync();
+        try
+        {
+            // All five renames in ONE transaction: 5 distinct lookup keys against a chunk size of 2 are
+            // offloaded as jobs of 2 + 2 + 1 while the transaction is consumed; no inline page is read.
+            await harness.Db.SetCategoryNamesAsync(catIds.Select((id, i) => (id, $"C{i}b")));
+            await harness.WaitUntilAsync(async () => await harness.PendingFanoutJobCountAsync() == 3, Timeout);
+
+            // The trigger transaction acknowledges while delivery rides entirely on the queued chunks.
+            await harness.WaitUntilAsync(() => harness.LastAcknowledgedLsn > 0, Timeout);
+            capture.For("products").ShouldBeEmpty();
+
+            (await harness.DrainFanoutAsync()).ShouldBe(3);
+            await harness.WaitUntilAsync(
+                () => capture.For("products").Select(r => r.DocumentId).Distinct().Count() >= 5, Timeout);
+        }
+        finally
+        {
+            await harness.StopAsync();
+        }
+
+        capture.For("products").Select(r => r.DocumentId).Distinct().Count().ShouldBe(5);
+    }
+
+    [Test]
     public async Task Fanout_queue_store_tracks_resume_cursor_and_coalesces()
     {
         await using (var conn = await pg.DataSource.OpenConnectionAsync())

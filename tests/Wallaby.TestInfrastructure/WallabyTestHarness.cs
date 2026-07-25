@@ -88,6 +88,18 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// </summary>
     public int MaxTransactionsPerBatch { get; set; } = 100;
 
+    /// <summary>
+    /// Safety valve on distinct dependent-lookup keys fanned out per binding per transaction (set before
+    /// <see cref="StartAsync"/>). Lower it to exercise the whole-table re-backfill fallback.
+    /// </summary>
+    public int MaxFanoutKeysPerTransaction { get; set; } = 1_000_000;
+
+    /// <summary>
+    /// Distinct lookup keys per offloaded fan-out chunk job (set before <see cref="StartAsync"/>). Lower
+    /// it to exercise chunked offload without a huge key set.
+    /// </summary>
+    public int FanoutChunkSize { get; set; } = 10_000;
+
     /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -270,7 +282,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         _dependentResolver = _model!.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_dataSource, _model, Instrumentation)
+            ? new DependentChangeResolver(
+                _dataSource, _model, Instrumentation, MaxFanoutKeysPerTransaction, FanoutChunkSize)
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
@@ -278,7 +291,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, NullLogger.Instance, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation,
-            maxTransactionsPerBatch: MaxTransactionsPerBatch);
+            maxTransactionsPerBatch: MaxTransactionsPerBatch,
+            backfillStore: new PostgresBackfillStore(_dataSource));
 
         // Mirror the production lifecycle: run one-time sink setup before streaming begins.
         foreach (var sink in _sinks.Values)

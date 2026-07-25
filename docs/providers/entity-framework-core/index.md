@@ -221,9 +221,14 @@ a million products). Wallaby keeps this bounded:
 - **Consolidated lookups**: All distinct keys changed for a dependent table in one transaction are resolved
   with a single `IN (…)` query per relationship.
 - **Inline first page, offloaded tail**: The first [`MaxBatchSize`](/configuration#general-options) affected rows
-  are re-emitted inline. If more remain, the rest is handed to a *scoped backfill job* that re-snapshots
+  are re-emitted inline. If more remain, the rest is handed to *scoped backfill jobs* that re-snapshot
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.
+- **Bounded memory**: A very wide fan-out (tens of thousands of distinct keys in one transaction) is
+  offloaded in chunk jobs *as the keys accumulate*, so memory stays flat no matter how many keys the
+  transaction touches. Past [`MaxFanoutKeysPerTransaction`](/configuration#advanced-options) the
+  transaction has effectively rewritten the dependent table, and the whole primary table is
+  re-snapshotted instead.
 - **On-demand processing**: The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
   the instant a job is enqueued so the tail is picked up promptly. A periodic
   [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a safety-net fallback.

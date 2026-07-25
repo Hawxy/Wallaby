@@ -46,6 +46,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.MaxTransactionsPerBatch must be between 1 and 10000.");
         }
+        if (options.Advanced.MaxFanoutKeysPerTransaction is <= 0 or > 1_000_000)
+        {
+            failures.Add("Advanced.MaxFanoutKeysPerTransaction must be between 1 and 1000000.");
+        }
         if (options.Advanced.KeepaliveInterval <= TimeSpan.Zero)
         {
             failures.Add("Advanced.KeepaliveInterval must be greater than zero.");

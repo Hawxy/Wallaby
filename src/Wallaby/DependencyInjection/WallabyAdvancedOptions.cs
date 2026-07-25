@@ -25,6 +25,16 @@ public sealed class WallabyAdvancedOptions
     /// </summary>
     public int MaxTransactionsPerBatch { get; set; } = 100;
 
+    /// <summary>
+    /// Safety valve on how many distinct dependent-lookup keys one transaction may fan out for a single
+    /// <c>DependsOn</c> binding. A wide fan-out is offloaded to the queue in bounded chunk jobs as the
+    /// keys accumulate, so memory stays flat regardless of size; past this cap the transaction has
+    /// effectively rewritten the dependent table, and the binding's whole primary table is re-snapshotted
+    /// instead (backfill is upsert-only, so the wider scan converges to the same result). Must be greater
+    /// than zero.
+    /// </summary>
+    public int MaxFanoutKeysPerTransaction { get; set; } = 1_000_000;
+
     /// <summary>How long a standby node waits before retrying to acquire leadership.</summary>
     public TimeSpan StandbyRetryInterval { get; set; } = TimeSpan.FromSeconds(10);
 
