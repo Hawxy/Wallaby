@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using Wallaby.DependencyInjection;
 
 namespace Wallaby.Sinks.Http;
@@ -24,6 +25,7 @@ public static class HttpSinkBuilderExtensions
         Validate(options);
 
         builder.Services.AddHttpClient();
+        DisableRedirectsOnDefaultClient(builder.Services, name);
         return builder.AddSink(name, sp => CreateSink(name, options, sp));
     }
 
@@ -39,6 +41,7 @@ public static class HttpSinkBuilderExtensions
         ArgumentNullException.ThrowIfNull(configure);
 
         builder.Services.AddHttpClient();
+        DisableRedirectsOnDefaultClient(builder.Services, name);
         return builder.AddSink(name, sp =>
         {
             var options = new HttpSinkOptions { Endpoint = "" };
@@ -47,6 +50,26 @@ public static class HttpSinkBuilderExtensions
             return CreateSink(name, options, sp);
         });
     }
+
+    /// <summary>
+    /// The sink issues only POSTs, and following a redirect rewrites POST→GET and drops the body while a
+    /// 2xx from the target acks the batch, so redirect following is disabled on the sink's <em>default</em>
+    /// named client. Applied by mutating the existing primary handler (never replacing it, so
+    /// <c>ConfigurePrimaryHttpMessageHandler</c> customizations like certs and proxies survive), and only
+    /// to the default client's name: a user-supplied <see cref="HttpSinkOptions.HttpClientName"/> may be
+    /// shared with other consumers and is left alone.
+    /// </summary>
+    private static void DisableRedirectsOnDefaultClient(IServiceCollection services, string sinkName)
+        => services.PostConfigure<HttpClientFactoryOptions>(HttpSink.ClientNameFor(sinkName), o =>
+            o.HttpMessageHandlerBuilderActions.Add(b =>
+            {
+                switch (b.PrimaryHandler)
+                {
+                    case HttpClientHandler h: h.AllowAutoRedirect = false; break;
+                    case SocketsHttpHandler s: s.AllowAutoRedirect = false; break;
+                    // A custom primary handler (e.g. a test stub) has no redirect behavior to disable.
+                }
+            }));
 
     private static void Validate(HttpSinkOptions options)
     {

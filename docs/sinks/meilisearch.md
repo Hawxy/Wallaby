@@ -96,6 +96,11 @@ A few details:
 
 - A key whose value is `null` counts as present, only an **absent** key is a failure.
 - The sink's `PrimaryKey` and Meilisearch's `*` wildcard are exempt.
+- A dotted attribute (`author.name`) matches a literal key first, then resolves segment-by-segment the way
+  Meilisearch does: through nested dictionary values and through the elements of an array. Validation only
+  inspects dictionary-shaped values (`WallabyDocument`, `Dictionary<string, object?>`); a segment landing
+  on anything else (a POCO, an anonymous type, a scalar) passes unchecked, so only a dictionary provably
+  missing the key ever fails.
 
 Set `ValidateConfiguredAttributes = false` to opt out and let Meilisearch accept whatever the transform emits.
 
@@ -129,7 +134,7 @@ the failed task):
 | Error | Outcome |
 | --- | --- |
 | Transport failures, timeouts, responses without a Meilisearch error code | **Retryable** - the dispatcher retries with exponential backoff. |
-| Environment-fixable codes: `index_not_found`, `internal`, disk/queue pressure, … | **Retryable**. |
+| Environment-fixable codes: `index_not_found`, `internal`, disk/queue pressure, … | **Retryable**. Exception: `index_not_found` on a **delete** is swallowed as success — deletes don't auto-create indexes, so a delete-only batch to an index that was never written (e.g. a per-tenant `ScopedDestination` index that saw a deletion before any upsert) has nothing to remove and would otherwise retry forever. |
 | Deterministic configuration/credential/payload errors: `invalid_api_key`, `missing_authorization_header`, `payload_too_large`, `invalid_document_id`, `missing_document_id`, `invalid_document_fields`, `invalid_document_geo_field`, `invalid_index_uid`, `invalid_index_primary_key`, `index_primary_key_already_exists`, `index_primary_key_multiple_candidates_found`, `bad_request` | **Permanent** - the pipeline halts (a `MeilisearchTaskFailedException` carries the failed task's code). |
 | A record with no destination and no `DefaultIndex`, or a document missing a [configured attribute](#attribute-validation) | **Permanent**. |
 

@@ -36,7 +36,7 @@ public class ClassificationTests
     }
 
     [Test]
-    [Arguments("index_not_found")]
+    [Arguments("index_not_found")] // on the upsert path only; the delete path swallows it (see AttributeValidationTests)
     [Arguments("internal")]
     [Arguments("no_space_left_on_device")]
     public async Task Api_error_with_an_environment_fixable_code_is_retried(string code)

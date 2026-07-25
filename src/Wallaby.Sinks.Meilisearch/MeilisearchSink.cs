@@ -204,10 +204,14 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             var info = await index.DeleteAllDocumentsAsync(ct);
             await WaitAsync(index, info, ct);
         }
-        // The delete-all is enqueued and fails as a task, so an absent index surfaces from WaitAsync.
+        // The absent index surfaces from WaitAsync when the delete-all enqueues, or synchronously
+        // when the request itself 404s.
         catch (MeilisearchTaskFailedException ex) when (ex.Code == "index_not_found")
         {
             // Nothing to purge; InitializeAsync creates configured indexes before the scheduler runs.
+        }
+        catch (MeilisearchApiError ex) when (ex.Code == "index_not_found")
+        {
         }
     }
 
@@ -302,8 +306,23 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerBatch)
         {
             var count = Math.Min(_options.MaxRecordsPerBatch, group.Deletions.Count - offset);
-            var info = await index.DeleteDocumentsAsync(group.Deletions.GetRange(offset, count), ct);
-            await WaitAsync(index, info, ct);
+            try
+            {
+                var info = await index.DeleteDocumentsAsync(group.Deletions.GetRange(offset, count), ct);
+                await WaitAsync(index, info, ct);
+            }
+            // Deletes don't auto-create the index (upserts do), so a delete-only batch to an index that
+            // was never written has nothing to remove. Retrying can never create it; treating this as a
+            // failure would loop the whole batch forever. The 404 can surface synchronously from the
+            // request or asynchronously from the task, hence both catches.
+            catch (MeilisearchTaskFailedException ex) when (ex.Code == "index_not_found")
+            {
+                break;
+            }
+            catch (MeilisearchApiError ex) when (ex.Code == "index_not_found")
+            {
+                break;
+            }
         }
     }
 
@@ -361,7 +380,11 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
     /// <summary>
     /// When attribute validation is enabled, ensures the document carries a key for every attribute the index
     /// was configured with. Throws <see cref="MeilisearchDocumentValidationException"/> (a permanent failure)
-    /// otherwise. A key with a null value counts as present — only an absent key is a problem.
+    /// otherwise. A key with a null value counts as present — only an absent key is a problem. A dotted
+    /// attribute matches a literal key first, then resolves segment-by-segment the way Meilisearch does:
+    /// through nested dictionaries and through the elements of an array. Validation only inspects
+    /// dictionary-shaped values; a segment landing on anything else (a POCO, an anonymous type, a scalar)
+    /// passes, so only a dictionary provably lacking a key is ever reported.
     /// </summary>
     private void ValidateConfiguredAttributes(string indexName, string documentId,
         IReadOnlyDictionary<string, object?> document)
@@ -374,7 +397,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         List<string>? missing = null;
         foreach (var attribute in required)
         {
-            if (!document.ContainsKey(attribute))
+            if (!AttributeSatisfied(document, attribute))
             {
                 (missing ??= []).Add(attribute);
             }
@@ -383,6 +406,50 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         if (missing is not null)
         {
             throw new MeilisearchDocumentValidationException(indexName, documentId, missing);
+        }
+    }
+
+    private static bool AttributeSatisfied(IReadOnlyDictionary<string, object?> document, string attribute)
+    {
+        // A literal key always satisfies (including keys that happen to contain a dot).
+        if (document.ContainsKey(attribute))
+        {
+            return true;
+        }
+        return attribute.Contains('.') && SegmentsSatisfied(document, attribute.Split('.'), 0);
+    }
+
+    private static bool SegmentsSatisfied(object? value, string[] segments, int index)
+    {
+        if (index == segments.Length)
+        {
+            return true; // every segment resolved; a null leaf counts as present
+        }
+
+        switch (value)
+        {
+            case IReadOnlyDictionary<string, object?> nested:
+                return nested.TryGetValue(segments[index], out var next)
+                    && SegmentsSatisfied(next, segments, index + 1);
+            case string:
+                return true; // scalar dead-end; not provably missing
+            case System.Collections.IEnumerable items:
+            {
+                // Meilisearch resolves a dotted path through arrays of objects: satisfied when any
+                // element satisfies the remainder. An empty array is data, not a transform bug.
+                var any = false;
+                foreach (var item in items)
+                {
+                    any = true;
+                    if (SegmentsSatisfied(item, segments, index))
+                    {
+                        return true;
+                    }
+                }
+                return !any;
+            }
+            default:
+                return true; // unknown shape (POCO/anonymous/scalar): not ours to judge
         }
     }
 

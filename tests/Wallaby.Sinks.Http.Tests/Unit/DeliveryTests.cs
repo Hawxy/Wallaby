@@ -82,6 +82,76 @@ public class DeliveryTests
     }
 
     [Test]
+    public async Task A_redirect_response_is_permanent_and_names_the_location()
+    {
+        // The sink never follows redirects: doing so would rewrite POST→GET and drop the body.
+        var handler = new CapturingHandler
+        {
+            Respond = _ => new HttpResponseMessage(HttpStatusCode.Found)
+            {
+                Headers = { Location = new Uri("https://receiver.example/hooks-v2") },
+            },
+        };
+        var sink = CreateSink(handler);
+
+        var result = await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        result.Error.ShouldNotBeNull().ShouldContain("https://receiver.example/hooks-v2");
+        result.Error.ShouldContain("redirect");
+    }
+
+    [Test]
+    public async Task A_followed_redirect_on_a_custom_client_is_permanent_not_success()
+    {
+        // A user-supplied client may still follow redirects; the terminal 2xx then comes from a URI the
+        // body never reached. Simulated by answering 200 from a different final request URI.
+        var handler = new CapturingHandler
+        {
+            Respond = _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = new HttpRequestMessage(HttpMethod.Get, "https://receiver.example/hooks-v2"),
+            },
+        };
+        var sink = CreateSink(handler);
+
+        var result = await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        result.Error.ShouldNotBeNull().ShouldContain("https://receiver.example/hooks-v2");
+    }
+
+    [Test]
+    public async Task A_uri_rewriting_handler_does_not_trip_the_redirect_defense()
+    {
+        // Service discovery / proxy handlers mutate the request URI before dispatch; the response then
+        // legitimately comes from the rewritten URI and must stay a success.
+        var handler = new CapturingHandler();
+        var services = new ServiceCollection();
+        services.AddTransient<UriRewritingHandler>();
+        services.AddHttpClient(HttpSink.ClientNameFor(SinkName))
+            .AddHttpMessageHandler<UriRewritingHandler>()
+            .ConfigurePrimaryHttpMessageHandler(() => handler);
+        var factory = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
+        var sink = new HttpSink(SinkName, new HttpSinkOptions { Endpoint = "https://receiver.example/hooks" }, factory);
+
+        var result = await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.Success);
+        handler.Requests.ShouldHaveSingleItem().Request.RequestUri!
+            .Host.ShouldBe("resolved.internal");
+    }
+
+    private sealed class UriRewritingHandler : DelegatingHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            request.RequestUri = new UriBuilder(request.RequestUri!) { Host = "resolved.internal" }.Uri;
+            return base.SendAsync(request, ct);
+        }
+    }
+
+    [Test]
     public async Task Network_failures_are_retryable()
     {
         var handler = new CapturingHandler { Throw = new HttpRequestException("connection refused") };
