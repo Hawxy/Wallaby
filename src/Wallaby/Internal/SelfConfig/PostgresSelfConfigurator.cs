@@ -123,7 +123,10 @@ internal sealed class PostgresSelfConfigurator(
         var listEligible = options.PublicationColumnLists && options.ManagePublicationTables;
         foreach (var table in model.Tables)
         {
-            yield return listEligible && !table.RequiresFullReplicaIdentity
+            // Only deliberately narrowed tables are listed. A list pins every column in it against
+            // ALTER/DROP COLUMN, so a table whose capture set merely reflects the columns its entity
+            // happens to map would pay that cost to filter nothing the user asked to filter.
+            yield return listEligible && table.ColumnsNarrowed && !table.RequiresFullReplicaIdentity
                 ? new PublicationTableSpec(
                     table.Schema, table.TableName, [.. table.Columns.Select(c => c.ColumnName)])
                 : PublicationTableSpec.WholeTable(table.Schema, table.TableName);

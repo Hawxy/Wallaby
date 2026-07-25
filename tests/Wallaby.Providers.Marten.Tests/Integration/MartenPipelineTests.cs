@@ -135,7 +135,7 @@ public class MartenPipelineTests(MartenStoreFixture pg)
     }
 
     [Test]
-    public async Task Publication_lists_only_modeled_columns_and_soft_delete_docs_publish_whole_rows()
+    public async Task Marten_documents_publish_whole_rows()
     {
         await using var harness = WallabyTestHarness.ForMartenStore(pg.Store, pg.ConnectionString);
         harness.AddCaptureSink();
@@ -171,17 +171,14 @@ public class MartenPipelineTests(MartenStoreFixture pg)
             }
         }
 
-        // A plain document publishes only the modeled columns — Marten's other metadata never hits the wire.
-        var widget = columns["mt_doc_widget"];
-        widget.ShouldNotBeNull();
-        widget!.ShouldContain("id");
-        widget.ShouldContain("data");
-        widget.ShouldNotContain("mt_version");
-        widget.ShouldNotContain("mt_last_modified");
-        widget.ShouldNotContain("mt_dotnet_type");
+        // Column lists are opt-in through a column selection, and Marten rejects Consumes/
+        // ConsumesAllExcept (transforms receive the whole document body), so no Marten table is ever
+        // narrowed and none is listed. Unmodeled mt_* metadata reaches the wire and is dropped at
+        // materialization instead, which leaves Marten's own schema management free to change those
+        // columns.
+        columns["mt_doc_widget"].ShouldBeNull();
 
-        // Soft-delete documents require REPLICA IDENTITY FULL (undelete TOAST fallback), so they are
-        // never column-listed.
+        // Soft-delete documents additionally require REPLICA IDENTITY FULL (undelete TOAST fallback).
         columns["mt_doc_softwidget"].ShouldBeNull();
     }
 }

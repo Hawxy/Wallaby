@@ -15,7 +15,7 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `ChunkSize` | `500` | Backfill keyset page size (1–100 000; chunk rows are held in memory). |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/providers/entity-framework-core/#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
 | `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. When `false`, a publication used with a [partitioned table](/how-it-works#partitioned-tables) must have `publish_via_partition_root = true` set yourself; startup fails otherwise. |
-| `PublicationColumnLists` | `true` | Publish only each table's captured columns via [publication column lists](#publication-column-lists). Requires `ManagePublicationTables`. |
+| `PublicationColumnLists` | `true` | Enforce declared [column selections](#publication-column-lists) at the publication, so excluded columns never leave the server. Tables you haven't narrowed publish whole rows. Requires `ManagePublicationTables`. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
@@ -84,18 +84,37 @@ See [Transaction Spill](/transaction-spill).
 
 ### Publication column lists
 
-With `PublicationColumnLists` (the default), Wallaby publishes only the columns the capture model
-actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so properties outside the
-mappings' [column selections](/providers/entity-framework-core/#declaring-consumed-columns),
-unmapped physical columns, and (for Marten) unmodeled `mt_*` metadata are filtered inside Postgres:
-they are never decoded by the WAL sender or sent over the wire. Column lists are reconciled on every
-startup; drift is applied atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+A table you narrow with a [column selection](/providers/entity-framework-core/#declaring-consumed-columns)
+is published with a matching column list - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so
+the excluded columns are filtered inside Postgres: they are never decoded by the WAL sender or sent over
+the wire. Dependent-only tables, which Wallaby narrows automatically to their primary key and lookup
+columns, are listed for the same reason. Column lists are reconciled on every startup; drift is applied
+atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+
+Narrowing is **opt-in per table**. A table you never narrowed publishes whole rows, even when its entity
+maps only some of the physical columns, because a column list pins every column in it against schema
+changes (see the warning below). Restricting that cost to the tables you deliberately narrowed keeps
+ordinary migrations working everywhere else.
+
+`PublicationColumnLists = false` disables column lists altogether, including declared selections. The
+selection still governs materialization and backfill; it just stops being enforced at the server.
 
 Tables that require `REPLICA IDENTITY FULL` (scoped destinations, custom document ids, Marten
 soft-delete documents) and tables whose live replica identity is `FULL` always publish whole rows: a
 column list must cover the table's replica identity, and `FULL` covers every column.
 [External slots](/external-slots) are unaffected - their publications always carry whole tables for
 the third-party consumer.
+
+::: warning
+**Migrating a column-listed table.** Postgres pins the columns in a publication's column list: while the
+list is in place, `ALTER TABLE ... ALTER COLUMN ... TYPE` (even a widening) and `DROP COLUMN` on a listed
+column are rejected, and `DROP COLUMN ... CASCADE` succeeds by removing the table from the publication
+entirely - which silently stops capturing it until the next startup reconciles the publication. To change
+a listed column, widen the table to whole-row publishing first
+(`ALTER PUBLICATION ... SET TABLE`, keeping the other members' lists intact), run the migration, and let
+the next startup re-narrow it. Tables without a declared selection are never listed, so their migrations
+are unaffected.
+:::
 
 ::: warning
 Flipping a column-listed table to `REPLICA IDENTITY FULL` while Wallaby is running makes that table's

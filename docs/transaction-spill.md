@@ -9,6 +9,10 @@ Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's
 streamed changes out of process memory until the commit arrives, so a single huge transaction can't
 exhaust the worker's heap. Small transactions, the overwhelming majority, never touch it.
 
+::: tip
+You likely don't need to care about this page unless you're dealing with a lot of massive transactions
+:::
+
 ## Choosing a backend
 
 ```csharp

@@ -72,8 +72,8 @@ export const nodes: IntNode[] = [
   {
     id: 'pub', x: 26, y: 210, w: 196, h: 77,
     title: 'publication',
-    subs: ['captured tables only', 'column lists'],
-    detail: 'Wallaby self-configures a publication covering exactly the captured tables and reconciles it on startup. Each table\'s column list is narrowed to the columns your mappings consume, so unread values never leave the server.',
+    subs: ['captured tables only', 'declared column lists'],
+    detail: 'Wallaby self-configures a publication covering exactly the captured tables and reconciles it on startup. A table you narrow with a column selection is published with a matching column list, so the excluded values never leave the server; every other table publishes whole rows.',
     links: [{ text: 'publication column lists', href: '/configuration#publication-column-lists' }],
   },
   {
@@ -94,8 +94,8 @@ export const nodes: IntNode[] = [
     id: 'assemble', x: 266, y: 127, w: 196, h: 77,
     title: 'decode + assemble',
     subs: ['committed tx in order', 'large tx spill'],
-    detail: 'pgoutput messages are assembled into whole transactions that only surface on commit - rolled-back work is never seen. A streamed transaction too large to hold in memory spills to an unlogged table in the wallaby schema (or to disk, configurable) and streams back out at commit.',
-    links: [],
+    detail: 'pgoutput messages are assembled into whole transactions that only surface on commit - rolled-back work is never seen. A streamed transaction too large to hold in memory spills to an unlogged table in the wallaby schema (or to disk, or a custom backend) and streams back out at commit.',
+    links: [{ text: 'transaction spill', href: '/transaction-spill' }],
   },
   {
     id: 'materialize', x: 266, y: 228, w: 196, h: 59,
@@ -187,8 +187,8 @@ export const nodes: IntNode[] = [
     id: 'ack', x: 232, y: 769, w: 240, h: 77,
     title: 'acknowledge + checkpoint',
     subs: ['after every sink accepts', 'advance slot ▸ save lsn'],
-    detail: 'The commit is acknowledged only after every sink accepted its batches - that single ordering rule is the at-least-once guarantee. A crash anywhere earlier simply re-streams from the last acknowledged position.',
-    links: [],
+    detail: 'The commit is acknowledged only after every sink accepted its batches - that single ordering rule is the at-least-once guarantee. Under a burst, up to MaxTransactionsPerBatch commits coalesce into one delivery and one acknowledgement at the last transaction\'s LSN. A crash anywhere earlier simply re-streams from the last acknowledged position.',
+    links: [{ text: 'maxtransactionsperbatch', href: '/configuration#advanced-options' }],
   },
 ];
 
@@ -293,7 +293,7 @@ export const scenarios: IntScenario[] = [
     blurb: 'a change to a related table re-emits every entity that depends on it',
     steps: [
       { nodes: ['tables'], caption: 'a row in a dependent table changes - say, a category rename that touches a million products' },
-      { nodes: ['wal', 'pub', 'slot'], edges: ['tables-wal', 'wal-pub', 'pub-slot'], fx: 'tick', caption: 'the dependent table is in the publication too, narrowed to just its key columns' },
+      { nodes: ['wal', 'pub', 'slot'], edges: ['tables-wal', 'wal-pub', 'pub-slot'], fx: 'tick', caption: 'the dependent table is in the publication too, narrowed to its key and lookup columns' },
       { nodes: ['stream', 'assemble', 'materialize'], edges: ['slot-stream', 'stream-assemble', 'assemble-materialize'], caption: 'it decodes like any other change…' },
       { nodes: ['route', 'fanout'], edges: ['materialize-route', 'route-fanout'], caption: '…but the router recognizes a dependency and hands it to fan-out' },
       { nodes: ['fanout', 'tables'], caption: 'one consolidated in (…) lookup resolves every affected primary key for the whole transaction' },

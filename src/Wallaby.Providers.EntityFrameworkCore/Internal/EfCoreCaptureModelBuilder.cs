@@ -202,6 +202,7 @@ internal static class EfCoreCaptureModelBuilder
             TableName = tableName,
             Columns = columns,
             PrimaryKey = pkColumns,
+            ColumnsNarrowed = consumedProperties is not null,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
         };
     }

@@ -41,6 +41,13 @@ public sealed class CapturedTable
     public required IReadOnlyList<CapturedColumn> PrimaryKey { get; init; }
 
     /// <summary>
+    /// True when <see cref="Columns"/> is a deliberate subset of the entity's mapped columns: a declared
+    /// <c>Consumes</c>/<c>ConsumesAllExcept</c> selection, or a dependent-only table narrowed to its
+    /// primary key and lookup columns. Only such tables are published with a column list.
+    /// </summary>
+    public bool ColumnsNarrowed { get; init; }
+
+    /// <summary>
     /// True when a transform for this table requires old values / full row availability and therefore
     /// the table should use <c>REPLICA IDENTITY FULL</c>.
     /// </summary>
