@@ -235,12 +235,19 @@ internal sealed class PostgresSelfConfigurator(
             var ddl = string.Join(" ", notFull.Select(p =>
                 $"ALTER TABLE {PgExec.QuoteTable(p.Schema, p.Table)} REPLICA IDENTITY FULL;"));
 
+            // A KeyedBy / entity-scoped mapping computes delete-time identity from the entity, so a
+            // missing identity means deletes target wrong documents: an error even without the option.
+            var strict = options.RequireFullReplicaIdentity || table.RequiresMaterializedEntity;
+            var reason = table.RequiresMaterializedEntity
+                ? "to compute delete-time document identity (KeyedBy / ScopedDestination)"
+                : "for its transform";
+
             string message;
             if (isPartitioned)
             {
                 var leaves = string.Join(", ", notFull.Select(p => $"{p.Schema}.{p.Table}"));
-                message = options.RequireFullReplicaIdentity
-                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform, but " +
+                message = strict
+                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL {reason}, but " +
                       $"partition(s) {leaves} are not FULL (identity is per leaf and does not propagate " +
                       $"from the root). Run: {ddl} New partitions need the same treatment."
                     : $"Table {table.QualifiedName} has partition(s) {leaves} without REPLICA IDENTITY FULL; " +
@@ -250,13 +257,13 @@ internal sealed class PostgresSelfConfigurator(
             else
             {
                 var relReplIdent = notFull[0].ReplIdent;
-                message = options.RequireFullReplicaIdentity
-                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform but has '{relReplIdent}'. Run: {ddl}"
+                message = strict
+                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL {reason} but has '{relReplIdent}'. Run: {ddl}"
                     : $"Table {table.QualifiedName} has REPLICA IDENTITY '{relReplIdent}'; old values and unchanged-TOAST " +
                       $"columns may be unavailable on UPDATE/DELETE. To capture full rows, run: {ddl}";
             }
 
-            if (options.RequireFullReplicaIdentity)
+            if (strict)
             {
                 throw new WallabyConfigurationException(message);
             }

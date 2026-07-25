@@ -70,7 +70,8 @@ internal static class EfCoreCaptureModelBuilder
 
             primaries.Add((entityType, BuildTable(
                 entityType, spec.RequiresFullReplicaIdentity.Contains(clrType),
-                consumedProperties.GetValueOrDefault(entityType.Name))));
+                consumedProperties.GetValueOrDefault(entityType.Name),
+                spec.RequiresMaterializedEntity.Contains(clrType))));
         }
 
         return primaries;
@@ -152,13 +153,15 @@ internal static class EfCoreCaptureModelBuilder
 
         var built = BuildTable(
             dependentEntityType, requiresFullReplicaIdentity: false,
-            consumedProperties.GetValueOrDefault(dependentEntityType.Name));
+            consumedProperties.GetValueOrDefault(dependentEntityType.Name),
+            requiresMaterializedEntity: false);
         byQualifiedName[(schema, tableName)] = built;
         return built;
     }
 
     private static CapturedTable BuildTable(
-        IEntityType entityType, bool requiresFullReplicaIdentity, IReadOnlySet<string>? consumedProperties)
+        IEntityType entityType, bool requiresFullReplicaIdentity, IReadOnlySet<string>? consumedProperties,
+        bool requiresMaterializedEntity)
     {
         var schema = entityType.GetSchema();
         var tableName = entityType.GetTableName()!;
@@ -204,6 +207,7 @@ internal static class EfCoreCaptureModelBuilder
             PrimaryKey = pkColumns,
             ColumnsNarrowed = consumedProperties is not null,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
+            RequiresMaterializedEntity = requiresMaterializedEntity,
         };
     }
 }

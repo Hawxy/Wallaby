@@ -149,6 +149,7 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
                 // wire and the materializer falls back to it.
                 RequiresFullReplicaIdentity =
                     softDeleted || spec.RequiresFullReplicaIdentity.Contains(mapping.DocumentType),
+                RequiresMaterializedEntity = spec.RequiresMaterializedEntity.Contains(mapping.DocumentType),
             },
             DocumentType = mapping.DocumentType,
             IdPropertyName = mapping.IdMember.Name,

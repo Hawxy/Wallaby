@@ -45,4 +45,22 @@ public class KeyedByTests(TestModelPostgresFixture pg)
             await harness.Db.SetReplicaIdentityDefaultAsync("products");
         }
     }
+
+    [Test]
+    public async Task Keyed_by_without_full_replica_identity_fails_self_config()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        harness.AddCaptureSink();
+        harness.Map<Product>("capture", destination: null, (_, changes, _) =>
+                Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+                    changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)new WallabyDocument())),
+            keyedBy: p => p.Sku);
+
+        // With the default replica identity, a delete would target a wrong (PK-named) document: with a
+        // default-constructed entity the selector yields ""/0, never null, so only startup can catch it.
+        var ex = await Should.ThrowAsync<Wallaby.WallabyConfigurationException>(() => harness.SelfConfigureAsync());
+
+        ex.Message.ShouldContain("REPLICA IDENTITY FULL");
+        ex.Message.ShouldContain("KeyedBy");
+    }
 }

@@ -4,9 +4,10 @@ using Wallaby.DependencyInjection;
 namespace Wallaby.Tests.Unit;
 
 /// <summary>
-/// <c>KeyedBy(...)</c> semantics: the mapping requires FULL replica identity (the custom id must be
-/// computable on deletes), a selector that comes up empty fails loudly with the DDL to fix it, and
-/// entity-less key-only rows fall back to the primary key.
+/// <c>KeyedBy(...)</c>/<c>ScopedBy(...)</c> delete-time identity semantics: the mapping requires FULL
+/// replica identity (the custom id must be computable on deletes), a selector that comes up empty fails
+/// loudly with the DDL to fix it, and an entity-less row fails loudly instead of falling back to the
+/// primary key (a PK-named document was never written, so that delete would remove nothing).
 /// </summary>
 public class KeyedByTests
 {
@@ -68,11 +69,62 @@ public class KeyedByTests
     }
 
     [Test]
-    public void Keyed_by_without_entity_falls_back_to_primary_key()
+    public void Keyed_by_without_entity_fails_loudly()
     {
         var selector = Selector(m => m.KeyedBy(d => d.Sku!));
 
-        // Key-only rows (e.g. Marten deletes) carry no entity; the PK identifies the document.
-        selector(Change(entity: null)).ShouldBe("7");
+        // A PK fallback would target a document that was never written; the custom-keyed orphan lingers.
+        var ex = Should.Throw<InvalidOperationException>(() => selector(Change(entity: null)));
+
+        ex.Message.ShouldContain("public.docs");
+        ex.Message.ShouldContain("REPLICA IDENTITY FULL");
+    }
+
+    [Test]
+    public void Entity_scoped_key_without_entity_is_null_for_enrichment_only_scoping()
+    {
+        var mapping = new MappingRegistration { EntityClrType = typeof(Doc) };
+        new EntityMapBuilder<Doc>(mapping).ScopedBy(d => d.Sku);
+
+        mapping.ScopeKeySelector.ShouldNotBeNull()(Change(entity: null)).ShouldBeNull();
+    }
+
+    [Test]
+    public void Entity_scoped_key_without_entity_fails_when_a_scoped_destination_depends_on_it()
+    {
+        var mapping = new MappingRegistration { EntityClrType = typeof(Doc) };
+        new EntityMapBuilder<Doc>(mapping)
+            .ScopedBy(d => d.Sku)
+            .ScopedDestination(key => $"idx_{key}");
+
+        var ex = Should.Throw<InvalidOperationException>(
+            () => mapping.ScopeKeySelector.ShouldNotBeNull()(Change(entity: null)));
+
+        ex.Message.ShouldContain("ScopedDestination");
+        ex.Message.ShouldContain("REPLICA IDENTITY FULL");
+    }
+
+    [Test]
+    public void Requires_materialized_entity_covers_keyed_by_and_entity_scoped_destinations_only()
+    {
+        Spec(m => m.KeyedBy(d => d.Sku!)).RequiresMaterializedEntity.ShouldBe([typeof(Doc)]);
+        Spec(m => m.ScopedBy(d => d.Sku).ScopedDestination(k => $"idx_{k}"))
+            .RequiresMaterializedEntity.ShouldBe([typeof(Doc)]);
+
+        // Enrichment-only entity scoping and record-based scoping never need the entity on delete.
+        Spec(m => m.ScopedBy(d => d.Sku)).RequiresMaterializedEntity.ShouldBeEmpty();
+        Spec(m => m.ScopedBy(c => c.Record.GetValueOrDefault("TenantId")).ScopedDestination(k => $"idx_{k}"))
+            .RequiresMaterializedEntity.ShouldBeEmpty();
+    }
+
+    private static Wallaby.Providers.CaptureSpec Spec(Action<EntityMapBuilder<Doc>> configure)
+    {
+        var config = new WallabyConfiguration();
+        var sink = new SinkRegistration { Name = "sink", Factory = _ => throw new NotSupportedException() };
+        var mapping = new MappingRegistration { EntityClrType = typeof(Doc) };
+        configure(new EntityMapBuilder<Doc>(mapping));
+        sink.Mappings.Add(mapping);
+        config.Sinks.Add(sink);
+        return config.ToCaptureSpec("A", new Dictionary<Type, string> { [typeof(Doc)] = "A" });
     }
 }

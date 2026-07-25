@@ -16,6 +16,14 @@ public sealed class CaptureSpec
     public IReadOnlySet<Type> RequiresFullReplicaIdentity { get; init; } = new HashSet<Type>();
 
     /// <summary>
+    /// Entity types whose delete-time identity or routing is computed from the materialized entity
+    /// (<c>KeyedBy</c>, entity-typed <c>ScopedBy</c> with a <c>ScopedDestination</c>). Always a subset of
+    /// <see cref="RequiresFullReplicaIdentity"/>; a missing replica identity is an error for these rather
+    /// than a warning, because deletes would target the wrong document or destination.
+    /// </summary>
+    public IReadOnlySet<Type> RequiresMaterializedEntity { get; init; } = new HashSet<Type>();
+
+    /// <summary>
     /// Per-primary-entity navigation expressions declared via <c>DependsOn(...)</c>. Each entry's key
     /// is the primary CLR type; the values are <c>Expression&lt;Func&lt;TEntity, TNav&gt;&gt;</c> lambdas
     /// the storage provider resolves against its model at startup to produce dependent-table captures

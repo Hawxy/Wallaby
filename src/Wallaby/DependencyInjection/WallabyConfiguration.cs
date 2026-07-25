@@ -50,6 +50,18 @@ internal sealed class MappingRegistration
     /// <summary>Per-scope-key destination (e.g. index-per-tenant); falls back to <see cref="Destination"/>.</summary>
     public Func<object?, string?>? DestinationSelector { get; set; }
 
+    /// <summary>Set by <c>KeyedBy</c>: the document id is computed from the entity, deletes included.</summary>
+    public bool HasEntityKeyedId { get; set; }
+
+    /// <summary>Set by the entity-typed <c>ScopedBy</c> overload (the <see cref="ChangeEvent"/> overload reads captured columns instead).</summary>
+    public bool HasEntityScopedKey { get; set; }
+
+    /// <summary>
+    /// Delete-time identity or routing is computed from the materialized entity, so a delete without one
+    /// targets the wrong document/destination. Escalates the table's replica-identity check to an error.
+    /// </summary>
+    public bool RequiresMaterializedEntity => HasEntityKeyedId || (HasEntityScopedKey && DestinationSelector is not null);
+
     /// <summary>
     /// Navigation expressions declared via <c>DependsOn(...)</c>. Each expression points at a single
     /// one-hop navigation whose target/join table should be captured and fan changes out to this
@@ -134,6 +146,7 @@ internal sealed class WallabyConfiguration
         // A type mapped to several sinks appears once: entities dedupe, dependencies merge.
         var declaredEntities = new List<Type>();
         var requiresFullReplicaIdentity = new HashSet<Type>();
+        var requiresMaterializedEntity = new HashSet<Type>();
         var declaredDependencies = new Dictionary<Type, List<LambdaExpression>>();
         var columnSelections = new Dictionary<Type, List<ColumnSelection>>();
         var consumesAll = new HashSet<Type>();
@@ -153,6 +166,10 @@ internal sealed class WallabyConfiguration
             if (mapping.DestinationSelector is not null || mapping.DocumentIdSelector is not null)
             {
                 requiresFullReplicaIdentity.Add(mapping.EntityClrType);
+            }
+            if (mapping.RequiresMaterializedEntity)
+            {
+                requiresMaterializedEntity.Add(mapping.EntityClrType);
             }
             if (mapping.DeclaredDependencies.Count > 0)
             {
@@ -180,6 +197,7 @@ internal sealed class WallabyConfiguration
         {
             DeclaredEntities = declaredEntities,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
+            RequiresMaterializedEntity = requiresMaterializedEntity,
             DeclaredDependencies = declaredDependencies.ToDictionary(
                 d => d.Key, d => (IReadOnlyList<LambdaExpression>)d.Value),
             // A mapping without a selection needs every column, so one such mapping keeps its entity at

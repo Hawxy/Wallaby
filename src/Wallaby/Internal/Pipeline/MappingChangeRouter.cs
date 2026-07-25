@@ -77,8 +77,18 @@ internal sealed class MappingChangeRouter : IChangeRouter
                     {
                         foreach (var change in deletes)
                         {
-                            var scopeKey = mapping.GetScopeKey(change);
-                            routed.Add(Deletion(mapping, change, mapping.ResolveDestination(scopeKey)));
+                            try
+                            {
+                                var scopeKey = mapping.GetScopeKey(change);
+                                routed.Add(Deletion(mapping, change, mapping.ResolveDestination(scopeKey)));
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Routing a delete of {mapping.EntityClrType.Name} (sink '{mapping.SinkName}') " +
+                                    $"from {change.Metadata.QualifiedTableName} failed at commit " +
+                                    $"{new NpgsqlLogSequenceNumber(change.Metadata.CommitLsn)}: {ex.Message}", ex);
+                            }
                         }
                     }
 

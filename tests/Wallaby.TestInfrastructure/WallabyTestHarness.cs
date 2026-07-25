@@ -531,6 +531,11 @@ public sealed class WallabyTestHarness : IAsyncDisposable
                 .Where(m => m.DestinationSelector is not null || m.DocumentIdSelector is not null)
                 .Select(m => m.EntityClrType)
                 .ToHashSet(),
+            // Harness scope keys are ChangeEvent-based, so only custom document ids are entity-bound.
+            RequiresMaterializedEntity = _mappings
+                .Where(m => m.DocumentIdSelector is not null)
+                .Select(m => m.EntityClrType)
+                .ToHashSet(),
         });
         _model = plan.Model;
         _materializer = plan.Materializer;

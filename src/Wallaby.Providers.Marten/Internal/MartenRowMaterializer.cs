@@ -12,9 +12,10 @@ namespace Wallaby.Providers.Marten.Internal;
 /// Materializes Marten document-table changes: rehydrates the document from <c>data</c> through the
 /// store's serializer, and translates soft deletes into Delete events (the sink document is removed).
 /// Decision table: unknown table → benign skip; backfill read of a soft-deleted row → skip (matching the
-/// Delete-event semantics); hard delete → key-only row; update flipping <c>mt_deleted</c> on → key-only
-/// row with a Delete action; everything else deserializes <c>data</c>, falling back to the old tuple for
-/// an unchanged-TOAST value (present via <c>REPLICA IDENTITY FULL</c>).
+/// Delete-event semantics); hard delete → Delete row, rehydrating the entity from the old tuple's
+/// <c>data</c> when the wire carried it (<c>REPLICA IDENTITY FULL</c>); update flipping <c>mt_deleted</c>
+/// on → Delete row rehydrated likewise; everything else deserializes <c>data</c>, falling back to the old
+/// tuple for an unchanged-TOAST value.
 /// </summary>
 internal sealed class MartenRowMaterializer : IRowMaterializer
 {
@@ -41,7 +42,7 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
                 ?? throw new InvalidOperationException(
                     $"Delete for '{plan.Table.QualifiedName}' carried no old values; the replica identity " +
                     "provides the key columns, so this indicates a decoding problem.");
-            row = KeyOnlyRow(plan, oldValues, deleted: WasDeleted(plan, oldValues));
+            row = DeleteRow(plan, oldValues, deleted: WasDeleted(plan, oldValues), EntityOrNull(plan, change));
             return true;
         }
 
@@ -53,22 +54,12 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
             {
                 return false;
             }
-            row = KeyOnlyRow(plan, change.NewValues, deleted: true);
+            row = DeleteRow(plan, change.NewValues, deleted: true, EntityOrNull(plan, change));
             return true;
         }
 
         var data = ReadData(plan, change);
-        object entity;
-        try
-        {
-            entity = Deserialize(plan.DocumentType, data);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"Failed to deserialize '{plan.Table.QualifiedName}' data into '{plan.DocumentType.FullName}' " +
-                "with the store's serializer.", ex);
-        }
+        var entity = DeserializeDocument(plan, data);
 
         var record = new Dictionary<string, object?>
         {
@@ -88,8 +79,12 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         return true;
     }
 
-    /// <summary>A row for a (hard or soft) delete: key values only, routed as a Delete.</summary>
-    private static MaterializedRow KeyOnlyRow(MartenTablePlan plan, IReadOnlyList<RawColumn> values, bool deleted)
+    /// <summary>
+    /// A row for a (hard or soft) delete, routed as a Delete. <paramref name="entity"/> carries the
+    /// document when the wire had its body, so KeyedBy/ScopedBy can compute delete-time identity.
+    /// </summary>
+    private static MaterializedRow DeleteRow(
+        MartenTablePlan plan, IReadOnlyList<RawColumn> values, bool deleted, object? entity)
     {
         var record = new Dictionary<string, object?>
         {
@@ -105,8 +100,15 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         }
 
         return new MaterializedRow(
-            ChangeAction.Delete, Entity: null, record, Changes: null, PrimaryKeyValues(plan, record), plan.DocumentType);
+            ChangeAction.Delete, entity, record, Changes: null, PrimaryKeyValues(plan, record), plan.DocumentType);
     }
+
+    /// <summary>
+    /// The deleted document, when its body is on the wire. Requires <c>REPLICA IDENTITY FULL</c> (enforced
+    /// at startup for KeyedBy / entity-scoped mappings); without it the row stays entity-less.
+    /// </summary>
+    private object? EntityOrNull(MartenTablePlan plan, RawChange change)
+        => TryReadData(plan, change) is { } data ? DeserializeDocument(plan, data) : null;
 
     /// <summary>Primary key values in the captured key's column order, from the already-coerced record.</summary>
     private static object[] PrimaryKeyValues(MartenTablePlan plan, Dictionary<string, object?> record)
@@ -132,9 +134,9 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
     /// <summary>
     /// The document JSON — a <c>string</c> or UTF-8 <c>byte[]</c>, kept in its wire form so
     /// <see cref="Deserialize"/> can avoid transcoding: the new tuple's <c>data</c>, or the old tuple's
-    /// when unchanged TOAST kept it off the wire.
+    /// when unchanged TOAST kept it off the wire. Null when neither tuple carries the body.
     /// </summary>
-    private static object ReadData(MartenTablePlan plan, RawChange change)
+    private static object? TryReadData(MartenTablePlan plan, RawChange change)
     {
         var column = Find(change.NewValues, "data");
         if (column is { IsUnchangedToast: false })
@@ -143,16 +145,29 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         }
 
         var old = change.OldValues is { } oldValues ? Find(oldValues, "data") : null;
-        if (old is { IsUnchangedToast: false, Value: not null })
-        {
-            return AsJson(plan, old.Value);
-        }
+        return old is { IsUnchangedToast: false, Value: not null } ? AsJson(plan, old.Value) : null;
+    }
 
-        throw new InvalidOperationException(
-            $"The document body for '{plan.Table.QualifiedName}' was not carried in the change (an unchanged " +
-            $"TOASTed value with no old tuple). Run: ALTER TABLE {plan.Table.QualifiedName} REPLICA IDENTITY FULL; " +
-            "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set). " +
-            "See https://wallabycdc.net/providers/marten/#managed-replica-identity");
+    private static object ReadData(MartenTablePlan plan, RawChange change)
+        => TryReadData(plan, change)
+            ?? throw new InvalidOperationException(
+                $"The document body for '{plan.Table.QualifiedName}' was not carried in the change (an unchanged " +
+                $"TOASTed value with no old tuple). Run: ALTER TABLE {plan.Table.QualifiedName} REPLICA IDENTITY FULL; " +
+                "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set). " +
+                "See https://wallabycdc.net/providers/marten/#managed-replica-identity");
+
+    private object DeserializeDocument(MartenTablePlan plan, object data)
+    {
+        try
+        {
+            return Deserialize(plan.DocumentType, data);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to deserialize '{plan.Table.QualifiedName}' data into '{plan.DocumentType.FullName}' " +
+                "with the store's serializer.", ex);
+        }
     }
 
     private static object AsJson(MartenTablePlan plan, object? value)

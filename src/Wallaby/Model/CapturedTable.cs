@@ -53,6 +53,13 @@ public sealed class CapturedTable
     /// </summary>
     public bool RequiresFullReplicaIdentity { get; init; }
 
+    /// <summary>
+    /// True when delete-time document identity or routing (<c>KeyedBy</c>, an entity-scoped
+    /// destination) is computed from the materialized entity. A missing <c>REPLICA IDENTITY FULL</c> is
+    /// then a self-config error rather than a warning: deletes would target the wrong document.
+    /// </summary>
+    public bool RequiresMaterializedEntity { get; init; }
+
     /// <summary>The schema-qualified table name, e.g. <c>public.orders</c>.</summary>
     public string QualifiedName => $"{Schema}.{TableName}";
 }
