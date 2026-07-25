@@ -58,7 +58,7 @@ internal sealed class LeaderSession(
     /// </summary>
     public async Task<LeaderSessionOutcome> RunAsync(CancellationToken ct)
     {
-        var controlStore = new PostgresControlStore(dataSource, _logger);
+        var controlStore = new PostgresControlStore(dataSource, options, _logger);
 
         // A suspension in force must be honored before self-config can recreate any slot. Tolerates a
         // database no suspension-aware version has touched (no control table reads as running).

@@ -39,6 +39,12 @@ internal static class ControlGateEvaluator
                 row = await store.ReadAsync(ct);
                 state = row?.State ?? ControlContract.StateSuspendRequested;
             }
+            else if (row?.Origin == ControlContract.OriginConfiguration)
+            {
+                // The gate re-runs on every idle pass, so this keeps the assertion fresh for as long as
+                // any flag-carrying node is alive, holding off flag-less nodes' auto-resume.
+                await store.HeartbeatConfigurationAssertionAsync(ct);
+            }
         }
         else if (row is not null && state != ControlContract.StateRunning &&
                  row.Origin == ControlContract.OriginConfiguration)
@@ -48,8 +54,18 @@ internal static class ControlGateEvaluator
             if (await store.ResumeConfigurationSuspensionAsync(ct))
             {
                 logger.ConfigurationSuspensionAutoResumed();
+                return (ControlGateAction.Proceed, row);
             }
-            return (ControlGateAction.Proceed, row);
+
+            // Refused: either another node already resumed (re-read shows Running), or a live
+            // flag-carrying node is still asserting the suspension and the grace hasn't elapsed.
+            // Keep honoring the state; the caller's idle loop re-runs this gate until the resume lands.
+            row = await store.ReadAsync(ct);
+            state = row?.State ?? ControlContract.StateRunning;
+            if (state != ControlContract.StateRunning)
+            {
+                logger.AutoResumeWaitingOutGrace();
+            }
         }
 
         return state switch
@@ -69,4 +85,7 @@ internal static partial class ControlGateEvaluatorLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Deployed without Suspend(): auto-resuming the configuration-driven suspension.")]
     internal static partial void ConfigurationSuspensionAutoResumed(this ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Deployed without Suspend(), but a flag-carrying node is still asserting the suspension; waiting out the configuration-suspension grace before auto-resuming.")]
+    internal static partial void AutoResumeWaitingOutGrace(this ILogger logger);
 }

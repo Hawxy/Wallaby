@@ -73,6 +73,16 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan ControlPollInterval { get; set; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
+    /// Floor on how long a flag-less node waits before auto-resuming a configuration-origin suspension
+    /// whose liveness heartbeat has gone quiet. The effective grace is
+    /// <c>max(ControlPollInterval * 4, SuspensionAutoResumeGraceFloor)</c>: flag-carrying nodes refresh
+    /// the heartbeat every control poll, so a mixed rolling deployment stays suspended instead of
+    /// flip-flopping slots (each flap forces a full re-backfill), while the grace bounds the dead time a
+    /// fully flag-less deployment waits before resuming.
+    /// </summary>
+    public TimeSpan SuspensionAutoResumeGraceFloor { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// How often the leader emits a tiny transactional heartbeat message (<c>pg_logical_emit_message</c>)
     /// while the pipeline is idle, so the slot's <c>confirmed_flush_lsn</c> keeps advancing even when the
     /// mapped tables are quiet while other tables churn WAL, preventing unbounded WAL retention (and

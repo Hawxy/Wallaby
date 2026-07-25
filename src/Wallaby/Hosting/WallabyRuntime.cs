@@ -48,7 +48,7 @@ internal sealed class WallabyRuntime
         _instrumentation = instrumentation;
         _status = status;
         _logger = logger;
-        _control = new PostgresControlStore(dataSource, logger);
+        _control = new PostgresControlStore(dataSource, options, logger);
     }
 
     // How long to wait between drop attempts when a managed slot is still held by an active consumer.
@@ -192,22 +192,38 @@ internal sealed class WallabyRuntime
     }
 
     /// <summary>
-    /// Suspension idle: hold no lock (so any actor can finalize or resume) and wait for the control row
-    /// to change — woken by NOTIFY, with the poll interval as a safety net. Exits on resume or shutdown;
-    /// a deployed Suspend() flag re-enters via the gate on the next iteration.
+    /// Suspension idle: hold no lock (so any actor can finalize or resume) and re-run the control gate on
+    /// every pass, woken by NOTIFY with the poll interval as a safety net. Re-evaluating (rather than
+    /// only polling the state) is what keeps a flag-carrying node's assertion heartbeat fresh, and what
+    /// makes a flag-less node whose auto-resume was refused retry until the grace elapses. Exits on any
+    /// non-idle gate outcome or shutdown; the main loop re-evaluates and acts on it.
     /// </summary>
     private async Task IdleWhileSuspendedAsync(ControlRow? row, CancellationToken ct)
     {
         _status.EnterSuspended(row?.RequestedAt ?? row?.SuspendedAt, row?.Reason);
-        _logger.Suspended(_options.SlotName);
+        if (!_options.Suspended && row?.Origin == ControlContract.OriginConfiguration)
+        {
+            // Not "suspended until an explicit resume": this node will resume itself once the
+            // flag-carrying nodes' assertion heartbeat goes stale.
+            _logger.SuspendedAwaitingGrace(_options.SlotName);
+        }
+        else
+        {
+            _logger.Suspended(_options.SlotName);
+        }
         await using var subscription = _control.Subscribe();
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                if (!await _control.IsSuspensionInEffectAsync(ct))
+                var (gate, _) = await ControlGateEvaluator.EvaluateAsync(
+                    _control, _options.Suspended, _options.SuspensionReason, _logger, ct);
+                if (gate != ControlGateAction.Idle)
                 {
-                    _logger.SuspensionEnded(_options.SlotName);
+                    if (gate == ControlGateAction.Proceed)
+                    {
+                        _logger.SuspensionEnded(_options.SlotName);
+                    }
                     return;
                 }
             }
@@ -268,6 +284,9 @@ internal static partial class WallabyRuntimeLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot '{Slot}'): managed replication slots are dropped and streaming is stopped until an explicit resume.")]
     internal static partial void Suspended(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot '{Slot}') by nodes still deployed with Suspend(); this flag-less node is waiting out the configuration-suspension grace and will auto-resume once their assertion goes stale.")]
+    internal static partial void SuspendedAwaitingGrace(this ILogger logger, string slot);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby suspension ended; re-entering leader election for slot '{Slot}'. Expect a full re-backfill of all mapped tables.")]
     internal static partial void SuspensionEnded(this ILogger logger, string slot);

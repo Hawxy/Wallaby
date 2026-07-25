@@ -66,6 +66,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.ControlPollInterval must be greater than zero.");
         }
+        if (options.Advanced.SuspensionAutoResumeGraceFloor < TimeSpan.Zero)
+        {
+            failures.Add("Advanced.SuspensionAutoResumeGraceFloor must be zero or greater.");
+        }
         if (options.Advanced.FanoutPollInterval <= TimeSpan.Zero)
         {
             failures.Add("Advanced.FanoutPollInterval must be greater than zero.");

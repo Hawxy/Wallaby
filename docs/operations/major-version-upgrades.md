@@ -51,6 +51,21 @@ No admin endpoint or extra tooling, suspension is managed via your deployment pi
 While the flagged build is deployed, the suspension is **re-asserted**, so a remote `ResumeAsync` gets
 re-suspended by the running nodes. Resume by deploying the flag-less build.
 
+### Mixed rollouts
+
+Each phase expects a **uniform deployment**, but a rolling deploy inevitably mixes flagged and
+flag-less nodes for a while, and the two sides want opposite states. The flagged nodes continuously
+stamp a liveness heartbeat (`wallaby.control.configuration_asserted_at`) while their suspension is in
+force, and a flag-less node only auto-resumes once that heartbeat has been quiet for a grace window:
+`max(ControlPollInterval × 4, SuspensionAutoResumeGraceFloor)`, one minute by default. So a mixed
+rollout simply **stays suspended** until the last flagged node is gone, then resumes exactly once,
+rather than the two sides flapping the slots (each flap forces a full re-backfill).
+
+The grace is also the dead time between the last flagged node stopping and the resume; lower
+`Advanced.SuspensionAutoResumeGraceFloor` if your deploys are single-node and the wait matters. A
+flag-less node waiting out the grace logs that it is doing so (distinct from the "suspended until an
+explicit resume" message).
+
 ## Option B: runtime control (Wallaby.Client)
 
 Suspend and resume at runtime from **any process with a connection string**. The app itself doesn't need to restart or redeploy.

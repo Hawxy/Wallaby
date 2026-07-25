@@ -23,8 +23,8 @@ version to the version the binary requires:
 
 Deployments that run several nodes (leader + standbys, blue/green) can upgrade one node at a time:
 
-- Migration steps are **additive** (new columns always carry a server-side `DEFAULT`, and columns are
-  never renamed), so a not-yet-upgraded node keeps reading and writing correctly against an
+- Migration steps are **additive** (new columns are nullable or carry a server-side `DEFAULT`, and
+  columns are never renamed), so a not-yet-upgraded node keeps reading and writing correctly against an
   already-migrated schema.
 - The first upgraded node to win leadership applies the migration, the rest fast-path past it.
 - The remote [control client](/operations/external-control) tolerates schema drift in the same way: it

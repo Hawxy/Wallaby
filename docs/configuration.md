@@ -48,6 +48,7 @@ You shouldn't modify these unless you know what you're doing:
 | `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
 | `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing; see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
 | `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
+| `SuspensionAutoResumeGraceFloor` | `60s` | Floor on how long a flag-less node waits before auto-resuming a configuration-origin suspension whose liveness heartbeat has gone quiet; the effective grace is `max(ControlPollInterval * 4, floor)`. Keeps a [mixed rolling deployment](/operations/major-version-upgrades#mixed-rollouts) suspended instead of flapping slots, at the cost of the same wait after the last `Suspend()`-flagged node stops. |
 
 ## Options Pattern
 

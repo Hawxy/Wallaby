@@ -89,7 +89,7 @@ internal sealed class ExternalSlotProvisioningService(
     /// </summary>
     private async Task WaitOutSuspensionAsync(CancellationToken ct)
     {
-        var control = new PostgresControlStore(dataSource, logger);
+        var control = new PostgresControlStore(dataSource, options, logger);
         INotifySubscription? subscription = null;
         var announced = false;
         try

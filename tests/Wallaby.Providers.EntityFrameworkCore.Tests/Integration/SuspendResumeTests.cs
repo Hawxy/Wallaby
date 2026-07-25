@@ -140,6 +140,81 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task A_suspended_flag_node_keeps_refreshing_its_assertion()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        try
+        {
+            var capture = new CaptureSink();
+            await using var node = await WallabyTestNode.StartAsync(
+                BuildServices(names, capture, suspendFlag: true));
+            await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+
+            // The idle loop re-runs the control gate every pass, so the assertion heartbeat keeps
+            // advancing for as long as the flag-carrying node lives.
+            var first = await AssertedAtAsync();
+            first.ShouldNotBeNull();
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            while (await AssertedAtAsync() <= first)
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException("The suspended flag node never refreshed configuration_asserted_at.");
+                }
+                await Task.Delay(100);
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_mixed_deployment_stays_suspended_until_the_flag_node_dies()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        try
+        {
+            // A rolling deploy in flight: a flag pod and a flag-less pod alive at the same time, each
+            // wanting the opposite control state.
+            var flagCapture = new CaptureSink();
+            var flaglessCapture = new CaptureSink();
+            await using var flagNode = await WallabyTestNode.StartAsync(
+                BuildServices(names, flagCapture, suspendFlag: true));
+            await WallabyReadiness.WaitForSuspendedAsync(flagNode.Services);
+
+            await using var flaglessNode = await WallabyTestNode.StartAsync(
+                BuildServices(names, flaglessCapture));
+            await WallabyReadiness.WaitForSuspendedAsync(flaglessNode.Services);
+
+            // Well past the 2s grace: the live flag node's heartbeat must keep the resume refused.
+            await Task.Delay(TimeSpan.FromSeconds(4));
+            flaglessNode.Services.GetRequiredService<IWallabyStatus>()
+                .Current.Role.ShouldBe(WallabyNodeRole.Suspended);
+            (await SlotExistsAsync(names.Slot)).ShouldBeFalse();
+
+            // The flag node dies (the rollout completes); its assertion goes stale and the flag-less
+            // node auto-resumes on its own.
+            await flagNode.DisposeAsync();
+            await WallabyReadiness.WaitForStreamingAsync(flaglessNode.Services);
+            (await SlotExistsAsync(names.Slot)).ShouldBeTrue();
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    private async Task<DateTime?> AssertedAtAsync()
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT configuration_asserted_at FROM wallaby.control", conn);
+        return await cmd.ExecuteScalarAsync() as DateTime?;
+    }
+
+    [Test]
     public async Task Client_origin_suspension_is_not_auto_resumed_by_a_flagless_host()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
@@ -240,6 +315,8 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
             o.PublicationName = names.Publication;
             o.Advanced.StandbyRetryInterval = TimeSpan.FromSeconds(1);
             o.Advanced.ControlPollInterval = TimeSpan.FromMilliseconds(500);
+            // The default 60s floor would stall the flag-less phases; grace = max(4 * poll, floor) = 2s.
+            o.Advanced.SuspensionAutoResumeGraceFloor = TimeSpan.FromSeconds(2);
         });
         services.ReplaceWallabySink("capture", capture);
         return services;

@@ -27,6 +27,7 @@ internal static class ControlOperations
     private const string ObjectInUse = "55006";
     private const string UndefinedObject = "42704";
     private const string UndefinedTable = "42P01";
+    private const string UndefinedColumn = "42703";
 
     private const string Notify = $"SELECT pg_notify('{ControlContract.NotifyChannel}', '');";
 
@@ -68,18 +69,26 @@ internal static class ControlOperations
     /// Transition Running → SuspendRequested. A suspension already requested or in force is left
     /// untouched (including its origin, so a configuration flag never converts a client suspension
     /// into an auto-resumable one, and vice versa). Returns true when this call made the transition.
+    /// A configuration-origin request also stamps <c>configuration_asserted_at</c> in the same
+    /// statement, so a flag-less node's grace-guarded auto-resume can never observe the request
+    /// without its liveness heartbeat. Only the host asserts that origin (after ensuring the state
+    /// schema), so client-origin calls never reference the column and stay compatible with databases
+    /// bootstrapped by older hosts.
     /// </summary>
     public static async Task<bool> RequestSuspendAsync(
         NpgsqlDataSource dataSource, string origin, string? reason, string? requestedBy, CancellationToken ct)
     {
+        var (assertColumn, assertValue, assertUpdate) = origin == ControlContract.OriginConfiguration
+            ? (", configuration_asserted_at", ", now()", ", configuration_asserted_at = now()")
+            : ("", "", "");
         await using var cmd = dataSource.CreateCommand(
             $"""
-             INSERT INTO {ControlContract.Table} (scope, state, origin, reason, requested_by, requested_at, updated_at)
-             VALUES ('{ControlContract.Scope}', '{ControlContract.StateSuspendRequested}', @origin, @reason, @by, now(), now())
+             INSERT INTO {ControlContract.Table} (scope, state, origin, reason, requested_by, requested_at, updated_at{assertColumn})
+             VALUES ('{ControlContract.Scope}', '{ControlContract.StateSuspendRequested}', @origin, @reason, @by, now(), now(){assertValue})
              ON CONFLICT (scope) DO UPDATE
                  SET state = EXCLUDED.state, origin = EXCLUDED.origin, reason = EXCLUDED.reason,
                      requested_by = EXCLUDED.requested_by, requested_at = EXCLUDED.requested_at,
-                     resumed_at = NULL, updated_at = EXCLUDED.updated_at
+                     resumed_at = NULL, updated_at = EXCLUDED.updated_at{assertUpdate}
                  WHERE control.state = '{ControlContract.StateRunning}';
              {Notify}
              """);
@@ -90,31 +99,74 @@ internal static class ControlOperations
     }
 
     /// <summary>
+    /// Stamp the configuration-assertion heartbeat: a flag-carrying node refreshes it on every gate
+    /// pass while a configuration-origin suspension is in force, keeping the grace-guarded auto-resume
+    /// at bay. Deliberately does not NOTIFY (a heartbeat is not a state transition and must not wake
+    /// every idle node). Host-only; callers ensure the state schema is current.
+    /// </summary>
+    public static async Task<bool> HeartbeatConfigurationAssertionAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct)
+    {
+        await using var cmd = dataSource.CreateCommand(
+            $"""
+             UPDATE {ControlContract.Table}
+             SET configuration_asserted_at = now()
+             WHERE scope = '{ControlContract.Scope}'
+               AND origin = '{ControlContract.OriginConfiguration}'
+               AND state <> '{ControlContract.StateRunning}'
+             """);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    /// <summary>
     /// Transition SuspendRequested/Suspended → Running. With <paramref name="configurationOriginOnly"/>
-    /// (the flag-less host's auto-resume) a client-origin suspension is left in force. Returns true when
-    /// this call made the transition; false includes the table not existing (nothing to resume).
+    /// (the flag-less host's auto-resume) a client-origin suspension is left in force, and
+    /// <paramref name="assertionGrace"/> additionally refuses the resume while a flag-carrying node's
+    /// <c>configuration_asserted_at</c> heartbeat is fresher than the grace (a never-stamped row resumes
+    /// immediately). The staleness predicate lives inside the single guarded UPDATE, so two racing
+    /// flag-less nodes cannot both resume off a stale read, and the NOTIFY fires only when a row
+    /// actually transitioned (a refused resume must not wake the cluster). Returns true when this call
+    /// made the transition; false includes the table not existing (nothing to resume).
     /// </summary>
     public static async Task<bool> ResumeAsync(
-        NpgsqlDataSource dataSource, bool configurationOriginOnly, CancellationToken ct)
+        NpgsqlDataSource dataSource, bool configurationOriginOnly, CancellationToken ct,
+        TimeSpan? assertionGrace = null)
     {
         var originGuard = configurationOriginOnly
             ? $" AND origin = '{ControlContract.OriginConfiguration}'"
+            : "";
+        var graceGuard = assertionGrace is not null
+            ? " AND (configuration_asserted_at IS NULL OR now() - configuration_asserted_at > @grace)"
             : "";
         try
         {
             await using var cmd = dataSource.CreateCommand(
                 $"""
-                 UPDATE {ControlContract.Table}
-                 SET state = '{ControlContract.StateRunning}', resumed_at = now(), updated_at = now()
-                 WHERE scope = '{ControlContract.Scope}'
-                   AND state IN ('{ControlContract.StateSuspendRequested}', '{ControlContract.StateSuspended}'){originGuard};
-                 {Notify}
+                 WITH resumed AS (
+                     UPDATE {ControlContract.Table}
+                     SET state = '{ControlContract.StateRunning}', resumed_at = now(), updated_at = now()
+                     WHERE scope = '{ControlContract.Scope}'
+                       AND state IN ('{ControlContract.StateSuspendRequested}', '{ControlContract.StateSuspended}'){originGuard}{graceGuard}
+                     RETURNING 1
+                 )
+                 SELECT count(*), CASE WHEN count(*) > 0 THEN pg_notify('{ControlContract.NotifyChannel}', '') END
+                 FROM resumed
                  """);
-            return await cmd.ExecuteNonQueryAsync(ct) > 0;
+            if (assertionGrace is { } grace)
+            {
+                cmd.Parameters.AddWithValue("grace", grace);
+            }
+            return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) > 0;
         }
         catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
         {
             return false;
+        }
+        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn && assertionGrace is not null)
+        {
+            // The heartbeat column doesn't exist (a database last touched by an older host), so no live
+            // asserter can be stamping it; resume with the pre-heartbeat semantics.
+            return await ResumeAsync(dataSource, configurationOriginOnly, ct);
         }
     }
 
