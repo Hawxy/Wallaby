@@ -38,7 +38,9 @@ internal static class DependencyAnalyzer
             $"DependsOn must point at a reference, collection, or skip-navigation property.");
     }
 
-    private static string ExtractMemberName(LambdaExpression expression, Type primaryClrType)
+    /// <summary>The single member name the expression accesses, or null for unsupported shapes
+    /// (which <see cref="Analyze"/> rejects with its own error).</summary>
+    public static string? TryExtractMemberName(LambdaExpression expression)
     {
         var body = expression.Body;
         while (body is UnaryExpression unary
@@ -47,15 +49,14 @@ internal static class DependencyAnalyzer
             body = unary.Operand;
         }
 
-        if (body is not MemberExpression member)
-        {
-            throw new WallabyConfigurationException(
-                $"DependsOn expression on '{primaryClrType.FullName}' must be a single navigation property access " +
-                $"(e.g. p => p.Category), got: {expression}.");
-        }
-
-        return member.Member.Name;
+        return body is MemberExpression member ? member.Member.Name : null;
     }
+
+    private static string ExtractMemberName(LambdaExpression expression, Type primaryClrType)
+        => TryExtractMemberName(expression)
+           ?? throw new WallabyConfigurationException(
+               $"DependsOn expression on '{primaryClrType.FullName}' must be a single navigation property access " +
+               $"(e.g. p => p.Category), got: {expression}.");
 
     private static DependencyResolution ResolveReference(IEntityType primary, INavigation nav)
     {

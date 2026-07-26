@@ -73,3 +73,52 @@ public class OrderLine
     public int Quantity { get; set; }
     public decimal UnitPrice { get; set; }
 }
+
+/// <summary>Ctor-bound owned record, nested inside <see cref="Address"/> (optional).</summary>
+public record GeoPoint(double Lat, double Lon);
+
+/// <summary>Same-table owned type with settable members and a nested ctor-bound record.</summary>
+public class Address
+{
+    public string Street { get; set; } = "";
+    public string City { get; set; } = "";
+    public GeoPoint? Location { get; set; }
+}
+
+/// <summary>Ctor-bound complex value object on <see cref="Supplier"/>.</summary>
+public record ContactCard(string Email, string Phone);
+
+/// <summary>Owned collection element, stored in its own table (<c>supplier_notes</c>).</summary>
+public class SupplierNote
+{
+    public string Text { get; set; } = "";
+}
+
+/// <summary>Owned type mapped to its own table (<c>supplier_legal</c>).</summary>
+public class LegalInfo
+{
+    public string RegistrationNumber { get; set; } = "";
+}
+
+/// <summary>Owned type mapped to a JSON column (<c>meta</c>).</summary>
+public class SupplierMeta
+{
+    public string Origin { get; set; } = "";
+}
+
+/// <summary>
+/// Owned/complex-type showcase: required and optional same-table <c>OwnsOne</c> (with a nested
+/// ctor-bound record), a complex property, plus the uncapturable shapes (owned collection,
+/// separate-table owned type, JSON-mapped owned type).
+/// </summary>
+public class Supplier
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public Address Address { get; set; } = new();
+    public Address? BillingAddress { get; set; }
+    public ContactCard Contact { get; set; } = new("", "");
+    public List<SupplierNote> Notes { get; set; } = [];
+    public LegalInfo? Legal { get; set; }
+    public SupplierMeta? Meta { get; set; }
+}

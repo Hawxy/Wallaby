@@ -54,6 +54,10 @@ internal sealed class WallabyComponents : IAsyncDisposable
         ILogger logger)
     {
         var model = providers.MergedPlan.Model;
+        foreach (var warning in model.Warnings)
+        {
+            logger.ModelWarning(warning);
+        }
 
         var mappings = new List<EntityMapping>();
         // Backfill state is per table: a table mapped to several sinks appears once, with the composite
@@ -157,4 +161,10 @@ internal sealed class WallabyComponents : IAsyncDisposable
         public bool PurgeOnVersionChange { get; set; }
         public List<SinkPurgeTarget> Targets { get; } = [];
     }
+}
+
+internal static partial class WallabyComponentsLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{ModelWarning}")]
+    public static partial void ModelWarning(this ILogger logger, string modelWarning);
 }

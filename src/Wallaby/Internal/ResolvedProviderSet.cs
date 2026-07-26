@@ -129,7 +129,8 @@ internal sealed class ResolvedProviderSet
 
         return new CapturePlan
         {
-            Model = new WallabyModel(tables, bindings),
+            Model = new WallabyModel(
+                tables, bindings, [.. providers.SelectMany(p => p.Plan.Model.Warnings)]),
             Materializer = new CompositeRowMaterializer(providers.Select(p => p.Plan)),
         };
     }

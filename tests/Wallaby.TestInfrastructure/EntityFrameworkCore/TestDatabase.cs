@@ -220,6 +220,29 @@ public sealed class TestDatabase(string connectionString)
         await ctx.SaveChangesAsync();
     }
 
+    public async Task<int> AddSupplierAsync(Supplier supplier)
+    {
+        await using var ctx = NewContext();
+        ctx.Suppliers.Add(supplier);
+        await ctx.SaveChangesAsync();
+        return supplier.Id;
+    }
+
+    public async Task SetSupplierStreetAsync(int id, string street)
+    {
+        await using var ctx = NewContext();
+        var supplier = await ctx.Suppliers.FindAsync(id);
+        supplier!.Address.Street = street;
+        await ctx.SaveChangesAsync();
+    }
+
+    public async Task DeleteSupplierAsync(int id)
+    {
+        await using var ctx = NewContext();
+        ctx.Suppliers.Remove((await ctx.Suppliers.FindAsync(id))!);
+        await ctx.SaveChangesAsync();
+    }
+
     /// <summary>Create a customer + order with <paramref name="lineCount"/> lines (single transaction for the order).</summary>
     public async Task<int> AddOrderWithLinesAsync(string customerName, int lineCount)
     {

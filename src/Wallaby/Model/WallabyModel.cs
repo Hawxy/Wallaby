@@ -18,10 +18,13 @@ public sealed class WallabyModel
     }
 
     /// <summary>Create a model from captured tables and the dependent fan-out bindings between them.</summary>
-    public WallabyModel(IReadOnlyList<CapturedTable> tables, IReadOnlyList<DependentBinding> dependentBindings)
+    public WallabyModel(
+        IReadOnlyList<CapturedTable> tables, IReadOnlyList<DependentBinding> dependentBindings,
+        IReadOnlyList<string>? warnings = null)
     {
         Tables = tables ?? throw new ArgumentNullException(nameof(tables));
         DependentBindings = dependentBindings ?? throw new ArgumentNullException(nameof(dependentBindings));
+        Warnings = warnings ?? [];
 
         _byQualifiedName = tables.ToDictionary(t => (t.Schema, t.TableName));
         // A CLR type may appear once (typical) or be shared across primary/dependent — the first
@@ -46,6 +49,12 @@ public sealed class WallabyModel
 
     /// <summary>Rules that fan a dependent-table change out to synthetic primary-table updates.</summary>
     public IReadOnlyList<DependentBinding> DependentBindings { get; }
+
+    /// <summary>
+    /// Provider warnings about capture gaps in this model (e.g. an owned member whose data is not on the
+    /// entity's rows and stays at its default when materialized). Logged once at host startup.
+    /// </summary>
+    public IReadOnlyList<string> Warnings { get; }
 
     /// <summary>Find a captured table by schema and name, or null if not captured.</summary>
     public CapturedTable? FindByRelation(string schema, string table)
