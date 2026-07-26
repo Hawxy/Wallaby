@@ -49,6 +49,47 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Repointing_a_dependent_lookup_refreshes_the_departed_primary()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        var capture = harness.AddCaptureSink();
+        harness.Project<Category>("capture", destination: null, c => new WallabyDocument { ["name"] = c.Name });
+        harness.DependsOn<Category, List<Product>>(c => c.Products);
+
+        // Seeded before self-config: these categories can only reach the sink via the fan-out.
+        var oldCat = await harness.Db.AddCategoryAsync("OldParent");
+        var newCat = await harness.Db.AddCategoryAsync("NewParent");
+        var productId = await harness.Db.AddProductAsync(oldCat, "roamer");
+
+        // The departed category's id rides in the product row's old tuple only under full identity.
+        await harness.Db.SetReplicaIdentityFullAsync("products");
+        try
+        {
+            await harness.SelfConfigureAsync();
+            await harness.StartAsync();
+            try
+            {
+                await harness.Db.SetProductCategoryAsync(productId, newCat);
+
+                // Both sides of the re-point refresh: the gaining category (new tuple) and the losing
+                // one (old tuple), whose document would otherwise keep the stale membership.
+                await harness.WaitUntilAsync(
+                    () => capture.For("categories").Any(r => r.DocumentId == oldCat.ToString())
+                          && capture.For("categories").Any(r => r.DocumentId == newCat.ToString()),
+                    Timeout);
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+        finally
+        {
+            await harness.Db.SetReplicaIdentityDefaultAsync("products");
+        }
+    }
+
+    [Test]
     public async Task Multiple_dependent_changes_in_one_transaction_fan_out_each_primary_once()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);

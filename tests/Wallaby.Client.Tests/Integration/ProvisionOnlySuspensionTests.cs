@@ -71,6 +71,21 @@ public class ProvisionOnlySuspensionTests(PostgresFixture pg)
 
             await PollUntilAsync(() => SlotExistsAsync(slot), "external slot to be provisioned after resume");
             status.Current.Faulted.ShouldBeFalse();
+
+            // The service stays alive watching the control channel: a second suspend/resume cycle
+            // drops and re-provisions the slot without a host restart.
+            var again = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+            again.State.ShouldBe(WallabySuspensionState.Suspended);
+            (await SlotExistsAsync(slot)).ShouldBeFalse();
+
+            await client.ResumeAsync();
+
+            await PollUntilAsync(() => SlotExistsAsync(slot), "external slot to be re-provisioned after the second resume");
+            status.Current.Faulted.ShouldBeFalse();
         }
         finally
         {

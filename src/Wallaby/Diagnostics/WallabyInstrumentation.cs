@@ -2,6 +2,9 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Wallaby.Abstractions;
+using Wallaby.Internal;
+using Wallaby.Internal.Pipeline;
+using Wallaby.Internal.Replication;
 
 namespace Wallaby.Diagnostics;
 
@@ -27,6 +30,16 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliveryOutcomeTag = "wallaby.delivery.outcome";
     internal const string DestinationTag = "wallaby.destination";
     internal const string BackfillKindTag = "wallaby.backfill.kind";
+    internal const string BatchTxnCountTag = "wallaby.batch.txn_count";
+    internal const string BatchFlushReasonTag = "wallaby.batch.flush_reason";
+    internal const string TxnCommitLsnTag = "wallaby.txn.lsn.commit";
+    internal const string TxnEndLsnTag = "wallaby.txn.lsn.end";
+    internal const string TxnSizeTag = "wallaby.txn.size";
+    internal const string TxnStreamedTag = "wallaby.txn.streamed";
+    internal const string IngestionLagTag = "wallaby.ingestion.lag_s";
+    internal const string WatermarkTag = "wallaby.watermark";
+    internal const string HeartbeatTag = "wallaby.heartbeat";
+    internal const string TruncateTag = "wallaby.truncate";
 
     // ---- span names ----
     internal const string TransactionActivity = "transaction.process";
@@ -138,7 +151,74 @@ public sealed class WallabyInstrumentation : IDisposable
 
     // ---- spans ----
 
-    internal Activity? StartTransaction() => _activitySource.StartActivity(TransactionActivity, ActivityKind.Consumer);
+    /// <summary>Root span for one solo-dispatched transaction, carrying its batch, lag, and marker attributes.</summary>
+    internal Activity? StartTransaction(
+        string slot, CommittedTransaction transaction, BatchFlushReason flushReason, double lagSeconds)
+    {
+        var activity = StartTransactionCore(
+            slot, txnCount: 1, flushReason, transaction.CommitLsn, transaction.EndLsn, lagSeconds);
+        if (activity is null)
+        {
+            return null;
+        }
+
+        activity.SetTag(TxnStreamedTag, transaction.IsStreamed);
+        // A streamed transaction's size is unknown until its spill is read; the pipeline tags it afterwards.
+        if (!transaction.IsStreamed)
+        {
+            activity.SetTag(TxnSizeTag, transaction.Changes.Count);
+        }
+        // Marks the tiny transactions that exist only to bracket a backfill chunk, so they can be
+        // filtered in a trace viewer.
+        if (transaction.Watermarks.Count > 0)
+        {
+            activity.SetTag(WatermarkTag,
+                transaction.Watermarks[0].Prefix == WallabySchema.WatermarkLowPrefix ? "low" : "high");
+        }
+        // Marks idle-slot heartbeat transactions, so they can be filtered in a trace viewer.
+        if (transaction.ContainsHeartbeat)
+        {
+            activity.SetTag(HeartbeatTag, true);
+        }
+        if (transaction.TruncatedTables.Count > 0)
+        {
+            activity.SetTag(TruncateTag, string.Join(",", transaction.TruncatedTables));
+        }
+        return activity;
+    }
+
+    /// <summary>Root span for one coalesced batch of small transactions.</summary>
+    internal Activity? StartTransaction(
+        string slot, IReadOnlyList<CommittedTransaction> batch, int totalChanges,
+        BatchFlushReason flushReason, double lagSeconds)
+    {
+        var activity = StartTransactionCore(
+            slot, batch.Count, flushReason, batch[0].CommitLsn, batch[^1].EndLsn, lagSeconds);
+        activity?.SetTag(TxnSizeTag, totalChanges);
+        return activity;
+    }
+
+    private Activity? StartTransactionCore(
+        string slot, int txnCount, BatchFlushReason flushReason, ulong commitLsn, ulong endLsn, double lagSeconds)
+    {
+        var activity = _activitySource.StartActivity(TransactionActivity, ActivityKind.Consumer);
+        if (activity is null)
+        {
+            return null;
+        }
+
+        activity.SetTag(SlotTag, slot);
+        activity.SetTag(BatchTxnCountTag, txnCount);
+        activity.SetTag(BatchFlushReasonTag, FlushReasonString(flushReason));
+        activity.SetTag(TxnCommitLsnTag, (long)commitLsn);
+        activity.SetTag(TxnEndLsnTag, (long)endLsn);
+        if (lagSeconds >= 0)
+        {
+            activity.SetTag(IngestionLagTag, lagSeconds);
+        }
+        return activity;
+    }
+
     internal Activity? StartDependentResolve() => _activitySource.StartActivity(DependentResolveActivity);
     internal Activity? StartRoute() => _activitySource.StartActivity(RouteActivity);
     internal Activity? StartTransform() => _activitySource.StartActivity(TransformActivity);
@@ -153,7 +233,23 @@ public sealed class WallabyInstrumentation : IDisposable
         BackfillChunkActivity, ActivityKind.Internal, parentContext: default,
         links: backfillRun == default ? null : [new ActivityLink(backfillRun)]);
 
-    internal Activity? StartAck() => _activitySource.StartActivity(AckActivity);
+    /// <summary>Ack span covering the server acknowledgement and checkpoint write; a batch ack also carries its transaction count.</summary>
+    internal Activity? StartAck(string slot, ulong endLsn, int? txnCount = null)
+    {
+        var activity = _activitySource.StartActivity(AckActivity);
+        if (activity is null)
+        {
+            return null;
+        }
+
+        activity.SetTag(SlotTag, slot);
+        activity.SetTag(TxnEndLsnTag, (long)endLsn);
+        if (txnCount is not null)
+        {
+            activity.SetTag(BatchTxnCountTag, txnCount);
+        }
+        return activity;
+    }
 
     // ---- leader bootstrap (per leadership term, before streaming) ----
 
@@ -285,6 +381,17 @@ public sealed class WallabyInstrumentation : IDisposable
             _backfillChunkDuration.Record(ElapsedSeconds(startTimestamp), new KeyValuePair<string, object?>(TableTag, table));
         }
     }
+
+    private static string FlushReasonString(BatchFlushReason reason) => reason switch
+    {
+        BatchFlushReason.Disabled => "disabled",
+        BatchFlushReason.Boundary => "boundary",
+        BatchFlushReason.Idle => "idle",
+        BatchFlushReason.TransactionCap => "txn_cap",
+        BatchFlushReason.SizeCap => "size_cap",
+        BatchFlushReason.Ended => "ended",
+        _ => "unknown",
+    };
 
     private static string ActionString(ChangeAction action) => action switch
     {

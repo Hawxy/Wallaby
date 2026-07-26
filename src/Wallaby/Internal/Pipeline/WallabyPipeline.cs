@@ -82,8 +82,8 @@ internal sealed class WallabyPipeline(
             try
             {
                 processed = batch.Count == 1
-                    ? await ProcessTransactionAsync(batch[0], ct)
-                    : await ProcessBatchAsync(batch, ct);
+                    ? await ProcessTransactionAsync(batch[0], batcher.LastFlushReason, ct)
+                    : await ProcessBatchAsync(batch, batcher.LastFlushReason, ct);
             }
             finally
             {
@@ -122,44 +122,14 @@ internal sealed class WallabyPipeline(
 
     // Process one committed transaction end-to-end: materialize, route, deliver, then acknowledge to the
     // server and record the checkpoint. Returns the number of changes processed.
-    private async Task<int> ProcessTransactionAsync(CommittedTransaction transaction, CancellationToken ct)
+    private async Task<int> ProcessTransactionAsync(
+        CommittedTransaction transaction, BatchFlushReason flushReason, CancellationToken ct)
     {
         var lagSeconds = transaction.CommitTimestamp is { } commitTs
             ? Math.Max(0, (DateTimeOffset.UtcNow - commitTs).TotalSeconds)
             : -1;
 
-        using var activity = _instr.StartTransaction();
-        if (activity is not null)
-        {
-            activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
-            activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
-            activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-            activity.SetTag("wallaby.txn.streamed", transaction.IsStreamed);
-            if (!transaction.IsStreamed)
-            {
-                activity.SetTag("wallaby.txn.size", transaction.Changes.Count);
-            }
-            if (lagSeconds >= 0)
-            {
-                activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
-            }
-            // Marks the tiny transactions that exist only to bracket a backfill chunk, so they can be
-            // filtered in a trace viewer.
-            if (transaction.Watermarks.Count > 0)
-            {
-                activity.SetTag("wallaby.watermark",
-                    transaction.Watermarks[0].Prefix == WallabySchema.WatermarkLowPrefix ? "low" : "high");
-            }
-            // Marks idle-slot heartbeat transactions, so they can be filtered in a trace viewer.
-            if (transaction.ContainsHeartbeat)
-            {
-                activity.SetTag("wallaby.heartbeat", true);
-            }
-            if (transaction.TruncatedTables.Count > 0)
-            {
-                activity.SetTag("wallaby.truncate", string.Join(",", transaction.TruncatedTables));
-            }
-        }
+        using var activity = _instr.StartTransaction(slotName, transaction, flushReason, lagSeconds);
 
         // Warn before dispatch so the divergence is on record even if a sink faults below.
         if (transaction.TruncatedTables.Count > 0)
@@ -181,13 +151,11 @@ internal sealed class WallabyPipeline(
             // A streamed transaction's size is only known once its spill has been read through.
             if (transaction.IsStreamed)
             {
-                activity?.SetTag("wallaby.txn.size", processed);
+                activity?.SetTag(WallabyInstrumentation.TxnSizeTag, processed);
             }
 
-            using (var ackActivity = _instr.StartAck())
+            using (_instr.StartAck(slotName, transaction.EndLsn))
             {
-                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
-                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
                 await stream.AcknowledgeAsync(transaction.EndLsn, ct);
                 Volatile.Write(ref _lastAcknowledgedLsn, transaction.EndLsn);
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
@@ -211,7 +179,8 @@ internal sealed class WallabyPipeline(
     // transaction's EndLsn) for the whole batch, changes concatenated in commit order. Boundary
     // transactions (streamed, watermark-carrying) never reach here; the batcher keeps them solo. A
     // failure acks nothing: the entire batch re-streams on the next leader session (at-least-once).
-    private async Task<long> ProcessBatchAsync(IReadOnlyList<CommittedTransaction> batch, CancellationToken ct)
+    private async Task<long> ProcessBatchAsync(
+        IReadOnlyList<CommittedTransaction> batch, BatchFlushReason flushReason, CancellationToken ct)
     {
         var last = batch[^1];
         var lagSeconds = batch[0].CommitTimestamp is { } oldestTs
@@ -227,19 +196,7 @@ internal sealed class WallabyPipeline(
             totalChanges += transaction.Changes.Count;
         }
 
-        using var activity = _instr.StartTransaction();
-        if (activity is not null)
-        {
-            activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
-            activity.SetTag("wallaby.batch.txn_count", batch.Count);
-            activity.SetTag("wallaby.txn.lsn.commit", (long)batch[0].CommitLsn);
-            activity.SetTag("wallaby.txn.lsn.end", (long)last.EndLsn);
-            activity.SetTag("wallaby.txn.size", totalChanges);
-            if (lagSeconds >= 0)
-            {
-                activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
-            }
-        }
+        using var activity = _instr.StartTransaction(slotName, batch, totalChanges, flushReason, lagSeconds);
 
         // Warn before dispatch so the divergence is on record even if a sink faults below.
         foreach (var transaction in batch)
@@ -280,11 +237,8 @@ internal sealed class WallabyPipeline(
                 await ResolveAndDispatchFanoutAsync(ToAsync(batch, ct), BuildLiveKeyIndex(appEvents), ct);
             }
 
-            using (var ackActivity = _instr.StartAck())
+            using (_instr.StartAck(slotName, last.EndLsn, batch.Count))
             {
-                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
-                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)last.EndLsn);
-                ackActivity?.SetTag("wallaby.batch.txn_count", batch.Count);
                 await stream.AcknowledgeAsync(last.EndLsn, ct);
                 Volatile.Write(ref _lastAcknowledgedLsn, last.EndLsn);
                 await checkpoints.SaveAsync(slotName, new Checkpoint(last.EndLsn, DateTimeOffset.UtcNow), ct);

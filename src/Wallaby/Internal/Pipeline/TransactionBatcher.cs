@@ -2,6 +2,28 @@ using Wallaby.Internal.Replication;
 
 namespace Wallaby.Internal.Pipeline;
 
+/// <summary>Why a batch was closed and handed to the pipeline.</summary>
+internal enum BatchFlushReason
+{
+    /// <summary>Coalescing is off (<c>MaxTransactionsPerBatch</c> is 1).</summary>
+    Disabled,
+
+    /// <summary>A streamed or watermark-carrying transaction forced a batch edge.</summary>
+    Boundary,
+
+    /// <summary>The stream had nothing more buffered.</summary>
+    Idle,
+
+    /// <summary>The batch reached <c>MaxTransactionsPerBatch</c>.</summary>
+    TransactionCap,
+
+    /// <summary>The batch reached <c>MaxBatchSize</c> changes.</summary>
+    SizeCap,
+
+    /// <summary>The stream ended.</summary>
+    Ended,
+}
+
 /// <summary>
 /// Accumulates committed transactions into bounded batches by greedy drain: after awaiting the first
 /// transaction, more are added only while the stream's <c>MoveNextAsync</c> completes synchronously
@@ -37,6 +59,9 @@ internal sealed class TransactionBatcher : IAsyncDisposable
     /// <summary>Whether a stream read is in flight (Npgsql is answering the server's keepalives).</summary>
     public bool ReadInFlight => _pending is { IsCompleted: false };
 
+    /// <summary>Why the batch most recently returned by <see cref="ReadBatchAsync"/> was closed.</summary>
+    public BatchFlushReason LastFlushReason { get; private set; }
+
     /// <summary>Read the next batch in stream order, or null at end of stream.</summary>
     public async Task<IReadOnlyList<CommittedTransaction>?> ReadBatchAsync()
     {
@@ -56,27 +81,46 @@ internal sealed class TransactionBatcher : IAsyncDisposable
             first = _enumerator.Current;
         }
 
-        if (_maxTransactions == 1 || IsBoundary(first))
+        if (_maxTransactions == 1)
         {
+            LastFlushReason = BatchFlushReason.Disabled;
+            return [first];
+        }
+        if (IsBoundary(first))
+        {
+            LastFlushReason = BatchFlushReason.Boundary;
             return [first];
         }
 
         List<CommittedTransaction> batch = [first];
         var changes = first.Changes.Count;
 
-        while (batch.Count < _maxTransactions && changes < _maxChanges)
+        while (true)
         {
+            if (batch.Count >= _maxTransactions)
+            {
+                LastFlushReason = BatchFlushReason.TransactionCap;
+                break;
+            }
+            if (changes >= _maxChanges)
+            {
+                LastFlushReason = BatchFlushReason.SizeCap;
+                break;
+            }
+
             var read = _enumerator.MoveNextAsync();
             if (!read.IsCompletedSuccessfully)
             {
                 // Pending (stream idle) or faulted: stop here. A fault is stashed and surfaces on the
                 // next call, after the transactions already read have been delivered and acknowledged.
                 _pending = read.AsTask();
+                LastFlushReason = BatchFlushReason.Idle;
                 break;
             }
             if (!read.Result)
             {
                 _ended = true;
+                LastFlushReason = BatchFlushReason.Ended;
                 break;
             }
 
@@ -84,6 +128,7 @@ internal sealed class TransactionBatcher : IAsyncDisposable
             if (IsBoundary(next))
             {
                 _carried = next;
+                LastFlushReason = BatchFlushReason.Boundary;
                 break;
             }
             batch.Add(next);

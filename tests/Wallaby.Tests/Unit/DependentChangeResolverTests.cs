@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Testing;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Internal.Backfill;
@@ -117,6 +119,67 @@ public class DependentChangeResolverTests
         results.ShouldHaveSingleItem().RebackfillTable.ShouldNotBeNull();
     }
 
+    [Test]
+    public async Task An_update_repointing_the_lookup_fans_out_to_both_values()
+    {
+        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        var resolver = new DependentChangeResolver(
+            dataSource, BuildModel(), instrumentation: null, maxKeysPerTransaction: 1_000_000, chunkSize: 2);
+        var chunks = new List<ScopedFanoutSpec>();
+
+        // One change whose old tuple carries a different lookup value: both scopes need refreshing
+        // (the rows the lookup left behind would otherwise keep a stale copy).
+        var results = await resolver.ResolveFirstPagesAsync(
+            Changes(CategoryChange(id: 1, oldId: 2)), pageSize: 100,
+            (spec, _) => { chunks.Add(spec); return Task.CompletedTask; }, CancellationToken.None);
+
+        chunks.ShouldHaveSingleItem().LookupValues.Select(t => t[0]).ShouldBe([1, 2], ignoreOrder: true);
+        results.ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task An_update_with_an_unchanged_old_lookup_counts_the_key_once()
+    {
+        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        var resolver = new DependentChangeResolver(
+            dataSource, BuildModel(), instrumentation: null, maxKeysPerTransaction: 1_000_000, chunkSize: 1);
+        var chunks = new List<ScopedFanoutSpec>();
+
+        await resolver.ResolveFirstPagesAsync(
+            Changes(CategoryChange(id: 7, oldId: 7)), pageSize: 100,
+            (spec, _) => { chunks.Add(spec); return Task.CompletedTask; }, CancellationToken.None);
+
+        chunks.ShouldHaveSingleItem().LookupValues.ShouldHaveSingleItem()[0].ShouldBe(7);
+    }
+
+    [Test]
+    public async Task An_update_without_old_lookup_values_logs_once_per_table()
+    {
+        await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
+        var collector = new FakeLogCollector();
+        var resolver = new DependentChangeResolver(
+            dataSource, BuildModel(), instrumentation: null, maxKeysPerTransaction: 1_000_000, chunkSize: 1,
+            logger: new FakeLogger(collector));
+
+        await resolver.ResolveFirstPagesAsync(
+            Changes(CategoryChange(id: 1), CategoryChange(id: 2)), pageSize: 100,
+            (_, _) => Task.CompletedTask, CancellationToken.None);
+
+        var record = collector.GetSnapshot().ShouldHaveSingleItem();
+        record.Level.ShouldBe(LogLevel.Debug);
+        record.Message.ShouldContain("public.categories");
+        record.Message.ShouldContain("REPLICA IDENTITY");
+    }
+
+    private static async IAsyncEnumerable<RawChange> Changes(params RawChange[] changes)
+    {
+        foreach (var change in changes)
+        {
+            yield return change;
+        }
+        await Task.CompletedTask;
+    }
+
     private static async IAsyncEnumerable<RawChange> DistinctLookupChanges(int count)
     {
         for (var i = 0; i < count; i++)
@@ -135,14 +198,14 @@ public class DependentChangeResolverTests
         await Task.CompletedTask;
     }
 
-    private static RawChange CategoryChange(int id) => new()
+    private static RawChange CategoryChange(int id, int? oldId = null) => new()
     {
         RelationId = 0,
         Schema = "public",
         TableName = "categories",
         Action = ChangeAction.Update,
         NewValues = [new RawColumn { ColumnName = "id", Value = id }],
-        OldValues = null,
+        OldValues = oldId is null ? null : [new RawColumn { ColumnName = "id", Value = oldId.Value }],
     };
 
     private static WallabyModel BuildModel()

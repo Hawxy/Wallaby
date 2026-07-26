@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
@@ -29,9 +31,13 @@ internal sealed record FanoutResult(
 /// </summary>
 internal sealed class DependentChangeResolver(
     NpgsqlDataSource dataSource, WallabyModel model, WallabyInstrumentation? instrumentation = null,
-    int maxKeysPerTransaction = 1_000_000, int chunkSize = 10_000)
+    int maxKeysPerTransaction = 1_000_000, int chunkSize = 10_000, ILogger? logger = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
+
+    // Dependent tables already logged for an update whose old tuple couldn't supply the lookup.
+    private readonly HashSet<string> _oldLookupLogged = [];
 
     // The Seen set is cleared once it reaches this many entries, so dedup memory stays bounded on a
     // wide fan-out. A key recurring across clearing windows yields overlapping chunk jobs, which
@@ -58,6 +64,47 @@ internal sealed class DependentChangeResolver(
         Dictionary<DependentBinding, BindingAccumulator>? perBinding = null;
         var chunksEnqueued = 0;
 
+        async ValueTask AcceptAsync(DependentBinding binding, object?[] values, RawChange change)
+        {
+            perBinding ??= [];
+            if (!perBinding.TryGetValue(binding, out var acc))
+            {
+                acc = new BindingAccumulator();
+                perBinding[binding] = acc;
+            }
+
+            if (acc.Overflowed)
+            {
+                return;
+            }
+
+            if (acc.Seen.Add(values))
+            {
+                acc.TotalKeys++;
+                if (acc.TotalKeys > maxKeysPerTransaction)
+                {
+                    // Effectively a rewrite of the dependent table; a whole-table re-snapshot beats
+                    // queueing more chunks (any already enqueued are superseded but harmless).
+                    acc.Overflow();
+                    return;
+                }
+
+                acc.Tuples.Add(values);
+                if (acc.Tuples.Count >= chunkSize && enqueueTail is not null)
+                {
+                    // Offload the full chunk now, so the key set never accumulates past chunkSize.
+                    // Chunks are cut at fixed counts in the stream's deterministic order, so a
+                    // redelivered transaction re-derives identical chunks and the queue coalesces
+                    // them by lookup hash.
+                    await enqueueTail(
+                        new ScopedFanoutSpec(binding.PrimaryTable, LookupColumns(binding), [.. acc.Tuples]), ct);
+                    chunksEnqueued++;
+                    acc.FlushChunk(_seenLimit);
+                }
+            }
+            acc.Representative = change;
+        }
+
         await foreach (var change in changes.WithCancellation(ct))
         {
             var bindings = model.FindBindingsForDependent(change.Schema, change.TableName);
@@ -74,50 +121,36 @@ internal sealed class DependentChangeResolver(
             }
 
             var sourceByName = IndexColumns(source);
+            Dictionary<string, RawColumn>? oldByName = null;
             foreach (var binding in bindings)
             {
-                if (!TryExtractLookup(sourceByName, binding, out var values))
+                var matched = TryExtractLookup(sourceByName, binding, out var values);
+                if (matched)
+                {
+                    await AcceptAsync(binding, values, change);
+                }
+
+                // An update that re-points the lookup affects two primary scopes: the row's new lookup
+                // value and the one it left behind. Without the old tuple's value the departed scope
+                // keeps its stale copy; observing it requires REPLICA IDENTITY FULL on the dependent
+                // table (the default identity sends no old tuple for a non-key change).
+                if (change.Action != ChangeAction.Update)
                 {
                     continue;
                 }
-
-                perBinding ??= [];
-                if (!perBinding.TryGetValue(binding, out var acc))
+                if (change.OldValues is { Count: > 0 } oldValuesSource)
                 {
-                    acc = new BindingAccumulator();
-                    perBinding[binding] = acc;
-                }
-
-                if (acc.Overflowed)
-                {
-                    continue;
-                }
-
-                if (acc.Seen.Add(values))
-                {
-                    acc.TotalKeys++;
-                    if (acc.TotalKeys > maxKeysPerTransaction)
+                    oldByName ??= IndexColumns(oldValuesSource);
+                    if (TryExtractLookup(oldByName, binding, out var oldValues))
                     {
-                        // Effectively a rewrite of the dependent table; a whole-table re-snapshot beats
-                        // queueing more chunks (any already enqueued are superseded but harmless).
-                        acc.Overflow();
+                        if (!matched || !LookupTupleComparer.Instance.Equals(values, oldValues))
+                        {
+                            await AcceptAsync(binding, oldValues, change);
+                        }
                         continue;
                     }
-
-                    acc.Tuples.Add(values);
-                    if (acc.Tuples.Count >= chunkSize && enqueueTail is not null)
-                    {
-                        // Offload the full chunk now, so the key set never accumulates past chunkSize.
-                        // Chunks are cut at fixed counts in the stream's deterministic order, so a
-                        // redelivered transaction re-derives identical chunks and the queue coalesces
-                        // them by lookup hash.
-                        await enqueueTail(
-                            new ScopedFanoutSpec(binding.PrimaryTable, LookupColumns(binding), [.. acc.Tuples]), ct);
-                        chunksEnqueued++;
-                        acc.FlushChunk(_seenLimit);
-                    }
                 }
-                acc.Representative = change;
+                LogOldLookupUnavailable(change);
             }
         }
 
@@ -214,6 +247,14 @@ internal sealed class DependentChangeResolver(
             activity?.SetTag("wallaby.fanout.chunks", chunksEnqueued);
         }
         return results;
+    }
+
+    private void LogOldLookupUnavailable(RawChange change)
+    {
+        if (_oldLookupLogged.Add($"{change.Schema}.{change.TableName}"))
+        {
+            _logger.DependentOldLookupUnavailable(change.Schema, change.TableName);
+        }
     }
 
     private static string[] LookupColumns(DependentBinding binding)
@@ -338,4 +379,11 @@ internal sealed class DependentChangeResolver(
             return hash.ToHashCode();
         }
     }
+}
+
+/// <summary>Source-generated log messages for <see cref="DependentChangeResolver"/>.</summary>
+internal static partial class DependentChangeResolverLog
+{
+    [LoggerMessage(Level = LogLevel.Debug, Message = "An update on dependent table {Schema}.{Table} carried no old lookup values (REPLICA IDENTITY is not FULL); a re-pointed lookup column fans out only to its new value's rows. Set REPLICA IDENTITY FULL on the table to also refresh the rows it left behind. Logged once per table.")]
+    internal static partial void DependentOldLookupUnavailable(this ILogger logger, string schema, string table);
 }

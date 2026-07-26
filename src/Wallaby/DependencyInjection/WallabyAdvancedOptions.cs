@@ -30,8 +30,9 @@ public sealed class WallabyAdvancedOptions
     /// <c>DependsOn</c> binding. A wide fan-out is offloaded to the queue in bounded chunk jobs as the
     /// keys accumulate, so memory stays flat regardless of size; past this cap the transaction has
     /// effectively rewritten the dependent table, and the binding's whole primary table is re-snapshotted
-    /// instead (backfill is upsert-only, so the wider scan converges to the same result). Must be greater
-    /// than zero.
+    /// instead (backfill is upsert-only, so the wider scan converges to the same result). An update whose
+    /// old tuple carries a different lookup value counts both values, so a table under REPLICA IDENTITY
+    /// FULL can consume up to two keys per change. Must be greater than zero.
     /// </summary>
     public int MaxFanoutKeysPerTransaction { get; set; } = 1_000_000;
 

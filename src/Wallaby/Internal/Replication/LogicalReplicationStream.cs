@@ -119,6 +119,8 @@ internal sealed class LogicalReplicationStream(
 
     // NULL array elements throw at decode under Npgsql's default ArrayNullabilityMode.Never; PerInstance
     // decodes them as Nullable<T>[] instead. Applied unless the consumer configured the mode explicitly.
+    // Npgsql rejects a multi-host replication connection outright, so a multi-host string must be
+    // resolved to the primary first; see ReplicationPrimaryResolver.
     private static string WithArrayNullability(string connectionString)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString);

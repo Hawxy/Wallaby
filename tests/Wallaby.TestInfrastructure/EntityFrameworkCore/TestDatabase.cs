@@ -171,6 +171,13 @@ public sealed class TestDatabase(string connectionString)
         return products.Select(p => p.Id).ToList();
     }
 
+    public async Task SetProductCategoryAsync(int productId, int categoryId)
+    {
+        await using var ctx = NewContext();
+        (await ctx.Products.FindAsync(productId))!.CategoryId = categoryId;
+        await ctx.SaveChangesAsync();
+    }
+
     /// <summary>Set a table's replica identity to FULL so old-row values (incl. scope keys) are present on delete.</summary>
     public Task SetReplicaIdentityFullAsync(string table) => SetReplicaIdentityAsync(table, "FULL");
 

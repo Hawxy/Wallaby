@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
@@ -86,8 +87,17 @@ internal sealed class LeaderSession(
         // cleared by the stream once it exclusively holds the slot.
         await using var spill = CreateSpill();
 
+        // Npgsql rejects a multi-host replication connection, so a multi-host string is resolved to its
+        // primary by probing; re-resolved each session, so a failover is picked up on re-election.
+        var replicationConnectionString = await ReplicationPrimaryResolver.ResolveAsync(
+            dataSource.ConnectionString, linked.Token);
+        if (!ReferenceEquals(replicationConnectionString, dataSource.ConnectionString))
+        {
+            _logger.ReplicationPrimaryResolved(new NpgsqlConnectionStringBuilder(replicationConnectionString).Host!);
+        }
+
         await using var stream = new LogicalReplicationStream(
-            dataSource.ConnectionString, options.SlotName, options.PublicationName, spill,
+            replicationConnectionString, options.SlotName, options.PublicationName, spill,
             options.Advanced.MaxBufferedChangesPerTransaction, components.Model);
         var changeEventFactory = new ChangeEventFactory(components.Materializer);
         var pipeline = new WallabyPipeline(
@@ -310,6 +320,9 @@ internal static partial class LeaderSessionLog
 {
     [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot '{Slot}' was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
     internal static partial void SlotGapDetected(this ILogger logger, string slot, string checkpointLsn, string consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Resolved '{Host}' as the primary for the replication connection (multi-host connection string).")]
+    internal static partial void ReplicationPrimaryResolved(this ILogger logger, string host);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Backfill scheduler failed.")]
     internal static partial void BackfillSchedulerFailed(this ILogger logger, Exception ex);
