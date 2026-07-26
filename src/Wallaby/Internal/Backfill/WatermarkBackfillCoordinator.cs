@@ -39,6 +39,9 @@ internal sealed class WatermarkBackfillCoordinator(
 
     public int ChunkSize { get; init; } = 500;
 
+    /// <summary>The opt-in visibility fence each chunk waits on after its low-watermark emission; null = disabled.</summary>
+    public VisibilityFence? Fence { get; init; }
+
     // A long backfill reports progress at most this often (its start/completion are always logged).
     private static readonly TimeSpan ProgressLogInterval = TimeSpan.FromSeconds(30);
 
@@ -186,6 +189,10 @@ internal sealed class WatermarkBackfillCoordinator(
                 _byToken[current.Token] = current;
 
                 await EmitWatermarkAsync(emitter, WallabySchema.WatermarkLowPrefix, current.Token, ct);
+                if (Fence is not null)
+                {
+                    await Fence.WaitAsync(emitter, qualifiedTable, ct);
+                }
                 var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
                 current.Buffer = chunk.Rows;
                 await EmitWatermarkAsync(emitter, WallabySchema.WatermarkHighPrefix, current.Token, ct);

@@ -100,4 +100,15 @@ public sealed class WallabyAdvancedOptions
     /// every acknowledged transaction.
     /// </summary>
     public TimeSpan CheckpointSaveInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Opt-in visibility fence for watermark backfill: after emitting a chunk's low watermark, wait up to
+    /// this long until no transaction in the current snapshot has already committed, closing the narrow
+    /// race where a commit lands just before the watermark but is visible to neither the chunk read nor
+    /// the window's live capture (leaving a stale document until the next backfill). The fence polls
+    /// <c>pg_xact_status</c>, which must be available to Wallaby's role on the server; long-running open
+    /// transactions do not pin it (they are in progress, not committed). On timeout a warning is logged
+    /// and the chunk proceeds unfenced. <see cref="TimeSpan.Zero"/> (the default) disables the fence.
+    /// </summary>
+    public TimeSpan WatermarkVisibilityFenceTimeout { get; set; } = TimeSpan.Zero;
 }

@@ -79,6 +79,9 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>Backfill keyset page size (set before <see cref="StartAsync"/>).</summary>
     public int ChunkSize { get; set; } = 50;
 
+    /// <summary>Watermark visibility fence; null = disabled (set before <see cref="StartAsync"/>).</summary>
+    internal VisibilityFence? VisibilityFence { get; set; }
+
     /// <summary>Maximum records per dispatched batch and per inline fan-out page (set before <see cref="StartAsync"/>).</summary>
     public int MaxBatchSize { get; set; } = 1000;
 
@@ -262,7 +265,11 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot);
         _stream = new LogicalReplicationStream(ConnectionString, Names.Slot, Names.Publication, _spill, model: _model);
         _coordinator = new WatermarkBackfillCoordinator(
-            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
+            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation)
+        {
+            ChunkSize = ChunkSize,
+            Fence = VisibilityFence,
+        };
 
         IChangeRouter router;
         if (_broadcast)

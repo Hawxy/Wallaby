@@ -118,7 +118,11 @@ internal sealed class WallabyComponents : IAsyncDisposable
             Dispatcher = new SinkDispatcher(sinks, logger, instrumentation, options.SinkRetry, status),
             Sinks = sinks,
             Coordinator = new WatermarkBackfillCoordinator(
-                dataSource.Source, backfillStore, logger, instrumentation) { ChunkSize = options.ChunkSize },
+                dataSource.Source, backfillStore, logger, instrumentation)
+            {
+                ChunkSize = options.ChunkSize,
+                Fence = VisibilityFence.FromTimeout(options.Advanced.WatermarkVisibilityFenceTimeout, logger),
+            },
             SelfConfigurator = new PostgresSelfConfigurator(
                 dataSource.Source,
                 new SelfConfigOptions

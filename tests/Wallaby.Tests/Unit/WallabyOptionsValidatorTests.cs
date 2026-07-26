@@ -91,6 +91,17 @@ public class WallabyOptionsValidatorTests
     }
 
     [Test]
+    public void Negative_visibility_fence_timeout_fails()
+    {
+        var options = ValidOptions();
+        options.Advanced.WatermarkVisibilityFenceTimeout = TimeSpan.FromSeconds(-1);
+        Validate(options).Failed.ShouldBeTrue();
+
+        options.Advanced.WatermarkVisibilityFenceTimeout = TimeSpan.Zero;
+        Validate(options).Succeeded.ShouldBeTrue();
+    }
+
+    [Test]
     public void Non_positive_retry_and_poll_intervals_fail()
     {
         var options = ValidOptions();
