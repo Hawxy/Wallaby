@@ -136,10 +136,11 @@ SELECT pg_notify('wallaby_control', '');
 ## What to expect on resume
 
 - The primary slot and publications are recreated by normal self-configuration on the next leader
-  election, and the recreated slot's consistent point is ahead of the persisted checkpoint — so
-  slot-loss gap detection marks **every mapped table for a full re-backfill**. Changes committed while
-  suspended are recovered; sinks must be idempotent (upsert/delete by id), which the
-  [sink contract](/sinks/custom) already requires.
+  election, and slot-loss gap detection marks **every mapped table for a full re-backfill**: the
+  recreated slot's consistent point is ahead of the persisted checkpoint, and an installation
+  suspended before its first checkpoint was ever written is detected through the slot's surviving
+  `wallaby.slot_registry` row. Changes committed while suspended are recovered either way; sinks must
+  be idempotent (upsert/delete by id), which the [sink contract](/sinks/custom) already requires.
 - **External slots** are recreated too, but their consumers' positions are gone: the external tool must
   re-sync from scratch (the same situation as any dropped slot). Plan its re-sync alongside the upgrade.
 - Until the re-backfill completes, sinks are stale by however long the suspension lasted.

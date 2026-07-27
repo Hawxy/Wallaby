@@ -228,9 +228,12 @@ internal sealed class LeaderSession(
     /// <summary>
     /// Detects and repairs a slot-loss gap: a persisted checkpoint behind the slot's consistent point can
     /// only mean the slot was recreated after that checkpoint was written (invalidation, failover, manual
-    /// drop), so every change between the two LSNs was never streamed. Repairs by marking all mapped
-    /// tables for re-backfill; the marks are durable before the checkpoint advances to the consistent
-    /// point, so a crash mid-repair re-detects on the next leader session.
+    /// drop), so every change between the two LSNs was never streamed. A recreated slot with no
+    /// checkpoint at all is the same gap observed before the first interval-throttled checkpoint save
+    /// (e.g. suspend/resume early in an install's life, or while it only ever backfilled), so it
+    /// repairs too. Repairs by marking all mapped tables for re-backfill; the marks are durable before
+    /// the checkpoint advances to the consistent point, so a crash mid-repair re-detects on the next
+    /// leader session.
     /// </summary>
     private async Task RepairSlotGapAsync(SelfConfigResult selfConfig, CancellationToken ct)
     {
@@ -243,16 +246,32 @@ internal sealed class LeaderSession(
 
         var checkpoint = await components.CheckpointsDirect.GetAsync(options.SlotName, ct);
         var consistentLsn = ParseLsn(consistentPoint);
-        if (checkpoint is null || checkpoint.ConfirmedLsn >= consistentLsn)
+        if (checkpoint is null)
+        {
+            // No checkpoint has ever been written for this slot. If the slot is a recreation, the
+            // installation may have delivered before the slot was dropped; nothing proves continuity,
+            // so repair. A first-ever slot (no prior registry row) has missed nothing.
+            if (!selfConfig.SlotRecreated)
+            {
+                return;
+            }
+            _logger.SlotRecreatedBeforeFirstCheckpoint(options.SlotName, consistentPoint);
+        }
+        else if (checkpoint.ConfirmedLsn >= consistentLsn)
         {
             return;
         }
+        else
+        {
+            _logger.SlotGapDetected(
+                options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
+        }
 
-        _logger.SlotGapDetected(
-            options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
         repair?.AddEvent(new ActivityEvent("slot.gap", tags: new ActivityTagsCollection
         {
-            ["wallaby.lsn.checkpoint"] = new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(),
+            ["wallaby.lsn.checkpoint"] = checkpoint is null
+                ? "none"
+                : new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(),
             ["wallaby.lsn.consistent"] = consistentPoint,
         }));
 
@@ -320,6 +339,9 @@ internal static partial class LeaderSessionLog
 {
     [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot '{Slot}' was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
     internal static partial void SlotGapDetected(this ILogger logger, string slot, string checkpointLsn, string consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot '{Slot}' was recreated (at {ConsistentPoint}) before its first checkpoint was written: changes committed while the slot was gone were never streamed. Re-backfilling all mapped tables to converge sinks.")]
+    internal static partial void SlotRecreatedBeforeFirstCheckpoint(this ILogger logger, string slot, string consistentPoint);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Resolved '{Host}' as the primary for the replication connection (multi-host connection string).")]
     internal static partial void ReplicationPrimaryResolved(this ILogger logger, string host);

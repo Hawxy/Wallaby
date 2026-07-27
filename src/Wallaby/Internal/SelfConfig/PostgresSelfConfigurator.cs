@@ -48,7 +48,7 @@ internal sealed class PostgresSelfConfigurator(
             {
                 await ValidatePartitionedCapturesAsync(connection, model, ct);
             }
-            var (slotCreated, consistentPoint) = await _slots.EnsureAsync(
+            var (slotCreated, consistentPoint, slotRecreated) = await _slots.EnsureAsync(
                 connection, options.SlotName, options.PublicationName, kind: "primary", ct);
             await ValidateReplicaIdentityAsync(connection, model, warnings, ct);
             var externalResults = await EnsureExternalSlotsAsync(connection, ct);
@@ -56,8 +56,8 @@ internal sealed class PostgresSelfConfigurator(
             logger.SelfConfigComplete(options.PublicationName, publication.Created, options.SlotName, slotCreated);
 
             return new SelfConfigResult(
-                options.PublicationName, options.SlotName, publication.Created, slotCreated, consistentPoint, warnings,
-                externalResults);
+                options.PublicationName, options.SlotName, publication.Created, slotCreated, consistentPoint,
+                slotRecreated, warnings, externalResults);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -106,7 +106,7 @@ internal sealed class PostgresSelfConfigurator(
                 .ToList();
             var publication = await _publications.EnsureAsync(
                 connection, spec.PublicationName, tables, reconcile: true, warnings: null, ct);
-            var (slotCreated, _) = await _slots.EnsureAsync(
+            var (slotCreated, _, _) = await _slots.EnsureAsync(
                 connection, spec.SlotName, spec.PublicationName, kind: "external", ct);
             logger.ExternalSlotConfigured(spec.SlotName, spec.PublicationName);
             results.Add(new ExternalSlotResult(spec.SlotName, spec.PublicationName, publication.Created, slotCreated));

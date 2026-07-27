@@ -122,20 +122,89 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
             await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, resumedCapture)))
             {
                 await WallabyReadiness.WaitForStreamingAsync(node.Services);
-                try
-                {
-                    await resumedCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
-                }
-                catch (TimeoutException ex)
-                {
-                    // TEMP diagnostics: dump the wallaby state tables only after the failure has happened.
-                    throw new TimeoutException(ex.Message + await DumpStateAsync(names), ex);
-                }
+                await resumedCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
             }
         }
         finally
         {
             await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_resume_before_the_first_checkpoint_still_re_backfills()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        try
+        {
+            // Phase 0: a normal deployment streams one product.
+            var firstCapture = new CaptureSink();
+            int categoryId, firstId;
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, firstCapture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                categoryId = await Db.AddCategoryAsync();
+                firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+                await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
+            }
+
+            await DeleteCheckpointAsync(names.Slot);
+
+            // Phase 1: deploy with Suspend(); the node drops the slots and idles.
+            await using (var node = await WallabyTestNode.StartAsync(
+                BuildServices(names, new CaptureSink(), suspendFlag: true)))
+            {
+                await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+                (await SlotExistsAsync(names.Slot)).ShouldBeFalse();
+            }
+
+            var missedId = await Db.AddProductAsync(categoryId, $"missed_{names.Suffix}");
+
+            // Phase 2: with no checkpoint, only the recreated slot's surviving slot_registry row can
+            // prove the installation predates the new slot; the repair must still fire.
+            var resumedCapture = new CaptureSink();
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, resumedCapture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                await resumedCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
+                var latest = resumedCapture.LatestByDocumentId(destination: "products");
+                latest[missedId.ToString()].Document!["name"].ShouldBe($"missed_{names.Suffix}");
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_restart_with_an_intact_slot_and_no_checkpoint_does_not_re_backfill()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+
+        var firstCapture = new CaptureSink();
+        int categoryId, firstId;
+        await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, firstCapture)))
+        {
+            await WallabyReadiness.WaitForStreamingAsync(node.Services);
+            categoryId = await Db.AddCategoryAsync();
+            firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+            await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
+        }
+
+        await DeleteCheckpointAsync(names.Slot);
+
+        // The slot survived the restart, so WAL continuity is intact: a missing checkpoint row alone
+        // must not trigger a re-backfill.
+        var secondCapture = new CaptureSink();
+        await using (var restarted = await WallabyTestNode.StartAsync(BuildServices(names, secondCapture)))
+        {
+            await WallabyReadiness.WaitForStreamingAsync(restarted.Services);
+            var liveId = await Db.AddProductAsync(categoryId, $"live_{names.Suffix}");
+            await secondCapture.WaitForDocumentsAsync([liveId.ToString()]);
+
+            secondCapture.LatestByDocumentId(destination: "products")
+                .ContainsKey(firstId.ToString()).ShouldBeFalse();
         }
     }
 
@@ -322,44 +391,15 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         return services;
     }
 
-    // TEMP diagnostics for the intermittent phase-2 timeout.
-    private async Task<string> DumpStateAsync(WallabyNames names)
+    // Simulates the pre-first-checkpoint window deterministically: streaming checkpoint saves race
+    // disposal, and an idle or backfill-only install never writes one at all.
+    private async Task DeleteCheckpointAsync(string slot)
     {
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
         await conn.OpenAsync();
-        var sb = new System.Text.StringBuilder("\n--- state dump ---\n");
-        foreach (var (label, sql) in new (string, string)[]
-        {
-            ("checkpoint", "SELECT slot_name, confirmed_lsn::text, updated_at::text FROM wallaby.checkpoint"),
-            ("backfill_state", "SELECT table_qualified, status, coalesce(transform_version,'<null>'), rows_copied::text, updated_at::text FROM wallaby.backfill_state"),
-            ("slot_registry", "SELECT slot_name, coalesce(consistent_point::text,'<null>'), kind FROM wallaby.slot_registry"),
-            ("control", "SELECT state, origin, coalesce(reason,'<null>'), updated_at::text FROM wallaby.control"),
-            ("pg_replication_slots", "SELECT slot_name, active::text, confirmed_flush_lsn::text FROM pg_replication_slots"),
-            ("fanout_queue", "SELECT table_qualified, status, attempts::text FROM wallaby.fanout_queue"),
-        })
-        {
-            sb.Append(label).Append(":\n");
-            try
-            {
-                await using var cmd = new NpgsqlCommand(sql, conn);
-                await using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    var fields = new string[reader.FieldCount];
-                    for (var i = 0; i < reader.FieldCount; i++)
-                    {
-                        fields[i] = reader.IsDBNull(i) ? "<null>" : reader.GetValue(i).ToString() ?? "";
-                    }
-                    sb.Append("  ").AppendJoin(" | ", fields).Append('\n');
-                }
-            }
-            catch (Exception ex)
-            {
-                sb.Append("  <query failed: ").Append(ex.Message).Append(">\n");
-            }
-        }
-        sb.Append("this test's slot: ").Append(names.Slot).Append('\n');
-        return sb.ToString();
+        await using var cmd = new NpgsqlCommand("DELETE FROM wallaby.checkpoint WHERE slot_name = @s", conn);
+        cmd.Parameters.AddWithValue("s", slot);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task<bool> SlotExistsAsync(string slot)

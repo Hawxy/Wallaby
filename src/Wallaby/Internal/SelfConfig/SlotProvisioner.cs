@@ -10,7 +10,12 @@ namespace Wallaby.Internal.SelfConfig;
 /// </summary>
 internal sealed class SlotProvisioner(ILogger logger)
 {
-    public async Task<(bool Created, string? ConsistentPoint)> EnsureAsync(
+    /// <summary>
+    /// Ensures the slot exists. <c>Recreated</c> is true when the slot was created this call but a
+    /// <c>wallaby.slot_registry</c> row for it already existed: the installation had a slot before
+    /// (suspension finalize, manual drop, server invalidation), so stream continuity cannot be assumed.
+    /// </summary>
+    public async Task<(bool Created, string? ConsistentPoint, bool Recreated)> EnsureAsync(
         NpgsqlConnection connection, string slot, string publication, string kind, CancellationToken ct)
     {
         var existing = await GetSlotAsync(connection, slot, ct);
@@ -35,7 +40,7 @@ internal sealed class SlotProvisioner(ILogger logger)
                 // Record the adopted slot so wallaby.slot_registry reflects reality (we don't know its original
                 // consistent point, so keep any value already recorded).
                 await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint: null, kind, ct);
-                return (false, null);
+                return (false, null, false);
             }
 
             // The server invalidated the slot (e.g. max_slot_wal_keep_size exceeded); its WAL is gone and
@@ -45,13 +50,16 @@ internal sealed class SlotProvisioner(ILogger logger)
             await PgExec.ExecuteAsync(connection, "SELECT pg_drop_replication_slot(@s)", ct, ("s", slot));
         }
 
+        var alreadyRegistered = await PgExec.ScalarBoolAsync(
+            connection, "SELECT EXISTS (SELECT 1 FROM wallaby.slot_registry WHERE slot_name = @s)", ct, ("s", slot));
+
         var consistentPoint = await PgExec.ScalarStringAsync(
             connection, "SELECT lsn::text FROM pg_create_logical_replication_slot(@s, 'pgoutput')", ct, ("s", slot));
 
         await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint, kind, ct);
 
         logger.SlotCreated(slot, consistentPoint);
-        return (true, consistentPoint);
+        return (true, consistentPoint, alreadyRegistered);
     }
 
     private static async Task<(string SlotType, string? Plugin, string? WalStatus)?> GetSlotAsync(
