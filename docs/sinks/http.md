@@ -59,17 +59,14 @@ builder.Services.AddHttpClient(HttpSink.ClientNameFor("webhook"))
 
 ## Redirects
 
-The sink never follows redirects: following one rewrites the POST to a GET and drops the body, while a
+The sink never follows redirects as following one rewrites the POST to a GET and drops the body, while a
 2xx from the target acknowledges a batch that was never delivered. Redirect following is disabled on the
-sink's default named client (by mutating its primary handler, so `ConfigurePrimaryHttpMessageHandler`
-customizations like certificates and proxies survive), and a 3xx response fails **permanently** naming
-the `Location` — point `Endpoint` at the final URL instead.
+sink's default named client, and a 3xx response fails **permanently** naming
+the `Location`. Fix this by pointing `Endpoint` at the final URL instead.
 
-A bring-your-own `HttpClientName` client is never reconfigured (it may be shared with other consumers),
-so it must not follow redirects itself. As a defense, a success whose final request URI differs from the
-URI the request was dispatched with is treated as a followed redirect and also fails permanently;
-URI-rewriting handlers (service discovery, proxies) are unaffected because they mutate the request
-before dispatch.
+A bring-your-own `HttpClientName` client is never reconfigured, so it must not follow redirects itself. 
+As a defense, a success whose final request URI differs from the
+URI the request was dispatched with is treated as a followed redirect and also fails permanently.
 
 ## The envelope
 

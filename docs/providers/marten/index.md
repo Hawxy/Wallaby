@@ -116,10 +116,8 @@ The change's `Record` carries the id under your document's id member name, plus 
 A delete's `ChangeEvent.Entity` carries the deleted document, rehydrated from the old tuple's `data`,
 whenever the table has `REPLICA IDENTITY FULL` (without it, only the key columns are on the wire and
 `Entity` is null). This is what makes [`KeyedBy(...)`](/mappings#document-ids) and entity-derived
-[`ScopedDestination`](/providers/marten/multi-tenancy) routing work on deletes: the custom id or scope
-key comes from the document itself. Mappings that use them require full identity, and
-self-configuration **fails at startup** when it is missing rather than letting deletes target documents
-that were never written.
+[`ScopedDestination`](/providers/marten/multi-tenancy) routing work on deletes as the custom id or scope
+key comes from the document itself.
 
 ## Soft deletes
 

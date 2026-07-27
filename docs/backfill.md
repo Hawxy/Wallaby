@@ -99,6 +99,32 @@ Two caveats:
   loses the other tables' documents too, and only the requested table is re-backfilled. Scoped
   (per-tenant) destinations cannot be enumerated and are skipped with a warning.
 
+### Ensuring Fresh Changes
+
+There is one narrow race in the watermark system, being a transaction whose commit enters
+the WAL just *before* the low watermark, but which is still invisible to the chunk read's snapshot. 
+Such a change is on the live stream's side of the watermark, so the window doesn't record it, and the chunk read doesn't see it either.
+If the backfill is racing writes to the very rows it is copying, the affected document can stay stale
+until the table's next backfill. For most deployments the default (no
+fence) is fine as the window is microseconds wide within an entire backfill.
+
+However, if this is not acceptable, set `Advanced.WatermarkVisibilityFenceTimeout`. After emitting a chunk's low watermark, the
+chunk read waits until no transaction in the current snapshot has already committed, polling:
+
+```sql
+SELECT NOT EXISTS (
+    SELECT 1 FROM pg_snapshot_xip(pg_current_snapshot()) AS x
+    WHERE pg_xact_status(x) = 'committed')
+```
+
+Once that holds, anything still invisible is genuinely in progress and will commit *after* the low
+watermark, where the window records it. The cost is one extra query per
+chunk. If the fence hasn't passed when the timeout elapses, a warning is logged and the chunk proceeds
+without it.
+
+Enabling the fence requires `pg_xact_status` (and `pg_current_snapshot`) to be callable
+by Wallaby's role. 
+
 ## How it works
 
 Each table is snapshotted in keyset-paged chunks
@@ -108,34 +134,6 @@ watermarks, so at the high watermark the chunk's surviving rows are emitted thro
 sink path** as live changes. If a row is changed live during the window, the live version wins.
 
 Progress is persisted per table, so a backfill resumes from its last cursor after a restart.
-
-### Visibility fence (opt-in)
-
-There is one narrow race the watermark protocol alone cannot close: a transaction whose commit enters
-the WAL just *before* the low watermark, but which is still invisible to the chunk read's snapshot
-(Postgres commits become visible a moment after they are logged). Such a change is on the live stream's
-side of the watermark, so the window doesn't record it, and the chunk read doesn't see it either - if
-the backfill is racing writes to the very rows it is copying, the affected document can stay stale
-until the table's next backfill. The window is microseconds wide; for most deployments the default (no
-fence) is fine.
-
-`Advanced.WatermarkVisibilityFenceTimeout` closes it: after emitting a chunk's low watermark, the
-chunk read waits until no transaction in the current snapshot has already committed, polling
-
-```sql
-SELECT NOT EXISTS (
-    SELECT 1 FROM pg_snapshot_xip(pg_current_snapshot()) AS x
-    WHERE pg_xact_status(x) = 'committed')
-```
-
-Once that holds, anything still invisible is genuinely in progress and will commit *after* the low
-watermark, where the window records it. Long-running open transactions do not pin the fence (they are
-in progress, not committed), so the first poll almost always passes; the cost is one extra query per
-chunk. If the fence hasn't passed when the timeout elapses, a warning is logged and the chunk proceeds
-without it - the fence narrows the race, it is not a prerequisite.
-
-Enabling the fence requires `pg_xact_status` (and `pg_current_snapshot`, PostgreSQL 13+) to be callable
-by Wallaby's role. Verify this on managed platforms before enabling.
 
 A [partitioned table](/how-it-works#partitioned-tables) is snapshotted through its root, so one
 backfill covers every partition. That makes a [purge backfill](#purging-before-a-backfill) the

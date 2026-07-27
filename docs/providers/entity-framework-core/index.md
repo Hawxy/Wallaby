@@ -68,40 +68,6 @@ mapping runs its own transform.
 Entities in a **TPH hierarchy** cannot be captured: hierarchy members share one table, so rows would
 materialize as one arbitrary type and lose subclass data. Map hierarchies with TPT or TPC instead.
 
-### Owned and complex types
-
-Whether a value-object member is captured follows from where its data physically lives:
-
-| Member shape | Behavior |
-| --- | --- |
-| Same-table `OwnsOne` reference (including nested) | Captured and materialized with the owner |
-| Complex property (`ComplexProperty`, column-mapped) | Captured and materialized with the owner |
-| Owned collection (`OwnsMany`) | Not captured - startup warning, member stays at its default |
-| `OwnsOne` mapped to its own table (`ToTable`) | Not captured - startup warning, member stays at its default |
-| Owned or complex member mapped to JSON (`ToJson`) | Not captured - startup warning, member stays at its default |
-
-Captured members behave like ordinary properties everywhere: their columns join the
-[publication column list](/configuration#publication-column-lists), backfills read them, and the
-materialized entity your transform receives carries the constructed instances (ctor-bound records
-included). In `ChangeEvent.Record` and `Changes`, their keys use the dotted member path, e.g.
-`"Address.Street"`. An optional member whose columns are all null stays null, mirroring EF. A
-captured entity whose owned or complex type cannot be constructed from column values (for example a
-constructor that injects the `DbContext`) fails at startup with the member named, never on the
-first row.
-
-For the uncapturable shapes, the data lives outside the entity's rows, so the materialized member
-stays at its default and Wallaby logs one warning per member at startup. The warning is silenced by
-expressing intent either way:
-
-- `DependsOn(e => e.Lines)` - the member's side table re-emits the entity when it changes (the
-  member itself is still not populated; read it in the transform via the `DbContext`).
-- `ConsumesAllExcept(e => e.Lines)` - acknowledges the member is not consumed.
-
-Column selections treat a captured owned navigation or complex property as a unit:
-`Consumes(s => s.Address)` selects every flattened `Address` column, and
-`ConsumesAllExcept(s => s.BillingAddress)` drops them all. Naming an uncapturable member in
-`Consumes(...)` fails at startup, since the data cannot be delivered.
-
 ### Dependent tables
 
 When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
@@ -154,6 +120,34 @@ skipped during materialization, and never read during backfill.
 ::: warning
 Missing columns will result in missing data within your transforms. Ensure these remain in sync.
 :::
+
+### Owned and complex types
+
+Whether a value-object member is captured follows from where its data physically lives:
+
+| Member shape | Behavior |
+| --- | --- |
+| Same-table `OwnsOne` reference (including nested) | Captured and materialized with the owner |
+| Complex property (`ComplexProperty`, column-mapped) | Captured and materialized with the owner |
+| Owned collection (`OwnsMany`) | Not captured - startup warning, member stays at its default |
+| `OwnsOne` mapped to its own table (`ToTable`) | Not captured - startup warning, member stays at its default |
+| Owned or complex member mapped to JSON (`ToJson`) | Not captured - startup warning, member stays at its default |
+
+Captured members behave like ordinary properties, with their columns joining the
+[publication column list](/configuration#publication-column-lists), backfills reading them, and the
+materialized entity carrying the constructed instances.
+In `ChangeEvent.Record` and `Changes`, their keys use the dotted member path, e.g.
+`"Address.Street"`. An optional member whose columns are all null stays null, mirroring EF. A
+captured entity whose owned or complex type cannot be constructed from column values (for example a
+constructor that injects the `DbContext`) fails at startup.
+
+For the uncapturable shapes, the data lives outside the entity's rows, so the materialized member
+stays at its default and Wallaby logs one warning per member at startup. The warning is silenced by
+expressing intent either way:
+
+- `DependsOn(e => e.Lines)` - the member's side table re-emits the entity when it changes (the
+  member itself is still not populated; read it in the transform via the `DbContext`).
+- `ConsumesAllExcept(e => e.Lines)` - acknowledges the member is not consumed.
 
 ## Transforms
 
