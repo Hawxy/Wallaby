@@ -39,6 +39,6 @@ internal static class SinkDisposal
 /// <summary>Source-generated log messages for <see cref="SinkDisposal"/>.</summary>
 internal static partial class SinkDisposalLog
 {
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Sink '{Sink}' threw while being disposed; continuing shutdown.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Sink {Sink} threw while being disposed; continuing shutdown.")]
     internal static partial void SinkDisposeFailed(this ILogger logger, Exception ex, string sink);
 }

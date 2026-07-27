@@ -276,10 +276,10 @@ internal sealed class PostgresSelfConfigurator(
 /// <summary>Source-generated log messages for <see cref="PostgresSelfConfigurator"/>.</summary>
 internal static partial class PostgresSelfConfiguratorLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby self-config complete: publication '{Publication}' (created={PubCreated}), slot '{Slot}' (created={SlotCreated}).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby self-config complete: publication {Publication} (created={PubCreated}), slot {Slot} (created={SlotCreated}).")]
     internal static partial void SelfConfigComplete(this ILogger logger, string publication, bool pubCreated, string slot, bool slotCreated);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Configured external slot '{Slot}' (publication '{Publication}') for a third-party consumer.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Configured external slot {Slot} (publication {Publication}) for a third-party consumer.")]
     internal static partial void ExternalSlotConfigured(this ILogger logger, string slot, string publication);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Warning}")]

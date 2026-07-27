@@ -280,9 +280,9 @@ internal static class ControlOperations
 /// <summary>Source-generated log messages for <see cref="ControlOperations"/>.</summary>
 internal static partial class ControlOperationsLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Dropped managed replication slot '{Slot}' (kind={Kind}) for suspension.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Dropped managed replication slot {Slot} (kind={Kind}) for suspension.")]
     internal static partial void ManagedSlotDropped(this ILogger logger, string slot, string kind);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Replication slot '{Slot}' is in use by an active consumer; retrying the drop.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Replication slot {Slot} is in use by an active consumer; retrying the drop.")]
     internal static partial void ManagedSlotBusy(this ILogger logger, string slot);
 }

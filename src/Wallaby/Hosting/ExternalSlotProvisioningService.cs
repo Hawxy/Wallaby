@@ -37,6 +37,8 @@ internal sealed class ExternalSlotProvisioningService(
     {
         try
         {
+            logger.ProvisioningStarting(WallabyVersion.Current);
+
             // No external slots declared (e.g. behind a consumer env gate) — do nothing, don't touch the DB.
             if (config.ExternalSlots.Count == 0)
             {
@@ -218,6 +220,9 @@ internal sealed class ExternalSlotProvisioningService(
 /// <summary>Source-generated log messages for <see cref="ExternalSlotProvisioningService"/>.</summary>
 internal static partial class ExternalSlotProvisioningServiceLog
 {
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby {Version} starting in provision-only mode (no capture declared).")]
+    internal static partial void ProvisioningStarting(this ILogger logger, string version);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "No external slots declared; external-slot provisioning is a no-op.")]
     internal static partial void NoExternalSlots(this ILogger logger);
 

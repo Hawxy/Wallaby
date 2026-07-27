@@ -99,9 +99,9 @@ internal sealed class SlotProvisioner(ILogger logger)
 /// <summary>Source-generated log messages for <see cref="SlotProvisioner"/>.</summary>
 internal static partial class SlotProvisionerLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot '{Slot}' at {ConsistentPoint}.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot {Slot} at {ConsistentPoint}.")]
     internal static partial void SlotCreated(this ILogger logger, string slot, string? consistentPoint);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot '{Slot}' was invalidated by the server (wal_status=lost); dropping and recreating it.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot {Slot} was invalidated by the server (wal_status=lost); dropping and recreating it.")]
     internal static partial void SlotInvalidated(this ILogger logger, string slot);
 }

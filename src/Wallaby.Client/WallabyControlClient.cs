@@ -251,6 +251,6 @@ internal static partial class WallabyControlClientLog
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby resume requested (transitioned={Transitioned}).")]
     internal static partial void ResumeRequested(this ILogger logger, bool transitioned);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table '{Table}' (purge={Purge}).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table {Table} (purge={Purge}).")]
     internal static partial void BackfillRequested(this ILogger logger, string table, bool purge);
 }

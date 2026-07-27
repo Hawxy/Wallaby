@@ -592,13 +592,13 @@ internal sealed class WallabyPipeline(
 /// <summary>Source-generated log messages for <see cref="WallabyPipeline"/>.</summary>
 internal static partial class WallabyPipelineLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot {Slot}.")]
     internal static partial void PipelineStarted(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed batch for slot '{Slot}' ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed batch for slot {Slot} ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
     internal static partial void BatchProcessed(this ILogger logger, string slot, int changes, ulong endLsn);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Slot '{Slot}' processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Slot {Slot} processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
     internal static partial void ProcessedRollup(this ILogger logger, string slot, long transactions, long changes, long seconds, ulong endLsn);
 
     [LoggerMessage(Level = LogLevel.Warning, Message =
@@ -612,7 +612,7 @@ internal static partial class WallabyPipelineLog
         "leader will restart and retry this transaction. Delivery does not advance until the cause is resolved.")]
     internal static partial void TransactionHalted(this ILogger logger, Exception ex, string slot, ulong endLsn);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed a batch of {Transactions} transaction(s) ({Changes} change(s)) for slot '{Slot}'; acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed a batch of {Transactions} transaction(s) ({Changes} change(s)) for slot {Slot}; acknowledged LSN {EndLsn}.")]
     internal static partial void TransactionBatchProcessed(this ILogger logger, string slot, int transactions, long changes, ulong endLsn);
 
     [LoggerMessage(Level = LogLevel.Warning, Message =

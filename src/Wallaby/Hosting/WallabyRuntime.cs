@@ -60,6 +60,8 @@ internal sealed class WallabyRuntime
 
     public async Task RunAsync(CancellationToken ct)
     {
+        _logger.RuntimeStarting(WallabyVersion.Current, _options.SlotName, _options.PublicationName);
+
         // Disposed when the election loop exits (shutdown or fault), releasing the sinks it materialized.
         await using var components = WallabyComponents.Build(
             _providers, _config, _options, _dataSource, _services, _instrumentation, _status, _logger);
@@ -264,13 +266,16 @@ internal static partial class WallabyRuntimeLog
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire Wallaby leadership; retrying.")]
     internal static partial void LeadershipAcquireFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Wallaby standby: another node holds leadership for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Wallaby standby: another node holds leadership for slot {Slot}.")]
     internal static partial void Standby(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Acquired Wallaby leadership for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby {Version} starting for slot {Slot} (publication {Publication}).")]
+    internal static partial void RuntimeStarting(this ILogger logger, string version, string slot, string publication);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Acquired Wallaby leadership for slot {Slot}.")]
     internal static partial void LeadershipAcquired(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Lost Wallaby leadership for slot '{Slot}' (lock connection dropped); stepping down and re-electing.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Lost Wallaby leadership for slot {Slot} (lock connection dropped); stepping down and re-electing.")]
     internal static partial void LeadershipLost(this ILogger logger, string slot);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Wallaby leader session failed; will retry.")]
@@ -279,15 +284,15 @@ internal static partial class WallabyRuntimeLog
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to evaluate the Wallaby suspension state; retrying.")]
     internal static partial void ControlGateFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Finalizing Wallaby suspension for slot '{Slot}': dropping every managed replication slot.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Finalizing Wallaby suspension for slot {Slot}: dropping every managed replication slot.")]
     internal static partial void FinalizingSuspension(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot '{Slot}'): managed replication slots are dropped and streaming is stopped until an explicit resume.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot {Slot}): managed replication slots are dropped and streaming is stopped until an explicit resume.")]
     internal static partial void Suspended(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot '{Slot}') by nodes still deployed with Suspend(); this flag-less node is waiting out the configuration-suspension grace and will auto-resume once their assertion goes stale.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot {Slot}) by nodes still deployed with Suspend(); this flag-less node is waiting out the configuration-suspension grace and will auto-resume once their assertion goes stale.")]
     internal static partial void SuspendedAwaitingGrace(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby suspension ended; re-entering leader election for slot '{Slot}'. Expect a full re-backfill of all mapped tables.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby suspension ended; re-entering leader election for slot {Slot}. Expect a full re-backfill of all mapped tables.")]
     internal static partial void SuspensionEnded(this ILogger logger, string slot);
 }

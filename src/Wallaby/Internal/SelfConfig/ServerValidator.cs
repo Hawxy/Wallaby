@@ -81,6 +81,6 @@ internal static partial class ServerValidatorLog
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).")]
     internal static partial void ServerValidationPassed(this ILogger logger, long maxSlots, long usedSlots);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not verify the REPLICATION privilege for role '{Role}'; logical replication will fail to start without it. Grant it with 'ALTER ROLE ... WITH REPLICATION' or 'GRANT rds_replication TO ...' ")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not verify the REPLICATION privilege for role {Role}; logical replication will fail to start without it. Grant it with 'ALTER ROLE ... WITH REPLICATION' or 'GRANT rds_replication TO ...' ")]
     internal static partial void ReplicationPrivilegeUnverified(this ILogger logger, string? role);
 }

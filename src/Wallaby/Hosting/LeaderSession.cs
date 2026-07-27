@@ -337,13 +337,13 @@ internal sealed class LeaderSession(
 /// <summary>Source-generated log messages for <see cref="LeaderSession"/>.</summary>
 internal static partial class LeaderSessionLog
 {
-    [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot '{Slot}' was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot {Slot} was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
     internal static partial void SlotGapDetected(this ILogger logger, string slot, string checkpointLsn, string consistentPoint);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot '{Slot}' was recreated (at {ConsistentPoint}) before its first checkpoint was written: changes committed while the slot was gone were never streamed. Re-backfilling all mapped tables to converge sinks.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot {Slot} was recreated (at {ConsistentPoint}) before its first checkpoint was written: changes committed while the slot was gone were never streamed. Re-backfilling all mapped tables to converge sinks.")]
     internal static partial void SlotRecreatedBeforeFirstCheckpoint(this ILogger logger, string slot, string consistentPoint);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Resolved '{Host}' as the primary for the replication connection (multi-host connection string).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Resolved {Host} as the primary for the replication connection (multi-host connection string).")]
     internal static partial void ReplicationPrimaryResolved(this ILogger logger, string host);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Backfill scheduler failed.")]
@@ -352,6 +352,6 @@ internal static partial class LeaderSessionLog
     [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker failed.")]
     internal static partial void FanoutWorkerFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink '{Sink}'.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink {Sink}.")]
     internal static partial void SinkInitialized(this ILogger logger, string sink);
 }

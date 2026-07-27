@@ -273,22 +273,22 @@ internal sealed class PublicationReconciler(ILogger logger)
 /// <summary>Source-generated log messages for <see cref="PublicationReconciler"/>.</summary>
 internal static partial class PublicationReconcilerLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Created publication '{Publication}' for {TableCount} table(s).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Created publication {Publication} for {TableCount} table(s).")]
     internal static partial void PublicationCreated(this ILogger logger, string publication, int tableCount);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Enabled publish_via_partition_root on publication '{Publication}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Enabled publish_via_partition_root on publication {Publication}.")]
     internal static partial void PublicationViaRootEnabled(this ILogger logger, string publication);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Added table {Table} to publication '{Publication}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Added table {Table} to publication {Publication}.")]
     internal static partial void TableAddedToPublication(this ILogger logger, string table, string publication);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Dropped table {Table} from publication '{Publication}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Dropped table {Table} from publication {Publication}.")]
     internal static partial void TableDroppedFromPublication(this ILogger logger, string table, string publication);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Updated column list for table {Table} in publication '{Publication}' ({ColumnCount} column(s)).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Updated column list for table {Table} in publication {Publication} ({ColumnCount} column(s)).")]
     internal static partial void PublicationColumnListChanged(this ILogger logger, string table, string publication, int columnCount);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Table {Table} reverted to publishing all columns in publication '{Publication}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Table {Table} reverted to publishing all columns in publication {Publication}.")]
     internal static partial void PublicationColumnListRemoved(this ILogger logger, string table, string publication);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Generated column {Column} on {Table} omitted from the publication column list (never published by pgoutput).")]
