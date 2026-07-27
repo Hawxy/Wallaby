@@ -171,6 +171,13 @@ public sealed class TestDatabase(string connectionString)
         return products.Select(p => p.Id).ToList();
     }
 
+    public async Task SetProductCategoryAsync(int productId, int categoryId)
+    {
+        await using var ctx = NewContext();
+        (await ctx.Products.FindAsync(productId))!.CategoryId = categoryId;
+        await ctx.SaveChangesAsync();
+    }
+
     /// <summary>Set a table's replica identity to FULL so old-row values (incl. scope keys) are present on delete.</summary>
     public Task SetReplicaIdentityFullAsync(string table) => SetReplicaIdentityAsync(table, "FULL");
 
@@ -210,6 +217,29 @@ public sealed class TestDatabase(string connectionString)
     {
         await using var ctx = NewContext();
         ctx.Products.Remove((await ctx.Products.FindAsync(id))!);
+        await ctx.SaveChangesAsync();
+    }
+
+    public async Task<int> AddSupplierAsync(Supplier supplier)
+    {
+        await using var ctx = NewContext();
+        ctx.Suppliers.Add(supplier);
+        await ctx.SaveChangesAsync();
+        return supplier.Id;
+    }
+
+    public async Task SetSupplierStreetAsync(int id, string street)
+    {
+        await using var ctx = NewContext();
+        var supplier = await ctx.Suppliers.FindAsync(id);
+        supplier!.Address.Street = street;
+        await ctx.SaveChangesAsync();
+    }
+
+    public async Task DeleteSupplierAsync(int id)
+    {
+        await using var ctx = NewContext();
+        ctx.Suppliers.Remove((await ctx.Suppliers.FindAsync(id))!);
         await ctx.SaveChangesAsync();
     }
 

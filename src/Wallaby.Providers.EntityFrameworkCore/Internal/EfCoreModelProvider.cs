@@ -15,10 +15,15 @@ internal sealed class EfCoreModelProvider(IModel model) : IWallabyModelProvider
     public CapturePlan BuildCapturePlan(CaptureSpec spec)
     {
         var consumedProperties = ColumnConsumptionResolver.Resolve(model, spec);
+        var captureModel = EfCoreCaptureModelBuilder.Build(model, spec, consumedProperties);
         return new()
         {
-            Model = EfCoreCaptureModelBuilder.Build(model, spec, consumedProperties),
-            Materializer = new EntityMaterializer(model, consumedProperties),
+            Model = captureModel,
+            // Captured tables materialize strictly: an owned member that cannot be constructed fails
+            // startup instead of the first row.
+            Materializer = new EntityMaterializer(
+                model, consumedProperties,
+                capturedTypes: captureModel.Tables.Select(t => t.EntityClrType).ToHashSet()),
         };
     }
 

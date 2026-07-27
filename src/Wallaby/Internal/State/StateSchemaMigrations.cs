@@ -12,8 +12,8 @@ namespace Wallaby.Internal.State;
 /// <item>Append only, with the next version number; never edit a shipped step.</item>
 /// <item>Steps must be idempotent (<c>IF NOT EXISTS</c> / <c>ADD COLUMN IF NOT EXISTS</c>): a step
 /// interrupted before its version stamp re-applies cleanly.</item>
-/// <item>New columns must carry <c>NOT NULL DEFAULT ...</c>; all host and client SQL uses explicit
-/// column lists, so defaults keep older writers working during rolling upgrades.</item>
+/// <item>New columns must be nullable or carry <c>NOT NULL DEFAULT ...</c>; all host and client SQL
+/// uses explicit column lists, so older writers keep working during rolling upgrades.</item>
 /// <item>Never rename columns: the remote client tolerates missing tables (42P01) but not missing
 /// columns, and the host's binary COPY into <c>stream_buffer</c> is position-sensitive.</item>
 /// <item><c>wallaby.stream_buffer</c> is UNLOGGED scratch space cleared at session start; it may be
@@ -23,7 +23,7 @@ namespace Wallaby.Internal.State;
 internal static class StateSchemaMigrations
 {
     /// <summary>The schema version this build requires; the highest version in <see cref="Steps"/>.</summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 3;
 
     /// <summary>
     /// Baseline: the full schema as deployed by the 1.0.0 betas. Databases bootstrapped by those betas
@@ -106,5 +106,25 @@ internal static class StateSchemaMigrations
         DELETE FROM wallaby.fanout_queue WHERE status = 'Completed';
         """;
 
-    public static readonly IReadOnlyList<(int Version, string Ddl)> Steps = [(1, Baseline)];
+    /// <summary>Per-job retry state for the fan-out queue, so a failing job backs off on its own schedule.</summary>
+    private const string FanoutRetryState = """
+        ALTER TABLE wallaby.fanout_queue ADD COLUMN IF NOT EXISTS attempts int NOT NULL DEFAULT 0;
+        ALTER TABLE wallaby.fanout_queue ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz NOT NULL DEFAULT now();
+        -- Nullable: "no error" is the absence of a value, which older writers also leave null.
+        ALTER TABLE wallaby.fanout_queue ADD COLUMN IF NOT EXISTS last_error text;
+
+        -- Serves the worker's due-job scan: ... AND next_attempt_at <= now() ORDER BY next_attempt_at, requested_at.
+        CREATE INDEX IF NOT EXISTS fanout_queue_next_attempt_idx
+            ON wallaby.fanout_queue (next_attempt_at, requested_at)
+            WHERE status IN ('Requested', 'InProgress');
+
+        DROP INDEX IF EXISTS wallaby.fanout_queue_due_idx;
+        """;
+
+    private const string ControlAssertionHeartbeat = """
+        ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS configuration_asserted_at timestamptz;
+        """;
+
+    public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
+        [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat)];
 }

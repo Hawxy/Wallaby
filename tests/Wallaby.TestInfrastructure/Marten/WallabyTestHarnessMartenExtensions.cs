@@ -32,7 +32,8 @@ public static class WallabyTestHarnessMartenExtensions
             bool backfill = false,
             string? backfillVersion = null,
             Func<ChangeEvent, object?>? scopeKey = null,
-            Func<object?, string?>? scopedDestination = null)
+            Func<object?, string?>? scopedDestination = null,
+            Func<TEntity, object>? keyedBy = null)
             where TEntity : class
             => harness.AddMapping(new EntityMapping
             {
@@ -43,13 +44,14 @@ public static class WallabyTestHarnessMartenExtensions
                 Sessions = null!, // late-bound by the harness at StartAsync (UseTenantSessions may still override)
                 ScopeKeySelector = scopeKey,
                 DestinationSelector = scopedDestination,
+                DocumentIdSelector = keyedBy is null ? null : KeyedBySelector(keyedBy),
             }, backfill, backfillVersion);
 
         /// <summary>Map a document to a sink/destination via a simple per-document projection.</summary>
         public WallabyTestHarness Project<TEntity>(
             string sink, string? destination, Func<TEntity, WallabyDocument?> document, bool backfill = false,
             string? backfillVersion = null, Func<ChangeEvent, object?>? scopeKey = null,
-            Func<object?, string?>? scopedDestination = null)
+            Func<object?, string?>? scopedDestination = null, Func<TEntity, object>? keyedBy = null)
             where TEntity : class
             => harness.Map<TEntity>(sink, destination, (_, changes, _) =>
             {
@@ -59,7 +61,7 @@ public static class WallabyTestHarnessMartenExtensions
                     documents[change.Key] = document(change.Entity!);
                 }
                 return Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(documents);
-            }, backfill, backfillVersion, scopeKey, scopedDestination);
+            }, backfill, backfillVersion, scopeKey, scopedDestination, keyedBy);
 
         /// <summary>Lease tenant-scoped query sessions from <paramref name="store"/> (for conjoined-tenancy tests).</summary>
         public WallabyTestHarness UseTenantSessions(IDocumentStore store)
@@ -69,4 +71,13 @@ public static class WallabyTestHarnessMartenExtensions
     /// <summary>The scope-key selector matching <c>ScopedByTenant()</c>: the captured <c>tenant_id</c>.</summary>
     public static Func<ChangeEvent, object?> TenantScopeKey { get; }
         = change => change.Record.GetValueOrDefault("TenantId");
+
+    // Builds the selector through the real EntityMapBuilder so tests exercise production KeyedBy semantics.
+    private static Func<ChangeEvent, string> KeyedBySelector<TEntity>(Func<TEntity, object> keyedBy)
+        where TEntity : class
+    {
+        var registration = new DependencyInjection.MappingRegistration { EntityClrType = typeof(TEntity) };
+        new DependencyInjection.EntityMapBuilder<TEntity>(registration).KeyedBy(keyedBy);
+        return registration.DocumentIdSelector!;
+    }
 }

@@ -43,7 +43,8 @@ internal sealed class WallabyPipeline(
     IFanoutQueueStore? fanoutQueue = null,
     WallabyInstrumentation? instrumentation = null,
     WallabyStatus? status = null,
-    int maxTransactionsPerBatch = 1)
+    int maxTransactionsPerBatch = 1,
+    IBackfillStateStore? backfillStore = null)
 {
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
@@ -81,8 +82,8 @@ internal sealed class WallabyPipeline(
             try
             {
                 processed = batch.Count == 1
-                    ? await ProcessTransactionAsync(batch[0], ct)
-                    : await ProcessBatchAsync(batch, ct);
+                    ? await ProcessTransactionAsync(batch[0], batcher.LastFlushReason, ct)
+                    : await ProcessBatchAsync(batch, batcher.LastFlushReason, ct);
             }
             finally
             {
@@ -121,44 +122,14 @@ internal sealed class WallabyPipeline(
 
     // Process one committed transaction end-to-end: materialize, route, deliver, then acknowledge to the
     // server and record the checkpoint. Returns the number of changes processed.
-    private async Task<int> ProcessTransactionAsync(CommittedTransaction transaction, CancellationToken ct)
+    private async Task<int> ProcessTransactionAsync(
+        CommittedTransaction transaction, BatchFlushReason flushReason, CancellationToken ct)
     {
         var lagSeconds = transaction.CommitTimestamp is { } commitTs
             ? Math.Max(0, (DateTimeOffset.UtcNow - commitTs).TotalSeconds)
             : -1;
 
-        using var activity = _instr.StartTransaction();
-        if (activity is not null)
-        {
-            activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
-            activity.SetTag("wallaby.txn.lsn.commit", (long)transaction.CommitLsn);
-            activity.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
-            activity.SetTag("wallaby.txn.streamed", transaction.IsStreamed);
-            if (!transaction.IsStreamed)
-            {
-                activity.SetTag("wallaby.txn.size", transaction.Changes.Count);
-            }
-            if (lagSeconds >= 0)
-            {
-                activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
-            }
-            // Marks the tiny transactions that exist only to bracket a backfill chunk, so they can be
-            // filtered in a trace viewer.
-            if (transaction.Watermarks.Count > 0)
-            {
-                activity.SetTag("wallaby.watermark",
-                    transaction.Watermarks[0].Prefix == WallabySchema.WatermarkLowPrefix ? "low" : "high");
-            }
-            // Marks idle-slot heartbeat transactions, so they can be filtered in a trace viewer.
-            if (transaction.ContainsHeartbeat)
-            {
-                activity.SetTag("wallaby.heartbeat", true);
-            }
-            if (transaction.TruncatedTables.Count > 0)
-            {
-                activity.SetTag("wallaby.truncate", string.Join(",", transaction.TruncatedTables));
-            }
-        }
+        using var activity = _instr.StartTransaction(slotName, transaction, flushReason, lagSeconds);
 
         // Warn before dispatch so the divergence is on record even if a sink faults below.
         if (transaction.TruncatedTables.Count > 0)
@@ -180,13 +151,11 @@ internal sealed class WallabyPipeline(
             // A streamed transaction's size is only known once its spill has been read through.
             if (transaction.IsStreamed)
             {
-                activity?.SetTag("wallaby.txn.size", processed);
+                activity?.SetTag(WallabyInstrumentation.TxnSizeTag, processed);
             }
 
-            using (var ackActivity = _instr.StartAck())
+            using (_instr.StartAck(slotName, transaction.EndLsn))
             {
-                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
-                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)transaction.EndLsn);
                 await stream.AcknowledgeAsync(transaction.EndLsn, ct);
                 Volatile.Write(ref _lastAcknowledgedLsn, transaction.EndLsn);
                 await checkpoints.SaveAsync(slotName, new Checkpoint(transaction.EndLsn, DateTimeOffset.UtcNow), ct);
@@ -210,7 +179,8 @@ internal sealed class WallabyPipeline(
     // transaction's EndLsn) for the whole batch, changes concatenated in commit order. Boundary
     // transactions (streamed, watermark-carrying) never reach here; the batcher keeps them solo. A
     // failure acks nothing: the entire batch re-streams on the next leader session (at-least-once).
-    private async Task<long> ProcessBatchAsync(IReadOnlyList<CommittedTransaction> batch, CancellationToken ct)
+    private async Task<long> ProcessBatchAsync(
+        IReadOnlyList<CommittedTransaction> batch, BatchFlushReason flushReason, CancellationToken ct)
     {
         var last = batch[^1];
         var lagSeconds = batch[0].CommitTimestamp is { } oldestTs
@@ -226,19 +196,7 @@ internal sealed class WallabyPipeline(
             totalChanges += transaction.Changes.Count;
         }
 
-        using var activity = _instr.StartTransaction();
-        if (activity is not null)
-        {
-            activity.SetTag(WallabyInstrumentation.SlotTag, slotName);
-            activity.SetTag("wallaby.batch.txn_count", batch.Count);
-            activity.SetTag("wallaby.txn.lsn.commit", (long)batch[0].CommitLsn);
-            activity.SetTag("wallaby.txn.lsn.end", (long)last.EndLsn);
-            activity.SetTag("wallaby.txn.size", totalChanges);
-            if (lagSeconds >= 0)
-            {
-                activity.SetTag("wallaby.ingestion.lag_s", lagSeconds);
-            }
-        }
+        using var activity = _instr.StartTransaction(slotName, batch, totalChanges, flushReason, lagSeconds);
 
         // Warn before dispatch so the divergence is on record even if a sink faults below.
         foreach (var transaction in batch)
@@ -279,11 +237,8 @@ internal sealed class WallabyPipeline(
                 await ResolveAndDispatchFanoutAsync(ToAsync(batch, ct), BuildLiveKeyIndex(appEvents), ct);
             }
 
-            using (var ackActivity = _instr.StartAck())
+            using (_instr.StartAck(slotName, last.EndLsn, batch.Count))
             {
-                ackActivity?.SetTag(WallabyInstrumentation.SlotTag, slotName);
-                ackActivity?.SetTag("wallaby.txn.lsn.end", (long)last.EndLsn);
-                ackActivity?.SetTag("wallaby.batch.txn_count", batch.Count);
                 await stream.AcknowledgeAsync(last.EndLsn, ct);
                 Volatile.Write(ref _lastAcknowledgedLsn, last.EndLsn);
                 await checkpoints.SaveAsync(slotName, new Checkpoint(last.EndLsn, DateTimeOffset.UtcNow), ct);
@@ -463,10 +418,16 @@ internal sealed class WallabyPipeline(
         await Task.CompletedTask;
     }
 
+    // Wide tails offload to the fan-out queue as the resolver cuts them; without a queue the callback is
+    // null and the resolver keeps the tail inline (dropped past its valve, matching prior behavior).
+    private readonly Func<ScopedFanoutSpec, CancellationToken, Task>? _enqueueTail = fanoutQueue is null
+        ? null
+        : fanoutQueue.EnqueueAsync;
+
     private async Task ResolveAndDispatchFanoutAsync(
         IAsyncEnumerable<RawChange> changes, IReadOnlySet<(string, DocumentKey)> liveIndex, CancellationToken ct)
     {
-        var results = await dependentResolver!.ResolveFirstPagesAsync(changes, maxBatchSize, ct);
+        var results = await dependentResolver!.ResolveFirstPagesAsync(changes, maxBatchSize, _enqueueTail, ct);
         if (results.Count == 0)
         {
             return;
@@ -474,6 +435,12 @@ internal sealed class WallabyPipeline(
 
         foreach (var result in results)
         {
+            if (result.RebackfillTable is { } wide)
+            {
+                await RequestWholeTableRebackfillAsync(wide, ct);
+                continue;
+            }
+
             var events = new List<ChangeEvent>(result.FirstPage.Count);
             foreach (var raw in result.FirstPage)
             {
@@ -495,11 +462,18 @@ internal sealed class WallabyPipeline(
             }
 
             await DispatchChunkedAsync(events, WallabyInstrumentation.SourceFanout, ct);
+        }
+    }
 
-            if (result.Continuation is not null && fanoutQueue is not null)
-            {
-                await fanoutQueue.EnqueueAsync(result.Continuation, ct);
-            }
+    // Warned unconditionally: the request only takes effect for a table the scheduler backfills, so an
+    // operator has to see it even when it lands as a no-op.
+    private async Task RequestWholeTableRebackfillAsync(CapturedTable table, CancellationToken ct)
+    {
+        logger.FanoutKeyCapExceeded(table.QualifiedName);
+        if (backfillStore is not null)
+        {
+            // The scheduler writes the declared version as the fresh run starts, so null loses nothing.
+            await backfillStore.RequestAsync(table.QualifiedName, transformVersion: null, purge: false, ct);
         }
     }
 
@@ -618,13 +592,13 @@ internal sealed class WallabyPipeline(
 /// <summary>Source-generated log messages for <see cref="WallabyPipeline"/>.</summary>
 internal static partial class WallabyPipelineLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot '{Slot}'.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot {Slot}.")]
     internal static partial void PipelineStarted(this ILogger logger, string slot);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed batch for slot '{Slot}' ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed batch for slot {Slot} ({Changes} change(s)); acknowledged LSN {EndLsn}.")]
     internal static partial void BatchProcessed(this ILogger logger, string slot, int changes, ulong endLsn);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Slot '{Slot}' processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Slot {Slot} processed {Transactions} transaction(s) ({Changes} change(s)) in the last {Seconds}s; acknowledged LSN {EndLsn}.")]
     internal static partial void ProcessedRollup(this ILogger logger, string slot, long transactions, long changes, long seconds, ulong endLsn);
 
     [LoggerMessage(Level = LogLevel.Warning, Message =
@@ -638,8 +612,15 @@ internal static partial class WallabyPipelineLog
         "leader will restart and retry this transaction. Delivery does not advance until the cause is resolved.")]
     internal static partial void TransactionHalted(this ILogger logger, Exception ex, string slot, ulong endLsn);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed a batch of {Transactions} transaction(s) ({Changes} change(s)) for slot '{Slot}'; acknowledged LSN {EndLsn}.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed a batch of {Transactions} transaction(s) ({Changes} change(s)) for slot {Slot}; acknowledged LSN {EndLsn}.")]
     internal static partial void TransactionBatchProcessed(this ILogger logger, string slot, int transactions, long changes, ulong endLsn);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message =
+        "A dependent fan-out touched more distinct lookup keys in one transaction than " +
+        "Advanced.MaxFanoutKeysPerTransaction allows, so {Table} is being re-backfilled whole instead of by " +
+        "scope. This only converges if {Table} is one of the backfilled tables; if it is not, re-index it " +
+        "manually or raise the cap.")]
+    internal static partial void FanoutKeyCapExceeded(this ILogger logger, string table);
 
     [LoggerMessage(Level = LogLevel.Error, Message =
         "Delivery of a batch of {Transactions} transaction(s) (LSNs {FirstCommitLsn}..{EndLsn}) on slot '{Slot}' " +

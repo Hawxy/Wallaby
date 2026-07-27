@@ -1,9 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Linq.Expressions;
-using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Wallaby.Abstractions;
 using Wallaby.Model;
@@ -12,16 +9,21 @@ using Wallaby.Providers;
 namespace Wallaby.Providers.EntityFrameworkCore.Internal;
 
 /// <summary>
-/// Turns decoded <see cref="RawChange"/>s into materialized CLR entities
-/// using EF Core model metadata (column-to-property mappings and value converters). Plans are computed
-/// once per table and cached.
+/// Turns decoded <see cref="RawChange"/>s into materialized CLR entities using per-table plans built
+/// once by <see cref="EntityPlanBuilder"/> and cached. Column values buffer into slots, then the
+/// plan's construction tree builds the entity: same-table owned references and complex properties
+/// construct with their owner (via the EF constructor binding or a parameterless constructor), and an
+/// optional member whose subtree is all null stays null. For captured entity types a member that
+/// cannot be constructed fails at startup rather than on the first row.
 /// </summary>
 internal sealed class EntityMaterializer : IRowMaterializer
 {
     private readonly Dictionary<(string Schema, string Table), EntityPlan> _plans;
 
     public EntityMaterializer(
-        IModel model, IReadOnlyDictionary<string, IReadOnlySet<string>>? consumedProperties = null)
+        IModel model,
+        IReadOnlyDictionary<string, IReadOnlySet<string>>? consumedProperties = null,
+        IReadOnlyCollection<Type>? capturedTypes = null)
     {
         _plans = new Dictionary<(string, string), EntityPlan>();
         foreach (var entityType in model.GetEntityTypes())
@@ -34,8 +36,9 @@ internal sealed class EntityMaterializer : IRowMaterializer
             var schema = entityType.GetSchema() ?? "public";
             if (_plans.ContainsKey((schema, table))) continue; // de-dup shared tables (TPH)
 
-            _plans[(schema, table)] = BuildPlan(
-                entityType, table, consumedProperties?.GetValueOrDefault(entityType.Name));
+            _plans[(schema, table)] = EntityPlanBuilder.Build(
+                entityType, table, consumedProperties?.GetValueOrDefault(entityType.Name),
+                strict: capturedTypes?.Contains(entityType.ClrType) == true);
         }
     }
 
@@ -49,9 +52,9 @@ internal sealed class EntityMaterializer : IRowMaterializer
         }
 
         var source = (change.Action == ChangeAction.Delete ? change.OldValues : change.NewValues) ?? [];
-
-        var entity = plan.Factory();
-        var record = new Dictionary<string, object?>(plan.Columns.Count);
+        var record = new Dictionary<string, object?>(plan.ColumnsByName.Count);
+        var slots = new object?[plan.SlotCount];
+        var present = new bool[plan.SlotCount];
 
         // Iterate the source columns once and look up the per-table plan, avoiding a per-call
         // Dictionary<string, RawColumn> allocation.
@@ -62,16 +65,12 @@ internal sealed class EntityMaterializer : IRowMaterializer
 
             var value = column.IsUnchangedToast ? ResolveUnchangedToast(change, column.ColumnName) : column.Value;
             var modelValue = ToModelValue(value, columnPlan.ClrType, columnPlan.Converter);
-            if (modelValue is null && !columnPlan.AcceptsNull)
-            {
-                // pgoutput emits non-identity columns as nulls on DELETE/REPLICA IDENTITY DEFAULT.
-                // The freshly-constructed entity already has default(T) for the property; skip the set.
-                record[columnPlan.PropertyName] = null;
-                continue;
-            }
-            columnPlan.Setter?.SetClrValue(entity, modelValue);
+            slots[columnPlan.Slot] = modelValue;
+            present[columnPlan.Slot] = true;
             record[columnPlan.PropertyName] = modelValue;
         }
+
+        var entity = Construct(plan.Root, slots, present)!; // the root is never optional
 
         var pkPlans = plan.PrimaryKey;
         var primaryKey = new object[pkPlans.Count];
@@ -91,8 +90,53 @@ internal sealed class EntityMaterializer : IRowMaterializer
         return true;
     }
 
+    private static object? Construct(NodePlan node, object?[] slots, bool[] present)
+    {
+        if (node.IsOptional && !HasValue(node, slots))
+        {
+            return null;
+        }
+
+        var instance = node.Construct(slots);
+        foreach (var assignment in node.Assignments)
+        {
+            if (!present[assignment.Slot]) continue; // column not in the change: keep the default
+            var value = slots[assignment.Slot];
+            if (value is null && !assignment.AcceptsNull)
+            {
+                // pgoutput emits non-identity columns as nulls on DELETE/REPLICA IDENTITY DEFAULT;
+                // the member keeps default(T).
+                continue;
+            }
+            assignment.Set(instance, value);
+        }
+        foreach (var child in node.Children)
+        {
+            // A child is complete (its own children attached) before it lands in the parent, and the
+            // parent receives it before being attached upward itself: safe for boxed struct members.
+            if (Construct(child, slots, present) is { } value)
+            {
+                child.Attach!(instance, value);
+            }
+        }
+        return instance;
+    }
+
+    private static bool HasValue(NodePlan node, object?[] slots)
+    {
+        foreach (var slot in node.ValueSlots)
+        {
+            if (slots[slot] is not null) return true;
+        }
+        foreach (var child in node.Children)
+        {
+            if (HasValue(child, slots)) return true;
+        }
+        return false;
+    }
+
     // An unchanged TOASTed value is omitted from the new tuple; under REPLICA IDENTITY FULL the old
-    // tuple still carries it. An unavailable value is a poison change — never a silently nulled property.
+    // tuple still carries it. An unavailable value is a poison change, never a silently nulled property.
     private static object ResolveUnchangedToast(RawChange change, string columnName)
     {
         if (change.OldValues is { } oldValues)
@@ -110,7 +154,7 @@ internal sealed class EntityMaterializer : IRowMaterializer
         throw new InvalidOperationException(
             $"Column '{columnName}' on '{change.Schema}.{change.TableName}' was not carried in the change " +
             $"(an unchanged TOASTed value with no old tuple). Run: ALTER TABLE {change.Schema}.{change.TableName} " +
-            "REPLICA IDENTITY FULL; — self-config warns with this DDL at startup (or fails when " +
+            "REPLICA IDENTITY FULL; - self-config warns with this DDL at startup (or fails when " +
             "RequireFullReplicaIdentity is set). If no transform reads the value, drop it from capture via the " +
             "mapping's column selection instead (e.g. .Map<T>().ConsumesAllExcept(e => e.Payload)). See " +
             "https://wallabycdc.net/providers/entity-framework-core/#replica-identity-in-migrations");
@@ -153,87 +197,5 @@ internal sealed class EntityMaterializer : IRowMaterializer
         }
 
         return changes;
-    }
-
-    private static EntityPlan BuildPlan(IEntityType entityType, string table, IReadOnlySet<string>? consumedProperties)
-    {
-        var storeObject = StoreObjectIdentifier.Table(table, entityType.GetSchema());
-
-        var columns = new List<ColumnPlan>();
-        var byProperty = new Dictionary<string, ColumnPlan>();
-        var byColumn = new Dictionary<string, ColumnPlan>();
-        foreach (var property in entityType.GetProperties())
-        {
-            var columnName = property.GetColumnName(storeObject);
-            if (columnName is null) continue;
-            // An unselected property never enters the plan, so its wire values (including unchanged
-            // TOAST markers) are skipped like any unmapped column.
-            if (consumedProperties is not null && !consumedProperties.Contains(property.Name)) continue;
-
-            // GetSetter() returns EF Core's compiled IClrPropertySetter, which already handles
-            // backing fields, shadow properties (no-op), and the PropertyBag indexer used by
-            // shared-type entities (e.g. skip-navigation join tables). It's marked internal but
-            // is the standard escape hatch used by EF providers/extensions.
-            var plan = new ColumnPlan
-            {
-                ColumnName = columnName,
-                PropertyName = property.Name,
-                ClrType = property.ClrType,
-                AcceptsNull = !property.ClrType.IsValueType || Nullable.GetUnderlyingType(property.ClrType) is not null,
-                Converter = property.GetValueConverter(),
-#pragma warning disable EF1001
-                Setter = property.IsShadowProperty() ? null : ((IRuntimePropertyBase)property).GetSetter(),
-#pragma warning restore EF1001
-            };
-            columns.Add(plan);
-            byProperty[property.Name] = plan;
-            byColumn[columnName] = plan;
-        }
-
-        var primaryKey = entityType.FindPrimaryKey()!.Properties
-            .Select(p => byProperty[p.Name])
-            .ToList();
-
-        var clrType = entityType.ClrType;
-        return new EntityPlan
-        {
-            ClrType = clrType,
-            Factory = BuildFactory(clrType),
-            Columns = columns,
-            ColumnsByName = byColumn,
-            PrimaryKey = primaryKey,
-        };
-    }
-
-    private static Func<object> BuildFactory(Type clrType)
-    {
-        // For types without an accessible parameterless ctor (rare in EF models), fall back to Activator.
-        var ctor = clrType.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-            binder: null, types: Type.EmptyTypes, modifiers: null);
-        if (ctor is null)
-        {
-            return () => Activator.CreateInstance(clrType)!;
-        }
-        var newExpr = Expression.New(ctor);
-        return Expression.Lambda<Func<object>>(Expression.Convert(newExpr, typeof(object))).Compile();
-    }
-
-    private sealed class EntityPlan
-    {
-        public required Type ClrType { get; init; }
-        public required Func<object> Factory { get; init; }
-        public required IReadOnlyList<ColumnPlan> Columns { get; init; }
-        public required IReadOnlyDictionary<string, ColumnPlan> ColumnsByName { get; init; }
-        public required IReadOnlyList<ColumnPlan> PrimaryKey { get; init; }
-    }
-
-    private sealed class ColumnPlan
-    {
-        public required string ColumnName { get; init; }
-        public required string PropertyName { get; init; }
-        public required Type ClrType { get; init; }
-        public required bool AcceptsNull { get; init; }
-        public ValueConverter? Converter { get; init; }
-        public IClrPropertySetter? Setter { get; init; }
     }
 }

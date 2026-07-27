@@ -91,6 +91,33 @@ public class WallabyOptionsValidatorTests
     }
 
     [Test]
+    public void Negative_visibility_fence_timeout_fails()
+    {
+        var options = ValidOptions();
+        options.Advanced.WatermarkVisibilityFenceTimeout = TimeSpan.FromSeconds(-1);
+        Validate(options).Failed.ShouldBeTrue();
+
+        options.Advanced.WatermarkVisibilityFenceTimeout = TimeSpan.Zero;
+        Validate(options).Succeeded.ShouldBeTrue();
+    }
+
+    [Test]
+    public void Non_positive_retry_and_poll_intervals_fail()
+    {
+        var options = ValidOptions();
+        options.Advanced.StandbyRetryInterval = TimeSpan.Zero;
+        Validate(options).Failed.ShouldBeTrue();
+
+        options = ValidOptions();
+        options.Advanced.LeaderRetryInterval = TimeSpan.FromSeconds(-1);
+        Validate(options).Failed.ShouldBeTrue();
+
+        options = ValidOptions();
+        options.Advanced.ControlPollInterval = TimeSpan.Zero;
+        Validate(options).Failed.ShouldBeTrue();
+    }
+
+    [Test]
     public void Sink_retry_base_delay_must_be_positive()
     {
         var options = ValidOptions();

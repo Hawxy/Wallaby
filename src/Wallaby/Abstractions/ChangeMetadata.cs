@@ -21,6 +21,10 @@ namespace Wallaby.Abstractions;
 /// True when this change originated from a backfill snapshot. Keyed off the raw change, so it stays
 /// true even when a provider substitutes <paramref name="Action"/>.
 /// </param>
+/// <param name="BackfillRunId">
+/// Identifier of the backfill run that produced this change; null for live changes. Separate runs
+/// over the same rows carry distinct values, so re-backfills survive consumer-side deduplication.
+/// </param>
 public sealed record ChangeMetadata(
     string TableSchema,
     string TableName,
@@ -28,7 +32,8 @@ public sealed record ChangeMetadata(
     DateTimeOffset? CommitTimestamp,
     ulong CommitLsn,
     int CommitIdx,
-    bool IsBackfill)
+    bool IsBackfill,
+    string? BackfillRunId = null)
 {
     private string? _qualifiedTableName;
 

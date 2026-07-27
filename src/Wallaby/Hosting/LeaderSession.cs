@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
@@ -58,7 +59,7 @@ internal sealed class LeaderSession(
     /// </summary>
     public async Task<LeaderSessionOutcome> RunAsync(CancellationToken ct)
     {
-        var controlStore = new PostgresControlStore(dataSource, _logger);
+        var controlStore = new PostgresControlStore(dataSource, options, _logger);
 
         // A suspension in force must be honored before self-config can recreate any slot. Tolerates a
         // database no suspension-aware version has touched (no control table reads as running).
@@ -67,26 +68,44 @@ internal sealed class LeaderSession(
             return LeaderSessionOutcome.SuspendRequested;
         }
 
-        await BootstrapAsync(ct);
+        // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
+        // connection dropped) so a standby that can take over isn't left waiting while we stream on with
+        // a stale lock. Bootstrap runs under the same token: an ex-leader must not keep issuing DDL.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
+
+        try
+        {
+            await BootstrapAsync(linked.Token);
+        }
+        catch (OperationCanceledException) when (leadership.Lost.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // A lock loss during bootstrap is a normal step-down, not a fault.
+            return LeaderSessionOutcome.LeadershipLost;
+        }
 
         // Spill target for pgoutput v2 streamed (large) transactions. Leftovers from a prior crash are
         // cleared by the stream once it exclusively holds the slot.
         await using var spill = CreateSpill();
 
+        // Npgsql rejects a multi-host replication connection, so a multi-host string is resolved to its
+        // primary by probing; re-resolved each session, so a failover is picked up on re-election.
+        var replicationConnectionString = await ReplicationPrimaryResolver.ResolveAsync(
+            dataSource.ConnectionString, linked.Token);
+        if (!ReferenceEquals(replicationConnectionString, dataSource.ConnectionString))
+        {
+            _logger.ReplicationPrimaryResolved(new NpgsqlConnectionStringBuilder(replicationConnectionString).Host!);
+        }
+
         await using var stream = new LogicalReplicationStream(
-            dataSource.ConnectionString, options.SlotName, options.PublicationName, spill,
+            replicationConnectionString, options.SlotName, options.PublicationName, spill,
             options.Advanced.MaxBufferedChangesPerTransaction, components.Model);
         var changeEventFactory = new ChangeEventFactory(components.Materializer);
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
             options.SlotName, _logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
             components.DependentResolver, components.FanoutQueue, instrumentation, status,
-            options.Advanced.MaxTransactionsPerBatch);
+            options.Advanced.MaxTransactionsPerBatch, components.BackfillStore);
 
-        // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
-        // connection dropped) so a standby that can take over isn't left waiting while we stream on with
-        // a stale lock.
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, leadership.Lost);
         var scheduler = new BackfillScheduler(
             components.BackfillTables, components.BackfillStore, components.Coordinator,
             new SinkPurgeRunner(components.Sinks, instrumentation, _logger),
@@ -209,9 +228,12 @@ internal sealed class LeaderSession(
     /// <summary>
     /// Detects and repairs a slot-loss gap: a persisted checkpoint behind the slot's consistent point can
     /// only mean the slot was recreated after that checkpoint was written (invalidation, failover, manual
-    /// drop), so every change between the two LSNs was never streamed. Repairs by marking all mapped
-    /// tables for re-backfill; the marks are durable before the checkpoint advances to the consistent
-    /// point, so a crash mid-repair re-detects on the next leader session.
+    /// drop), so every change between the two LSNs was never streamed. A recreated slot with no
+    /// checkpoint at all is the same gap observed before the first interval-throttled checkpoint save
+    /// (e.g. suspend/resume early in an install's life, or while it only ever backfilled), so it
+    /// repairs too. Repairs by marking all mapped tables for re-backfill; the marks are durable before
+    /// the checkpoint advances to the consistent point, so a crash mid-repair re-detects on the next
+    /// leader session.
     /// </summary>
     private async Task RepairSlotGapAsync(SelfConfigResult selfConfig, CancellationToken ct)
     {
@@ -224,16 +246,32 @@ internal sealed class LeaderSession(
 
         var checkpoint = await components.CheckpointsDirect.GetAsync(options.SlotName, ct);
         var consistentLsn = ParseLsn(consistentPoint);
-        if (checkpoint is null || checkpoint.ConfirmedLsn >= consistentLsn)
+        if (checkpoint is null)
+        {
+            // No checkpoint has ever been written for this slot. If the slot is a recreation, the
+            // installation may have delivered before the slot was dropped; nothing proves continuity,
+            // so repair. A first-ever slot (no prior registry row) has missed nothing.
+            if (!selfConfig.SlotRecreated)
+            {
+                return;
+            }
+            _logger.SlotRecreatedBeforeFirstCheckpoint(options.SlotName, consistentPoint);
+        }
+        else if (checkpoint.ConfirmedLsn >= consistentLsn)
         {
             return;
         }
+        else
+        {
+            _logger.SlotGapDetected(
+                options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
+        }
 
-        _logger.SlotGapDetected(
-            options.SlotName, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(), consistentPoint);
         repair?.AddEvent(new ActivityEvent("slot.gap", tags: new ActivityTagsCollection
         {
-            ["wallaby.lsn.checkpoint"] = new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(),
+            ["wallaby.lsn.checkpoint"] = checkpoint is null
+                ? "none"
+                : new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString(),
             ["wallaby.lsn.consistent"] = consistentPoint,
         }));
 
@@ -299,8 +337,14 @@ internal sealed class LeaderSession(
 /// <summary>Source-generated log messages for <see cref="LeaderSession"/>.</summary>
 internal static partial class LeaderSessionLog
 {
-    [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot '{Slot}' was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot {Slot} was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]
     internal static partial void SlotGapDetected(this ILogger logger, string slot, string checkpointLsn, string consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot {Slot} was recreated (at {ConsistentPoint}) before its first checkpoint was written: changes committed while the slot was gone were never streamed. Re-backfilling all mapped tables to converge sinks.")]
+    internal static partial void SlotRecreatedBeforeFirstCheckpoint(this ILogger logger, string slot, string consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Resolved {Host} as the primary for the replication connection (multi-host connection string).")]
+    internal static partial void ReplicationPrimaryResolved(this ILogger logger, string host);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Backfill scheduler failed.")]
     internal static partial void BackfillSchedulerFailed(this ILogger logger, Exception ex);
@@ -308,6 +352,6 @@ internal static partial class LeaderSessionLog
     [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker failed.")]
     internal static partial void FanoutWorkerFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink '{Sink}'.")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink {Sink}.")]
     internal static partial void SinkInitialized(this ILogger logger, string sink);
 }

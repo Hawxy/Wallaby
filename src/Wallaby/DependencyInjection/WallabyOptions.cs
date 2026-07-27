@@ -28,8 +28,12 @@ public sealed class WallabyOptions
     public bool ManagePublicationTables { get; set; } = true;
 
     /// <summary>
-    /// Publish only each table's captured columns (PostgreSQL publication column lists), so excluded
-    /// and unmapped columns never leave the server. Applies to the primary publication and only when
+    /// Honor declared column selections at the publication (PostgreSQL publication column lists), so a
+    /// table with a <c>Consumes</c>/<c>ConsumesAllExcept</c> selection publishes only those columns and
+    /// the excluded ones never leave the server. Dependent-only tables, narrowed automatically to their
+    /// primary key and lookup columns, are listed too. Every other table publishes whole, so its columns
+    /// stay free to <c>ALTER</c> and <c>DROP</c>. Setting this to false disables column lists entirely,
+    /// including declared selections. Applies to the primary publication and only when
     /// <see cref="ManagePublicationTables"/> is true; external publications always publish whole
     /// tables, as do tables requiring <c>REPLICA IDENTITY FULL</c>.
     /// </summary>

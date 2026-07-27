@@ -79,6 +79,9 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>Backfill keyset page size (set before <see cref="StartAsync"/>).</summary>
     public int ChunkSize { get; set; } = 50;
 
+    /// <summary>Watermark visibility fence; null = disabled (set before <see cref="StartAsync"/>).</summary>
+    internal VisibilityFence? VisibilityFence { get; set; }
+
     /// <summary>Maximum records per dispatched batch and per inline fan-out page (set before <see cref="StartAsync"/>).</summary>
     public int MaxBatchSize { get; set; } = 1000;
 
@@ -87,6 +90,18 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// Defaults to the production default; set to 1 for tests that assert per-transaction granularity.
     /// </summary>
     public int MaxTransactionsPerBatch { get; set; } = 100;
+
+    /// <summary>
+    /// Safety valve on distinct dependent-lookup keys fanned out per binding per transaction (set before
+    /// <see cref="StartAsync"/>). Lower it to exercise the whole-table re-backfill fallback.
+    /// </summary>
+    public int MaxFanoutKeysPerTransaction { get; set; } = 1_000_000;
+
+    /// <summary>
+    /// Distinct lookup keys per offloaded fan-out chunk job (set before <see cref="StartAsync"/>). Lower
+    /// it to exercise chunked offload without a huge key set.
+    /// </summary>
+    public int FanoutChunkSize { get; set; } = 10_000;
 
     /// <summary>Interval for in-flight replication keepalives during transaction processing (set before <see cref="StartAsync"/>).</summary>
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
@@ -250,7 +265,11 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot);
         _stream = new LogicalReplicationStream(ConnectionString, Names.Slot, Names.Publication, _spill, model: _model);
         _coordinator = new WatermarkBackfillCoordinator(
-            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation) { ChunkSize = ChunkSize };
+            _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation)
+        {
+            ChunkSize = ChunkSize,
+            Fence = VisibilityFence,
+        };
 
         IChangeRouter router;
         if (_broadcast)
@@ -270,7 +289,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         _dependentResolver = _model!.DependentBindings.Count > 0
-            ? new DependentChangeResolver(_dataSource, _model, Instrumentation)
+            ? new DependentChangeResolver(
+                _dataSource, _model, Instrumentation, MaxFanoutKeysPerTransaction, FanoutChunkSize)
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
@@ -278,7 +298,8 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, NullLogger.Instance, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation,
-            maxTransactionsPerBatch: MaxTransactionsPerBatch);
+            maxTransactionsPerBatch: MaxTransactionsPerBatch,
+            backfillStore: new PostgresBackfillStore(_dataSource));
 
         // Mirror the production lifecycle: run one-time sink setup before streaming begins.
         foreach (var sink in _sinks.Values)
@@ -515,6 +536,11 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             // must be computable on deletes, which needs full old-row values.
             RequiresFullReplicaIdentity = _mappings
                 .Where(m => m.DestinationSelector is not null || m.DocumentIdSelector is not null)
+                .Select(m => m.EntityClrType)
+                .ToHashSet(),
+            // Harness scope keys are ChangeEvent-based, so only custom document ids are entity-bound.
+            RequiresMaterializedEntity = _mappings
+                .Where(m => m.DocumentIdSelector is not null)
                 .Select(m => m.EntityClrType)
                 .ToHashSet(),
         });

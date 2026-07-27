@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +67,41 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.ToTable("order_lines", schema: "sales");
             b.HasKey(l => new { l.OrderId, l.LineNumber });
+        });
+
+        modelBuilder.Entity<Supplier>(b =>
+        {
+            b.ToTable("suppliers");
+            b.HasKey(s => s.Id);
+            b.OwnsOne(s => s.Address, a =>
+            {
+                a.Property(x => x.Street).HasColumnName("address_street");
+                a.Property(x => x.City).HasColumnName("address_city");
+                a.OwnsOne(x => x.Location, g =>
+                {
+                    g.Property(p => p.Lat).HasColumnName("address_lat");
+                    g.Property(p => p.Lon).HasColumnName("address_lon");
+                });
+            });
+            b.Navigation(s => s.Address).IsRequired();
+            b.OwnsOne(s => s.BillingAddress, a =>
+            {
+                a.Property(x => x.Street).HasColumnName("billing_street");
+                a.Property(x => x.City).HasColumnName("billing_city");
+                a.OwnsOne(x => x.Location, g =>
+                {
+                    g.Property(p => p.Lat).HasColumnName("billing_lat");
+                    g.Property(p => p.Lon).HasColumnName("billing_lon");
+                });
+            });
+            b.ComplexProperty(s => s.Contact, c =>
+            {
+                c.Property(p => p.Email).HasColumnName("contact_email");
+                c.Property(p => p.Phone).HasColumnName("contact_phone");
+            });
+            b.OwnsMany(s => s.Notes, n => n.ToTable("supplier_notes"));
+            b.OwnsOne(s => s.Legal, l => l.ToTable("supplier_legal"));
+            b.OwnsOne(s => s.Meta, m => m.ToJson("meta"));
         });
     }
 }

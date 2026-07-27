@@ -25,9 +25,10 @@ internal sealed class SelfConfigOptions
     public bool RequireFullReplicaIdentity { get; init; }
 
     /// <summary>
-    /// When true (and <see cref="ManagePublicationTables"/> is true), the primary publication publishes
-    /// only each table's captured columns via a PG15 column list. Tables requiring
-    /// <c>REPLICA IDENTITY FULL</c> always publish whole rows; external publications are unaffected.
+    /// When true (and <see cref="ManagePublicationTables"/> is true), the primary publication gives a
+    /// PG15 column list to each table whose capture set was deliberately narrowed
+    /// (<see cref="Model.CapturedTable.ColumnsNarrowed"/>); every other table publishes whole rows, as
+    /// do tables requiring <c>REPLICA IDENTITY FULL</c>. External publications are unaffected.
     /// </summary>
     public bool PublicationColumnLists { get; init; } = true;
 

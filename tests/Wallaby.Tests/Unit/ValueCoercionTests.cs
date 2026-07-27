@@ -107,4 +107,23 @@ public class ValueCoercionTests
         ValueCoercion.ToClr(123L, typeof(int)).ShouldBe(123);
         ValueCoercion.ToClr((short)7, typeof(decimal)).ShouldBe(7m);
     }
+
+    // ---- array widening (PerInstance array nullability) ----
+
+    [Test]
+    public void Value_array_widens_to_a_nullable_element_target()
+    {
+        // A row without NULL elements decodes as T[] even when the property is Nullable<T>[].
+        ValueCoercion.ToClr(new[] { 1, 2 }, typeof(int?[])).ShouldBe(new int?[] { 1, 2 });
+        ValueCoercion.ToClr(new[] { 1.5m }, typeof(decimal?[])).ShouldBe(new decimal?[] { 1.5m });
+        ValueCoercion.ToClr(Array.Empty<long>(), typeof(long?[])).ShouldBeOfType<long?[]>().ShouldBeEmpty();
+    }
+
+    [Test]
+    public void Nullable_element_array_passes_through_to_a_matching_target()
+    {
+        var value = new int?[] { 1, null };
+
+        ValueCoercion.ToClr(value, typeof(int?[])).ShouldBeSameAs(value);
+    }
 }

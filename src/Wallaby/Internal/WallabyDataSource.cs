@@ -20,6 +20,13 @@ internal sealed class WallabyDataSource : IAsyncDisposable
         {
             builder.MaxAutoPrepare = 64;
         }
+        // NULL array elements throw at read time under Npgsql's default ArrayNullabilityMode.Never;
+        // PerInstance reads them as Nullable<T>[] instead (backfill reads share the replication
+        // stream's decoding behavior). Applied unless the consumer configured the mode explicitly.
+        if (!builder.ShouldSerialize("Array Nullability Mode"))
+        {
+            builder.ArrayNullabilityMode = ArrayNullabilityMode.PerInstance;
+        }
         var source = NpgsqlDataSource.Create(builder);
 
         if(source is NpgsqlMultiHostDataSource multiHostDataSource)

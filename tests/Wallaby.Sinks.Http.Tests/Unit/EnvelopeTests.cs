@@ -61,20 +61,33 @@ public class EnvelopeTests
     }
 
     [Test]
-    public async Task Backfill_record_omits_the_commit_timestamp()
+    public async Task Backfill_record_carries_its_run_id()
     {
         var envelope = await CaptureEnvelopeAsync(Batch(
-            Upsert("1", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, action: ChangeAction.Read))));
+            Upsert("1", new Dictionary<string, object?>(),
+                metadata: Meta(backfill: true, lsn: 0, action: ChangeAction.Read, backfillRunId: "r1"))));
 
         var record = envelope.RootElement.GetProperty("records")[0];
-        // Stable across backfill runs: keyed by row, not by (lsn, idx) — those are 0 for every backfill read.
-        record.GetProperty("idempotencyKey").GetString().ShouldBe("backfill:products:1");
+        // Keyed by (run, row): stable within a run's chunks, distinct across separate runs.
+        record.GetProperty("idempotencyKey").GetString().ShouldBe("backfill:r1:products:1");
 
         var metadata = record.GetProperty("metadata");
         metadata.GetProperty("isBackfill").GetBoolean().ShouldBeTrue();
         metadata.GetProperty("action").GetString().ShouldBe("read");
         metadata.GetProperty("commitLsn").GetString().ShouldBe("0");
+        metadata.GetProperty("backfillRunId").GetString().ShouldBe("r1");
         metadata.TryGetProperty("commitTimestamp", out _).ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task Backfill_record_without_a_run_id_keys_on_the_zero_sentinel()
+    {
+        var envelope = await CaptureEnvelopeAsync(Batch(
+            Upsert("1", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, action: ChangeAction.Read))));
+
+        var record = envelope.RootElement.GetProperty("records")[0];
+        record.GetProperty("idempotencyKey").GetString().ShouldBe("backfill:0:products:1");
+        record.GetProperty("metadata").TryGetProperty("backfillRunId", out _).ShouldBeFalse();
     }
 
     [Test]

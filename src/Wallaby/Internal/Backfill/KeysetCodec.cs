@@ -51,7 +51,8 @@ internal static class KeysetCodec
     /// <summary>
     /// Deserialize a PK cursor, coercing each element to the matching target type. Returns false when the
     /// persisted JSON is not a current-version envelope for exactly <paramref name="pkColumns"/> (ordinal,
-    /// order-sensitive) — the caller restarts from scratch. Null/empty input is a valid "no cursor yet".
+    /// order-sensitive) or its values cannot be coerced back — the caller restarts from scratch. Null/empty
+    /// input is a valid "no cursor yet".
     /// </summary>
     public static bool TryDeserializeCursor(
         string? json, IReadOnlyList<string> pkColumns, IReadOnlyList<Type> targets, out object?[]? cursor)
@@ -62,37 +63,36 @@ internal static class KeysetCodec
             return true;
         }
 
-        CursorEnvelope? envelope;
         try
         {
-            envelope = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.CursorEnvelope);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-
-        if (envelope is null || envelope.V != CursorVersion || envelope.Pk is null || envelope.Cur is null ||
-            envelope.Pk.Length != pkColumns.Count || envelope.Cur.Length != targets.Count)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < pkColumns.Count; i++)
-        {
-            if (!string.Equals(envelope.Pk[i], pkColumns[i], StringComparison.Ordinal))
+            var envelope = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.CursorEnvelope);
+            if (envelope is null || envelope.V != CursorVersion || envelope.Pk is null || envelope.Cur is null ||
+                envelope.Pk.Length != pkColumns.Count || envelope.Cur.Length != targets.Count)
             {
                 return false;
             }
-        }
 
-        var row = new object?[envelope.Cur.Length];
-        for (var i = 0; i < row.Length; i++)
-        {
-            row[i] = ElementToClr(envelope.Cur[i], targets[i]);
+            for (var i = 0; i < pkColumns.Count; i++)
+            {
+                if (!string.Equals(envelope.Pk[i], pkColumns[i], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            var row = new object?[envelope.Cur.Length];
+            for (var i = 0; i < row.Length; i++)
+            {
+                row[i] = ElementToClr(envelope.Cur[i], targets[i]);
+            }
+            cursor = row;
+            return true;
         }
-        cursor = row;
-        return true;
+        catch (Exception)
+        {
+            // Unparseable values make the cursor as unusable as malformed JSON; the caller rescans.
+            return false;
+        }
     }
 
     /// <summary>
@@ -134,8 +134,8 @@ internal static class KeysetCodec
 
     /// <summary>
     /// Deserialize a scoped-backfill cursor. Cursors persisted before batching carry no batch index and
-    /// read back as batch 0. Returns false on a stale/mismatched envelope — the caller reruns the scope
-    /// fresh. Null/empty input is a valid "no cursor yet".
+    /// read back as batch 0. Returns false on a stale/mismatched envelope or values that cannot be coerced
+    /// back — the caller reruns the scope fresh. Null/empty input is a valid "no cursor yet".
     /// </summary>
     public static bool TryDeserializeScopedCursor(
         string? json, IReadOnlyList<string> pkColumns, IReadOnlyList<Type> targets,
@@ -148,42 +148,43 @@ internal static class KeysetCodec
             return true;
         }
 
-        CursorEnvelope? envelope;
         try
         {
-            envelope = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.CursorEnvelope);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-
-        if (envelope is null || envelope.V != CursorVersion || envelope.Pk is null || envelope.B < 0 ||
-            envelope.Pk.Length != pkColumns.Count ||
-            (envelope.Cur is not null && envelope.Cur.Length != targets.Count))
-        {
-            return false;
-        }
-
-        for (var i = 0; i < pkColumns.Count; i++)
-        {
-            if (!string.Equals(envelope.Pk[i], pkColumns[i], StringComparison.Ordinal))
+            var envelope = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.CursorEnvelope);
+            if (envelope is null || envelope.V != CursorVersion || envelope.Pk is null || envelope.B < 0 ||
+                envelope.Pk.Length != pkColumns.Count ||
+                (envelope.Cur is not null && envelope.Cur.Length != targets.Count))
             {
                 return false;
             }
-        }
 
-        batch = envelope.B;
-        if (envelope.Cur is not null)
-        {
-            var row = new object?[envelope.Cur.Length];
-            for (var i = 0; i < row.Length; i++)
+            for (var i = 0; i < pkColumns.Count; i++)
             {
-                row[i] = ElementToClr(envelope.Cur[i], targets[i]);
+                if (!string.Equals(envelope.Pk[i], pkColumns[i], StringComparison.Ordinal))
+                {
+                    return false;
+                }
             }
-            cursor = row;
+
+            if (envelope.Cur is not null)
+            {
+                var row = new object?[envelope.Cur.Length];
+                for (var i = 0; i < row.Length; i++)
+                {
+                    row[i] = ElementToClr(envelope.Cur[i], targets[i]);
+                }
+                cursor = row;
+            }
+            batch = envelope.B;
+            return true;
         }
-        return true;
+        catch (Exception)
+        {
+            // Unparseable values make the cursor as unusable as malformed JSON; the caller reruns fresh.
+            batch = 0;
+            cursor = null;
+            return false;
+        }
     }
 
     /// <summary>Serialize a single value tuple to its JSON array form (one element of <see cref="SerializeTuples"/>).</summary>
@@ -223,7 +224,11 @@ internal static class KeysetCodec
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
-    /// <summary>Deserialize a set of value tuples, coercing each element to the matching target type.</summary>
+    /// <summary>
+    /// Deserialize a set of value tuples, coercing each element to the matching target type. Throws when
+    /// the JSON or a value cannot be read; the fan-out worker drops such a job (a retry replays the same
+    /// bytes).
+    /// </summary>
     public static IReadOnlyList<object?[]> DeserializeTuples(string json, IReadOnlyList<Type> targets)
     {
         var tuples = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.JsonElementArrayArray);
@@ -247,7 +252,8 @@ internal static class KeysetCodec
 
     // Values are written in the shapes ElementToClr reads back: numbers/bools/nulls natively, everything
     // else as an invariant string that ValueCoercion.ToClr parses against the target type (Guid as "D",
-    // date/times as ISO 8601 via the Utf8JsonWriter overloads).
+    // date/times as ISO 8601 via the Utf8JsonWriter overloads, byte[] as base64, DateOnly/TimeOnly/TimeSpan
+    // as round-trip formats). An unhandled type throws: a lossy string would corrupt the cursor silently.
     private static void WriteValue(Utf8JsonWriter writer, object? value)
     {
         switch (value)
@@ -266,10 +272,17 @@ internal static class KeysetCodec
             case double n: writer.WriteNumberValue(n); break;
             case float n: writer.WriteNumberValue(n); break;
             case string s: writer.WriteStringValue(s); break;
+            case char c: writer.WriteStringValue(c.ToString()); break;
             case Guid g: writer.WriteStringValue(g); break;
             case DateTime dt: writer.WriteStringValue(dt); break;
             case DateTimeOffset dto: writer.WriteStringValue(dto); break;
-            default: writer.WriteStringValue(Convert.ToString(value, CultureInfo.InvariantCulture)); break;
+            case byte[] bytes: writer.WriteBase64StringValue(bytes); break;
+            case DateOnly d: writer.WriteStringValue(d.ToString("O", CultureInfo.InvariantCulture)); break;
+            case TimeOnly t: writer.WriteStringValue(t.ToString("O", CultureInfo.InvariantCulture)); break;
+            case TimeSpan ts: writer.WriteStringValue(ts.ToString("c", CultureInfo.InvariantCulture)); break;
+            default:
+                throw new NotSupportedException(
+                    $"A value of type {value.GetType()} cannot be persisted in a keyset cursor or fan-out lookup.");
         }
     }
 

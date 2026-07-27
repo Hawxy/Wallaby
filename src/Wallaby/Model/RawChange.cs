@@ -38,6 +38,13 @@ public sealed record RawChange
     /// <summary>Zero-based index of this change within its transaction.</summary>
     public int CommitIdx { get; internal set; }
 
+    /// <summary>
+    /// Identifier of the backfill run that produced this <see cref="ChangeAction.Read"/> change; null for
+    /// live changes. Distinguishes separate runs over the same rows (e.g. a version-triggered re-backfill)
+    /// in the sink idempotency key.
+    /// </summary>
+    public string? BackfillRunId { get; init; }
+
     /// <summary>The schema-qualified table name, e.g. <c>public.orders</c>.</summary>
     public string QualifiedName => field ??= $"{Schema}.{TableName}";
 }

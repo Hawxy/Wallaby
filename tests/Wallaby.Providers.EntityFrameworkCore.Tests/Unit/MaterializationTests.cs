@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.Providers.EntityFrameworkCore.Internal;
 using Wallaby.Internal.Pipeline;
@@ -187,6 +188,45 @@ public class MaterializationTests
 
         materializer.TryMaterialize(change, out _).ShouldBeFalse();
     }
+
+    [Test]
+    public void A_ctor_bound_record_entity_materializes()
+    {
+        using var ctx = new KioskContext(new DbContextOptionsBuilder<KioskContext>()
+            .UseNpgsql(TestModelFactory.ModelOnlyConnectionString)
+            .Options);
+        var materializer = new EntityMaterializer(ctx.Model);
+
+        var change = new RawChange
+        {
+            RelationId = 5, Schema = "public", TableName = "kiosks",
+            Action = ChangeAction.Insert,
+            NewValues = [Col("Id", 3), Col("Label", "North")],
+        };
+
+        var ok = materializer.TryMaterialize(change, out var row);
+
+        ok.ShouldBeTrue();
+        var kiosk = (Kiosk)row!.Entity!;
+        kiosk.Id.ShouldBe(3);
+        kiosk.Label.ShouldBe("North");
+        row.PrimaryKey[0].ShouldBe(3);
+    }
+
+    private sealed class KioskContext(DbContextOptions<KioskContext> options) : DbContext(options)
+    {
+        public DbSet<Kiosk> Kiosks => Set<Kiosk>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<Kiosk>(b =>
+            {
+                b.ToTable("kiosks");
+                b.HasKey(k => k.Id);
+            });
+    }
+
+    /// <summary>An entity with no parameterless constructor, materialized via the EF constructor binding.</summary>
+    public sealed record Kiosk(int Id, string Label);
 
     [Test]
     public void ChangeEventFactory_builds_envelope_with_metadata()

@@ -11,9 +11,12 @@ namespace Wallaby.Abstractions;
 /// The current row materialized into its mapped CLR entity. Null for deletes when the
 /// row no longer exists, or when materialization is not applicable.
 /// </param>
-/// <param name="Record">Current column values keyed by EF Core property name.</param>
+/// <param name="Record">
+/// Current column values keyed by property name; a flattened owned or complex member's properties
+/// key by their dotted member path (e.g. <c>Address.Street</c>).
+/// </param>
 /// <param name="Changes">
-/// Previous values of changed columns (keyed by EF Core property name) for updates/deletes,
+/// Previous values of changed columns (keyed like <see cref="Record"/>) for updates/deletes,
 /// subject to the table's <c>REPLICA IDENTITY</c>. Null for inserts and backfill reads.
 /// </param>
 /// <param name="PrimaryKey">The primary key values, in key ordinal order.</param>

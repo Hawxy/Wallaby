@@ -115,7 +115,7 @@ public class SinkDispatcherTests
         // One warning per retry; the final failed attempt propagates instead of retrying.
         var warnings = logger.Collector.GetSnapshot().Where(r => r.Level == LogLevel.Warning).ToList();
         warnings.Count.ShouldBe(2);
-        warnings[0].Message.ShouldContain("'sink'");
+        warnings[0].Message.ShouldContain("sink");
         warnings[0].Exception.ShouldBeOfType<SinkRetryableException>();
     }
 

@@ -111,6 +111,14 @@ documents. Marten's other metadata columns (`mt_version`, `mt_last_modified`, â€
 The change's `Record` carries the id under your document's id member name, plus `TenantId` and
 `Deleted` when applicable.
 
+## Deletes and document identity
+
+A delete's `ChangeEvent.Entity` carries the deleted document, rehydrated from the old tuple's `data`,
+whenever the table has `REPLICA IDENTITY FULL` (without it, only the key columns are on the wire and
+`Entity` is null). This is what makes [`KeyedBy(...)`](/mappings#document-ids) and entity-derived
+[`ScopedDestination`](/providers/marten/multi-tenancy) routing work on deletes as the custom id or scope
+key comes from the document itself.
+
 ## Soft deletes
 
 A soft delete (`session.Delete<T>(...)` on a `SoftDeleted()` document) flips `mt_deleted` in place, but consumers of a search index or read model almost never want "deleted but still there" documents.

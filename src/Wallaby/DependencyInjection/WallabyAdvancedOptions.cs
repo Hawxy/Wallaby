@@ -25,6 +25,17 @@ public sealed class WallabyAdvancedOptions
     /// </summary>
     public int MaxTransactionsPerBatch { get; set; } = 100;
 
+    /// <summary>
+    /// Safety valve on how many distinct dependent-lookup keys one transaction may fan out for a single
+    /// <c>DependsOn</c> binding. A wide fan-out is offloaded to the queue in bounded chunk jobs as the
+    /// keys accumulate, so memory stays flat regardless of size; past this cap the transaction has
+    /// effectively rewritten the dependent table, and the binding's whole primary table is re-snapshotted
+    /// instead (backfill is upsert-only, so the wider scan converges to the same result). An update whose
+    /// old tuple carries a different lookup value counts both values, so a table under REPLICA IDENTITY
+    /// FULL can consume up to two keys per change. Must be greater than zero.
+    /// </summary>
+    public int MaxFanoutKeysPerTransaction { get; set; } = 1_000_000;
+
     /// <summary>How long a standby node waits before retrying to acquire leadership.</summary>
     public TimeSpan StandbyRetryInterval { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -63,6 +74,16 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan ControlPollInterval { get; set; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
+    /// Floor on how long a flag-less node waits before auto-resuming a configuration-origin suspension
+    /// whose liveness heartbeat has gone quiet. The effective grace is
+    /// <c>max(ControlPollInterval * 4, SuspensionAutoResumeGraceFloor)</c>: flag-carrying nodes refresh
+    /// the heartbeat every control poll, so a mixed rolling deployment stays suspended instead of
+    /// flip-flopping slots (each flap forces a full re-backfill), while the grace bounds the dead time a
+    /// fully flag-less deployment waits before resuming.
+    /// </summary>
+    public TimeSpan SuspensionAutoResumeGraceFloor { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// How often the leader emits a tiny transactional heartbeat message (<c>pg_logical_emit_message</c>)
     /// while the pipeline is idle, so the slot's <c>confirmed_flush_lsn</c> keeps advancing even when the
     /// mapped tables are quiet while other tables churn WAL, preventing unbounded WAL retention (and
@@ -79,4 +100,15 @@ public sealed class WallabyAdvancedOptions
     /// every acknowledged transaction.
     /// </summary>
     public TimeSpan CheckpointSaveInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Opt-in visibility fence for watermark backfill: after emitting a chunk's low watermark, wait up to
+    /// this long until no transaction in the current snapshot has already committed, closing the narrow
+    /// race where a commit lands just before the watermark but is visible to neither the chunk read nor
+    /// the window's live capture (leaving a stale document until the next backfill). The fence polls
+    /// <c>pg_xact_status</c>, which must be available to Wallaby's role on the server; long-running open
+    /// transactions do not pin it (they are in progress, not committed). On timeout a warning is logged
+    /// and the chunk proceeds unfenced. <see cref="TimeSpan.Zero"/> (the default) disables the fence.
+    /// </summary>
+    public TimeSpan WatermarkVisibilityFenceTimeout { get; set; } = TimeSpan.Zero;
 }

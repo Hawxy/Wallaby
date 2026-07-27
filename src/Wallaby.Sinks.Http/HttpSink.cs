@@ -143,10 +143,30 @@ public sealed class HttpSink : ISink
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (response.IsSuccessStatusCode)
             {
+                // A user-supplied client may still follow redirects; the response then comes from a URI
+                // the request wasn't sent to, with the POST body dropped along the way. Compared against
+                // the request's own (post-send) URI, not the configured endpoint, so a URI-rewriting
+                // handler (service discovery, proxies) doesn't false-positive.
+                var finalUri = response.RequestMessage?.RequestUri;
+                if (finalUri is not null && request.RequestUri is not null && finalUri != request.RequestUri)
+                {
+                    return DeliveryResult.Permanent(
+                        $"HTTP sink request to {request.RequestUri} was redirected to {finalUri} and the POST body " +
+                        "was dropped in transit; the 2xx acknowledges nothing. Point Endpoint at the final URL, " +
+                        "or disable redirect following on the custom HttpClient.");
+                }
                 return null;
             }
 
             var status = (int)response.StatusCode;
+            if (status is >= 300 and < 400)
+            {
+                var location = response.Headers.Location?.ToString() ?? "an unspecified location";
+                return DeliveryResult.Permanent(
+                    $"HTTP sink request to {_endpoint} was answered with a redirect ({status}) to {location}. " +
+                    "Following it would drop the POST body, so redirects are never followed; point Endpoint " +
+                    "at the final URL.");
+            }
             return status is 408 or 429 or >= 500
                 ? DeliveryResult.Retry($"HTTP sink received {status} from {_endpoint}.")
                 : DeliveryResult.Permanent($"HTTP sink request was rejected with {status} by {_endpoint}.");

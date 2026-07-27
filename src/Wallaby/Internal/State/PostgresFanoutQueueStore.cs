@@ -13,6 +13,10 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
 {
     private const string DueStatuses = "('Requested', 'InProgress')";
 
+    // Per-job retry schedule, computed in SQL from the persisted attempt count so it survives a restart.
+    private static readonly TimeSpan FailureBaseDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FailureMaxDelay = TimeSpan.FromMinutes(5);
+
     public async Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct)
     {
         var columns = spec.LookupColumns.ToArray();
@@ -32,7 +36,11 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
                 SET status = 'Requested',
                     lookup_values = EXCLUDED.lookup_values,
                     requested_at = now(),
-                    updated_at = now();
+                    updated_at = now(),
+                    -- A fresh trigger clears any backoff left by earlier failures.
+                    attempts = 0,
+                    next_attempt_at = now(),
+                    last_error = NULL;
             SELECT pg_notify('{WallabySchema.FanoutNotifyChannel}', '');
             """,
             connection);
@@ -51,10 +59,10 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
             $"""
-            SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied
+            SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied, attempts
             FROM wallaby.fanout_queue
-            WHERE status IN {DueStatuses}
-            ORDER BY requested_at
+            WHERE status IN {DueStatuses} AND next_attempt_at <= now()
+            ORDER BY next_attempt_at, requested_at
             LIMIT 1
             """,
             connection);
@@ -69,6 +77,14 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         await using var cmd = new NpgsqlCommand(
             $"SELECT count(*) FROM wallaby.fanout_queue WHERE status IN {DueStatuses}", connection);
         return (long)(await cmd.ExecuteScalarAsync(ct))!;
+    }
+
+    // No status filter: every surviving row is pending (finished jobs are deleted on completion).
+    public async Task<int> MaxAttemptsAsync(CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+        return (int)await PgExec.ScalarLongAsync(
+            connection, "SELECT coalesce(max(attempts), 0) FROM wallaby.fanout_queue", ct);
     }
 
     public Task MarkInProgressAsync(string tableQualified, string lookupHash, string? startCursorJson, CancellationToken ct)
@@ -103,22 +119,37 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
             ct,
             ("t", tableQualified), ("h", lookupHash));
 
-    public Task DeferAsync(string tableQualified, string lookupHash, CancellationToken ct)
+    public Task DeferAsync(string tableQualified, string lookupHash, TimeSpan delay, CancellationToken ct)
         => PgExec.ExecuteAsync(
             dataSource,
             """
             UPDATE wallaby.fanout_queue
-            SET requested_at = now(), updated_at = now()
+            SET next_attempt_at = now() + @d, updated_at = now()
             WHERE table_qualified = @t AND lookup_hash = @h
             """,
             ct,
-            ("t", tableQualified), ("h", lookupHash));
+            ("t", tableQualified), ("h", lookupHash), ("d", delay));
+
+    public Task FailAsync(string tableQualified, string lookupHash, string error, CancellationToken ct)
+        => PgExec.ExecuteAsync(
+            dataSource,
+            """
+            UPDATE wallaby.fanout_queue
+            SET attempts = attempts + 1,
+                last_error = @e,
+                next_attempt_at = now() + least(@base * power(2, least(attempts, 16)), @max),
+                updated_at = now()
+            WHERE table_qualified = @t AND lookup_hash = @h
+            """,
+            ct,
+            ("t", tableQualified), ("h", lookupHash), ("e", error),
+            ("base", FailureBaseDelay), ("max", FailureMaxDelay));
 
     public async Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied FROM wallaby.fanout_queue",
+            "SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied, attempts FROM wallaby.fanout_queue",
             connection);
 
         var results = new List<FanoutJobRow>();
@@ -138,7 +169,8 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
             reader.GetFieldValue<string[]>(3),
             reader.GetString(4),
             reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.GetInt64(6));
+            reader.GetInt64(6),
+            reader.GetInt32(7));
 
     /// <summary>
     /// The canonical JSON for a lookup set: tuples sorted by their serialized form so the same logical

@@ -15,7 +15,7 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `ChunkSize` | `500` | Backfill keyset page size (1–100 000; chunk rows are held in memory). |
 | `MaxBatchSize` | `1000` | Max records per dispatched batch (and per inline [dependent fan-out](/providers/entity-framework-core/#dependent-tables) page). Bounds memory and sink batch size for large transactions, fan-out, and backfill (1–100 000). |
 | `ManagePublicationTables` | `true` | Reconcile the publication's table set to the model. When `false`, a publication used with a [partitioned table](/how-it-works#partitioned-tables) must have `publish_via_partition_root = true` set yourself; startup fails otherwise. |
-| `PublicationColumnLists` | `true` | Publish only each table's captured columns via [publication column lists](#publication-column-lists). Requires `ManagePublicationTables`. |
+| `PublicationColumnLists` | `true` | Enforce declared [column selections](#publication-column-lists) at the publication, so excluded columns never leave the server. Tables you haven't narrowed publish whole rows. Requires `ManagePublicationTables`. |
 | `RequireFullReplicaIdentity` | `false` | Fail (vs warn) when a table needs `REPLICA IDENTITY FULL`. |
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
@@ -24,6 +24,11 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
 | `SinkRetry.MaxDelay` | `3m` | Ceiling on the delay between sink retries. |
+
+Wallaby adjusts two Npgsql settings on the connections it builds from `ConnectionString`, each only
+when your connection string doesn't set it explicitly: `Max Auto Prepare=64` (auto-prepares the hot
+bookkeeping statements) and `Array Nullability Mode=PerInstance` (an array column holding a `NULL`
+element decodes as `Nullable<T>[]` instead of failing the stream).
 
 ### Advanced Options
 
@@ -36,12 +41,15 @@ You shouldn't modify these unless you know what you're doing:
 | `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
+| `MaxFanoutKeysPerTransaction` | `1 000 000` | Safety valve on the distinct [dependent-lookup](/providers/entity-framework-core/#dependent-tables) keys one transaction may fan out per binding. A wide fan-out is offloaded to the queue in bounded chunk jobs as the keys accumulate, so memory stays flat regardless of size. Past the cap the transaction has effectively rewritten the dependent table: the binding's primary table is re-snapshotted whole instead (upsert-only, so it converges the same way) and a warning is logged (1–1 000 000). |
 | `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/providers/entity-framework-core/#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
 | `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval is only a safety net for a missed notification. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 | `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
 | `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing; see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
 | `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
+| `WatermarkVisibilityFenceTimeout` | `Zero` (off) | Opt-in [visibility fence](/backfill#visibility-fence-opt-in) for watermark backfill: each chunk waits up to this long after its low watermark until no transaction in the current snapshot has already committed, closing the microsecond race where a commit lands just before the watermark but is visible to neither the chunk read nor the window. Polls `pg_xact_status` (must be callable by Wallaby's role); long-running open transactions don't pin it. On timeout a warning is logged and the chunk proceeds unfenced. |
+| `SuspensionAutoResumeGraceFloor` | `60s` | Floor on how long a flag-less node waits before auto-resuming a configuration-origin suspension whose liveness heartbeat has gone quiet; the effective grace is `max(ControlPollInterval * 4, floor)`. Keeps a [mixed rolling deployment](/operations/major-version-upgrades#mixed-rollouts) suspended instead of flapping slots, at the cost of the same wait after the last `Suspend()`-flagged node stops. |
 
 ## Options Pattern
 
@@ -80,22 +88,106 @@ and their configuration errors surface at host start instead of at registration.
 
 ## Large Transaction Handling
 
-See [Transaction Spill](/transaction-spill).
+### Transaction Spill
 
-### Publication column lists
+Wallaby uses pgoutput **protocol v2**, so a transaction larger than the server's
+`logical_decoding_work_mem` (default 64 MB) is streamed before its commit. The spill buffers those
+streamed changes out of process memory until the commit arrives, so a single huge transaction can't
+exhaust the worker's heap. Small transactions, the overwhelming majority, never touch it.
 
-With `PublicationColumnLists` (the default), Wallaby publishes only the columns the capture model
-actually uses - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so properties outside the
-mappings' [column selections](/providers/entity-framework-core/#declaring-consumed-columns),
-unmapped physical columns, and (for Marten) unmodeled `mt_*` metadata are filtered inside Postgres:
-they are never decoded by the WAL sender or sent over the wire. Column lists are reconciled on every
-startup; drift is applied atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+::: tip
+You likely don't need to care about this page unless you're dealing with a lot of massive transactions
+:::
+
+### Choosing a backend
+
+```csharp
+cdc.SpillToDatabase();            // default: wallaby.stream_buffer UNLOGGED table on the source DB
+cdc.SpillToDisk("/var/spill");    // local temp files (path optional)
+cdc.UseTransactionSpill(ctx => new S3Spill(ctx.SlotName)); // your own backend
+```
+
+- **`SpillToDatabase()`** *(default)* is disk-free and zero-config (it works wherever Wallaby
+  connects), at the cost of I/O amplification on the source database during large transactions.
+- **`SpillToDisk(path?)`** writes append-only files under the given path (default
+  `%TEMP%/wallaby/<slot>`). It needs a writable path, so it isn't suitable for read-only
+  environments.
+- **`UseTransactionSpill(...)`** plugs in a custom backend. The factory runs once per leader
+  session and should return a fresh instance; Wallaby disposes it when the session ends.
+
+### Interface
+
+```csharp
+public interface ITransactionSpill : IAsyncDisposable
+{
+    ValueTask AppendAsync(uint xid, uint subxid, RawChange change, CancellationToken ct);
+    IAsyncEnumerable<RawChange> ReadAsync(uint xid, CancellationToken ct);
+    ValueTask DiscardAsync(uint xid, CancellationToken ct);
+    ValueTask DiscardSubtransactionAsync(uint xid, uint subxid, CancellationToken ct);
+    ValueTask ClearAsync(CancellationToken ct);
+}
+
+public readonly record struct SpillContext(
+    NpgsqlDataSource DataSource,   // pooled connections to the source database
+    string SlotName,               // namespace your buffered data by slot
+    IServiceProvider Services);    // resolve your backend's own dependencies
+```
+
+Changes are appended per transaction (`xid`) as they stream and read back **in append order** at
+the commit. An implementation owns its own serialization of `RawChange`; the abstraction deals
+purely in changes.
+
+### Implementation Guidance
+
+- **Savepoint truncation.** `DiscardSubtransactionAsync(xid, subxid)` handles a rolled-back
+  savepoint: remove the changes appended with `subxid` *and every change appended after its first
+  one* (a later change can only belong to the aborted subtransaction or one nested inside it,
+  which aborts with it). It must be a no-op when `subxid` never appended anything. Changes
+  appended afterwards must survive and be returned by a later `ReadAsync`.
+- **All-or-nothing reads.** If the backing store no longer holds everything appended for an `xid`,
+  `ReadAsync` should fail rather than yield a partial buffer; a partial read that succeeded would
+  be delivered and acknowledged as if complete.
+- **No durability across restarts.** A streamed transaction that never commits (a crash) is
+  re-streamed from the slot, so the spill need not survive a restart; `ClearAsync` drops any
+  leftovers on startup.
+
+::: warning
+Do not implement an in-memory spill as you may exhaust system resources.
+:::
+
+## Publication column lists
+
+A table you narrow with a [column selection](/providers/entity-framework-core/#declaring-consumed-columns)
+is published with a matching column list - `CREATE PUBLICATION ... TABLE products (id, name, ...)` - so
+the excluded columns are filtered inside Postgres: they are never decoded by the WAL sender or sent over
+the wire. Dependent-only tables, which Wallaby narrows automatically to their primary key and lookup
+columns, are listed for the same reason. Column lists are reconciled on every startup; drift is applied
+atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+
+Narrowing is **opt-in per table**. A table you never narrowed publishes whole rows, even when its entity
+maps only some of the physical columns, because a column list pins every column in it against schema
+changes (see the warning below). Restricting that cost to the tables you deliberately narrowed keeps
+ordinary migrations working everywhere else.
+
+`PublicationColumnLists = false` disables column lists altogether, including declared selections. The
+selection still governs materialization and backfill; it just stops being enforced at the server.
 
 Tables that require `REPLICA IDENTITY FULL` (scoped destinations, custom document ids, Marten
 soft-delete documents) and tables whose live replica identity is `FULL` always publish whole rows: a
 column list must cover the table's replica identity, and `FULL` covers every column.
 [External slots](/external-slots) are unaffected - their publications always carry whole tables for
 the third-party consumer.
+
+::: warning
+**Migrating a column-listed table.** Postgres pins the columns in a publication's column list: while the
+list is in place, `ALTER TABLE ... ALTER COLUMN ... TYPE` (even a widening) and `DROP COLUMN` on a listed
+column are rejected, and `DROP COLUMN ... CASCADE` succeeds by removing the table from the publication
+entirely - which silently stops capturing it until the next startup reconciles the publication. To change
+a listed column, widen the table to whole-row publishing first
+(`ALTER PUBLICATION ... SET TABLE`, keeping the other members' lists intact), run the migration, and let
+the next startup re-narrow it. Tables without a declared selection are never listed, so their migrations
+are unaffected.
+:::
 
 ::: warning
 Flipping a column-listed table to `REPLICA IDENTITY FULL` while Wallaby is running makes that table's

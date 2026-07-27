@@ -46,9 +46,29 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.MaxTransactionsPerBatch must be between 1 and 10000.");
         }
+        if (options.Advanced.MaxFanoutKeysPerTransaction is <= 0 or > 1_000_000)
+        {
+            failures.Add("Advanced.MaxFanoutKeysPerTransaction must be between 1 and 1000000.");
+        }
         if (options.Advanced.KeepaliveInterval <= TimeSpan.Zero)
         {
             failures.Add("Advanced.KeepaliveInterval must be greater than zero.");
+        }
+        if (options.Advanced.StandbyRetryInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.StandbyRetryInterval must be greater than zero.");
+        }
+        if (options.Advanced.LeaderRetryInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.LeaderRetryInterval must be greater than zero.");
+        }
+        if (options.Advanced.ControlPollInterval <= TimeSpan.Zero)
+        {
+            failures.Add("Advanced.ControlPollInterval must be greater than zero.");
+        }
+        if (options.Advanced.SuspensionAutoResumeGraceFloor < TimeSpan.Zero)
+        {
+            failures.Add("Advanced.SuspensionAutoResumeGraceFloor must be zero or greater.");
         }
         if (options.Advanced.FanoutPollInterval <= TimeSpan.Zero)
         {
@@ -65,6 +85,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         if (options.Advanced.HeartbeatInterval < TimeSpan.Zero)
         {
             failures.Add("Advanced.HeartbeatInterval must be zero (disabled) or greater.");
+        }
+        if (options.Advanced.WatermarkVisibilityFenceTimeout < TimeSpan.Zero)
+        {
+            failures.Add("Advanced.WatermarkVisibilityFenceTimeout must be zero (disabled) or greater.");
         }
         if (options.SinkRetry is null)
         {

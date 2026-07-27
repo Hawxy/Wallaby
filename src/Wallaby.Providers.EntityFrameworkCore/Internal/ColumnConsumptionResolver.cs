@@ -11,7 +11,10 @@ namespace Wallaby.Providers.EntityFrameworkCore.Internal;
 /// primary-key and <c>DependsOn(...)</c> lookup properties always captured; and dependent-only tables,
 /// whose wire needs are fully determined by their bindings — fan-out reads just the lookup key, so they
 /// narrow to primary-key ∪ lookup properties with no declaration. Entities absent from the result are
-/// captured whole. Validates every selected name against the model.
+/// captured whole. Selections validate against the entity's effective member surface
+/// (<see cref="EffectiveProperties"/>): a same-table owned reference or complex property is selected as
+/// a unit (expanding to its dotted leaf paths), while a member whose data is not on the entity's rows
+/// fails an include selection and is silently acknowledged by an exclude selection.
 /// </summary>
 internal static class ColumnConsumptionResolver
 {
@@ -33,7 +36,7 @@ internal static class ColumnConsumptionResolver
             resolved[entityType.Name] = ResolveEntity(
                 clrType.Name,
                 selections,
-                mappedProperties: entityType.GetProperties().Select(p => p.Name).ToHashSet(StringComparer.Ordinal),
+                EffectiveProperties.Resolve(entityType).ToMembers(),
                 primaryKeyProperties: entityType.FindPrimaryKey()?.Properties.Select(p => p.Name)
                     .ToHashSet(StringComparer.Ordinal) ?? [],
                 lookupProperties: lookupProperties.GetValueOrDefault(entityType) ?? []);
@@ -61,7 +64,7 @@ internal static class ColumnConsumptionResolver
     internal static IReadOnlySet<string> ResolveEntity(
         string entityName,
         IReadOnlyList<ColumnSelection> selections,
-        IReadOnlySet<string> mappedProperties,
+        EffectiveMembers members,
         IReadOnlySet<string> primaryKeyProperties,
         IReadOnlySet<string> lookupProperties)
     {
@@ -71,34 +74,62 @@ internal static class ColumnConsumptionResolver
         foreach (var selection in selections)
         {
             var method = selection.Mode == ColumnSelectionMode.Include ? "Consumes" : "ConsumesAllExcept";
+            var selected = new HashSet<string>(StringComparer.Ordinal);
             foreach (var name in selection.PropertyNames)
             {
-                if (!mappedProperties.Contains(name))
+                IReadOnlyCollection<string> expanded;
+                if (members.Leaves.Contains(name))
+                {
+                    expanded = [name];
+                }
+                else if (members.Expandable.TryGetValue(name, out var memberLeaves))
+                {
+                    expanded = memberLeaves;
+                }
+                else if (members.Uncapturable.TryGetValue(name, out var reason))
+                {
+                    if (selection.Mode == ColumnSelectionMode.Include)
+                    {
+                        throw new WallabyConfigurationException(
+                            $"{method}<{entityName}>(e => e.{name}): '{name}' {reason}; its data is not on " +
+                            "the entity's rows and cannot be captured with it. Capture it via DependsOn(...) " +
+                            "and an enriching transform, or drop it from the selection.");
+                    }
+                    // Excluding an uncapturable member acknowledges it (silencing the startup warning);
+                    // it contributes nothing to the captured set either way.
+                    continue;
+                }
+                else
                 {
                     throw new WallabyConfigurationException(
-                        $"{method}<{entityName}>(e => e.{name}): '{name}' is not a mapped scalar property " +
-                        "of the entity (navigations cannot be selected).");
+                        $"{method}<{entityName}>(e => e.{name}): '{name}' is not a mapped scalar property, " +
+                        "same-table owned reference, or complex property of the entity.");
                 }
-                if (selection.Mode == ColumnSelectionMode.Exclude && primaryKeyProperties.Contains(name))
+
+                if (selection.Mode == ColumnSelectionMode.Exclude)
                 {
-                    throw new WallabyConfigurationException(
-                        $"{method}<{entityName}>(e => e.{name}): a primary-key property cannot be excluded.");
+                    if (primaryKeyProperties.Contains(name))
+                    {
+                        throw new WallabyConfigurationException(
+                            $"{method}<{entityName}>(e => e.{name}): a primary-key property cannot be excluded.");
+                    }
+                    if (expanded.FirstOrDefault(lookupProperties.Contains) is { } lookup)
+                    {
+                        throw new WallabyConfigurationException(
+                            $"{method}<{entityName}>(e => e.{name}): a DependsOn(...) lookup resolves through " +
+                            $"'{lookup}'; a dependency-lookup column cannot be excluded.");
+                    }
                 }
-                if (selection.Mode == ColumnSelectionMode.Exclude && lookupProperties.Contains(name))
-                {
-                    throw new WallabyConfigurationException(
-                        $"{method}<{entityName}>(e => e.{name}): a DependsOn(...) lookup resolves through " +
-                        $"'{name}'; a dependency-lookup column cannot be excluded.");
-                }
+                selected.UnionWith(expanded);
             }
 
             if (selection.Mode == ColumnSelectionMode.Include)
             {
-                effective.UnionWith(selection.PropertyNames);
+                effective.UnionWith(selected);
             }
             else
             {
-                effective.UnionWith(mappedProperties.Except(selection.PropertyNames));
+                effective.UnionWith(members.Leaves.Except(selected));
             }
         }
         return effective;
@@ -133,9 +164,10 @@ internal static class ColumnConsumptionResolver
         Dictionary<IEntityType, HashSet<string>> byType, IEntityType entityType, string columnName)
     {
         var storeObject = StoreObjectIdentifier.Table(entityType.GetTableName()!, entityType.GetSchema());
-        foreach (var property in entityType.GetProperties())
+        // The effective view: a lookup may resolve through a column backing an owned member's property.
+        foreach (var leaf in EffectiveProperties.Resolve(entityType).Leaves)
         {
-            if (property.GetColumnName(storeObject) != columnName)
+            if (leaf.Property.GetColumnName(storeObject) != columnName)
             {
                 continue;
             }
@@ -143,7 +175,7 @@ internal static class ColumnConsumptionResolver
             {
                 byType[entityType] = names = new HashSet<string>(StringComparer.Ordinal);
             }
-            names.Add(property.Name);
+            names.Add(leaf.Path);
             return;
         }
     }

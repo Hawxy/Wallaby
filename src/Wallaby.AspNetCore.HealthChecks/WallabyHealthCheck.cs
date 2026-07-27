@@ -16,6 +16,7 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
         var snapshot = status.Current;
         var data = Describe(snapshot);
         var crashLoopThreshold = _options.CrashLoopFailureThreshold;
+        var fanoutThreshold = _options.FanoutFailureThreshold;
 
         var result = snapshot switch
         {
@@ -32,6 +33,13 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             // deliberately stopped and its slots are dropped (e.g. for a database major-version upgrade).
             { Role: WallabyNodeRole.Suspended } => HealthCheckResult.Degraded(
                 "Wallaby is suspended: managed replication slots are dropped until an explicit resume.", exception: null, data),
+            // Dependent documents go stale, but live replication is fine: loud, not a restart signal.
+            { ConsecutiveFanoutFailures: var fanoutFailures } when fanoutThreshold > 0 && fanoutFailures >= fanoutThreshold =>
+                HealthCheckResult.Degraded(
+                    $"Wallaby dependent fan-out is failing ({fanoutFailures} consecutive job failures); " +
+                    "documents that depend on those tables are going stale." +
+                    (snapshot.LastError is { } fanoutError ? $" Last error: {fanoutError}" : string.Empty),
+                    exception: null, data),
             _ => HealthCheckResult.Healthy("Wallaby subsystem alive.", data),
         };
 

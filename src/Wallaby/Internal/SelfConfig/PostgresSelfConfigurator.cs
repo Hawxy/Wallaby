@@ -48,7 +48,7 @@ internal sealed class PostgresSelfConfigurator(
             {
                 await ValidatePartitionedCapturesAsync(connection, model, ct);
             }
-            var (slotCreated, consistentPoint) = await _slots.EnsureAsync(
+            var (slotCreated, consistentPoint, slotRecreated) = await _slots.EnsureAsync(
                 connection, options.SlotName, options.PublicationName, kind: "primary", ct);
             await ValidateReplicaIdentityAsync(connection, model, warnings, ct);
             var externalResults = await EnsureExternalSlotsAsync(connection, ct);
@@ -56,8 +56,8 @@ internal sealed class PostgresSelfConfigurator(
             logger.SelfConfigComplete(options.PublicationName, publication.Created, options.SlotName, slotCreated);
 
             return new SelfConfigResult(
-                options.PublicationName, options.SlotName, publication.Created, slotCreated, consistentPoint, warnings,
-                externalResults);
+                options.PublicationName, options.SlotName, publication.Created, slotCreated, consistentPoint,
+                slotRecreated, warnings, externalResults);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -106,7 +106,7 @@ internal sealed class PostgresSelfConfigurator(
                 .ToList();
             var publication = await _publications.EnsureAsync(
                 connection, spec.PublicationName, tables, reconcile: true, warnings: null, ct);
-            var (slotCreated, _) = await _slots.EnsureAsync(
+            var (slotCreated, _, _) = await _slots.EnsureAsync(
                 connection, spec.SlotName, spec.PublicationName, kind: "external", ct);
             logger.ExternalSlotConfigured(spec.SlotName, spec.PublicationName);
             results.Add(new ExternalSlotResult(spec.SlotName, spec.PublicationName, publication.Created, slotCreated));
@@ -123,7 +123,10 @@ internal sealed class PostgresSelfConfigurator(
         var listEligible = options.PublicationColumnLists && options.ManagePublicationTables;
         foreach (var table in model.Tables)
         {
-            yield return listEligible && !table.RequiresFullReplicaIdentity
+            // Only deliberately narrowed tables are listed. A list pins every column in it against
+            // ALTER/DROP COLUMN, so a table whose capture set merely reflects the columns its entity
+            // happens to map would pay that cost to filter nothing the user asked to filter.
+            yield return listEligible && table.ColumnsNarrowed && !table.RequiresFullReplicaIdentity
                 ? new PublicationTableSpec(
                     table.Schema, table.TableName, [.. table.Columns.Select(c => c.ColumnName)])
                 : PublicationTableSpec.WholeTable(table.Schema, table.TableName);
@@ -232,12 +235,19 @@ internal sealed class PostgresSelfConfigurator(
             var ddl = string.Join(" ", notFull.Select(p =>
                 $"ALTER TABLE {PgExec.QuoteTable(p.Schema, p.Table)} REPLICA IDENTITY FULL;"));
 
+            // A KeyedBy / entity-scoped mapping computes delete-time identity from the entity, so a
+            // missing identity means deletes target wrong documents: an error even without the option.
+            var strict = options.RequireFullReplicaIdentity || table.RequiresMaterializedEntity;
+            var reason = table.RequiresMaterializedEntity
+                ? "to compute delete-time document identity (KeyedBy / ScopedDestination)"
+                : "for its transform";
+
             string message;
             if (isPartitioned)
             {
                 var leaves = string.Join(", ", notFull.Select(p => $"{p.Schema}.{p.Table}"));
-                message = options.RequireFullReplicaIdentity
-                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform, but " +
+                message = strict
+                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL {reason}, but " +
                       $"partition(s) {leaves} are not FULL (identity is per leaf and does not propagate " +
                       $"from the root). Run: {ddl} New partitions need the same treatment."
                     : $"Table {table.QualifiedName} has partition(s) {leaves} without REPLICA IDENTITY FULL; " +
@@ -247,13 +257,13 @@ internal sealed class PostgresSelfConfigurator(
             else
             {
                 var relReplIdent = notFull[0].ReplIdent;
-                message = options.RequireFullReplicaIdentity
-                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL for its transform but has '{relReplIdent}'. Run: {ddl}"
+                message = strict
+                    ? $"Table {table.QualifiedName} requires REPLICA IDENTITY FULL {reason} but has '{relReplIdent}'. Run: {ddl}"
                     : $"Table {table.QualifiedName} has REPLICA IDENTITY '{relReplIdent}'; old values and unchanged-TOAST " +
                       $"columns may be unavailable on UPDATE/DELETE. To capture full rows, run: {ddl}";
             }
 
-            if (options.RequireFullReplicaIdentity)
+            if (strict)
             {
                 throw new WallabyConfigurationException(message);
             }
@@ -266,10 +276,10 @@ internal sealed class PostgresSelfConfigurator(
 /// <summary>Source-generated log messages for <see cref="PostgresSelfConfigurator"/>.</summary>
 internal static partial class PostgresSelfConfiguratorLog
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby self-config complete: publication '{Publication}' (created={PubCreated}), slot '{Slot}' (created={SlotCreated}).")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby self-config complete: publication {Publication} (created={PubCreated}), slot {Slot} (created={SlotCreated}).")]
     internal static partial void SelfConfigComplete(this ILogger logger, string publication, bool pubCreated, string slot, bool slotCreated);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Configured external slot '{Slot}' (publication '{Publication}') for a third-party consumer.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Configured external slot {Slot} (publication {Publication}) for a third-party consumer.")]
     internal static partial void ExternalSlotConfigured(this ILogger logger, string slot, string publication);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Warning}")]

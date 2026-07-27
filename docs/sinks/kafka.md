@@ -110,8 +110,10 @@ the headers, which every message carries:
 
 Delivery is **at-least-once**: a crash can re-produce messages a consumer has already seen. The
 `wallaby.idempotency-key` header is unique per delivered change - store it and skip keys you have seen,
-or use a compacted topic and let the latest message per key win. Backfill rows share their key across
-backfill runs (backfill is upsert-only, so replays are harmless).
+or use a compacted topic and let the latest message per key win. A backfill row's key embeds a per-run
+token (echoed as `metadata.backfillRunId`): stable within one run, **new for every run**, so a
+deliberate re-backfill is never suppressed by stored keys - and a crash-resumed backfill can re-deliver
+rows under fresh keys, so gate costly side effects on document state, not on the key alone.
 
 Per-document ordering is guaranteed: same key → same partition, produced in commit order. A batch is
 only acknowledged to the replication slot once **every** message's delivery report has succeeded.

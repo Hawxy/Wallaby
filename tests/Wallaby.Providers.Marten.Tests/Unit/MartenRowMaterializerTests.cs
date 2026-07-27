@@ -79,18 +79,19 @@ public class MartenRowMaterializerTests
     }
 
     [Test]
-    public void An_update_flipping_the_soft_delete_flag_becomes_a_key_only_delete()
+    public void An_update_flipping_the_soft_delete_flag_becomes_a_delete_carrying_the_document()
     {
         var change = Change("mt_doc_softdoc", ChangeAction.Update, newValues:
         [
             Col("id", DocId),
-            Col("data", """{"unused":true}"""),
+            Col("data", $$"""{"Id":"{{DocId}}","Name":"kanga"}"""),
             Col("mt_deleted", true),
         ]);
 
         Materializer().TryMaterialize(change, out var row).ShouldBeTrue();
         row!.Action.ShouldBe(ChangeAction.Delete);
-        row.Entity.ShouldBeNull();
+        // The body is on the wire, so KeyedBy/ScopedBy can compute delete-time identity from it.
+        row.Entity.ShouldBeOfType<SoftDoc>().Name.ShouldBe("kanga");
         row.Record["Deleted"].ShouldBe(true);
         row.PrimaryKey.ShouldBe(new object[] { DocId });
     }
@@ -109,13 +110,30 @@ public class MartenRowMaterializerTests
     }
 
     [Test]
-    public void A_hard_delete_materializes_the_key_from_the_old_tuple()
+    public void A_hard_delete_without_data_on_the_wire_stays_entity_less()
     {
+        // Without REPLICA IDENTITY FULL the old tuple carries only the key columns.
         var change = Change("mt_doc_softdoc", ChangeAction.Delete, oldValues: [Col("id", DocId)]);
 
         Materializer().TryMaterialize(change, out var row).ShouldBeTrue();
         row!.Action.ShouldBe(ChangeAction.Delete);
         row.Entity.ShouldBeNull();
+        row.PrimaryKey.ShouldBe(new object[] { DocId });
+    }
+
+    [Test]
+    public void A_hard_delete_rehydrates_the_document_from_the_old_tuple()
+    {
+        var change = Change("mt_doc_softdoc", ChangeAction.Delete, oldValues:
+        [
+            Col("id", DocId),
+            Col("data", $$"""{"Id":"{{DocId}}","Name":"kanga"}"""),
+            Col("mt_deleted", false),
+        ]);
+
+        Materializer().TryMaterialize(change, out var row).ShouldBeTrue();
+        row!.Action.ShouldBe(ChangeAction.Delete);
+        row.Entity.ShouldBeOfType<SoftDoc>().Name.ShouldBe("kanga");
         row.PrimaryKey.ShouldBe(new object[] { DocId });
     }
 

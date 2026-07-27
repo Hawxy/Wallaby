@@ -60,8 +60,8 @@ internal static class SinkTestHelpers
     }
 
     public static ChangeMetadata Meta(int commitIdx = 0, bool backfill = false, DateTimeOffset? timestamp = null,
-        ulong lsn = 12345, ChangeAction action = ChangeAction.Insert)
-        => new("public", "products", action, timestamp, lsn, commitIdx, backfill);
+        ulong lsn = 12345, ChangeAction action = ChangeAction.Insert, string? backfillRunId = null)
+        => new("public", "products", action, timestamp, lsn, commitIdx, backfill, backfillRunId);
 
     public static SinkRecord Upsert(string id, IReadOnlyDictionary<string, object?> document,
         string? destination = "products", ChangeMetadata? metadata = null)

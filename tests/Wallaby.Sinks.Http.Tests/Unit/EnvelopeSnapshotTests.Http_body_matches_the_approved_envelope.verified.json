@@ -49,7 +49,7 @@
     {
       "operation": "upsert",
       "id": "7",
-      "idempotencyKey": "backfill:products:7",
+      "idempotencyKey": "backfill:3f2c8a41d96e4f0f9c2b7e5a1d6b8c90:products:7",
       "destination": "products",
       "document": {
         "name": "Backfilled"
@@ -60,7 +60,8 @@
         "action": "read",
         "commitLsn": "0",
         "commitIdx": 0,
-        "isBackfill": true
+        "isBackfill": true,
+        "backfillRunId": "3f2c8a41d96e4f0f9c2b7e5a1d6b8c90"
       }
     }
   ]

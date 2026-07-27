@@ -62,6 +62,7 @@ public class TransactionBatcherTests
         batch!.Count.ShouldBe(5);
         batch.Select(t => t.CommitLsn).ShouldBe([10ul, 20ul, 30ul, 40ul, 50ul]);
         batcher.ReadInFlight.ShouldBeTrue(); // the drain left a pending read on the now-empty stream
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Idle);
     }
 
     [Test]
@@ -85,7 +86,9 @@ public class TransactionBatcherTests
         await using var batcher = stream.Batcher(maxTransactions: 3);
 
         (await batcher.ReadBatchAsync())!.Count.ShouldBe(3);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.TransactionCap);
         (await batcher.ReadBatchAsync())!.Count.ShouldBe(2);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Idle);
     }
 
     [Test]
@@ -97,6 +100,7 @@ public class TransactionBatcherTests
 
         // Add-then-check: the batch may overshoot the cap by at most one transaction.
         (await batcher.ReadBatchAsync())!.Count.ShouldBe(3);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.SizeCap);
         (await batcher.ReadBatchAsync())!.Count.ShouldBe(1);
     }
 
@@ -108,6 +112,7 @@ public class TransactionBatcherTests
         await using var batcher = stream.Batcher(maxTransactions: 1);
 
         (await batcher.ReadBatchAsync())!.Single().CommitLsn.ShouldBe(10ul);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Disabled);
         (await batcher.ReadBatchAsync())!.Single().CommitLsn.ShouldBe(20ul);
     }
 
@@ -118,11 +123,15 @@ public class TransactionBatcherTests
         stream.Add(Txn(10), Txn(20, streamed: true, changes: 0), Txn(30));
         await using var batcher = stream.Batcher();
 
+        // The first batch is cut short by the boundary behind it; the boundary itself is solo.
         (await batcher.ReadBatchAsync())!.Single().CommitLsn.ShouldBe(10ul);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Boundary);
         var solo = (await batcher.ReadBatchAsync())!.Single();
         solo.CommitLsn.ShouldBe(20ul);
         solo.IsStreamed.ShouldBeTrue();
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Boundary);
         (await batcher.ReadBatchAsync())!.Single().CommitLsn.ShouldBe(30ul);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Idle);
     }
 
     [Test]
@@ -156,6 +165,7 @@ public class TransactionBatcherTests
         await using var batcher = stream.Batcher();
 
         (await batcher.ReadBatchAsync())!.Count.ShouldBe(2);
+        batcher.LastFlushReason.ShouldBe(BatchFlushReason.Ended);
         (await batcher.ReadBatchAsync()).ShouldBeNull();
     }
 

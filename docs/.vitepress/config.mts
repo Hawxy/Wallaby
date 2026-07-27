@@ -53,7 +53,6 @@ export default defineConfig({
           { text: 'Backfill', link: '/backfill' },
           { text: 'External Slots', link: '/external-slots' },
           { text: 'Configuration', link: '/configuration' },
-          { text: 'Transaction Spill', link: '/transaction-spill' },
           { text: 'Testing', link: '/testing' },
         ]
       },

@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -82,7 +83,7 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     }
 
     [Test]
-    public async Task Publication_is_created_with_column_lists_matching_the_model()
+    public async Task Only_a_declared_selection_is_published_with_a_column_list()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
         var model = BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Description)));
@@ -91,25 +92,63 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
 
         var columns = await ReadPublicationColumnsAsync(names.Publication);
         columns.Count.ShouldBe(3);
-        columns.Values.ShouldAllBe(c => c != null); // every member has an explicit list
 
         var expectedProduct = model.FindByClrType(typeof(Product))!.Columns.Select(c => c.ColumnName).ToHashSet();
         columns["products"]!.ShouldBe(expectedProduct, ignoreOrder: true);
         columns["products"]!.ShouldNotContain(nameof(Product.Description));
+
+        // The tables nobody narrowed keep every column free to ALTER and DROP.
+        columns.Values.Count(c => c is not null).ShouldBe(1);
+        columns["categories"].ShouldBeNull();
+    }
+
+    [Test]
+    public async Task A_table_without_a_declared_selection_publishes_whole_rows()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+
+        await CreateConfigurator(names).EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None);
+
+        var columns = await ReadPublicationColumnsAsync(names.Publication);
+        columns.Count.ShouldBe(3);
+        columns.Values.ShouldAllBe(c => c == null);
+    }
+
+    [Test]
+    public async Task A_dependent_only_table_is_listed_without_a_declaration()
+    {
+        // Fan-out reads just the lookup key, so a dependent-only table's wire needs are fully
+        // determined by its binding and it narrows with no declaration.
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var model = EfCoreCaptureModelBuilder.Build(ctx.Model, new CaptureSpec
+        {
+            DeclaredEntities = [typeof(Product)],
+            DeclaredDependencies = new Dictionary<Type, IReadOnlyList<LambdaExpression>>
+            {
+                [typeof(Product)] = [(Expression<Func<Product, Category?>>)(p => p.Category)],
+            },
+        });
+
+        await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
+
+        var columns = await ReadPublicationColumnsAsync(names.Publication);
+        columns["categories"]!.ShouldBe(["Id"], ignoreOrder: true);
+        columns["products"].ShouldBeNull(); // declared, but nothing narrowed it
     }
 
     [Test]
     public async Task Reconcile_applies_column_lists_to_an_existing_whole_table_publication()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
-        var model = BuildTestModel();
+        var model = BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Description)));
 
         // The upgrade path: a publication created without lists gains them on the next startup.
         await CreateConfigurator(names, columnLists: false).EnsureConfiguredAsync(model, CancellationToken.None);
         (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c == null);
 
         await CreateConfigurator(names, columnLists: true).EnsureConfiguredAsync(model, CancellationToken.None);
-        (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c != null);
+        (await ReadPublicationColumnsAsync(names.Publication))["products"].ShouldNotBeNull();
     }
 
     [Test]
@@ -117,7 +156,9 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
 
-        await CreateConfigurator(names).EnsureConfiguredAsync(BuildTestModel(), CancellationToken.None);
+        await CreateConfigurator(names).EnsureConfiguredAsync(
+            BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Price))),
+            CancellationToken.None);
         (await ReadPublicationColumnsAsync(names.Publication))["products"]!
             .ShouldContain(nameof(Product.Description));
 
@@ -164,9 +205,11 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     public async Task Disabling_the_option_removes_column_lists()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
-        var model = BuildTestModel();
+        var model = BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Description)));
 
         await CreateConfigurator(names, columnLists: true).EnsureConfiguredAsync(model, CancellationToken.None);
+        (await ReadPublicationColumnsAsync(names.Publication))["products"].ShouldNotBeNull();
+
         await CreateConfigurator(names, columnLists: false).EnsureConfiguredAsync(model, CancellationToken.None);
 
         (await ReadPublicationColumnsAsync(names.Publication)).Values.ShouldAllBe(c => c == null);
@@ -176,7 +219,11 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     public async Task Replica_identity_full_table_publishes_whole_rows()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
-        var model = BuildTestModel();
+        var model = BuildTestModel(new Dictionary<Type, IReadOnlyList<ColumnSelection>>
+        {
+            [typeof(Category)] = [new ColumnSelection(ColumnSelectionMode.Include, [nameof(Category.Name)])],
+            [typeof(Product)] = [new ColumnSelection(ColumnSelectionMode.Include, [nameof(Product.Name)])],
+        });
 
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
         await conn.OpenAsync();
@@ -200,9 +247,16 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     public async Task Requires_full_replica_identity_table_is_never_listed()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
-        // Flagged tables are exempt even while relreplident is still 'd': the user is being told to
-        // flip to FULL, and a list would turn that flip into publisher-side DML errors.
-        var model = BuildTestModel(requiresFullReplicaIdentity: new HashSet<Type> { typeof(Product) });
+        // Flagged tables are exempt even while relreplident is still 'd' and even with a declared
+        // selection: the user is being told to flip to FULL, and a list would turn that flip into
+        // publisher-side DML errors.
+        var model = BuildTestModel(
+            new Dictionary<Type, IReadOnlyList<ColumnSelection>>
+            {
+                [typeof(Category)] = [new ColumnSelection(ColumnSelectionMode.Include, [nameof(Category.Name)])],
+                [typeof(Product)] = [new ColumnSelection(ColumnSelectionMode.Include, [nameof(Product.Name)])],
+            },
+            requiresFullReplicaIdentity: new HashSet<Type> { typeof(Product) });
 
         await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
 
@@ -278,6 +332,7 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
                 new CapturedColumn { PropertyName = "UpperName", ColumnName = "upper_name", ClrType = typeof(string), IsPrimaryKey = false },
             ],
             PrimaryKey = [],
+            ColumnsNarrowed = true,
         };
         var model = new WallabyModel([genTable], []);
 
@@ -298,8 +353,10 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     public async Task Scoped_destination_mapping_publishes_whole_rows()
     {
         // Scoped destinations require full old-row values on deletes; the harness (like production
-        // ToCaptureSpec) must flag the table so it is never column-listed.
-        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        // ToCaptureSpec) must flag the table so it is never column-listed, even though the declared
+        // selection would otherwise narrow it.
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString)
+            .ConsumesAllExcept<Product>(nameof(Product.Description));
         harness.AddCaptureSink();
         harness.Project<Product>("capture", destination: null,
             p => new WallabyDocument { ["name"] = p.Name },

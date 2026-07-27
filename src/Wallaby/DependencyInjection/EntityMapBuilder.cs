@@ -29,17 +29,25 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Override the document id (defaults to the source primary key). Because deletes must also compute
-    /// the id, the table is marked to need <c>REPLICA IDENTITY FULL</c> so the key columns are present on delete.
+    /// the id, the table requires <c>REPLICA IDENTITY FULL</c> so the full old row is present on delete;
+    /// self-configuration fails at startup when it is missing.
     /// </summary>
     public EntityMapBuilder<TEntity> KeyedBy(Func<TEntity, object> keySelector)
     {
         ArgumentNullException.ThrowIfNull(keySelector);
+        _registration.HasEntityKeyedId = true;
         _registration.DocumentIdSelector = change =>
         {
             if (change.Entity is not TEntity entity)
             {
-                // Key-only rows (e.g. Marten deletes materialize no entity) identify by primary key.
-                return change.Key.ToString();
+                // A primary-key fallback would target a document that was never written, so the orphan
+                // under the custom id lingers forever.
+                throw new InvalidOperationException(
+                    $"KeyedBy for '{typeof(TEntity).Name}' could not compute the document id: the " +
+                    $"{change.Action} on '{change.Metadata.QualifiedTableName}' (primary key {change.Key}) " +
+                    "carried no materialized entity. Ensure the table has REPLICA IDENTITY FULL so deletes " +
+                    "carry the full old row (self-config logs the exact DDL), or drop KeyedBy to key by " +
+                    "primary key.");
             }
             return keySelector(entity)?.ToString()
                 ?? throw new InvalidOperationException(
@@ -71,11 +79,33 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// Derive a per-row scope key (e.g. tenant id) from the change. The engine sub-groups the transform
     /// batch by this key and supplies a scope-scoped enrichment session (see the provider's scoped-context
     /// registration, e.g. <c>UseScopedDbContext</c>); it also feeds <see cref="ScopedDestination"/>.
+    /// Combined with <see cref="ScopedDestination"/>, the table requires <c>REPLICA IDENTITY FULL</c>
+    /// (deletes must resolve their destination from the entity); the <see cref="ChangeEvent"/> overload
+    /// reads captured columns instead and carries no such requirement.
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedBy(Func<TEntity, object?> keySelector)
     {
         ArgumentNullException.ThrowIfNull(keySelector);
-        _registration.ScopeKeySelector = change => change.Entity is TEntity entity ? keySelector(entity) : null;
+        var registration = _registration;
+        registration.HasEntityScopedKey = true;
+        registration.ScopeKeySelector = change =>
+        {
+            if (change.Entity is TEntity entity)
+            {
+                return keySelector(entity);
+            }
+            if (registration.DestinationSelector is not null)
+            {
+                // A null key would resolve the ScopedDestination to the wrong index.
+                throw new InvalidOperationException(
+                    $"ScopedBy for '{typeof(TEntity).Name}' could not compute the scope key: the " +
+                    $"{change.Action} on '{change.Metadata.QualifiedTableName}' (primary key {change.Key}) " +
+                    "carried no materialized entity, so its ScopedDestination cannot be resolved. Ensure " +
+                    "the table has REPLICA IDENTITY FULL (self-config logs the exact DDL), or use the " +
+                    "ChangeEvent overload of ScopedBy to read the key from a captured column.");
+            }
+            return null; // enrichment-only scoping: the key is unused for deletes
+        };
         return this;
     }
 

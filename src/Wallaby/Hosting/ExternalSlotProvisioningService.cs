@@ -14,12 +14,12 @@ namespace Wallaby.Hosting;
 
 /// <summary>
 /// Provision-only hosted service: when the consumer declares external slots but no capture (no sink or
-/// mappings), this creates/reconciles the declared pgoutput publications + slots and then completes. There
-/// is no primary slot and no streaming. Runs under the cluster lock so only one node provisions at a time,
-/// and is idempotent. Honors the suspension control gate before provisioning — a suspension must not be
-/// undone by recreating external slots (once this service has completed and exited, a suspension is
-/// finalized by the requesting client instead). A failure faults the host (which restarts and retries),
-/// matching <see cref="WallabyBackgroundService"/> and the hand-rolled initializer it replaces.
+/// mappings), this creates/reconciles the declared pgoutput publications + slots. There is no primary
+/// slot and no streaming. Each provisioning round runs under the cluster lock so only one node
+/// provisions at a time, and is idempotent. The service then stays alive watching the control channel:
+/// a suspension drops the slots (honored via the gate, never undone by re-provisioning), and each
+/// resume re-provisions them. A failure faults the host (which restarts and retries), matching
+/// <see cref="WallabyBackgroundService"/>.
 /// </summary>
 internal sealed class ExternalSlotProvisioningService(
     WallabyConfiguration config,
@@ -37,6 +37,8 @@ internal sealed class ExternalSlotProvisioningService(
     {
         try
         {
+            logger.ProvisioningStarting(WallabyVersion.Current);
+
             // No external slots declared (e.g. behind a consumer env gate) — do nothing, don't touch the DB.
             if (config.ExternalSlots.Count == 0)
             {
@@ -45,28 +47,23 @@ internal sealed class ExternalSlotProvisioningService(
                 return;
             }
 
-            await WaitOutSuspensionAsync(stoppingToken);
-
             // ForEntity<T>() needs the providers' models; only build them when a slot actually uses an entity type.
             var needsModel = config.ExternalSlots.Exists(s => s.EntityTypes.Count > 0);
             IReadOnlyList<(string Name, IWallabyModelProvider Provider)> modelProviders = needsModel
                 ? [.. config.Providers.Select(p => (p.Name, Provider: p.ModelProvider(services)))]
                 : [];
             var specs = ExternalSlotResolver.Resolve(config.ExternalSlots, modelProviders);
+            var control = new PostgresControlStore(dataSource, options, logger);
 
-            await using var lease = await clusterLock.TryAcquireAsync(LockKey, stoppingToken);
-            if (lease is null)
+            while (!stoppingToken.IsCancellationRequested)
             {
-                // Another node is provisioning; it owns the work. Idempotent re-runs on the next deploy converge.
-                logger.ProvisioningSkipped();
-                status.MarkStopped();
-                return;
-            }
+                await WaitOutSuspensionAsync(control, stoppingToken);
+                await ProvisionRoundAsync(specs, stoppingToken);
 
-            var configurator = new PostgresSelfConfigurator(
-                dataSource.Source, new SelfConfigOptions { ExternalSlots = specs }, logger);
-            await configurator.EnsureExternalSlotsOnlyAsync(stoppingToken);
-            status.MarkStopped();
+                // Watching: alive so the next suspend/resume cycle re-provisions, holding no lock.
+                status.EnterStandby();
+                await WaitForSuspensionAsync(control, stoppingToken);
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -81,15 +78,76 @@ internal sealed class ExternalSlotProvisioningService(
     }
 
     /// <summary>
+    /// One provisioning round under the cluster lock. A lease held elsewhere is retried rather than
+    /// skipped: only a round this node completed proves the slots exist (the other holder may be a
+    /// node about to die), and a completed round elsewhere makes ours a fast idempotent reconcile.
+    /// </summary>
+    private async Task ProvisionRoundAsync(IReadOnlyList<ExternalSlotSpec> specs, CancellationToken ct)
+    {
+        var waitLogged = false;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            await using var lease = await clusterLock.TryAcquireAsync(LockKey, ct);
+            if (lease is not null)
+            {
+                var configurator = new PostgresSelfConfigurator(
+                    dataSource.Source, new SelfConfigOptions { ExternalSlots = specs }, logger);
+                await configurator.EnsureExternalSlotsOnlyAsync(ct);
+                return;
+            }
+
+            if (!waitLogged)
+            {
+                logger.ProvisioningSkipped();
+                waitLogged = true;
+            }
+            await Task.Delay(options.Advanced.StandbyRetryInterval, ct);
+        }
+    }
+
+    /// <summary>
+    /// Block until a suspension is requested (the cue to wind down and later re-provision), woken by
+    /// NOTIFY with the poll interval as a safety net. Transient control-read failures are paced here
+    /// rather than faulting the host.
+    /// </summary>
+    private async Task WaitForSuspensionAsync(PostgresControlStore control, CancellationToken ct)
+    {
+        await using var subscription = control.Subscribe();
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                if (await control.IsSuspensionInEffectAsync(ct))
+                {
+                    return;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.ControlReadFailed(ex);
+                await Task.Delay(options.Advanced.ControlPollInterval, ct);
+                continue;
+            }
+
+            await subscription.WaitAsync(options.Advanced.ControlPollInterval, ct);
+        }
+        ct.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>
     /// The suspension control gate: finalize a requested suspension (under the lock), and while suspended
     /// idle on the control channel instead of provisioning. Returns when the state allows provisioning;
     /// with a deployed Suspend() flag that never happens — the node stays suspended until redeployed.
     /// Transient control-read failures (expected while the database is offline for the upgrade itself)
     /// are retried here rather than faulting the host.
     /// </summary>
-    private async Task WaitOutSuspensionAsync(CancellationToken ct)
+    private async Task WaitOutSuspensionAsync(PostgresControlStore control, CancellationToken ct)
     {
-        var control = new PostgresControlStore(dataSource, logger);
         INotifySubscription? subscription = null;
         var announced = false;
         try
@@ -162,6 +220,9 @@ internal sealed class ExternalSlotProvisioningService(
 /// <summary>Source-generated log messages for <see cref="ExternalSlotProvisioningService"/>.</summary>
 internal static partial class ExternalSlotProvisioningServiceLog
 {
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby {Version} starting in provision-only mode (no capture declared).")]
+    internal static partial void ProvisioningStarting(this ILogger logger, string version);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "No external slots declared; external-slot provisioning is a no-op.")]
     internal static partial void NoExternalSlots(this ILogger logger);
 

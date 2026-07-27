@@ -54,6 +54,10 @@ internal sealed class WallabyComponents : IAsyncDisposable
         ILogger logger)
     {
         var model = providers.MergedPlan.Model;
+        foreach (var warning in model.Warnings)
+        {
+            logger.ModelWarning(warning);
+        }
 
         var mappings = new List<EntityMapping>();
         // Backfill state is per table: a table mapped to several sinks appears once, with the composite
@@ -104,7 +108,9 @@ internal sealed class WallabyComponents : IAsyncDisposable
         var backfillStore = new PostgresBackfillStore(dataSource.Source);
         var checkpointsDirect = new PostgresCheckpointStore(dataSource.Source);
         var dependentResolver = model.DependentBindings.Count > 0
-            ? new DependentChangeResolver(dataSource.Source, model, instrumentation)
+            ? new DependentChangeResolver(
+                dataSource.Source, model, instrumentation, options.Advanced.MaxFanoutKeysPerTransaction,
+                logger: logger)
             : null;
 
         return new WallabyComponents
@@ -116,7 +122,11 @@ internal sealed class WallabyComponents : IAsyncDisposable
             Dispatcher = new SinkDispatcher(sinks, logger, instrumentation, options.SinkRetry, status),
             Sinks = sinks,
             Coordinator = new WatermarkBackfillCoordinator(
-                dataSource.Source, backfillStore, logger, instrumentation) { ChunkSize = options.ChunkSize },
+                dataSource.Source, backfillStore, logger, instrumentation)
+            {
+                ChunkSize = options.ChunkSize,
+                Fence = VisibilityFence.FromTimeout(options.Advanced.WatermarkVisibilityFenceTimeout, logger),
+            },
             SelfConfigurator = new PostgresSelfConfigurator(
                 dataSource.Source,
                 new SelfConfigOptions
@@ -151,4 +161,10 @@ internal sealed class WallabyComponents : IAsyncDisposable
         public bool PurgeOnVersionChange { get; set; }
         public List<SinkPurgeTarget> Targets { get; } = [];
     }
+}
+
+internal static partial class WallabyComponentsLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{ModelWarning}")]
+    public static partial void ModelWarning(this ILogger logger, string modelWarning);
 }

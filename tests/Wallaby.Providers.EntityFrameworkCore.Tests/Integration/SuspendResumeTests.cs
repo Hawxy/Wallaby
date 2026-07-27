@@ -132,6 +132,158 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task A_resume_before_the_first_checkpoint_still_re_backfills()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        try
+        {
+            // Phase 0: a normal deployment streams one product.
+            var firstCapture = new CaptureSink();
+            int categoryId, firstId;
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, firstCapture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                categoryId = await Db.AddCategoryAsync();
+                firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+                await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
+            }
+
+            await DeleteCheckpointAsync(names.Slot);
+
+            // Phase 1: deploy with Suspend(); the node drops the slots and idles.
+            await using (var node = await WallabyTestNode.StartAsync(
+                BuildServices(names, new CaptureSink(), suspendFlag: true)))
+            {
+                await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+                (await SlotExistsAsync(names.Slot)).ShouldBeFalse();
+            }
+
+            var missedId = await Db.AddProductAsync(categoryId, $"missed_{names.Suffix}");
+
+            // Phase 2: with no checkpoint, only the recreated slot's surviving slot_registry row can
+            // prove the installation predates the new slot; the repair must still fire.
+            var resumedCapture = new CaptureSink();
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, resumedCapture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                await resumedCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
+                var latest = resumedCapture.LatestByDocumentId(destination: "products");
+                latest[missedId.ToString()].Document!["name"].ShouldBe($"missed_{names.Suffix}");
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_restart_with_an_intact_slot_and_no_checkpoint_does_not_re_backfill()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+
+        var firstCapture = new CaptureSink();
+        int categoryId, firstId;
+        await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, firstCapture)))
+        {
+            await WallabyReadiness.WaitForStreamingAsync(node.Services);
+            categoryId = await Db.AddCategoryAsync();
+            firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+            await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
+        }
+
+        await DeleteCheckpointAsync(names.Slot);
+
+        // The slot survived the restart, so WAL continuity is intact: a missing checkpoint row alone
+        // must not trigger a re-backfill.
+        var secondCapture = new CaptureSink();
+        await using (var restarted = await WallabyTestNode.StartAsync(BuildServices(names, secondCapture)))
+        {
+            await WallabyReadiness.WaitForStreamingAsync(restarted.Services);
+            var liveId = await Db.AddProductAsync(categoryId, $"live_{names.Suffix}");
+            await secondCapture.WaitForDocumentsAsync([liveId.ToString()]);
+
+            secondCapture.LatestByDocumentId(destination: "products")
+                .ContainsKey(firstId.ToString()).ShouldBeFalse();
+        }
+    }
+
+    [Test]
+    public async Task A_suspended_flag_node_keeps_refreshing_its_assertion()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        try
+        {
+            var capture = new CaptureSink();
+            await using var node = await WallabyTestNode.StartAsync(
+                BuildServices(names, capture, suspendFlag: true));
+            await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+
+            // The idle loop re-runs the control gate every pass, so the assertion heartbeat keeps
+            // advancing for as long as the flag-carrying node lives.
+            var first = await AssertedAtAsync();
+            first.ShouldNotBeNull();
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            while (await AssertedAtAsync() <= first)
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException("The suspended flag node never refreshed configuration_asserted_at.");
+                }
+                await Task.Delay(100);
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_mixed_deployment_stays_suspended_until_the_flag_node_dies()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        try
+        {
+            // A rolling deploy in flight: a flag pod and a flag-less pod alive at the same time, each
+            // wanting the opposite control state.
+            var flagCapture = new CaptureSink();
+            var flaglessCapture = new CaptureSink();
+            await using var flagNode = await WallabyTestNode.StartAsync(
+                BuildServices(names, flagCapture, suspendFlag: true));
+            await WallabyReadiness.WaitForSuspendedAsync(flagNode.Services);
+
+            await using var flaglessNode = await WallabyTestNode.StartAsync(
+                BuildServices(names, flaglessCapture));
+            await WallabyReadiness.WaitForSuspendedAsync(flaglessNode.Services);
+
+            // Well past the 2s grace: the live flag node's heartbeat must keep the resume refused.
+            await Task.Delay(TimeSpan.FromSeconds(4));
+            flaglessNode.Services.GetRequiredService<IWallabyStatus>()
+                .Current.Role.ShouldBe(WallabyNodeRole.Suspended);
+            (await SlotExistsAsync(names.Slot)).ShouldBeFalse();
+
+            // The flag node dies (the rollout completes); its assertion goes stale and the flag-less
+            // node auto-resumes on its own.
+            await flagNode.DisposeAsync();
+            await WallabyReadiness.WaitForStreamingAsync(flaglessNode.Services);
+            (await SlotExistsAsync(names.Slot)).ShouldBeTrue();
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    private async Task<DateTime?> AssertedAtAsync()
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT configuration_asserted_at FROM wallaby.control", conn);
+        return await cmd.ExecuteScalarAsync() as DateTime?;
+    }
+
+    [Test]
     public async Task Client_origin_suspension_is_not_auto_resumed_by_a_flagless_host()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
@@ -232,9 +384,22 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
             o.PublicationName = names.Publication;
             o.Advanced.StandbyRetryInterval = TimeSpan.FromSeconds(1);
             o.Advanced.ControlPollInterval = TimeSpan.FromMilliseconds(500);
+            // The default 60s floor would stall the flag-less phases; grace = max(4 * poll, floor) = 2s.
+            o.Advanced.SuspensionAutoResumeGraceFloor = TimeSpan.FromSeconds(2);
         });
         services.ReplaceWallabySink("capture", capture);
         return services;
+    }
+
+    // Simulates the pre-first-checkpoint window deterministically: streaming checkpoint saves race
+    // disposal, and an idle or backfill-only install never writes one at all.
+    private async Task DeleteCheckpointAsync(string slot)
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("DELETE FROM wallaby.checkpoint WHERE slot_name = @s", conn);
+        cmd.Parameters.AddWithValue("s", slot);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task<bool> SlotExistsAsync(string slot)

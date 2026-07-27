@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Wallaby.Internal.Cluster;
@@ -19,9 +18,7 @@ internal sealed class StateSchemaBootstrapper(ILogger? logger = null)
     // Distinct from both leadership lock keys; pinned the same way (see PostgresAdvisoryLock.StableKey).
     private static readonly long MigrationLockKey = PostgresAdvisoryLock.StableKey("wallaby_schema_migration");
 
-    private static readonly string AppliedBy =
-        typeof(StateSchemaBootstrapper).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion ?? "unknown";
+    private static readonly string AppliedBy = WallabyVersion.Current;
 
     private const string VersionTableDdl = """
         CREATE SCHEMA IF NOT EXISTS wallaby;

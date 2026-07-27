@@ -51,6 +51,19 @@ No admin endpoint or extra tooling, suspension is managed via your deployment pi
 While the flagged build is deployed, the suspension is **re-asserted**, so a remote `ResumeAsync` gets
 re-suspended by the running nodes. Resume by deploying the flag-less build.
 
+### Mixed rollouts
+
+A rolling deploy inevitably mixes flagged and flag-less nodes for a while. The flagged nodes continuously
+stamp a liveness heartbeat (`wallaby.control.configuration_asserted_at`) while their suspension is in
+force, and a flag-less node only auto-resumes once that heartbeat has been quiet for a grace window, computed as
+`max(ControlPollInterval × 4, SuspensionAutoResumeGraceFloor)`, set to one minute by default. So a mixed
+rollout simply **stays suspended** until the last flagged node is gone, then resumes exactly once,
+rather than the two sides flapping the slots (each flap forces a full re-backfill).
+
+The grace is also the dead time between the last flagged node stopping and the resume; lower
+`Advanced.SuspensionAutoResumeGraceFloor` if your deploys are single-node and the wait matters.
+A flag-less node waiting out the grace will log that it is doing so.
+
 ## Option B: runtime control (Wallaby.Client)
 
 Suspend and resume at runtime from **any process with a connection string**. The app itself doesn't need to restart or redeploy.
@@ -121,10 +134,7 @@ SELECT pg_notify('wallaby_control', '');
 ## What to expect on resume
 
 - The primary slot and publications are recreated by normal self-configuration on the next leader
-  election, and the recreated slot's consistent point is ahead of the persisted checkpoint — so
-  slot-loss gap detection marks **every mapped table for a full re-backfill**. Changes committed while
-  suspended are recovered; sinks must be idempotent (upsert/delete by id), which the
-  [sink contract](/sinks/custom) already requires.
+  election, and slot-loss gap detection marks **every mapped table for a full re-backfill**.
 - **External slots** are recreated too, but their consumers' positions are gone: the external tool must
   re-sync from scratch (the same situation as any dropped slot). Plan its re-sync alongside the upgrade.
 - Until the re-backfill completes, sinks are stale by however long the suspension lasted.

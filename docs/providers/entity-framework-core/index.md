@@ -121,6 +121,34 @@ skipped during materialization, and never read during backfill.
 Missing columns will result in missing data within your transforms. Ensure these remain in sync.
 :::
 
+### Owned and complex types
+
+Whether a value-object member is captured follows from where its data physically lives:
+
+| Member shape | Behavior |
+| --- | --- |
+| Same-table `OwnsOne` reference (including nested) | Captured and materialized with the owner |
+| Complex property (`ComplexProperty`, column-mapped) | Captured and materialized with the owner |
+| Owned collection (`OwnsMany`) | Not captured - startup warning, member stays at its default |
+| `OwnsOne` mapped to its own table (`ToTable`) | Not captured - startup warning, member stays at its default |
+| Owned or complex member mapped to JSON (`ToJson`) | Not captured - startup warning, member stays at its default |
+
+Captured members behave like ordinary properties, with their columns joining the
+[publication column list](/configuration#publication-column-lists), backfills reading them, and the
+materialized entity carrying the constructed instances.
+In `ChangeEvent.Record` and `Changes`, their keys use the dotted member path, e.g.
+`"Address.Street"`. An optional member whose columns are all null stays null, mirroring EF. A
+captured entity whose owned or complex type cannot be constructed from column values (for example a
+constructor that injects the `DbContext`) fails at startup.
+
+For the uncapturable shapes, the data lives outside the entity's rows, so the materialized member
+stays at its default and Wallaby logs one warning per member at startup. The warning is silenced by
+expressing intent either way:
+
+- `DependsOn(e => e.Lines)` - the member's side table re-emits the entity when it changes (the
+  member itself is still not populated; read it in the transform via the `DbContext`).
+- `ConsumesAllExcept(e => e.Lines)` - acknowledges the member is not consumed.
+
 ## Transforms
 
 ### Enrichment via the DbContext
@@ -221,9 +249,14 @@ a million products). Wallaby keeps this bounded:
 - **Consolidated lookups**: All distinct keys changed for a dependent table in one transaction are resolved
   with a single `IN (…)` query per relationship.
 - **Inline first page, offloaded tail**: The first [`MaxBatchSize`](/configuration#general-options) affected rows
-  are re-emitted inline. If more remain, the rest is handed to a *scoped backfill job* that re-snapshots
+  are re-emitted inline. If more remain, the rest is handed to *scoped backfill jobs* that re-snapshot
   them asynchronously. This lets the trigger
   transaction be acknowledged immediately, so a huge fan-out never stalls replication.
+- **Bounded memory**: A very wide fan-out (tens of thousands of distinct keys in one transaction) is
+  offloaded in chunk jobs *as the keys accumulate*, so memory stays flat no matter how many keys the
+  transaction touches. Past [`MaxFanoutKeysPerTransaction`](/configuration#advanced-options) the
+  transaction has effectively rewritten the dependent table, and the whole primary table is
+  re-snapshotted instead.
 - **On-demand processing**: The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
   the instant a job is enqueued so the tail is picked up promptly. A periodic
   [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a safety-net fallback.

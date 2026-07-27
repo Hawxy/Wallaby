@@ -39,6 +39,9 @@ internal sealed class WatermarkBackfillCoordinator(
 
     public int ChunkSize { get; init; } = 500;
 
+    /// <summary>The opt-in visibility fence each chunk waits on after its low-watermark emission; null = disabled.</summary>
+    public VisibilityFence? Fence { get; init; }
+
     // A long backfill reports progress at most this often (its start/completion are always logged).
     private static readonly TimeSpan ProgressLogInterval = TimeSpan.FromSeconds(30);
 
@@ -47,7 +50,10 @@ internal sealed class WatermarkBackfillCoordinator(
     /// <summary>Snapshot a whole table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
     public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
     {
-        var pager = new KeysetPager(table);
+        // One token per run, deliberately not persisted: a crash-resume re-delivers under a fresh token,
+        // which is harmless (upsert-only) and avoids a state column.
+        var runId = Guid.NewGuid().ToString("N");
+        var pager = new KeysetPager(table, backfillRunId: runId);
         var pkColumns = table.PrimaryKey.Select(c => c.ColumnName).ToArray();
         var pkTypes = table.PrimaryKey.Select(c => c.ClrType).ToArray();
         var existing = await store.GetAsync(table.QualifiedName, ct);
@@ -108,12 +114,14 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
+        // Hoisted above the batch loop so one scoped run shares one token across all its filter batches.
+        var runId = Guid.NewGuid().ToString("N");
         var rowsCopied = startRows;
         for (var b = startBatch; b < filters.Count; b++)
         {
             var batch = b;
             var isLastBatch = batch == filters.Count - 1;
-            var pager = new KeysetPager(spec.PrimaryTable, filters[batch]);
+            var pager = new KeysetPager(spec.PrimaryTable, filters[batch], runId);
 
             rowsCopied = await RunChunkLoopAsync(
                 pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,
@@ -181,6 +189,10 @@ internal sealed class WatermarkBackfillCoordinator(
                 _byToken[current.Token] = current;
 
                 await EmitWatermarkAsync(emitter, WallabySchema.WatermarkLowPrefix, current.Token, ct);
+                if (Fence is not null)
+                {
+                    await Fence.WaitAsync(emitter, qualifiedTable, ct);
+                }
                 var chunk = await pager.ReadChunkAsync(emitter, cursor, ChunkSize, ct);
                 current.Buffer = chunk.Rows;
                 await EmitWatermarkAsync(emitter, WallabySchema.WatermarkHighPrefix, current.Token, ct);

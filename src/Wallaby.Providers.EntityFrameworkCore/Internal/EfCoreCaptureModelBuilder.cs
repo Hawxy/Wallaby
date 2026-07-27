@@ -22,14 +22,16 @@ internal static class EfCoreCaptureModelBuilder
         ArgumentNullException.ThrowIfNull(spec);
         consumedProperties ??= ColumnConsumptionResolver.Resolve(model, spec);
 
-        var primaries = BuildPrimariesFromDeclared(model, spec, consumedProperties);
+        var warnings = new List<string>();
+        var primaries = BuildPrimariesFromDeclared(model, spec, consumedProperties, warnings);
 
         var (allTables, bindings) = AttachDependents(model, primaries, spec, consumedProperties);
-        return new WallabyModel(allTables, bindings);
+        return new WallabyModel(allTables, bindings, warnings);
     }
 
     private static List<(IEntityType EntityType, CapturedTable Table)> BuildPrimariesFromDeclared(
-        IModel model, CaptureSpec spec, IReadOnlyDictionary<string, IReadOnlySet<string>> consumedProperties)
+        IModel model, CaptureSpec spec, IReadOnlyDictionary<string, IReadOnlySet<string>> consumedProperties,
+        List<string> warnings)
     {
         // An empty spec builds an empty model: with several providers registered, one of them may simply
         // have no mapped entities. "No mappings at all" is rejected once, at WallabyBuilder.Build().
@@ -70,10 +72,70 @@ internal static class EfCoreCaptureModelBuilder
 
             primaries.Add((entityType, BuildTable(
                 entityType, spec.RequiresFullReplicaIdentity.Contains(clrType),
-                consumedProperties.GetValueOrDefault(entityType.Name))));
+                consumedProperties.GetValueOrDefault(entityType.Name),
+                spec.RequiresMaterializedEntity.Contains(clrType))));
+            CollectUncapturableWarnings(entityType, clrType, spec, warnings);
         }
 
         return primaries;
+    }
+
+    // A member whose data is not on the entity's rows (owned collection, separate-table owned type,
+    // JSON-mapped member) is left at its default on the materialized entity. That deserves a startup
+    // warning unless the user has expressed intent: a DependsOn(...) on the member or an exclude-mode
+    // selection naming it acknowledges the gap, and include-mode-only selections drop every unnamed
+    // member deliberately. Selections naming an uncapturable member to *include* it fail earlier, in
+    // ColumnConsumptionResolver.
+    private static void CollectUncapturableWarnings(
+        IEntityType entityType, Type clrType, CaptureSpec spec, List<string> warnings)
+    {
+        var effective = EffectiveProperties.Resolve(entityType);
+        if (effective.Uncapturable.Count == 0)
+        {
+            return;
+        }
+
+        var acknowledged = new HashSet<string>(StringComparer.Ordinal);
+        if (spec.DeclaredColumnSelections.TryGetValue(clrType, out var selections))
+        {
+            if (selections.Any(s => s.Mode == ColumnSelectionMode.Include)
+                && selections.All(s => s.Mode == ColumnSelectionMode.Include))
+            {
+                return;
+            }
+            foreach (var selection in selections.Where(s => s.Mode == ColumnSelectionMode.Exclude))
+            {
+                acknowledged.UnionWith(selection.PropertyNames);
+            }
+        }
+        if (spec.DeclaredDependencies.TryGetValue(clrType, out var expressions))
+        {
+            foreach (var expression in expressions)
+            {
+                if (DependencyAnalyzer.TryExtractMemberName(expression) is { } name)
+                {
+                    acknowledged.Add(name);
+                }
+            }
+        }
+
+        var qualifiedTable = $"{entityType.GetSchema() ?? "public"}.{entityType.GetTableName()}";
+        foreach (var member in effective.Uncapturable)
+        {
+            var root = member.Name.Split('.')[0];
+            if (acknowledged.Contains(root))
+            {
+                continue;
+            }
+            var remedy = member.HasSideTable && member.Name == root
+                ? $"Declare DependsOn(e => e.{root}) to re-emit the entity when it changes, or " +
+                  $"ConsumesAllExcept(e => e.{root}) to acknowledge and silence this warning."
+                : $"Add ConsumesAllExcept(e => e.{root}) to acknowledge and silence this warning.";
+            warnings.Add(
+                $"'{clrType.Name}.{member.Name}' {member.Reason}, so its data is not on '{qualifiedTable}' " +
+                $"rows and cannot be captured with the entity; the materialized {clrType.Name} leaves it at " +
+                $"its default value. {remedy}");
+        }
     }
 
     private static (IReadOnlyList<CapturedTable> All, IReadOnlyList<DependentBinding> Bindings) AttachDependents(
@@ -152,13 +214,15 @@ internal static class EfCoreCaptureModelBuilder
 
         var built = BuildTable(
             dependentEntityType, requiresFullReplicaIdentity: false,
-            consumedProperties.GetValueOrDefault(dependentEntityType.Name));
+            consumedProperties.GetValueOrDefault(dependentEntityType.Name),
+            requiresMaterializedEntity: false);
         byQualifiedName[(schema, tableName)] = built;
         return built;
     }
 
     private static CapturedTable BuildTable(
-        IEntityType entityType, bool requiresFullReplicaIdentity, IReadOnlySet<string>? consumedProperties)
+        IEntityType entityType, bool requiresFullReplicaIdentity, IReadOnlySet<string>? consumedProperties,
+        bool requiresMaterializedEntity)
     {
         var schema = entityType.GetSchema();
         var tableName = entityType.GetTableName()!;
@@ -171,23 +235,25 @@ internal static class EfCoreCaptureModelBuilder
 
         var columnsByProperty = new Dictionary<string, CapturedColumn>();
         var columns = new List<CapturedColumn>();
-        foreach (var property in entityType.GetProperties())
+        // Own scalar properties plus same-table owned/complex members, flattened; owned leaves carry
+        // their dotted member path as the property name (e.g. "Address.Street").
+        foreach (var leaf in EffectiveProperties.Resolve(entityType).Leaves)
         {
-            var columnName = property.GetColumnName(storeObject);
+            var columnName = leaf.Property.GetColumnName(storeObject);
             if (columnName is null) continue; // property not mapped to this table
             // Unselected columns are dropped from the capture set entirely (publication column list,
             // materialization, backfill reads).
-            if (consumedProperties is not null && !consumedProperties.Contains(property.Name)) continue;
+            if (consumedProperties is not null && !consumedProperties.Contains(leaf.Path)) continue;
 
             var column = new CapturedColumn
             {
-                PropertyName = property.Name,
+                PropertyName = leaf.Path,
                 ColumnName = columnName,
-                ClrType = property.ClrType,
-                IsPrimaryKey = pkPropertyNames.Contains(property.Name),
+                ClrType = leaf.Property.ClrType,
+                IsPrimaryKey = pkPropertyNames.Contains(leaf.Path),
             };
             columns.Add(column);
-            columnsByProperty[property.Name] = column;
+            columnsByProperty[leaf.Path] = column;
         }
 
         // Preserve primary-key ordinal order.
@@ -202,7 +268,9 @@ internal static class EfCoreCaptureModelBuilder
             TableName = tableName,
             Columns = columns,
             PrimaryKey = pkColumns,
+            ColumnsNarrowed = consumedProperties is not null,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
+            RequiresMaterializedEntity = requiresMaterializedEntity,
         };
     }
 }

@@ -41,6 +41,49 @@ public class KeysetCodecTests
     }
 
     [Test]
+    public void Cursor_round_trips_bytea_dateonly_timeonly_and_timespan()
+    {
+        var bytes = new byte[] { 1, 2, 255 };
+        var date = new DateOnly(2026, 7, 25);
+        var time = new TimeOnly(23, 59, 58, 123); // sub-minute precision must survive
+        var span = new TimeSpan(1, 2, 3, 4, 5);
+        string[] pk = ["a", "b", "c", "d"];
+
+        var json = KeysetCodec.SerializeCursor([bytes, date, time, span], pk);
+
+        KeysetCodec.TryDeserializeCursor(
+                json, pk, [typeof(byte[]), typeof(DateOnly), typeof(TimeOnly), typeof(TimeSpan)], out var cursor)
+            .ShouldBeTrue();
+
+        cursor.ShouldNotBeNull();
+        cursor[0].ShouldBeOfType<byte[]>().ShouldBe(bytes);
+        cursor[1].ShouldBe(date);
+        cursor[2].ShouldBe(time);
+        cursor[3].ShouldBe(span);
+    }
+
+    [Test]
+    public void An_unsupported_cursor_value_type_throws_at_serialize_time()
+    {
+        Should.Throw<NotSupportedException>(
+            () => KeysetCodec.SerializeCursor([new System.Collections.BitArray(3)], ["a"]));
+    }
+
+    [Test]
+    public void A_cursor_whose_values_cannot_be_coerced_is_rejected()
+    {
+        KeysetCodec.TryDeserializeCursor(
+                """{"v":1,"pk":["tenant_id","order_id"],"cur":["nope","x"]}""",
+                Pk, [typeof(int), typeof(string)], out _)
+            .ShouldBeFalse();
+
+        KeysetCodec.TryDeserializeScopedCursor(
+                """{"v":1,"b":1,"pk":["tenant_id","order_id"],"cur":["nope","x"]}""",
+                Pk, [typeof(int), typeof(string)], out _, out _)
+            .ShouldBeFalse();
+    }
+
+    [Test]
     public void Null_or_empty_json_is_a_valid_fresh_start()
     {
         KeysetCodec.TryDeserializeCursor(null, Pk, [typeof(int), typeof(int)], out var cursor).ShouldBeTrue();

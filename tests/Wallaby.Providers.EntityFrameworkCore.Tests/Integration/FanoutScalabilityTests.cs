@@ -49,6 +49,47 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Repointing_a_dependent_lookup_refreshes_the_departed_primary()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        var capture = harness.AddCaptureSink();
+        harness.Project<Category>("capture", destination: null, c => new WallabyDocument { ["name"] = c.Name });
+        harness.DependsOn<Category, List<Product>>(c => c.Products);
+
+        // Seeded before self-config: these categories can only reach the sink via the fan-out.
+        var oldCat = await harness.Db.AddCategoryAsync("OldParent");
+        var newCat = await harness.Db.AddCategoryAsync("NewParent");
+        var productId = await harness.Db.AddProductAsync(oldCat, "roamer");
+
+        // The departed category's id rides in the product row's old tuple only under full identity.
+        await harness.Db.SetReplicaIdentityFullAsync("products");
+        try
+        {
+            await harness.SelfConfigureAsync();
+            await harness.StartAsync();
+            try
+            {
+                await harness.Db.SetProductCategoryAsync(productId, newCat);
+
+                // Both sides of the re-point refresh: the gaining category (new tuple) and the losing
+                // one (old tuple), whose document would otherwise keep the stale membership.
+                await harness.WaitUntilAsync(
+                    () => capture.For("categories").Any(r => r.DocumentId == oldCat.ToString())
+                          && capture.For("categories").Any(r => r.DocumentId == newCat.ToString()),
+                    Timeout);
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+        finally
+        {
+            await harness.Db.SetReplicaIdentityDefaultAsync("products");
+        }
+    }
+
+    [Test]
     public async Task Multiple_dependent_changes_in_one_transaction_fan_out_each_primary_once()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
@@ -207,6 +248,51 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Very_wide_fanout_is_offloaded_in_bounded_chunk_jobs()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        harness.FanoutChunkSize = 2;
+        var capture = harness.AddCaptureSink();
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
+        harness.DependsOn<Product, Category?>(p => p.Category);
+
+        // Seed before self-config so only the batch rename below streams.
+        var catIds = new List<int>();
+        for (var i = 0; i < 5; i++)
+        {
+            var id = await harness.Db.AddCategoryAsync($"C{i}");
+            await harness.Db.AddProductAsync(id, $"chunk_p{i}");
+            catIds.Add(id);
+        }
+
+        await harness.SelfConfigureAsync();
+        await harness.ClearFanoutQueueAsync();
+
+        await harness.StartAsync();
+        try
+        {
+            // All five renames in ONE transaction: 5 distinct lookup keys against a chunk size of 2 are
+            // offloaded as jobs of 2 + 2 + 1 while the transaction is consumed; no inline page is read.
+            await harness.Db.SetCategoryNamesAsync(catIds.Select((id, i) => (id, $"C{i}b")));
+            await harness.WaitUntilAsync(async () => await harness.PendingFanoutJobCountAsync() == 3, Timeout);
+
+            // The trigger transaction acknowledges while delivery rides entirely on the queued chunks.
+            await harness.WaitUntilAsync(() => harness.LastAcknowledgedLsn > 0, Timeout);
+            capture.For("products").ShouldBeEmpty();
+
+            (await harness.DrainFanoutAsync()).ShouldBe(3);
+            await harness.WaitUntilAsync(
+                () => capture.For("products").Select(r => r.DocumentId).Distinct().Count() >= 5, Timeout);
+        }
+        finally
+        {
+            await harness.StopAsync();
+        }
+
+        capture.For("products").Select(r => r.DocumentId).Distinct().Count().ShouldBe(5);
+    }
+
+    [Test]
     public async Task Fanout_queue_store_tracks_resume_cursor_and_coalesces()
     {
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
@@ -249,6 +335,68 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         rearmed!.Status.ShouldBe(BackfillStatus.Requested);
         (await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash)
             .ShouldBe(1);
+    }
+
+    [Test]
+    public async Task A_failing_job_backs_off_and_a_fresh_trigger_resets_its_retry_state()
+    {
+        await using (var conn = await pg.DataSource.OpenConnectionAsync())
+        {
+            await new StateSchemaBootstrapper().EnsureAsync(conn, CancellationToken.None);
+        }
+        await PgExec.ExecuteAsync(pg.DataSource, "DELETE FROM wallaby.fanout_queue", CancellationToken.None);
+
+        var store = new PostgresFanoutQueueStore(pg.DataSource);
+        var table = new CapturedTable
+        {
+            EntityClrType = typeof(Product),
+            Schema = "public",
+            TableName = "products",
+            Columns = [],
+            PrimaryKey = [],
+        };
+        var spec = new ScopedFanoutSpec(table, ["category_id"], [new object?[] { 4242 }]);
+
+        await store.EnqueueAsync(spec, CancellationToken.None);
+        var job = (await store.GetNextDueAsync(CancellationToken.None))!;
+
+        // A failure persists the attempt and error, and backs the job out of the due set.
+        await store.FailAsync(job.TableQualified, job.LookupHash, "boom", CancellationToken.None);
+        (await store.GetNextDueAsync(CancellationToken.None)).ShouldBeNull();
+        (await store.MaxAttemptsAsync(CancellationToken.None)).ShouldBe(1);
+        var first = await ReadRetryStateAsync();
+        first.Attempts.ShouldBe(1);
+        first.LastError.ShouldBe("boom");
+
+        // A second failure schedules further out (exponential backoff off the persisted count).
+        await store.FailAsync(job.TableQualified, job.LookupHash, "boom again", CancellationToken.None);
+        var second = await ReadRetryStateAsync();
+        second.Attempts.ShouldBe(2);
+        second.NextAttemptAt.ShouldBeGreaterThan(first.NextAttemptAt);
+
+        // Deferral reschedules on its own delay without counting as a failure.
+        await store.DeferAsync(job.TableQualified, job.LookupHash, TimeSpan.FromMinutes(10), CancellationToken.None);
+        var deferred = await ReadRetryStateAsync();
+        deferred.Attempts.ShouldBe(2);
+        deferred.NextAttemptAt.ShouldBeGreaterThan(second.NextAttemptAt);
+
+        // A fresh trigger clears the backoff: due immediately, retry state reset.
+        await store.EnqueueAsync(spec, CancellationToken.None);
+        var rearmed = await store.GetNextDueAsync(CancellationToken.None);
+        rearmed.ShouldNotBeNull();
+        rearmed!.Attempts.ShouldBe(0);
+        (await store.MaxAttemptsAsync(CancellationToken.None)).ShouldBe(0);
+        (await ReadRetryStateAsync()).LastError.ShouldBeNull();
+    }
+
+    private async Task<(int Attempts, string? LastError, DateTime NextAttemptAt)> ReadRetryStateAsync()
+    {
+        await using var conn = await pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new Npgsql.NpgsqlCommand(
+            "SELECT attempts, last_error, next_attempt_at FROM wallaby.fanout_queue", conn);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        (await reader.ReadAsync()).ShouldBeTrue();
+        return (reader.GetInt32(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.GetDateTime(2));
     }
 
     [Test]

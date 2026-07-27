@@ -241,7 +241,7 @@ internal sealed class TransactionAssembler(
     private async ValueTask<RawChange> DecodeInsertAsync(InsertMessage message, CancellationToken ct)
     {
         var readModes = ReadModesFor(message.Relation);
-        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, ct);
+        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, message.Relation, message.WalStart, ct);
         return new RawChange
         {
             RelationId = message.Relation.RelationId,
@@ -258,8 +258,10 @@ internal sealed class TransactionAssembler(
     {
         var readModes = ReadModesFor(message.Relation);
         // On the wire the old tuple (when present) precedes the new tuple, so read it first.
-        var oldValues = oldRow is null ? null : await PgOutputDecoder.ReadTupleAsync(oldRow, readModes, ct);
-        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, ct);
+        var oldValues = oldRow is null
+            ? null
+            : await PgOutputDecoder.ReadTupleAsync(oldRow, readModes, message.Relation, message.WalStart, ct);
+        var newValues = await PgOutputDecoder.ReadTupleAsync(message.NewRow, readModes, message.Relation, message.WalStart, ct);
         return new RawChange
         {
             RelationId = message.Relation.RelationId,
@@ -274,7 +276,8 @@ internal sealed class TransactionAssembler(
     private async ValueTask<RawChange> DecodeDeleteAsync(
         DeleteMessage message, Npgsql.Replication.PgOutput.ReplicationTuple oldOrKey, CancellationToken ct)
     {
-        var oldValues = await PgOutputDecoder.ReadTupleAsync(oldOrKey, ReadModesFor(message.Relation), ct);
+        var oldValues = await PgOutputDecoder.ReadTupleAsync(
+            oldOrKey, ReadModesFor(message.Relation), message.Relation, message.WalStart, ct);
         return new RawChange
         {
             RelationId = message.Relation.RelationId,

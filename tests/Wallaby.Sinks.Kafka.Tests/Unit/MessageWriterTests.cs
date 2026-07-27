@@ -53,13 +53,23 @@ public class MessageWriterTests
     }
 
     [Test]
-    public void Backfill_records_share_an_idempotency_key_across_runs()
+    public void Backfill_records_share_an_idempotency_key_within_a_run()
     {
-        var first = Upsert("7", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0));
-        var second = Upsert("7", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, commitIdx: 9));
+        // Same run, different chunks (commitIdx differs): one key, so a run never double-delivers.
+        var first = Upsert("7", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, backfillRunId: "r1"));
+        var second = Upsert("7", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, commitIdx: 9, backfillRunId: "r1"));
 
-        KafkaMessageWriter.IdempotencyKey(first).ShouldBe("backfill:products:7");
-        KafkaMessageWriter.IdempotencyKey(second).ShouldBe("backfill:products:7");
+        KafkaMessageWriter.IdempotencyKey(first).ShouldBe("backfill:r1:products:7");
+        KafkaMessageWriter.IdempotencyKey(second).ShouldBe("backfill:r1:products:7");
+    }
+
+    [Test]
+    public void Separate_backfill_runs_produce_distinct_idempotency_keys()
+    {
+        var firstRun = Upsert("7", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, backfillRunId: "r1"));
+        var secondRun = Upsert("7", new Dictionary<string, object?>(), metadata: Meta(backfill: true, lsn: 0, backfillRunId: "r2"));
+
+        KafkaMessageWriter.IdempotencyKey(firstRun).ShouldNotBe(KafkaMessageWriter.IdempotencyKey(secondRun));
     }
 
     [Test]

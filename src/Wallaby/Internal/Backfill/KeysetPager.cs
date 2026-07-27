@@ -141,16 +141,18 @@ internal sealed class KeysetPager
 {
     private readonly CapturedTable _table;
     private readonly KeysetFilter? _filter;
+    private readonly string? _backfillRunId;
     private readonly string[] _columnNames;
     private readonly ColumnReadMode[] _readModes;
     private readonly int[] _pkIndexInColumns;
     private readonly string _firstPageSql;
     private readonly string _nextPageSql;
 
-    public KeysetPager(CapturedTable table, KeysetFilter? filter = null)
+    public KeysetPager(CapturedTable table, KeysetFilter? filter = null, string? backfillRunId = null)
     {
         _table = table;
         _filter = filter;
+        _backfillRunId = backfillRunId;
         _columnNames = table.Columns.Select(c => c.ColumnName).ToArray();
         _readModes = table.Columns.Select(c => c.ReadMode).ToArray();
 
@@ -240,6 +242,7 @@ internal sealed class KeysetPager
                 Action = ChangeAction.Read,
                 NewValues = values,
                 OldValues = null,
+                BackfillRunId = _backfillRunId,
             });
 
             lastRow = values;
