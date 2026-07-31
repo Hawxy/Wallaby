@@ -13,6 +13,8 @@
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Http" />
+    <!-- Independent Standard Webhooks verifier: proves the sink's signatures conform on the wire. -->
+    <PackageReference Include="StandardWebhooks" />
   </ItemGroup>
 
   <ItemGroup>

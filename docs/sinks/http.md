@@ -1,5 +1,5 @@
 ---
-description: "POSTing change batches to any HTTP endpoint as a JSON envelope, with named-client auth, HMAC signing, and idempotency keys."
+description: "POSTing change batches to any HTTP endpoint as a JSON envelope, with named-client auth, Standard Webhooks signing, and idempotency keys."
 ---
 
 # HTTP Sink
@@ -24,7 +24,7 @@ builder.Services.AddWallaby(cdc =>
        .AddHttpSink("webhook", o =>
        {
            o.Endpoint = "https://api.example.com/wallaby";
-           o.SigningSecret = secret; // optional HMAC body signing
+           o.SigningSecret = secret; // optional Standard Webhooks signing ("whsec_...")
        })
        .WithMappings(sink => sink
            .Map<Product>()
@@ -39,7 +39,8 @@ builder.Services.AddWallaby(cdc =>
 | --- | --- | --- |
 | `Endpoint` | *(required)* | Absolute URL every envelope is POSTed to. |
 | `HttpClientName` | `wallaby.sinks.http.<name>` | The `IHttpClientFactory` named client used for delivery. |
-| `SigningSecret` | `null` | Enables HMAC-SHA256 [body signing](#verifying-signatures). |
+| `SigningSecret` | `null` | Enables [Standard Webhooks request signing](#verifying-signatures) (`whsec_...`). |
+| `PreviousSigningSecret` | `null` | Second signature during [key rotation](#verifying-signatures). |
 | `Compression` | `None` | [Request-body compression](#compression): `Gzip` or `Brotli`. |
 | `Annotations` | `null` | Static key/values echoed at the top of every envelope. |
 | `MaxRecordsPerRequest` | `500` | Larger batches are split into sequential requests (commit order preserved). |
@@ -74,6 +75,7 @@ Each request is a JSON envelope; `records` preserves commit order:
 
 ```json
 {
+  "type": "wallaby.changes",
   "sink": "webhook",
   "sentAt": "2026-07-06T03:12:45.123Z",
   "records": [
@@ -118,8 +120,17 @@ Each request is a JSON envelope; `records` preserves commit order:
   `delete` - so it can differ from the raw WAL operation.
 - `commitLsn` is a string - the value can exceed the safe-integer range of JavaScript consumers. Backfill
   records have `commitLsn: "0"` and omit `commitTimestamp`.
+- `type` is always `wallaby.changes`.
+- `sentAt` is **per attempt**: a retried delivery re-sends the same records with a fresh `sentAt` (and,
+  [when signed](#verifying-signatures), the same `webhook-id`). Treat requests with an equal
+  `webhook-id` as the same delivery.
 - With `Annotations` configured, the envelope carries an `annotations` object with those key/values
   alongside `sink` and `sentAt`.
+- **Ignore unknown fields.** New fields are added to the envelope additively (and some, like
+  `metadata.backfillRunId`, appear only when relevant). A receiver that rejects or fails on
+  unrecognized properties will break on upgrades that are compatible by contract.
+- Receivers that want spec-shaped, one-event-per-request traffic can set `MaxRecordsPerRequest = 1`. The
+  envelope stays the same but each request carries a single record.
 
 ## Delivery semantics
 
@@ -163,23 +174,38 @@ app.UseRequestDecompression();
 
 ## Verifying signatures
 
-As an additional security measure, you can set `SigningSecret` and sign every request with a HMAC-SHA256 of the exact body:
+Set `SigningSecret` and every request is signed per the
+[Standard Webhooks](https://www.standardwebhooks.com/) specification, so any spec-conformant
+verification library can check it:
 
 ```
-X-Wallaby-Signature: sha256=<lowercase hex>
+webhook-id: msg_<hex>
+webhook-timestamp: <unix seconds>
+webhook-signature: v1,<base64> [v1,<base64>]
 ```
 
-Verify it before trusting the payload:
+The signature is the HMAC-SHA256 of `{id}.{timestamp}.{body}`. The secret must be in the standard
+format (base64, optionally prefixed `whsec_`) or the sink fails at startup. Optionally generate one with:
+
+```csharp
+var secret = "whsec_" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
+```
+
+Verify with a Standard Webhooks library - for .NET, the
+[`StandardWebhooks`](https://www.nuget.org/packages/StandardWebhooks) package:
 
 ```csharp
 app.MapPost("/wallaby", async (HttpRequest request) =>
 {
-    using var buffer = new MemoryStream();
-    await request.Body.CopyToAsync(buffer);
-    var body = buffer.ToArray();
+    using var reader = new StreamReader(request.Body);
+    var body = await reader.ReadToEndAsync();
 
-    var expected = $"sha256={Convert.ToHexStringLower(HMACSHA256.HashData(secretBytes, body))}";
-    if (request.Headers["X-Wallaby-Signature"] != expected)
+    var webhook = new StandardWebhook(secret); // e.g. from configuration
+    try
+    {
+        webhook.Verify(body, request.Headers); // checks signature + timestamp tolerance
+    }
+    catch (WebhookVerificationException)
     {
         return Results.Unauthorized();
     }
@@ -190,8 +216,12 @@ app.MapPost("/wallaby", async (HttpRequest request) =>
 });
 ```
 
-The HMAC signature is computed over the **uncompressed** payload, so signature verification works
-unchanged against the body your endpoint reads after the middleware has decompressed it.
+**Key rotation:** set the new secret in `SigningSecret` and move the old one to
+`PreviousSigningSecret`. Every request then carries a signature for each, so receivers can switch
+whenever within the rotation window. Clear `PreviousSigningSecret` once all receivers are moved.
+
+The signature is computed over the **uncompressed** payload, so verification works unchanged
+against the body your endpoint reads after the middleware has decompressed it.
 
 ## NativeAOT
 

@@ -1,25 +1,26 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using StandardWebhooks;
 
 namespace Wallaby.Sinks.Http.Tests.Integration;
 
 /// <summary>
 /// In-process webhook endpoint: an <see cref="HttpListener"/> on a loopback port that records every
-/// envelope (verifying the HMAC signature when a secret is expected) and returns 200.
+/// envelope (verifying the Standard Webhooks signature via the independent StandardWebhooks package
+/// when a secret is expected) and returns 200.
 /// </summary>
 internal sealed class WebhookReceiver : IAsyncDisposable
 {
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loop;
-    private readonly byte[]? _signingKey;
+    private readonly StandardWebhook? _verifier;
 
     public WebhookReceiver(string? signingSecret = null)
     {
-        _signingKey = signingSecret is null ? null : Encoding.UTF8.GetBytes(signingSecret);
+        _verifier = signingSecret is null ? null : new StandardWebhook(signingSecret);
 
         var port = FreePort();
         Endpoint = $"http://127.0.0.1:{port}/hooks/";
@@ -74,13 +75,9 @@ internal sealed class WebhookReceiver : IAsyncDisposable
             await context.Request.InputStream.CopyToAsync(buffer);
             var body = buffer.ToArray();
 
-            if (_signingKey is not null)
+            if (_verifier is not null && !VerifySignature(context.Request, body))
             {
-                var expected = $"sha256={Convert.ToHexStringLower(HMACSHA256.HashData(_signingKey, body))}";
-                if (context.Request.Headers[HttpSink.SignatureHeader] != expected)
-                {
-                    SawInvalidSignature = true;
-                }
+                SawInvalidSignature = true;
             }
 
             using var envelope = JsonDocument.Parse(body);
@@ -92,6 +89,26 @@ internal sealed class WebhookReceiver : IAsyncDisposable
             context.Response.StatusCode = 200;
             context.Response.Close();
         }
+    }
+
+    // The documented receiver recipe: a fresh timestamp within tolerance, and any of the signatures
+    // matching the reference implementation's output for {id}.{timestamp}.{body}.
+    private bool VerifySignature(HttpListenerRequest request, byte[] body)
+    {
+        var id = request.Headers[HttpSink.IdHeader];
+        var timestamp = request.Headers[HttpSink.TimestampHeader];
+        var signatures = request.Headers[HttpSink.SignatureHeader];
+        if (id is null || signatures is null
+            || timestamp is null
+            || !long.TryParse(timestamp, out var unix)
+            || Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unix) > 300)
+        {
+            return false;
+        }
+
+        var expected = _verifier!.Sign(
+            id, DateTimeOffset.FromUnixTimeSeconds(unix), Encoding.UTF8.GetString(body));
+        return signatures.Split(' ').Contains(expected, StringComparer.Ordinal);
     }
 
     public async ValueTask DisposeAsync()

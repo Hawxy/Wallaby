@@ -7,7 +7,9 @@ namespace Wallaby.Sinks.Http.Tests.Unit;
 /// <summary>Message handler that records every request (with its body) and returns configurable responses.</summary>
 internal sealed class CapturingHandler : HttpMessageHandler
 {
-    public sealed record Captured(HttpRequestMessage Request, byte[] Body, string? Signature, string? ContentEncoding);
+    public sealed record Captured(
+        HttpRequestMessage Request, byte[] Body, string? Signature, string? ContentEncoding, string? Timestamp,
+        string? Id);
 
     public List<Captured> Requests { get; } = [];
 
@@ -27,7 +29,12 @@ internal sealed class CapturingHandler : HttpMessageHandler
         var signature = request.Headers.TryGetValues(HttpSink.SignatureHeader, out var values)
             ? values.Single()
             : null;
-        Requests.Add(new Captured(request, body, signature, request.Content.Headers.ContentEncoding.SingleOrDefault()));
+        var timestamp = request.Headers.TryGetValues(HttpSink.TimestampHeader, out var timestamps)
+            ? timestamps.Single()
+            : null;
+        var id = request.Headers.TryGetValues(HttpSink.IdHeader, out var ids) ? ids.Single() : null;
+        Requests.Add(new Captured(
+            request, body, signature, request.Content.Headers.ContentEncoding.SingleOrDefault(), timestamp, id));
 
         if (OnRequest is not null)
         {

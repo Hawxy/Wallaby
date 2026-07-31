@@ -57,12 +57,12 @@ internal sealed class ExternalSlotProvisioningService(
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                await WaitOutSuspensionAsync(control, stoppingToken);
+                var snapshot = await WaitOutSuspensionAsync(control, stoppingToken);
                 await ProvisionRoundAsync(specs, stoppingToken);
 
                 // Watching: alive so the next suspend/resume cycle re-provisions, holding no lock.
                 status.EnterStandby();
-                await WaitForSuspensionAsync(control, stoppingToken);
+                await WaitForControlChangeAsync(control, snapshot, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -107,18 +107,22 @@ internal sealed class ExternalSlotProvisioningService(
     }
 
     /// <summary>
-    /// Block until a suspension is requested (the cue to wind down and later re-provision), woken by
-    /// NOTIFY with the poll interval as a safety net. Transient control-read failures are paced here
-    /// rather than faulting the host.
+    /// Block until the control row differs from <paramref name="snapshot"/> (taken before the
+    /// provisioning round), woken by NOTIFY with the poll interval as a safety net. Level-triggered on
+    /// the row rather than on observing the Suspended state: every transition stamps a timestamp, so a
+    /// suspend/resume cycle faster than any observation still leaves the row changed and triggers a
+    /// reconcile round for the slots its finalize dropped. Transient control-read failures are paced
+    /// here rather than faulting the host.
     /// </summary>
-    private async Task WaitForSuspensionAsync(PostgresControlStore control, CancellationToken ct)
+    private async Task WaitForControlChangeAsync(
+        PostgresControlStore control, ControlRow? snapshot, CancellationToken ct)
     {
         await using var subscription = control.Subscribe();
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                if (await control.IsSuspensionInEffectAsync(ct))
+                if (!Equals(await control.ReadAsync(ct), snapshot))
                 {
                     return;
                 }
@@ -141,12 +145,13 @@ internal sealed class ExternalSlotProvisioningService(
 
     /// <summary>
     /// The suspension control gate: finalize a requested suspension (under the lock), and while suspended
-    /// idle on the control channel instead of provisioning. Returns when the state allows provisioning;
-    /// with a deployed Suspend() flag that never happens — the node stays suspended until redeployed.
+    /// idle on the control channel instead of provisioning. Returns the control row that allowed
+    /// provisioning (the change-detection snapshot for <see cref="WaitForControlChangeAsync"/>); with a
+    /// deployed Suspend() flag that never happens, and the node stays suspended until redeployed.
     /// Transient control-read failures (expected while the database is offline for the upgrade itself)
     /// are retried here rather than faulting the host.
     /// </summary>
-    private async Task WaitOutSuspensionAsync(PostgresControlStore control, CancellationToken ct)
+    private async Task<ControlRow?> WaitOutSuspensionAsync(PostgresControlStore control, CancellationToken ct)
     {
         INotifySubscription? subscription = null;
         var announced = false;
@@ -176,7 +181,7 @@ internal sealed class ExternalSlotProvisioningService(
                 switch (gate)
                 {
                     case ControlGateAction.Proceed:
-                        return;
+                        return row;
 
                     case ControlGateAction.Finalize:
                     {

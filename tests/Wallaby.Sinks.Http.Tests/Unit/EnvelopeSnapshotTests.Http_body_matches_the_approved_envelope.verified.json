@@ -1,4 +1,5 @@
 ﻿{
+  "type": "wallaby.changes",
   "sink": "webhook",
   "sentAt": "{Scrubbed}",
   "annotations": {

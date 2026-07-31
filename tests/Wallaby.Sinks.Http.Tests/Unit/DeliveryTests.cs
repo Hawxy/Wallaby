@@ -1,8 +1,8 @@
 using System.Net;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using StandardWebhooks;
 using Wallaby.Abstractions;
 using static Wallaby.Sinks.Http.Tests.Unit.SinkTestHelpers;
 
@@ -186,17 +186,83 @@ public class DeliveryTests
             () => sink.DeliverAsync(Batch(Upserts("1")), cts.Token));
     }
 
+    private const string Secret = "whsec_dGVzdC1zaWduaW5nLWtleS0wMTIzNDU2Nzg5YWJjZGVm";
+    private const string PreviousSecret = "whsec_cHJldmlvdXMtc2lnbmluZy1rZXktMDAwMDAwMDAwMDAw";
+
+    // The independent reference: the StandardWebhooks package's signer, fed the captured id, timestamp,
+    // and body, must reproduce the header exactly.
+    private static string ReferenceSignature(string secret, CapturingHandler.Captured captured)
+        => new StandardWebhook(secret).Sign(
+            captured.Id!,
+            DateTimeOffset.FromUnixTimeSeconds(long.Parse(captured.Timestamp!)),
+            Encoding.UTF8.GetString(captured.Body));
+
     [Test]
-    public async Task Body_is_signed_when_a_secret_is_configured()
+    public async Task Requests_carry_a_standard_webhooks_signature_when_a_secret_is_configured()
     {
         var handler = new CapturingHandler();
-        var sink = CreateSink(handler, o => o.SigningSecret = "s3cret");
+        var sink = CreateSink(handler, o => o.SigningSecret = Secret);
 
         (await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None)).Status.ShouldBe(DeliveryStatus.Success);
 
         var captured = handler.Requests.ShouldHaveSingleItem();
-        var expected = Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("s3cret"), captured.Body));
-        captured.Signature.ShouldBe($"sha256={expected}");
+        captured.Id.ShouldNotBeNull();
+        captured.Id!.ShouldStartWith("msg_");
+        captured.Timestamp.ShouldNotBeNull();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long.Parse(captured.Timestamp!).ShouldBeInRange(now - 60, now + 5);
+
+        captured.Signature.ShouldBe(ReferenceSignature(Secret, captured));
+    }
+
+    [Test]
+    public async Task A_retried_delivery_carries_the_same_message_id()
+    {
+        var handler = new CapturingHandler();
+        var sink = CreateSink(handler, o => o.SigningSecret = Secret);
+
+        await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None);
+        await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None);
+        await sink.DeliverAsync(Batch(Upserts("2")), CancellationToken.None);
+
+        handler.Requests.Count.ShouldBe(3);
+        handler.Requests[1].Id.ShouldBe(handler.Requests[0].Id);
+        handler.Requests[2].Id.ShouldNotBe(handler.Requests[0].Id);
+    }
+
+    [Test]
+    public async Task A_previous_secret_adds_a_second_verifiable_signature()
+    {
+        var handler = new CapturingHandler();
+        var sink = CreateSink(handler, o =>
+        {
+            o.SigningSecret = Secret;
+            o.PreviousSigningSecret = PreviousSecret;
+        });
+
+        (await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None)).Status.ShouldBe(DeliveryStatus.Success);
+
+        var captured = handler.Requests.ShouldHaveSingleItem();
+        var signatures = captured.Signature!.Split(' ');
+        signatures.Length.ShouldBe(2);
+        signatures[0].ShouldBe(ReferenceSignature(Secret, captured));
+        signatures[1].ShouldBe(ReferenceSignature(PreviousSecret, captured));
+    }
+
+    [Test]
+    public void A_non_base64_secret_fails_construction_with_guidance()
+    {
+        var ex = Should.Throw<WallabyConfigurationException>(
+            () => CreateSink(new CapturingHandler(), o => o.SigningSecret = "not base64!"));
+
+        ex.Message.ShouldContain("whsec_");
+    }
+
+    [Test]
+    public void A_previous_secret_without_an_active_secret_fails_construction()
+    {
+        Should.Throw<WallabyConfigurationException>(
+            () => CreateSink(new CapturingHandler(), o => o.PreviousSigningSecret = PreviousSecret));
     }
 
     [Test]
@@ -207,7 +273,10 @@ public class DeliveryTests
 
         (await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None)).Status.ShouldBe(DeliveryStatus.Success);
 
-        handler.Requests.ShouldHaveSingleItem().Signature.ShouldBeNull();
+        var captured = handler.Requests.ShouldHaveSingleItem();
+        captured.Signature.ShouldBeNull();
+        captured.Timestamp.ShouldBeNull();
+        captured.Id.ShouldBeNull();
     }
 
     [Test]
