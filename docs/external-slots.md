@@ -50,7 +50,7 @@ primary publication, never one consumed by a third-party tool.
 | `AddExternalSlot(name, configure)` | Declare an external pgoutput slot named `name`. |
 | `WithPublication(name)` | Override the publication name (default `"{slot}_pub"`). |
 | `ForTable(table)` / `ForTable(schema, table)` | Add a table by name (schema defaults to `public`). |
-| `ForEntity<T>()` | Add the table mapped to `T`, resolved against the EF Core model. |
+| `ForEntity<T>()` | Add the table mapped to `T`, resolved against the EF Core or Marten model. |
 
 At least one table is required (a pgoutput publication needs tables). Slot and publication names must be
 distinct from Wallaby's own slot/publication and from each other.
