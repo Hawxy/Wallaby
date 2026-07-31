@@ -4,10 +4,14 @@ Postgres Change Data Capture for .NET, driven by your **EF Core or Marten model*
 
 Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
 EF Core entities or Marten documents, lets you **transform/enrich** them, and routes the resulting
-documents to pluggable **destinations** (sinks). It **self-configures** the publication and replication
-slot from your model, supports **backfill** operations, and is **cluster-safe** via leader election.
+documents to pluggable **destinations** (sinks) with at-least-once delivery. It **self-configures**
+the publication and replication slot from your model, supports **versioned backfill** (initial
+snapshots and shape-change reindexes), and is **cluster-safe** via leader election.
 
-**Meilisearch** and **HTTP/webhook** sinks are supported out of the box. Contributions for additional sinks is welcome.
+**Meilisearch**, **Kafka**, and **HTTP/webhook** sinks are supported out of the box.
+Contributions for additional sinks are welcome.
+
+Requires Postgres 15+ and .NET 10+.
 
 📖 **Full documentation: [wallabycdc.net](https://wallabycdc.net/)**
 
@@ -19,7 +23,11 @@ slot from your model, supports **backfill** operations, and is **cluster-safe** 
 | `Wallaby.Providers.EntityFrameworkCore`  | EF Core storage provider.                |
 | `Wallaby.Providers.Marten`               | Marten storage provider.                 |
 | `Wallaby.Sinks.Http`           | HTTP/webhook destination sink.           |
+| `Wallaby.Sinks.Kafka`          | Kafka destination sink (keyed messages, tombstone deletes). |
 | `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
+| `Wallaby.Client`               | Standalone remote control plane (suspend/resume, backfills, inspection) via Postgres |
+| `Wallaby.Testing`              | End-to-end pipeline test harness with real logical replication. |
+| `Wallaby.AspNetCore.HealthChecks` | ASP.NET Core health check for Wallaby nodes. |
 
 ## Quick start
 
