@@ -1,8 +1,6 @@
 using System.Buffers;
 using System.IO.Compression;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
-using System.Text;
 using Wallaby.Abstractions;
 using Wallaby.Sinks.Http.Internal;
 
@@ -12,19 +10,39 @@ namespace Wallaby.Sinks.Http;
 /// A destination that POSTs batches of changes to an HTTP endpoint as a JSON envelope of upsert/delete
 /// records. Requests are sent through an <see cref="IHttpClientFactory"/> named client (see
 /// <see cref="ClientNameFor"/>), so authentication is configured on the client; the sink optionally signs
-/// each body with HMAC-SHA256 (<see cref="SignatureHeader"/>). Delivery is at-least-once: receivers must
-/// upsert/delete idempotently by record id.
+/// each request per the <a href="https://www.standardwebhooks.com/">Standard Webhooks</a> specification
+/// (<see cref="SignatureHeader"/>). Delivery is at-least-once: receivers must upsert/delete
+/// idempotently by record id.
 /// </summary>
 public sealed class HttpSink : ISink
 {
-    /// <summary>Request header carrying <c>sha256=&lt;lowercase hex HMAC-SHA256 of the body&gt;</c> when signing is enabled.</summary>
-    public const string SignatureHeader = "X-Wallaby-Signature";
+    /// <summary>
+    /// Request header carrying the message id when signing is enabled: <c>msg_</c> plus a hash of the
+    /// delivered records' idempotency keys, so a retried delivery of the same records carries the same
+    /// id and receivers can use it as a request-level idempotency key.
+    /// </summary>
+    public const string IdHeader = "webhook-id";
+
+    /// <summary>
+    /// Request header carrying the Unix-seconds timestamp bound into the signature; sent whenever
+    /// signing is enabled. Receivers should reject requests whose timestamp falls outside their
+    /// replay-tolerance window.
+    /// </summary>
+    public const string TimestampHeader = "webhook-timestamp";
+
+    /// <summary>
+    /// Request header carrying one or more space-delimited <c>v1,&lt;base64&gt;</c> signatures when
+    /// signing is enabled: the HMAC-SHA256 of <c>{id}.{timestamp}.{body}</c> per Standard Webhooks,
+    /// over the uncompressed request body. Two signatures are sent while
+    /// <see cref="HttpSinkOptions.PreviousSigningSecret"/> rotates a key out.
+    /// </summary>
+    public const string SignatureHeader = "webhook-signature";
 
     private readonly HttpSinkOptions _options;
     private readonly IHttpClientFactory _factory;
     private readonly string _clientName;
     private readonly Uri _endpoint;
-    private readonly byte[]? _signingKey;
+    private readonly WebhookSigner? _signer;
 
     /// <summary>
     /// Creates a sink that delivers to <see cref="HttpSinkOptions.Endpoint"/>. A client is drawn from
@@ -41,7 +59,7 @@ public sealed class HttpSink : ISink
         _factory = factory;
         _clientName = options.HttpClientName ?? ClientNameFor(name);
         _endpoint = new Uri(options.Endpoint, UriKind.Absolute);
-        _signingKey = options.SigningSecret is null ? null : Encoding.UTF8.GetBytes(options.SigningSecret);
+        _signer = WebhookSigner.Create(name, options);
     }
 
     /// <summary>
@@ -82,12 +100,10 @@ public sealed class HttpSink : ISink
 
             // Signed before compression, so receivers verify against the payload they read after
             // (middleware) decompression.
-            var signature = _signingKey is null
-                ? null
-                : $"sha256={Convert.ToHexStringLower(HMACSHA256.HashData(_signingKey, buffer.WrittenSpan))}";
+            var signing = _signer?.Sign(batch, offset, count, buffer.WrittenSpan);
             var body = Compress(buffer);
 
-            var failure = await PostAsync(client, body, signature, ct);
+            var failure = await PostAsync(client, body, signing, ct);
             if (failure is not null)
             {
                 return failure;
@@ -119,7 +135,7 @@ public sealed class HttpSink : ISink
 
     /// <summary>POST one envelope; null on success, otherwise the classified failure.</summary>
     private async Task<DeliveryResult?> PostAsync(
-        HttpClient client, ReadOnlyMemory<byte> body, string? signature, CancellationToken ct)
+        HttpClient client, ReadOnlyMemory<byte> body, WebhookHeaders? signing, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_options.TimeoutMs);
@@ -135,9 +151,11 @@ public sealed class HttpSink : ISink
             }
             request.Content = content;
 
-            if (signature is not null)
+            if (signing is { } headers)
             {
-                request.Headers.TryAddWithoutValidation(SignatureHeader, signature);
+                request.Headers.TryAddWithoutValidation(IdHeader, headers.Id);
+                request.Headers.TryAddWithoutValidation(TimestampHeader, headers.Timestamp);
+                request.Headers.TryAddWithoutValidation(SignatureHeader, headers.Signature);
             }
 
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);

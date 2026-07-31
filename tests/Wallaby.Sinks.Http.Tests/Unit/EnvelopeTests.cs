@@ -27,6 +27,7 @@ public class EnvelopeTests
             Delete("43")));
 
         var root = envelope.RootElement;
+        root.GetProperty("type").GetString().ShouldBe("wallaby.changes");
         root.GetProperty("sink").GetString().ShouldBe(SinkName);
         root.GetProperty("sentAt").GetDateTimeOffset().ShouldBeInRange(
             DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));

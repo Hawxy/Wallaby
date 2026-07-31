@@ -29,6 +29,7 @@ internal static class EnvelopeWriter
         using var writer = new Utf8JsonWriter(buffer);
 
         writer.WriteStartObject();
+        writer.WriteString("type", "wallaby.changes");
         writer.WriteString("sink", sinkName);
         writer.WriteString("sentAt", DateTimeOffset.UtcNow);
         if (annotations is { Count: > 0 })

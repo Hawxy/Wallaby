@@ -1,7 +1,7 @@
 using System.IO.Compression;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using StandardWebhooks;
 using Wallaby.Abstractions;
 using static Wallaby.Sinks.Http.Tests.Unit.SinkTestHelpers;
 
@@ -60,14 +60,16 @@ public class CompressionTests
         var sink = CreateSink(handler, o =>
         {
             o.Compression = HttpSinkCompression.Gzip;
-            o.SigningSecret = "s3cret";
+            o.SigningSecret = "whsec_dGVzdC1zaWduaW5nLWtleS0wMTIzNDU2Nzg5YWJjZGVm";
         });
 
         (await sink.DeliverAsync(OneRecord(), CancellationToken.None)).Status.ShouldBe(DeliveryStatus.Success);
 
         var captured = handler.Requests.ShouldHaveSingleItem();
-        var payload = Decompress(captured.Body, "gzip");
-        var expected = Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("s3cret"), payload));
-        captured.Signature.ShouldBe($"sha256={expected}");
+        var expected = new StandardWebhook("whsec_dGVzdC1zaWduaW5nLWtleS0wMTIzNDU2Nzg5YWJjZGVm").Sign(
+            captured.Id!,
+            DateTimeOffset.FromUnixTimeSeconds(long.Parse(captured.Timestamp!)),
+            Encoding.UTF8.GetString(Decompress(captured.Body, "gzip")));
+        captured.Signature.ShouldBe(expected);
     }
 }

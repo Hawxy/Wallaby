@@ -17,11 +17,22 @@ public sealed class HttpSinkOptions
     public string? HttpClientName { get; set; }
 
     /// <summary>
-    /// Secret for HMAC-SHA256 body signing. When set, every request carries
-    /// <c>X-Wallaby-Signature: sha256=&lt;lowercase hex&gt;</c> computed over the exact request body,
-    /// so receivers can verify authenticity and integrity.
+    /// Secret for <a href="https://www.standardwebhooks.com/">Standard Webhooks</a> request signing:
+    /// base64, optionally prefixed <c>whsec_</c>. When set, every request carries
+    /// <c>webhook-id</c>, <c>webhook-timestamp</c>, and <c>webhook-signature</c> headers
+    /// (HMAC-SHA256 over <c>{id}.{timestamp}.{body}</c>), verifiable with any Standard Webhooks
+    /// library. Receivers can check authenticity, integrity, and freshness, rejecting replayed
+    /// requests whose timestamp is outside their tolerance window.
     /// </summary>
     public string? SigningSecret { get; set; }
+
+    /// <summary>
+    /// The signing secret being rotated out (same format as <see cref="SigningSecret"/>). While set,
+    /// every request carries a second signature computed with it, so receivers can be moved to the new
+    /// secret without a window of rejected deliveries. Clear it once all receivers verify with the new
+    /// secret.
+    /// </summary>
+    public string? PreviousSigningSecret { get; set; }
 
     /// <summary>
     /// Compression applied to each request body (<c>Content-Encoding</c> is set accordingly). The

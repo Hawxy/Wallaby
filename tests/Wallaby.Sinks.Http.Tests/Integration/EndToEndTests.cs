@@ -16,7 +16,7 @@ namespace Wallaby.Sinks.Http.Tests.Integration;
 [ClassDataSource<TestModelPostgresFixture>(Shared = SharedType.PerTestSession)]
 public class EndToEndTests(TestModelPostgresFixture pg)
 {
-    private const string SigningSecret = "e2e-signing-secret";
+    private const string SigningSecret = "whsec_ZTJlLXNpZ25pbmcta2V5LWZlZGNiYTk4NzY1NDMyMTA=";
 
     private TestDatabase Db => new(pg.ConnectionString);
 
