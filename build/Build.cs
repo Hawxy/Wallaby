@@ -63,11 +63,20 @@ class Build : NukeBuild
         {
             DotNetTest(s =>
             {
+                // Release, matching Compile: reuses its output instead of a second Debug build, and
+                // tests the configuration that ships.
                 var config = s
-                    .AddProcessAdditionalArguments("--project", Solution);
-    
-                return config;
+                    .AddProcessAdditionalArguments("--project", Solution)
+                    .AddProcessAdditionalArguments("--configuration", "Release");
 
+                if (IsServerBuild)
+                {
+                    // CI runners have 2 vCPUs; running the Testcontainers-backed suites in parallel
+                    // oversubscribes them and starves timing-sensitive e2e tests.
+                    config = config.AddProcessAdditionalArguments("--max-parallel-test-modules", "1");
+                }
+
+                return config;
             });
         });
     
