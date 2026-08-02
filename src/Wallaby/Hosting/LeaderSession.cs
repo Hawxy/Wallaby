@@ -99,7 +99,8 @@ internal sealed class LeaderSession(
         await using var stream = new LogicalReplicationStream(
             replicationConnectionString, options.SlotName, options.PublicationName, spill,
             options.Advanced.MaxBufferedChangesPerTransaction, components.Model);
-        var changeEventFactory = new ChangeEventFactory(components.Materializer);
+        var changeEventFactory = new ChangeEventFactory(
+            components.Materializer, components.Reselector, _logger, instrumentation);
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
             options.SlotName, _logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,

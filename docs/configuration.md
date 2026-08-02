@@ -20,6 +20,7 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
 | `PurgeOnSlotGapRepair` | `false` | [Purge sink destinations](/backfill#purging-before-a-backfill) before the automatic re-backfill that repairs a [slot-loss gap](/how-it-works#slot-loss-gap-detection), so deletes missed in the gap also converge. Needs sinks that implement `ISinkPurger`; destinations are incomplete while the re-backfill runs. |
+| `ReselectUnavailableValues` | `true` | [Heal a change](/how-it-works#unavailable-value-self-healing-reselect) whose unchanged TOASTed value was not on the wire (`REPLICA IDENTITY DEFAULT`) by re-reading the row by primary key instead of halting. The re-read returns current row state (converge-forward); a vanished row's change is dropped (its delete follows in the stream). Logs a warning per healed change. |
 | `Suspended` / `SuspensionReason` | `false` / – | Deploy-time [suspension](/operations/major-version-upgrades) flag (set via `Suspend(reason?)` on the builder): the node drops every managed replication slot and idles instead of streaming, so a platform blocked by logical slots (e.g. an RDS/Aurora major-version upgrade) can proceed. A flag-less deployment auto-resumes it. |
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
@@ -164,6 +165,13 @@ the excluded columns are filtered inside Postgres: they are never decoded by the
 the wire. Dependent-only tables, which Wallaby narrows automatically to their primary key and lookup
 columns, are listed for the same reason. Column lists are reconciled on every startup; drift is applied
 atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+
+Column lists are a bandwidth and data-minimization optimization, not a correctness mechanism: what a
+mapping consumes is decided client-side by the selection, which applies even with lists disabled. In
+particular, a list is not the fix for a large (TOASTed) column a transform *reads* - that table needs
+[`REPLICA IDENTITY FULL`](/how-it-works#unavailable-value-self-healing-reselect), and a FULL table is
+never column-listed (see below). Reach for a selection when no transform reads the column; reach for
+full identity when one does.
 
 Narrowing is **opt-in per table**. A table you never narrowed publishes whole rows, even when its entity
 maps only some of the physical columns, because a column list pins every column in it against schema

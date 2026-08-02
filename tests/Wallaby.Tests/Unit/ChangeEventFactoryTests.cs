@@ -15,7 +15,7 @@ public class ChangeEventFactoryTests
     }
 
     [Test]
-    public void Materialization_failure_is_annotated_with_table_and_commit_position()
+    public async Task Materialization_failure_is_annotated_with_table_and_commit_position()
     {
         var factory = new ChangeEventFactory(new ThrowingMaterializer());
         var change = new RawChange
@@ -28,7 +28,8 @@ public class ChangeEventFactoryTests
             CommitIdx = 7,
         };
 
-        var ex = Should.Throw<InvalidOperationException>(() => factory.Create(change));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await factory.CreateAsync(change, CancellationToken.None));
 
         ex.Message.ShouldContain("public.products");
         ex.Message.ShouldContain("Update");

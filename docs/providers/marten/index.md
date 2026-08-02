@@ -126,8 +126,10 @@ Wallaby surfaces it as a **Delete event**: the sink document is removed, exactly
 Correspondingly, backfills skip rows where `mt_deleted = true`, and an **un-delete**
 (`session.UndoDeleteWhere<T>(...)`) re-emits the full document as an upsert.
 
-Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple. 
-If you're using soft deletes you should opt into the below.
+Soft-deleted document tables need `REPLICA IDENTITY FULL`: an un-delete's UPDATE doesn't touch `data`, so for a TOASTed (large) body Postgres omits it from the new tuple. Without it, Wallaby
+[heals such a change by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect)
+(warning per healed change; a hard failure when [`ReselectUnavailableValues`](/configuration) is
+disabled). If you're using soft deletes you should opt into the below rather than rely on the re-read.
 
 ## Managed replica identity
 

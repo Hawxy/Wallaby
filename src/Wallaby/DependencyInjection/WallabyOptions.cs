@@ -56,6 +56,15 @@ public sealed class WallabyOptions
     /// </summary>
     public bool PurgeOnSlotGapRepair { get; set; }
 
+    /// <summary>
+    /// Heal a change whose unchanged TOASTed value was not on the wire (<c>REPLICA IDENTITY DEFAULT</c>)
+    /// by re-reading the row by primary key instead of halting the pipeline. The re-read returns current
+    /// row state, not commit-time state; later updates to the row are themselves in the stream, so sinks
+    /// converge forward. A vanished row's change is dropped (its delete follows later in the stream).
+    /// Each healed change logs a warning naming the <c>REPLICA IDENTITY FULL</c> DDL that removes the cost.
+    /// </summary>
+    public bool ReselectUnavailableValues { get; set; } = true;
+
     /// <summary>Retry policy for sink delivery (attempts, base delay, delay ceiling).</summary>
     public SinkRetryOptions SinkRetry { get; set; } = new();
 

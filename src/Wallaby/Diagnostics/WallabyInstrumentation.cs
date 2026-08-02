@@ -40,6 +40,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string WatermarkTag = "wallaby.watermark";
     internal const string HeartbeatTag = "wallaby.heartbeat";
     internal const string TruncateTag = "wallaby.truncate";
+    internal const string ReselectOutcomeTag = "wallaby.reselect.outcome";
 
     // ---- span names ----
     internal const string TransactionActivity = "transaction.process";
@@ -65,6 +66,8 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliveryPermanent = "permanent";
     internal const string BackfillKindTable = "table";
     internal const string BackfillKindFanout = "fanout";
+    internal const string ReselectHealed = "healed";
+    internal const string ReselectRowGone = "row_gone";
 
     /// <summary>A shared, never-observed instance for components constructed outside DI (tests, direct use).</summary>
     internal static readonly WallabyInstrumentation NoOp = new();
@@ -79,6 +82,7 @@ public sealed class WallabyInstrumentation : IDisposable
     private readonly Histogram<double> _sinkDeliveryDuration;
     private readonly Counter<long> _sinkRecordsDelivered;
     private readonly Counter<long> _sinkDeliveryFailures;
+    private readonly Counter<long> _changesReselected;
     private readonly Counter<long> _backfillRows;
     private readonly UpDownCounter<int> _backfillActive;
     private readonly Histogram<double> _backfillChunkDuration;
@@ -129,6 +133,9 @@ public sealed class WallabyInstrumentation : IDisposable
             "wallaby.sink.records.delivered", unit: "{record}", description: "Records accepted by a sink.");
         _sinkDeliveryFailures = _meter.CreateCounter<long>(
             "wallaby.sink.delivery.failures", unit: "{failure}", description: "Failed sink deliveries by outcome.");
+        _changesReselected = _meter.CreateCounter<long>(
+            "wallaby.changes.reselected", unit: "{change}",
+            description: "Changes healed by re-reading the row after an unavailable (unchanged TOAST) value, by outcome.");
         _backfillRows = _meter.CreateCounter<long>(
             "wallaby.backfill.rows", unit: "{row}", description: "Rows copied during backfill.");
         _backfillActive = _meter.CreateUpDownCounter<int>(
@@ -287,6 +294,28 @@ public sealed class WallabyInstrumentation : IDisposable
             { SourceTag, backfill ? SourceBackfill : SourceLive },
         };
         _changesReceived.Add(1, tags);
+    }
+
+    /// <summary>Record a reselect (counter + an event on the ambient transaction span), by outcome.</summary>
+    internal void RecordReselect(string table, string outcome)
+    {
+        Activity.Current?.AddEvent(new ActivityEvent("change.reselected", tags: new ActivityTagsCollection
+        {
+            [TableTag] = table,
+            [ReselectOutcomeTag] = outcome,
+        }));
+
+        if (!_changesReselected.Enabled)
+        {
+            return;
+        }
+
+        var tags = new TagList
+        {
+            { TableTag, table },
+            { ReselectOutcomeTag, outcome },
+        };
+        _changesReselected.Add(1, tags);
     }
 
     internal void RecordIngestionLag(string slot, double lagSeconds)

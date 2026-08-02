@@ -118,7 +118,10 @@ An unselected property is dropped from capture entirely. Its column is left out 
 skipped during materialization, and never read during backfill.
 
 ::: warning
-Missing columns will result in missing data within your transforms. Ensure these remain in sync.
+Missing columns will result in missing data within your transforms: an excluded property a transform
+does read stays at its CLR default with no error. A selection is an optimization for columns no
+transform consumes - it is not the fix for a large (TOASTed) column a transform *does* read; that
+table needs [`REPLICA IDENTITY FULL`](#replica-identity-in-migrations).
 :::
 
 ### Owned and complex types
@@ -231,12 +234,21 @@ public partial class OrdersReplicaIdentity : Migration
 ```
 
 ::: warning Large (TOASTed) columns
-Entities with large values - long text, big jsonb, bytea over ~2KB - also need `REPLICA IDENTITY FULL`.
-Postgres omits an *unchanged* TOASTed value from an update's new tuple, so under the default identity
-the value isn't carried in the change at all. Rather than deliver a document with the field silently
-nulled, Wallaby fails the change with the DDL above in the error message. If no transform reads the
-value, [drop it from the mapping's column selection](#declaring-consumed-columns) instead of paying
-the WAL cost of full identity.
+Postgres omits an *unchanged* TOASTed value (long text, big jsonb, bytea over ~2KB) from an update's
+new tuple, so under the default identity the value isn't carried in the change at all. Rather than
+deliver a document with the field silently nulled, Wallaby
+[heals the change by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect) (a
+warning is logged per healed change, naming the DDL above); with
+[`ReselectUnavailableValues`](/configuration) disabled it fails the change instead.
+
+Pick the permanent fix by whether any transform reads the column:
+
+- **A transform reads it** → `REPLICA IDENTITY FULL` is the fix. A column selection is *not* an
+  alternative here: excluding a consumed column leaves the transform reading a silently defaulted
+  property. Full identity puts the value on the wire and removes the per-change re-read.
+- **No transform reads it** →
+  [drop it from the mapping's column selection](#declaring-consumed-columns). The value then never
+  leaves the server, and the table avoids full identity's whole-old-row WAL cost.
 :::
 
 ## Internals

@@ -150,7 +150,8 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
 
     private static object ReadData(MartenTablePlan plan, RawChange change)
         => TryReadData(plan, change)
-            ?? throw new InvalidOperationException(
+            ?? throw new UnavailableValueException(
+                plan.Table.Schema, plan.Table.TableName, "data",
                 $"The document body for '{plan.Table.QualifiedName}' was not carried in the change (an unchanged " +
                 $"TOASTed value with no old tuple). Run: ALTER TABLE {plan.Table.QualifiedName} REPLICA IDENTITY FULL; " +
                 "— self-config warns with this DDL at startup (or fails when RequireFullReplicaIdentity is set). " +
