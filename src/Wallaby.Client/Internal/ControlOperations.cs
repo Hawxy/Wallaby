@@ -14,7 +14,8 @@ internal sealed record ControlRow(
     DateTimeOffset? ResumedAt);
 
 /// <summary>A <c>wallaby.slot_registry</c> entry joined against the server's live slot catalog.</summary>
-internal sealed record ManagedSlotRow(string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active);
+internal sealed record ManagedSlotRow(
+    string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active, long? RetainedWalBytes);
 
 /// <summary>
 /// Self-contained SQL operations on the wallaby control plane, shared verbatim between the host and the
@@ -195,10 +196,15 @@ internal static class ControlOperations
     {
         try
         {
+            // The retained-WAL diff is guarded: pg_current_wal_lsn() errors on a standby in recovery,
+            // and a slot missing from the server has no restart_lsn.
             await using var cmd = dataSource.CreateCommand(
                 """
                 SELECT r.slot_name, r.publication, r.kind,
-                       s.slot_name IS NOT NULL AS exists_on_server, COALESCE(s.active, false) AS active
+                       s.slot_name IS NOT NULL AS exists_on_server, COALESCE(s.active, false) AS active,
+                       CASE WHEN s.restart_lsn IS NOT NULL AND NOT pg_is_in_recovery()
+                            THEN pg_wal_lsn_diff(pg_current_wal_lsn(), s.restart_lsn)::bigint
+                       END AS retained_wal_bytes
                 FROM wallaby.slot_registry r
                 LEFT JOIN pg_replication_slots s USING (slot_name)
                 ORDER BY r.slot_name
@@ -209,7 +215,8 @@ internal static class ControlOperations
             {
                 slots.Add(new ManagedSlotRow(
                     reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                    reader.GetBoolean(3), reader.GetBoolean(4)));
+                    reader.GetBoolean(3), reader.GetBoolean(4),
+                    reader.IsDBNull(5) ? null : reader.GetInt64(5)));
             }
             return slots;
         }

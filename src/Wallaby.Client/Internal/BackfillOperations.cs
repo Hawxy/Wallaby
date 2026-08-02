@@ -39,6 +39,31 @@ internal static class BackfillOperations
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Cancel a queued request: flip a <c>Requested</c> row to <c>Cancelled</c> and clear its pending
+    /// purge mark. Returns false when the table has no queued request (absent, running, completed, or
+    /// no host has ever run). Best-effort: a request the leader has already begun serving proceeds.
+    /// </summary>
+    public static async Task<bool> CancelAsync(
+        NpgsqlDataSource dataSource, string tableQualifiedName, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = dataSource.CreateCommand(
+                $"""
+                 UPDATE {BackfillContract.Table}
+                 SET status = '{BackfillContract.StatusCancelled}', purge = false, updated_at = now()
+                 WHERE table_qualified = @t AND status = '{BackfillContract.StatusRequested}'
+                 """);
+            cmd.Parameters.AddWithValue("t", tableQualifiedName);
+            return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        }
+        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Every tracked table's backfill state. Empty when the table doesn't exist (no host ever ran).</summary>
     public static async Task<IReadOnlyList<BackfillStateRow>> ListStatesAsync(
         NpgsqlDataSource dataSource, CancellationToken ct)

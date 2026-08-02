@@ -101,7 +101,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
     }
 
     [Test]
-    public async Task List_requested_filters_to_the_given_tables()
+    public async Task List_requested_returns_requested_rows_only()
     {
         await EnsureSchemaAsync();
         var store = new PostgresBackfillStore(pg.DataSource);
@@ -111,10 +111,57 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         await store.RequestAsync(requested, null, purge: false, CancellationToken.None);
         await store.SaveAsync(State(inProgress, BackfillStatus.InProgress), CancellationToken.None);
 
-        var listed = await store.ListRequestedAsync(
-            [requested, inProgress, UniqueTable("absent")], CancellationToken.None);
+        // The shared database may hold requests from other tests, so assert membership, not equality.
+        var listed = await store.ListRequestedAsync(CancellationToken.None);
 
-        listed.ShouldBe([requested]);
+        listed.ShouldContain(requested);
+        listed.ShouldNotContain(inProgress);
+    }
+
+    [Test]
+    public async Task Cancel_withdraws_a_queued_request_and_clears_its_purge_mark()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, "v1", purge: true, CancellationToken.None);
+
+        (await store.CancelRequestAsync(table, CancellationToken.None)).ShouldBeTrue();
+
+        var state = await store.GetAsync(table, CancellationToken.None);
+        state.ShouldNotBeNull();
+        state.Status.ShouldBe(BackfillStatus.Cancelled);
+        state.Purge.ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task Cancel_does_not_touch_a_running_or_absent_table()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var running = UniqueTable("orders");
+
+        await store.SaveAsync(State(running, BackfillStatus.InProgress), CancellationToken.None);
+
+        (await store.CancelRequestAsync(running, CancellationToken.None)).ShouldBeFalse();
+        (await store.GetAsync(running, CancellationToken.None))!.Status.ShouldBe(BackfillStatus.InProgress);
+
+        (await store.CancelRequestAsync(UniqueTable("absent"), CancellationToken.None)).ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task A_new_request_overrides_a_cancelled_row()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+        await store.CancelRequestAsync(table, CancellationToken.None);
+        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+
+        (await store.GetAsync(table, CancellationToken.None))!.Status.ShouldBe(BackfillStatus.Requested);
     }
 
     private async Task EnsureSchemaAsync()

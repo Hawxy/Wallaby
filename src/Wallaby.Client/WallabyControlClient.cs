@@ -198,6 +198,21 @@ public sealed class WallabyControlClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Cancel a queued backfill request for <paramref name="tableQualifiedName"/> before the leader
+    /// serves it, clearing any pending purge mark with it. Returns false when the table has no queued
+    /// request (never requested, already served, or no host has ever run against the database).
+    /// Best-effort: a request the leader has already begun serving proceeds; a backfill already
+    /// running is not interrupted (though a re-run request queued behind it is withdrawn).
+    /// </summary>
+    public async Task<bool> CancelBackfillAsync(string tableQualifiedName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableQualifiedName);
+        var cancelled = await BackfillOperations.CancelAsync(_dataSource, tableQualifiedName, ct);
+        _logger.BackfillCancelled(tableQualifiedName, cancelled);
+        return cancelled;
+    }
+
+    /// <summary>
     /// The backfill state of every tracked table. Empty for a database no Wallaby host has run against.
     /// </summary>
     public async Task<IReadOnlyList<WallabyBackfillState>> GetBackfillStatusAsync(CancellationToken ct = default)
@@ -213,7 +228,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
     {
         var mapped = slots.Count == 0
             ? []
-            : slots.Select(s => new WallabyManagedSlot(s.SlotName, s.Publication, s.Kind, s.ExistsOnServer, s.Active))
+            : slots.Select(s => new WallabyManagedSlot(
+                    s.SlotName, s.Publication, s.Kind, s.ExistsOnServer, s.Active, s.RetainedWalBytes))
                 .ToList() as IReadOnlyList<WallabyManagedSlot>;
         if (row is null)
         {
@@ -253,4 +269,7 @@ internal static partial class WallabyControlClientLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table {Table} (purge={Purge}).")]
     internal static partial void BackfillRequested(this ILogger logger, string table, bool purge);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfill cancel for table {Table} (withdrew a queued request={Cancelled}).")]
+    internal static partial void BackfillCancelled(this ILogger logger, string table, bool cancelled);
 }

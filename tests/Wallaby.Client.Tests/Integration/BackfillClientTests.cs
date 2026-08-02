@@ -109,6 +109,57 @@ public class BackfillClientTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task Cancel_withdraws_a_queued_request_and_clears_its_purge_mark()
+    {
+        var table = $"public.orders_{Guid.NewGuid():N}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureBackfillTableAsync();
+
+            await client.RequestBackfillAsync(table, purge: true);
+
+            (await client.CancelBackfillAsync(table)).ShouldBeTrue();
+
+            var status = await client.GetBackfillStatusAsync();
+            status.Single(s => s.Table == table).Status.ShouldBe(WallabyBackfillStatus.Cancelled);
+            (await ReadPurgeAsync(table)).ShouldBeFalse();
+
+            // Nothing left to withdraw; the second cancel reports that.
+            (await client.CancelBackfillAsync(table)).ShouldBeFalse();
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified = '{table}'");
+        }
+    }
+
+    [Test]
+    public async Task Cancel_does_not_touch_a_running_backfill()
+    {
+        var table = $"public.orders_{Guid.NewGuid():N}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureBackfillTableAsync();
+            await ExecAsync(
+                $"""
+                 INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied)
+                 VALUES ('{table}', 'InProgress', 'v1', NULL, 10)
+                 """);
+
+            (await client.CancelBackfillAsync(table)).ShouldBeFalse();
+
+            var status = await client.GetBackfillStatusAsync();
+            status.Single(s => s.Table == table).Status.ShouldBe(WallabyBackfillStatus.InProgress);
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified = '{table}'");
+        }
+    }
+
+    [Test]
     public async Task A_database_wallaby_never_touched_reads_empty_and_refuses_requests()
     {
         await ExecAsync("CREATE DATABASE backfill_virgin");
@@ -117,5 +168,7 @@ public class BackfillClientTests(PostgresFixture pg)
 
         (await client.GetBackfillStatusAsync()).ShouldBeEmpty();
         await Should.ThrowAsync<InvalidOperationException>(() => client.RequestBackfillAsync("public.orders"));
+        // Cancel has nothing to withdraw, so it reports false instead of throwing.
+        (await client.CancelBackfillAsync("public.orders")).ShouldBeFalse();
     }
 }

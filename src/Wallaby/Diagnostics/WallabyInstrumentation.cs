@@ -83,10 +83,17 @@ public sealed class WallabyInstrumentation : IDisposable
     private readonly UpDownCounter<int> _backfillActive;
     private readonly Histogram<double> _backfillChunkDuration;
     private readonly ObservableGauge<long> _fanoutQueueDepthGauge;
+    private readonly ObservableGauge<long> _slotRetainedWalGauge;
 
     // Cached by the fan-out worker once per drain pass, so the exporter thread never queries the database.
     // -1 = never sampled (no leader session yet); the gauge emits nothing until a real sample exists.
     private long _fanoutQueueDepth = -1;
+
+    // Cached by the leader's slot-lag sampler once per tick, so the exporter thread never queries the
+    // database. Null = never sampled; the gauge emits nothing until a real sample exists.
+    private SlotWalSample? _slotRetainedWal;
+
+    private sealed record SlotWalSample(string Slot, long Bytes);
 
     // Per sink, the Stopwatch timestamp of the last successful delivery; the lag gauge derives seconds-since.
     private readonly ConcurrentDictionary<string, long> _sinkLastDeliveredAt = new(StringComparer.Ordinal);
@@ -131,6 +138,9 @@ public sealed class WallabyInstrumentation : IDisposable
         _fanoutQueueDepthGauge = _meter.CreateObservableGauge(
             "wallaby.fanout.queue.depth", ObserveFanoutQueueDepth, unit: "{job}",
             description: "Scoped fan-out jobs currently due (Requested or InProgress), sampled once per drain pass.");
+        _slotRetainedWalGauge = _meter.CreateObservableGauge(
+            "wallaby.slot.retained_wal", ObserveSlotRetainedWal, unit: "By",
+            description: "WAL bytes the server retains for the slot (restart_lsn to the current write position), sampled by the leader.");
         _meter.CreateObservableGauge(
             "wallaby.sink.delivery.lag", ObserveSinkDeliveryLag, unit: "s",
             description: "Seconds since each sink last accepted a batch.");
@@ -358,6 +368,22 @@ public sealed class WallabyInstrumentation : IDisposable
         if (depth >= 0)
         {
             yield return new Measurement<long>(depth);
+        }
+    }
+
+    // ---- replication slot ----
+
+    /// <summary>True when something is collecting the retained-WAL gauge, so the sampler knows whether a query is worth it.</summary>
+    internal bool SlotRetainedWalEnabled => _slotRetainedWalGauge.Enabled;
+
+    internal void RecordSlotRetainedWal(string slot, long bytes) => _slotRetainedWal = new SlotWalSample(slot, bytes);
+
+    private IEnumerable<Measurement<long>> ObserveSlotRetainedWal()
+    {
+        if (_slotRetainedWal is { } sample)
+        {
+            yield return new Measurement<long>(
+                sample.Bytes, new KeyValuePair<string, object?>(SlotTag, sample.Slot));
         }
     }
 

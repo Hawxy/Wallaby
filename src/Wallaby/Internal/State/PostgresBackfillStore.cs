@@ -98,15 +98,27 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<IReadOnlyList<string>> ListRequestedAsync(
-        IReadOnlyList<string> tableQualifiedNames, CancellationToken ct)
+    public async Task<bool> CancelRequestAsync(string tableQualifiedName, CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+
+        return await PgExec.ExecuteAsync(
+            connection,
+            """
+            UPDATE wallaby.backfill_state
+            SET status = 'Cancelled', purge = false, updated_at = now()
+            WHERE table_qualified = @t AND status = 'Requested'
+            """,
+            ct, ("t", tableQualifiedName)) > 0;
+    }
+
+    public async Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified FROM wallaby.backfill_state WHERE status = 'Requested' AND table_qualified = ANY(@t)",
+            "SELECT table_qualified FROM wallaby.backfill_state WHERE status = 'Requested'",
             connection);
-        cmd.Parameters.AddWithValue("t", tableQualifiedNames.ToArray());
 
         var results = new List<string>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);

@@ -71,6 +71,38 @@ public class ControlClientTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task Slots_report_retained_wal_bytes_when_present_on_the_server()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var live = $"cdc_slot_{suffix}";
+        var gone = $"dropped_slot_{suffix}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureStateSchemaAsync();
+            await ExecAsync($"SELECT pg_create_logical_replication_slot('{live}', 'pgoutput')");
+            await ExecAsync(
+                $"""
+                 INSERT INTO wallaby.slot_registry (slot_name, publication, kind)
+                 VALUES ('{live}', 'pub_{suffix}', 'primary'), ('{gone}', 'ext_pub_{suffix}', 'external')
+                 """);
+
+            var state = await client.GetStateAsync();
+
+            // A slot on the server retains WAL from its restart_lsn; a slot missing from it reads null.
+            state.Slots.Single(s => s.SlotName == live).RetainedWalBytes
+                .ShouldNotBeNull().ShouldBeGreaterThanOrEqualTo(0L);
+            state.Slots.Single(s => s.SlotName == gone).RetainedWalBytes.ShouldBeNull();
+        }
+        finally
+        {
+            await ExecAsync(
+                $"SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = '{live}'");
+            await ExecAsync($"DELETE FROM wallaby.slot_registry WHERE slot_name IN ('{live}', '{gone}')");
+        }
+    }
+
+    [Test]
     public async Task Suspend_without_a_host_drops_managed_slots_from_the_client()
     {
         var suffix = Guid.NewGuid().ToString("N");

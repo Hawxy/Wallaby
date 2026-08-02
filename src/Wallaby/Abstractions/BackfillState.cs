@@ -18,6 +18,14 @@ public enum BackfillStatus
 
     /// <summary>The backfill completed for the recorded <see cref="BackfillState.TransformVersion"/>.</summary>
     Completed,
+
+    /// <summary>
+    /// A queued request was cancelled before the leader served it (any pending purge mark was cleared
+    /// with it). The scheduler skips the table, including on a version change, until a new request
+    /// (or slot-gap repair) marks it <see cref="Requested"/> again; sinks the withdrawn backfill would
+    /// have converged stay as they are.
+    /// </summary>
+    Cancelled,
 }
 
 /// <summary>

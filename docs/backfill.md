@@ -51,6 +51,23 @@ converges them to exactly the current table contents:
 await backfill.RequestBackfillAsync<Product>(purge: true);
 ```
 
+### Cancelling a queued request
+
+A request the leader hasn't served yet can be withdrawn with `CancelBackfillAsync`, which also clears
+any pending purge mark — the escape hatch for a mis-fired `purge: true`:
+
+```csharp
+var withdrew = await backfill.CancelBackfillAsync<Product>();
+```
+
+Cancellation is best-effort and queued-requests-only: a request the leader has already begun serving
+proceeds, and a backfill already running is not interrupted (cancelling while one runs withdraws the
+re-run request queued behind it; the running backfill completes normally). A cancelled table reads
+`Cancelled` in the status and is skipped — including on a version change — until a new request marks
+it `Requested` again. The string overload (`CancelBackfillAsync("public.orders")`) skips model
+validation, so it can withdraw a request for a table Wallaby doesn't capture (e.g. a mistyped
+remote request).
+
 ### From outside the application
 
 The [Wallaby.Client](/operations/external-control) package drives the same mechanism from **any process
@@ -63,12 +80,15 @@ await using var control = new WallabyControlClient(connectionString);
 await control.RequestBackfillAsync("public.products");
 await control.RequestBackfillAsync("public.products", purge: true);   // purge destinations first
 
+await control.CancelBackfillAsync("public.products");  // withdraw a queued request (clears its purge mark)
+
 var status = await control.GetBackfillStatusAsync();   // every tracked table's state
 ```
 
 The request behaves exactly like the in-host manager's: persisted, served instantly by the current
 leader, and winning over an in-flight run. A request for a table Wallaby doesn't capture stays
-`Requested` until a mapping for it deploys.
+`Requested` until a mapping for it deploys; the leader warns once per term about such requests, and
+`CancelBackfillAsync` withdraws one that turns out to be a typo.
 
 ## Purging before a backfill
 

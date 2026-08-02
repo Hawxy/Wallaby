@@ -48,15 +48,29 @@ internal sealed class BackfillScheduler(
     public async Task RunAsync(TimeSpan pollInterval, CancellationToken ct)
     {
         await using var signal = store.Subscribe();
-        var tableNames = tables.Select(t => t.Table.QualifiedName).ToArray();
+        var mappedNames = tables.Select(t => t.Table.QualifiedName).ToHashSet(StringComparer.Ordinal);
+        var warnedUnknown = new HashSet<string>(StringComparer.Ordinal);
 
         await RunDueBackfillsAsync(ct);
         while (!ct.IsCancellationRequested)
         {
-            var requested = await store.ListRequestedAsync(tableNames, ct);
-            if (requested.Count > 0)
+            var requested = await store.ListRequestedAsync(ct);
+
+            // A request naming a table no mapping captures sits queued until a mapping for it deploys.
+            // That is legal (requests may precede a deploy), but a typo would wait forever silently, so
+            // each unknown name is called out once per leadership term.
+            foreach (var name in requested)
             {
-                logger.BackfillRequestsObserved(requested.Count);
+                if (!mappedNames.Contains(name) && warnedUnknown.Add(name))
+                {
+                    logger.UnknownBackfillRequested(name);
+                }
+            }
+
+            var due = requested.Count(mappedNames.Contains);
+            if (due > 0)
+            {
+                logger.BackfillRequestsObserved(due);
                 await RunDueBackfillsAsync(ct);
             }
             else
@@ -117,6 +131,9 @@ internal sealed class BackfillScheduler(
             BackfillStatus.Requested or BackfillStatus.NotStarted => new(BackfillAction.Fresh, state.Purge),
             // Re-purging mid-run would delete the chunks the run already delivered.
             BackfillStatus.InProgress => new(BackfillAction.Resume, Purge: false),
+            // A cancelled table stays skipped (even on a version change) until a new request marks it
+            // Requested again.
+            BackfillStatus.Cancelled => new(BackfillAction.Skip, Purge: false),
             // A version-change Fresh fires from a Completed row (its flag is false — completion clears
             // it), so the purge intent comes from the mappings' opt-in.
             BackfillStatus.Completed when options.AutoBackfillOnVersionChange && state.TransformVersion != declaredVersion
@@ -134,4 +151,7 @@ internal static partial class BackfillSchedulerLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "{Count} manual backfill request(s) observed; running a scheduler pass.")]
     internal static partial void BackfillRequestsObserved(this ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A backfill of {Table} is requested, but no mapping captures that table. The request stays queued until a mapping for it deploys; if the name is wrong, cancel it (IWallabyBackfillManager or WallabyControlClient, CancelBackfillAsync).")]
+    internal static partial void UnknownBackfillRequested(this ILogger logger, string table);
 }
