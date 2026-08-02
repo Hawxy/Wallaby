@@ -136,7 +136,8 @@ internal sealed class EntityMaterializer : IRowMaterializer
     }
 
     // An unchanged TOASTed value is omitted from the new tuple; under REPLICA IDENTITY FULL the old
-    // tuple still carries it. An unavailable value is a poison change, never a silently nulled property.
+    // tuple still carries it. An unavailable value is never a silently nulled property: the typed
+    // exception lets the pipeline heal by reselect, or halts as a poison change when that is disabled.
     private static object ResolveUnchangedToast(RawChange change, string columnName)
     {
         if (change.OldValues is { } oldValues)
@@ -151,7 +152,8 @@ internal sealed class EntityMaterializer : IRowMaterializer
             }
         }
 
-        throw new InvalidOperationException(
+        throw new UnavailableValueException(
+            change.Schema, change.TableName, columnName,
             $"Column '{columnName}' on '{change.Schema}.{change.TableName}' was not carried in the change " +
             $"(an unchanged TOASTed value with no old tuple). Run: ALTER TABLE {change.Schema}.{change.TableName} " +
             "REPLICA IDENTITY FULL; - self-config warns with this DDL at startup (or fails when " +

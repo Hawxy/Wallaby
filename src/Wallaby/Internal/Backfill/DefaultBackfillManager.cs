@@ -31,6 +31,23 @@ internal sealed class DefaultBackfillManager(WallabyModel model, IBackfillStateS
         await store.RequestAsync(table.QualifiedName, existing?.TransformVersion, purge, ct);
     }
 
+    public Task<bool> CancelBackfillAsync<TEntity>(CancellationToken ct = default) where TEntity : class
+        => CancelBackfillAsync(typeof(TEntity), ct);
+
+    public Task<bool> CancelBackfillAsync(Type entityClrType, CancellationToken ct = default)
+    {
+        var table = model.FindByClrType(entityClrType)
+            ?? throw new WallabyConfigurationException(
+                $"Cannot cancel a backfill for '{entityClrType.FullName}': it is not a captured table.");
+        return store.CancelRequestAsync(table.QualifiedName, ct);
+    }
+
+    public Task<bool> CancelBackfillAsync(string tableQualifiedName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableQualifiedName);
+        return store.CancelRequestAsync(tableQualifiedName, ct);
+    }
+
     public Task<IReadOnlyList<BackfillState>> GetStatusAsync(CancellationToken ct = default)
         => store.ListAsync(ct);
 }

@@ -18,6 +18,9 @@ public enum WallabyBackfillStatus
 
     /// <summary>The backfill completed.</summary>
     Completed,
+
+    /// <summary>A queued request was cancelled before the leader served it; the table is skipped until requested again.</summary>
+    Cancelled,
 }
 
 /// <summary>A tracked table's backfill state, read remotely by <see cref="WallabyControlClient"/>.</summary>

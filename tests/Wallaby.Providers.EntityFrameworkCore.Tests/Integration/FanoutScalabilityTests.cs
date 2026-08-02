@@ -293,6 +293,50 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Offloaded_tail_records_carry_a_fresh_run_token_per_drain()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        harness.FanoutChunkSize = 1;
+        var capture = harness.AddCaptureSink();
+        harness.Project<Product>("capture", destination: null, p => new WallabyDocument { ["name"] = p.Name });
+        harness.DependsOn<Product, Category?>(p => p.Category);
+
+        // Seed before self-config so only the renames below stream.
+        var cat = await harness.Db.AddCategoryAsync("Cat");
+        var productId = await harness.Db.AddProductAsync(cat, "tail_p");
+
+        await harness.SelfConfigureAsync();
+        await harness.ClearFanoutQueueAsync();
+
+        await harness.StartAsync();
+        try
+        {
+            // Chunk size 1: the single affected key is offloaded as a queued job, no inline page.
+            await harness.Db.SetCategoryNameAsync(cat, "Cat-a");
+            await harness.WaitUntilAsync(async () => await harness.PendingFanoutJobCountAsync() == 1, Timeout);
+            (await harness.DrainFanoutAsync()).ShouldBe(1);
+            await harness.WaitUntilAsync(() => capture.For("products").Any(), Timeout);
+
+            // A second trigger re-arms the same (table, lookup) job; draining it is a distinct scoped run.
+            await harness.Db.SetCategoryNameAsync(cat, "Cat-b");
+            await harness.WaitUntilAsync(async () => await harness.PendingFanoutJobCountAsync() == 1, Timeout);
+            (await harness.DrainFanoutAsync()).ShouldBe(1);
+            await harness.WaitUntilAsync(() => capture.For("products").Count() >= 2, Timeout);
+        }
+        finally
+        {
+            await harness.StopAsync();
+        }
+
+        // Tail records are backfill-sourced and carry a run token that is fresh for every run of the
+        // job, so a consumer deduping on stored idempotency keys never swallows a re-run.
+        var records = capture.For("products").Where(r => r.DocumentId == productId.ToString()).ToList();
+        records.Count.ShouldBe(2);
+        records.ShouldAllBe(r => r.Metadata.IsBackfill && r.Metadata.BackfillRunId != null);
+        records[0].Metadata.BackfillRunId.ShouldNotBe(records[1].Metadata.BackfillRunId);
+    }
+
+    [Test]
     public async Task Fanout_queue_store_tracks_resume_cursor_and_coalesces()
     {
         await using (var conn = await pg.DataSource.OpenConnectionAsync())

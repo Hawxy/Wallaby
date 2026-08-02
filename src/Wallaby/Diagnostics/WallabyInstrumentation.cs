@@ -40,6 +40,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string WatermarkTag = "wallaby.watermark";
     internal const string HeartbeatTag = "wallaby.heartbeat";
     internal const string TruncateTag = "wallaby.truncate";
+    internal const string ReselectOutcomeTag = "wallaby.reselect.outcome";
 
     // ---- span names ----
     internal const string TransactionActivity = "transaction.process";
@@ -65,6 +66,8 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliveryPermanent = "permanent";
     internal const string BackfillKindTable = "table";
     internal const string BackfillKindFanout = "fanout";
+    internal const string ReselectHealed = "healed";
+    internal const string ReselectRowGone = "row_gone";
 
     /// <summary>A shared, never-observed instance for components constructed outside DI (tests, direct use).</summary>
     internal static readonly WallabyInstrumentation NoOp = new();
@@ -79,14 +82,22 @@ public sealed class WallabyInstrumentation : IDisposable
     private readonly Histogram<double> _sinkDeliveryDuration;
     private readonly Counter<long> _sinkRecordsDelivered;
     private readonly Counter<long> _sinkDeliveryFailures;
+    private readonly Counter<long> _changesReselected;
     private readonly Counter<long> _backfillRows;
     private readonly UpDownCounter<int> _backfillActive;
     private readonly Histogram<double> _backfillChunkDuration;
     private readonly ObservableGauge<long> _fanoutQueueDepthGauge;
+    private readonly ObservableGauge<long> _slotRetainedWalGauge;
 
     // Cached by the fan-out worker once per drain pass, so the exporter thread never queries the database.
     // -1 = never sampled (no leader session yet); the gauge emits nothing until a real sample exists.
     private long _fanoutQueueDepth = -1;
+
+    // Cached by the leader's slot-lag sampler once per tick, so the exporter thread never queries the
+    // database. Null = never sampled; the gauge emits nothing until a real sample exists.
+    private SlotWalSample? _slotRetainedWal;
+
+    private sealed record SlotWalSample(string Slot, long Bytes);
 
     // Per sink, the Stopwatch timestamp of the last successful delivery; the lag gauge derives seconds-since.
     private readonly ConcurrentDictionary<string, long> _sinkLastDeliveredAt = new(StringComparer.Ordinal);
@@ -122,6 +133,9 @@ public sealed class WallabyInstrumentation : IDisposable
             "wallaby.sink.records.delivered", unit: "{record}", description: "Records accepted by a sink.");
         _sinkDeliveryFailures = _meter.CreateCounter<long>(
             "wallaby.sink.delivery.failures", unit: "{failure}", description: "Failed sink deliveries by outcome.");
+        _changesReselected = _meter.CreateCounter<long>(
+            "wallaby.changes.reselected", unit: "{change}",
+            description: "Changes healed by re-reading the row after an unavailable (unchanged TOAST) value, by outcome.");
         _backfillRows = _meter.CreateCounter<long>(
             "wallaby.backfill.rows", unit: "{row}", description: "Rows copied during backfill.");
         _backfillActive = _meter.CreateUpDownCounter<int>(
@@ -131,6 +145,9 @@ public sealed class WallabyInstrumentation : IDisposable
         _fanoutQueueDepthGauge = _meter.CreateObservableGauge(
             "wallaby.fanout.queue.depth", ObserveFanoutQueueDepth, unit: "{job}",
             description: "Scoped fan-out jobs currently due (Requested or InProgress), sampled once per drain pass.");
+        _slotRetainedWalGauge = _meter.CreateObservableGauge(
+            "wallaby.slot.retained_wal", ObserveSlotRetainedWal, unit: "By",
+            description: "WAL bytes the server retains for the slot (restart_lsn to the current write position), sampled by the leader.");
         _meter.CreateObservableGauge(
             "wallaby.sink.delivery.lag", ObserveSinkDeliveryLag, unit: "s",
             description: "Seconds since each sink last accepted a batch.");
@@ -279,6 +296,28 @@ public sealed class WallabyInstrumentation : IDisposable
         _changesReceived.Add(1, tags);
     }
 
+    /// <summary>Record a reselect (counter + an event on the ambient transaction span), by outcome.</summary>
+    internal void RecordReselect(string table, string outcome)
+    {
+        Activity.Current?.AddEvent(new ActivityEvent("change.reselected", tags: new ActivityTagsCollection
+        {
+            [TableTag] = table,
+            [ReselectOutcomeTag] = outcome,
+        }));
+
+        if (!_changesReselected.Enabled)
+        {
+            return;
+        }
+
+        var tags = new TagList
+        {
+            { TableTag, table },
+            { ReselectOutcomeTag, outcome },
+        };
+        _changesReselected.Add(1, tags);
+    }
+
     internal void RecordIngestionLag(string slot, double lagSeconds)
     {
         if (lagSeconds >= 0)
@@ -358,6 +397,22 @@ public sealed class WallabyInstrumentation : IDisposable
         if (depth >= 0)
         {
             yield return new Measurement<long>(depth);
+        }
+    }
+
+    // ---- replication slot ----
+
+    /// <summary>True when something is collecting the retained-WAL gauge, so the sampler knows whether a query is worth it.</summary>
+    internal bool SlotRetainedWalEnabled => _slotRetainedWalGauge.Enabled;
+
+    internal void RecordSlotRetainedWal(string slot, long bytes) => _slotRetainedWal = new SlotWalSample(slot, bytes);
+
+    private IEnumerable<Measurement<long>> ObserveSlotRetainedWal()
+    {
+        if (_slotRetainedWal is { } sample)
+        {
+            yield return new Measurement<long>(
+                sample.Bytes, new KeyValuePair<string, object?>(SlotTag, sample.Slot));
         }
     }
 

@@ -40,6 +40,9 @@ internal sealed class WallabyComponents : IAsyncDisposable
     public DependentChangeResolver? DependentResolver { get; init; }
     public IFanoutQueueStore? FanoutQueue { get; init; }
 
+    /// <summary>Heals unavailable (unchanged TOAST) values by re-reading the row; null when disabled.</summary>
+    public IRowReselector? Reselector { get; init; }
+
     /// <summary>Every mapped table with its composite backfill version and sink purge targets.</summary>
     public required IReadOnlyList<BackfillTable> BackfillTables { get; init; }
 
@@ -147,6 +150,7 @@ internal sealed class WallabyComponents : IAsyncDisposable
             BackfillStore = backfillStore,
             DependentResolver = dependentResolver,
             FanoutQueue = dependentResolver is not null ? new PostgresFanoutQueueStore(dataSource.Source) : null,
+            Reselector = options.ReselectUnavailableValues ? new RowReselector(dataSource.Source, model) : null,
             BackfillTables = backfillTables,
         };
     }

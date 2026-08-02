@@ -45,8 +45,14 @@ var state = await control.GetStateAsync();
 // state.State          Running | SuspendRequested | Suspended
 // state.Origin         who initiated a suspension: Client | Configuration
 // state.Reason / RequestedBy / RequestedAt / SuspendedAt / ResumedAt
-// state.Slots          every managed slot: name, publication, kind, exists-on-server, active
+// state.Slots          every managed slot: name, publication, kind, exists-on-server, active,
+//                      retained-WAL bytes (null when the slot is gone or read from a standby)
 ```
+
+A slot's `RetainedWalBytes` is how much WAL the server must keep for it. Watch it especially for
+[external slots](/external-slots): they pin WAL from the moment they exist, and Wallaby's own
+heartbeat does not advance them, so a consumer that lags (or never connects) grows this number
+until `max_slot_wal_keep_size` invalidates the slot.
 
 ## Suspend and resume
 
@@ -87,6 +93,8 @@ Only an explicit `ResumeAsync` ends it.
 await control.RequestBackfillAsync("public.products");
 await control.RequestBackfillAsync("public.products", purge: true);   // purge destinations first
 
+await control.CancelBackfillAsync("public.products");  // withdraw a queued request (clears its purge mark)
+
 var status = await control.GetBackfillStatusAsync();   // every tracked table's state
 ```
 
@@ -94,7 +102,11 @@ Identical semantics to the in-host manager: the request is persisted (it survive
 leader is signalled instantly, and a request made while the table is already backfilling wins — the
 table re-runs from the start. The client has no entity model, so tables are addressed by
 schema-qualified name; a request for a table Wallaby doesn't capture stays `Requested` until a mapping
-for it deploys. See [Backfill](/backfill) for how snapshots run and what
+for it deploys (the leader warns once per term about such requests).
+`CancelBackfillAsync` withdraws a queued request before the leader serves it — including its pending
+purge mark, the escape hatch for a mis-fired `purge: true` — and returns whether a request was
+withdrawn; see [cancelling a queued request](/backfill#cancelling-a-queued-request) for the exact
+semantics. See [Backfill](/backfill) for how snapshots run and what
 [`purge: true`](/backfill#purging-before-a-backfill) converges.
 
 ## Requirements and privileges

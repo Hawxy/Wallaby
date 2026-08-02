@@ -167,8 +167,11 @@ public class MaterializationTests
             OldValues = null,
         };
 
-        var ex = Should.Throw<InvalidOperationException>(() => materializer.TryMaterialize(change, out _));
+        var ex = Should.Throw<UnavailableValueException>(() => materializer.TryMaterialize(change, out _));
 
+        ex.Schema.ShouldBe("public");
+        ex.TableName.ShouldBe("products");
+        ex.ColumnName.ShouldBe("Description");
         ex.Message.ShouldContain("Description");
         ex.Message.ShouldContain("public.products");
         ex.Message.ShouldContain("REPLICA IDENTITY FULL");
@@ -229,12 +232,12 @@ public class MaterializationTests
     public sealed record Kiosk(int Id, string Label);
 
     [Test]
-    public void ChangeEventFactory_builds_envelope_with_metadata()
+    public async Task ChangeEventFactory_builds_envelope_with_metadata()
     {
         var factory = new ChangeEventFactory(CreateMaterializer());
 
         var change = ProductInsert() with { CommitLsn = 123, CommitIdx = 2 };
-        var ev = factory.Create(change);
+        var ev = await factory.CreateAsync(change, CancellationToken.None);
 
         ev.ShouldNotBeNull();
         ev!.Action.ShouldBe(ChangeAction.Insert);

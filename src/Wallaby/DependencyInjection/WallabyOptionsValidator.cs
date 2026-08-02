@@ -86,6 +86,10 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
         {
             failures.Add("Advanced.HeartbeatInterval must be zero (disabled) or greater.");
         }
+        if (options.Advanced.SlotLagSampleInterval < TimeSpan.Zero)
+        {
+            failures.Add("Advanced.SlotLagSampleInterval must be zero (disabled) or greater.");
+        }
         if (options.Advanced.WatermarkVisibilityFenceTimeout < TimeSpan.Zero)
         {
             failures.Add("Advanced.WatermarkVisibilityFenceTimeout must be zero (disabled) or greater.");

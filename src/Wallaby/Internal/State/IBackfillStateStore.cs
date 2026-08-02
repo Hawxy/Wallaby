@@ -23,8 +23,15 @@ internal interface IBackfillStateStore
     /// </summary>
     Task RequestAsync(string tableQualifiedName, string? transformVersion, bool purge, CancellationToken ct);
 
-    /// <summary>The subset of <paramref name="tableQualifiedNames"/> currently marked <c>Requested</c>.</summary>
-    Task<IReadOnlyList<string>> ListRequestedAsync(IReadOnlyList<string> tableQualifiedNames, CancellationToken ct);
+    /// <summary>
+    /// Cancel a queued request: flip a <c>Requested</c> row to <c>Cancelled</c> and clear its pending
+    /// purge mark. Returns false when the table has no queued request (absent, running, or completed).
+    /// Best-effort against the scheduler: a request it has already begun serving proceeds.
+    /// </summary>
+    Task<bool> CancelRequestAsync(string tableQualifiedName, CancellationToken ct);
+
+    /// <summary>Every table name currently marked <c>Requested</c>, mapped or not.</summary>
+    Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct);
 
     Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct);
 

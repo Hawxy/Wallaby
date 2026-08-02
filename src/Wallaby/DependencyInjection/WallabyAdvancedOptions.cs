@@ -93,6 +93,16 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// How often the leader samples the WAL bytes the server retains for the slot
+    /// (<c>pg_wal_lsn_diff</c> from the current write position to the slot's <c>restart_lsn</c>),
+    /// published as the <c>wallaby.slot.retained_wal</c> gauge. Retention stays small on a healthy slot
+    /// (the heartbeat keeps it advancing); sustained growth means acknowledgements have stalled and the
+    /// slot is heading toward <c>max_slot_wal_keep_size</c> invalidation.
+    /// <see cref="TimeSpan.Zero"/> disables sampling.
+    /// </summary>
+    public TimeSpan SlotLagSampleInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap
     /// detection and observability; the authoritative resume position is the slot's
     /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a

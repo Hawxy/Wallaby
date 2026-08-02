@@ -215,7 +215,7 @@ internal sealed class WallabyPipeline(
             var sawDependentChange = false;
             foreach (var transaction in batch)
             {
-                sawDependentChange |= MaterializeInto(appEvents, transaction.Changes);
+                sawDependentChange |= await MaterializeIntoAsync(appEvents, transaction.Changes, ct);
             }
 
             foreach (var ev in appEvents)
@@ -262,7 +262,7 @@ internal sealed class WallabyPipeline(
     private async Task<int> ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
     {
         var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
-        var sawDependentChange = MaterializeInto(appEvents, transaction.Changes);
+        var sawDependentChange = await MaterializeIntoAsync(appEvents, transaction.Changes, ct);
 
         foreach (var ev in appEvents)
         {
@@ -327,7 +327,7 @@ internal sealed class WallabyPipeline(
                 sawDependentChange = true;
             }
 
-            var changeEvent = changeEventFactory.Create(raw);
+            var changeEvent = await changeEventFactory.CreateAsync(raw, ct);
             if (changeEvent is null)
             {
                 continue;
@@ -369,7 +369,8 @@ internal sealed class WallabyPipeline(
 
     // Materialize raw changes into change events, returning whether any change can trigger dependent
     // fan-out, so transactions that touched no dependent table skip the fan-out resolve entirely.
-    private bool MaterializeInto(List<ChangeEvent> appEvents, IReadOnlyList<RawChange> changes)
+    private async Task<bool> MaterializeIntoAsync(
+        List<ChangeEvent> appEvents, IReadOnlyList<RawChange> changes, CancellationToken ct)
     {
         var sawDependentChange = false;
         foreach (var raw in changes)
@@ -379,7 +380,7 @@ internal sealed class WallabyPipeline(
                 sawDependentChange = true;
             }
 
-            var changeEvent = changeEventFactory.Create(raw);
+            var changeEvent = await changeEventFactory.CreateAsync(raw, ct);
             if (changeEvent is not null)
             {
                 appEvents.Add(changeEvent);
@@ -444,7 +445,7 @@ internal sealed class WallabyPipeline(
             var events = new List<ChangeEvent>(result.FirstPage.Count);
             foreach (var raw in result.FirstPage)
             {
-                var changeEvent = changeEventFactory.Create(raw);
+                var changeEvent = await changeEventFactory.CreateAsync(raw, ct);
                 if (changeEvent is null || liveIndex.Contains((changeEvent.Metadata.QualifiedTableName, changeEvent.Key)))
                 {
                     continue;
@@ -508,7 +509,7 @@ internal sealed class WallabyPipeline(
             var events = new List<ChangeEvent>(window.Buffer.Count);
             foreach (var raw in window.Buffer)
             {
-                var changeEvent = changeEventFactory.Create(raw);
+                var changeEvent = await changeEventFactory.CreateAsync(raw, ct);
                 if (changeEvent is not null && !window.SeenKeys.Contains(changeEvent.Key))
                 {
                     events.Add(changeEvent);

@@ -20,6 +20,7 @@ description: "Wallaby's configuration options and how to set them, from slot and
 | `AutoBackfillNewTables` | `true` | Backfill a newly declared table on first run. |
 | `AutoBackfillOnVersionChange` | `true` | Re-backfill when a mapping's `WithBackfillVersion` changes. |
 | `PurgeOnSlotGapRepair` | `false` | [Purge sink destinations](/backfill#purging-before-a-backfill) before the automatic re-backfill that repairs a [slot-loss gap](/how-it-works#slot-loss-gap-detection), so deletes missed in the gap also converge. Needs sinks that implement `ISinkPurger`; destinations are incomplete while the re-backfill runs. |
+| `ReselectUnavailableValues` | `true` | [Heal a change](/how-it-works#unavailable-value-self-healing-reselect) whose unchanged TOASTed value was not on the wire (`REPLICA IDENTITY DEFAULT`) by re-reading the row by primary key instead of halting. The re-read returns current row state (converge-forward); a vanished row's change is dropped (its delete follows in the stream). Logs a warning per healed change. |
 | `Suspended` / `SuspensionReason` | `false` / – | Deploy-time [suspension](/operations/major-version-upgrades) flag (set via `Suspend(reason?)` on the builder): the node drops every managed replication slot and idles instead of streaming, so a platform blocked by logical slots (e.g. an RDS/Aurora major-version upgrade) can proceed. A flag-less deployment auto-resumes it. |
 | `SinkRetry.MaxAttempts` | `10` | Retry attempts after the first delivery try for a **retryable** sink failure (0–100). `0` disables in-dispatch retry: the first retryable failure halts the leader session and leader-level backoff takes over. |
 | `SinkRetry.BaseDelay` | `200ms` | Delay before the first sink retry; later delays grow exponentially (with jitter). |
@@ -47,6 +48,7 @@ You shouldn't modify these unless you know what you're doing:
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 | `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
 | `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing; see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
+| `SlotLagSampleInterval` | `30s` | How often the leader samples the WAL bytes the server retains for the slot, published as the `wallaby.slot.retained_wal` gauge (see [observability](/operations/observability#metrics)). `Zero` disables sampling. |
 | `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
 | `WatermarkVisibilityFenceTimeout` | `Zero` (off) | Opt-in [visibility fence](/backfill#visibility-fence-opt-in) for watermark backfill: each chunk waits up to this long after its low watermark until no transaction in the current snapshot has already committed, closing the microsecond race where a commit lands just before the watermark but is visible to neither the chunk read nor the window. Polls `pg_xact_status` (must be callable by Wallaby's role); long-running open transactions don't pin it. On timeout a warning is logged and the chunk proceeds unfenced. |
 | `SuspensionAutoResumeGraceFloor` | `60s` | Floor on how long a flag-less node waits before auto-resuming a configuration-origin suspension whose liveness heartbeat has gone quiet; the effective grace is `max(ControlPollInterval * 4, floor)`. Keeps a [mixed rolling deployment](/operations/major-version-upgrades#mixed-rollouts) suspended instead of flapping slots, at the cost of the same wait after the last `Suspend()`-flagged node stops. |
@@ -163,6 +165,13 @@ the excluded columns are filtered inside Postgres: they are never decoded by the
 the wire. Dependent-only tables, which Wallaby narrows automatically to their primary key and lookup
 columns, are listed for the same reason. Column lists are reconciled on every startup; drift is applied
 atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+
+Column lists are a bandwidth and data-minimization optimization, not a correctness mechanism: what a
+mapping consumes is decided client-side by the selection, which applies even with lists disabled. In
+particular, a list is not the fix for a large (TOASTed) column a transform *reads* - that table needs
+[`REPLICA IDENTITY FULL`](/how-it-works#unavailable-value-self-healing-reselect), and a FULL table is
+never column-listed (see below). Reach for a selection when no transform reads the column; reach for
+full identity when one does.
 
 Narrowing is **opt-in per table**. A table you never narrowed publishes whole rows, even when its entity
 maps only some of the physical columns, because a column list pins every column in it against schema

@@ -99,7 +99,8 @@ internal sealed class LeaderSession(
         await using var stream = new LogicalReplicationStream(
             replicationConnectionString, options.SlotName, options.PublicationName, spill,
             options.Advanced.MaxBufferedChangesPerTransaction, components.Model);
-        var changeEventFactory = new ChangeEventFactory(components.Materializer);
+        var changeEventFactory = new ChangeEventFactory(
+            components.Materializer, components.Reselector, _logger, instrumentation);
         var pipeline = new WallabyPipeline(
             stream, changeEventFactory, components.Router, components.Dispatcher, components.Checkpoints,
             options.SlotName, _logger, options.MaxBatchSize, options.Advanced.KeepaliveInterval, components.Coordinator,
@@ -156,6 +157,19 @@ internal sealed class LeaderSession(
             })
             : Task.CompletedTask;
 
+        // Publishes the retained-WAL gauge while leading. Never faults the session: the sampler logs
+        // and swallows per-tick errors.
+        var slotLagTask = options.Advanced.SlotLagSampleInterval > TimeSpan.Zero
+            ? Task.Run(async () =>
+            {
+                var sampler = new SlotLagSampler(
+                    dataSource.Source, options.SlotName, options.Advanced.SlotLagSampleInterval,
+                    instrumentation, _logger);
+                try { await sampler.RunAsync(linked.Token); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            })
+            : Task.CompletedTask;
+
         // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
         var fanoutTask = components.FanoutQueue is not null
             ? Task.Run(async () =>
@@ -188,6 +202,7 @@ internal sealed class LeaderSession(
             await fanoutTask;
             await controlTask;
             await heartbeatTask;
+            await slotLagTask;
         }
 
         ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks

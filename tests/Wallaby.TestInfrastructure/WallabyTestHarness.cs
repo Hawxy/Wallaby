@@ -79,6 +79,9 @@ public sealed class WallabyTestHarness : IAsyncDisposable
     /// <summary>Backfill keyset page size (set before <see cref="StartAsync"/>).</summary>
     public int ChunkSize { get; set; } = 50;
 
+    /// <summary>Heal unavailable (unchanged TOAST) values by re-reading the row (set before <see cref="StartAsync"/>).</summary>
+    public bool ReselectUnavailableValues { get; set; } = true;
+
     /// <summary>Watermark visibility fence; null = disabled (set before <see cref="StartAsync"/>).</summary>
     internal VisibilityFence? VisibilityFence { get; set; }
 
@@ -294,8 +297,10 @@ public sealed class WallabyTestHarness : IAsyncDisposable
             : null;
         _fanoutQueue = _dependentResolver is not null ? new PostgresFanoutQueueStore(_dataSource) : null;
 
+        var reselector = ReselectUnavailableValues ? new RowReselector(_dataSource, _model!) : null;
         _pipeline = new WallabyPipeline(
-            _stream, new ChangeEventFactory(_materializer!), router, new SinkDispatcher(_sinks, NullLogger.Instance, Instrumentation, SinkRetry),
+            _stream, new ChangeEventFactory(_materializer!, reselector, NullLogger.Instance, Instrumentation),
+            router, new SinkDispatcher(_sinks, NullLogger.Instance, Instrumentation, SinkRetry),
             new PostgresCheckpointStore(_dataSource), Names.Slot, NullLogger.Instance,
             MaxBatchSize, KeepaliveInterval, _coordinator, _dependentResolver, _fanoutQueue, Instrumentation,
             maxTransactionsPerBatch: MaxTransactionsPerBatch,

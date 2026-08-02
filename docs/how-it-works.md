@@ -45,6 +45,39 @@ removing those stale documents needs a destination purge. Enable
 [purge sink destinations](/backfill#purging-before-a-backfill) before it re-backfills, making the
 recovery fully convergent.
 
+### Unavailable-value self-healing (reselect)
+
+Under `REPLICA IDENTITY DEFAULT`, an `UPDATE` that leaves a TOASTed column (large text, jsonb) unchanged
+omits its value from the WAL record, and there is no old tuple to fall back to. The value was never on
+the wire, so the change cannot be materialized faithfully — and because replica identity only affects
+records written *after* an `ALTER TABLE ... REPLICA IDENTITY FULL`, a change written before the flip
+stays incomplete forever, wedging the pipeline on a change it can never deliver.
+
+Wallaby heals this by **reselect** (enabled by default via
+[`ReselectUnavailableValues`](/configuration)): when materialization reports an unavailable value, the
+row is re-read by primary key over the primary connection and the change materializes from current row
+state. Each healed change logs a warning pointing here, and increments the
+`wallaby.changes.reselected` counter. Setting the table to `REPLICA IDENTITY FULL` removes the
+per-change re-read cost; apply it through your provider's managed path — the
+[EF Core migration helpers](/providers/entity-framework-core/#replica-identity-in-migrations) or
+Marten's [`ManageWallabyReplicaIdentity()`](/providers/marten/#managed-replica-identity) schema
+feature.
+
+Two properties to be aware of:
+
+- **Converge-forward, not point-in-time.** The re-read returns the row as it is *now*, which may be
+  newer than the change being processed. Any later update is itself in the stream and re-upserts, so
+  sinks converge to current state — the same contract [backfill](/backfill) already relies on.
+- **A vanished row's change is dropped.** If the re-read finds no row, the row was deleted after this
+  change committed; the `DELETE` necessarily follows later in the stream and removes the document, so
+  the incomplete change is logged and skipped rather than wedging the pipeline.
+
+A failing re-read (e.g. the database is unreachable) halts the pipeline exactly like any other fault:
+nothing is acknowledged and the transaction re-streams, preserving at-least-once delivery. Deletes
+whose routing needs the full old row (`KeyedBy`, entity-scoped destinations) cannot be healed this way
+— the row is gone — which is why those mappings [require `REPLICA IDENTITY FULL`](/configuration) up
+front. Set `ReselectUnavailableValues = false` to restore strict halt-on-poison behavior.
+
 ### Idle slots and WAL retention
 
 A replication slot only lets the server recycle WAL up to the position the consumer has acknowledged.

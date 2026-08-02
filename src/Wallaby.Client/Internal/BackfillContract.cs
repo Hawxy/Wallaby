@@ -14,4 +14,6 @@ internal static class BackfillContract
     public const string NotifyChannel = "wallaby_backfill";
 
     public const string StatusRequested = "Requested";
+
+    public const string StatusCancelled = "Cancelled";
 }

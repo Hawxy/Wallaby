@@ -212,15 +212,28 @@ public class MartenRowMaterializerTests
     }
 
     [Test]
-    public void An_unavailable_body_is_a_poison_change_with_replica_identity_guidance()
+    public void An_unavailable_body_is_a_typed_unavailable_value_with_replica_identity_guidance()
     {
         var change = Change("mt_doc_softdoc", ChangeAction.Update,
             newValues: [Col("id", DocId), Toast("data"), Col("mt_deleted", false)]);
 
-        var ex = Should.Throw<InvalidOperationException>(() => Materializer().TryMaterialize(change, out _));
+        var ex = Should.Throw<UnavailableValueException>(() => Materializer().TryMaterialize(change, out _));
 
+        ex.TableName.ShouldBe("mt_doc_softdoc");
+        ex.ColumnName.ShouldBe("data");
         ex.Message.ShouldContain("REPLICA IDENTITY FULL");
         ex.Message.ShouldContain("https://wallabycdc.net/providers/marten/");
+    }
+
+    [Test]
+    public void A_delete_without_old_values_is_not_a_reselectable_failure()
+    {
+        var change = Change("mt_doc_softdoc", ChangeAction.Delete, newValues: []);
+
+        var ex = Should.Throw<InvalidOperationException>(() => Materializer().TryMaterialize(change, out _));
+
+        ex.ShouldNotBeOfType<UnavailableValueException>();
+        ex.Message.ShouldContain("carried no old values");
     }
 
     [Test]

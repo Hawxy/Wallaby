@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
@@ -90,6 +92,19 @@ public class BackfillSchedulerTests
             .Action.ShouldBe(BackfillAction.Skip);
     }
 
+    [Test]
+    public void Cancelled_is_skipped()
+    {
+        Decide(State(BackfillStatus.Cancelled, "v1"), "v1").Action.ShouldBe(BackfillAction.Skip);
+    }
+
+    [Test]
+    public void Cancelled_is_skipped_even_on_a_version_change()
+    {
+        Decide(State(BackfillStatus.Cancelled, "v1", purge: true), "v2", purgeOnVersionChange: true)
+            .ShouldBe(new BackfillDecision(BackfillAction.Skip, Purge: false));
+    }
+
     // ---- request loop ----
 
     // Every pass sees Completed at the declared version (Skip), so the coordinator is never invoked and
@@ -105,12 +120,14 @@ public class BackfillSchedulerTests
                 new BackfillState(t, BackfillStatus.Completed, "v1", null, 0, DateTimeOffset.UtcNow));
         }
 
-        public Task<IReadOnlyList<string>> ListRequestedAsync(IReadOnlyList<string> t, CancellationToken ct)
+        public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
         {
             Events.Add("check");
             return Task.FromResult<IReadOnlyList<string>>(
                 requestedPerCheck.Count > 0 ? requestedPerCheck.Dequeue() : []);
         }
+
+        public Task<bool> CancelRequestAsync(string t, CancellationToken ct) => Task.FromResult(false);
 
         public INotifySubscription Subscribe() => new WaitSignal(Events, onWait);
 
@@ -133,10 +150,18 @@ public class BackfillSchedulerTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private static async Task<List<string>> RunLoopAsync(Queue<string[]> requestedPerCheck)
+    private static async Task<List<string>> RunLoopAsync(
+        Queue<string[]> requestedPerCheck, ILogger? logger = null, int stopAfterWaits = 1)
     {
         using var stop = new CancellationTokenSource();
-        var store = new LoopStore(requestedPerCheck, onWait: stop.Cancel);
+        var waits = 0;
+        var store = new LoopStore(requestedPerCheck, onWait: () =>
+        {
+            if (++waits >= stopAfterWaits)
+            {
+                stop.Cancel();
+            }
+        });
         var table = new CapturedTable
         {
             EntityClrType = typeof(object),
@@ -153,7 +178,7 @@ public class BackfillSchedulerTests
             [new BackfillTable(table, "v1", PurgeOnVersionChange: false, PurgeTargets: [])],
             store, coordinator,
             new SinkPurgeRunner(new Dictionary<string, ISink>(), WallabyInstrumentation.NoOp, NullLogger.Instance),
-            new BackfillSchedulerOptions(), NullLogger.Instance);
+            new BackfillSchedulerOptions(), logger ?? NullLogger.Instance);
 
         await scheduler.RunAsync(TimeSpan.FromSeconds(30), stop.Token);
         return store.Events;
@@ -183,5 +208,21 @@ public class BackfillSchedulerTests
 
         events.IndexOf("wait").ShouldBe(events.Count - 1);
         events.Take(events.IndexOf("wait")).ShouldBe(["pass", "check", "pass", "check"]);
+    }
+
+    [Test]
+    public async Task A_request_for_an_unmapped_table_warns_once_and_triggers_no_pass()
+    {
+        var logger = new FakeLogger();
+        // Two checks observe the same unknown name; the loop idles through the first wait.
+        var events = await RunLoopAsync(
+            new Queue<string[]>([["public.mistyped"], ["public.mistyped"]]), logger, stopAfterWaits: 2);
+
+        // The unknown request never runs a scheduler pass; the initial pass is the only one.
+        events.Count(e => e == "pass").ShouldBe(1);
+
+        var warnings = logger.Collector.GetSnapshot().Where(r => r.Level == LogLevel.Warning).ToList();
+        warnings.Count.ShouldBe(1);
+        warnings[0].Message.ShouldContain("public.mistyped");
     }
 }

@@ -29,7 +29,15 @@ public enum WallabySuspensionOrigin
 /// <param name="Kind"><c>primary</c> (Wallaby's own capture slot) or <c>external</c> (provisioned for a third-party consumer).</param>
 /// <param name="ExistsOnServer">Whether the slot currently exists in <c>pg_replication_slots</c>.</param>
 /// <param name="Active">Whether a consumer is currently streaming from the slot.</param>
-public sealed record WallabyManagedSlot(string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active);
+/// <param name="RetainedWalBytes">
+/// WAL bytes the server retains for the slot (its <c>restart_lsn</c> to the current write position).
+/// External slots pin WAL from the moment they exist, so watch this for slots whose consumer lags or
+/// never connects. <c>null</c> when the slot doesn't exist on the server, or when reading from a
+/// standby in recovery.
+/// </param>
+public sealed record WallabyManagedSlot(
+    string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active,
+    long? RetainedWalBytes = null);
 
 /// <summary>A point-in-time view of the Wallaby control plane, read from the shared Postgres database.</summary>
 /// <param name="State">The installation-wide suspension state.</param>
