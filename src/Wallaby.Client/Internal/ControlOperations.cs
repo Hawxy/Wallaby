@@ -128,10 +128,14 @@ internal static class ControlOperations
     /// flag-less nodes cannot both resume off a stale read, and the NOTIFY fires only when a row
     /// actually transitioned (a refused resume must not wake the cluster). Returns true when this call
     /// made the transition; false includes the table not existing (nothing to resume).
+    /// With <paramref name="purge"/>, the same transition stamps <c>purge_on_resume</c>, asking the
+    /// slot-gap repair that serves the resume to purge sink destinations before its re-backfills; a
+    /// database bootstrapped by a host without the column surfaces <c>42703</c> to the caller rather
+    /// than silently dropping the request.
     /// </summary>
     public static async Task<bool> ResumeAsync(
         NpgsqlDataSource dataSource, bool configurationOriginOnly, CancellationToken ct,
-        TimeSpan? assertionGrace = null)
+        TimeSpan? assertionGrace = null, bool purge = false)
     {
         var originGuard = configurationOriginOnly
             ? $" AND origin = '{ControlContract.OriginConfiguration}'"
@@ -139,13 +143,14 @@ internal static class ControlOperations
         var graceGuard = assertionGrace is not null
             ? " AND (configuration_asserted_at IS NULL OR now() - configuration_asserted_at > @grace)"
             : "";
+        var purgeSet = purge ? ", purge_on_resume = true" : "";
         try
         {
             await using var cmd = dataSource.CreateCommand(
                 $"""
                  WITH resumed AS (
                      UPDATE {ControlContract.Table}
-                     SET state = '{ControlContract.StateRunning}', resumed_at = now(), updated_at = now()
+                     SET state = '{ControlContract.StateRunning}', resumed_at = now(), updated_at = now(){purgeSet}
                      WHERE scope = '{ControlContract.Scope}'
                        AND state IN ('{ControlContract.StateSuspendRequested}', '{ControlContract.StateSuspended}'){originGuard}{graceGuard}
                      RETURNING 1
@@ -163,12 +168,35 @@ internal static class ControlOperations
         {
             return false;
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn && assertionGrace is not null)
+        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn && assertionGrace is not null && !purge)
         {
             // The heartbeat column doesn't exist (a database last touched by an older host), so no live
             // asserter can be stamping it; resume with the pre-heartbeat semantics.
             return await ResumeAsync(dataSource, configurationOriginOnly, ct);
         }
+    }
+
+    /// <summary>
+    /// Whether the last resume asked the slot-gap repair to purge sink destinations before its
+    /// re-backfills. Host-only; callers ensure the state schema is current.
+    /// </summary>
+    public static async Task<bool> ReadPurgeOnResumeAsync(NpgsqlDataSource dataSource, CancellationToken ct)
+    {
+        await using var cmd = dataSource.CreateCommand(
+            $"SELECT purge_on_resume FROM {ControlContract.Table} WHERE scope = '{ControlContract.Scope}'");
+        return await cmd.ExecuteScalarAsync(ct) is true;
+    }
+
+    /// <summary>
+    /// Clear the resume purge flag. The repair calls this once its purge marks are durable, so a crash
+    /// before the marks re-reads the flag while a later unrelated repair does not purge unrequested.
+    /// Deliberately does not NOTIFY (consuming the flag is not a state transition). Host-only.
+    /// </summary>
+    public static async Task ClearPurgeOnResumeAsync(NpgsqlDataSource dataSource, CancellationToken ct)
+    {
+        await using var cmd = dataSource.CreateCommand(
+            $"UPDATE {ControlContract.Table} SET purge_on_resume = false WHERE scope = '{ControlContract.Scope}'");
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ namespace Wallaby.Client;
 /// Remote control plane for a Wallaby installation, mediated entirely through its Postgres database — no
 /// Wallaby host reference or running node required. Suspension durably drops every replication slot
 /// Wallaby manages (primary and external) so platforms like RDS/Aurora can run a major-version upgrade,
-/// and persists across restarts until <see cref="ResumeAsync"/>; on resume, Wallaby recreates its slots
+/// and persists across restarts until <see cref="ResumeAsync(CancellationToken)"/>; on resume, Wallaby recreates its slots
 /// and re-backfills every mapped table to converge sinks. Backfills can also be requested directly via
 /// <see cref="RequestBackfillAsync(string, CancellationToken)"/>, addressed by schema-qualified table name.
 /// </summary>
@@ -51,7 +51,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// wait until every managed replication slot is verified dropped. If no host acts within
     /// <see cref="WallabySuspendOptions.HostGracePeriod"/>, this client drops the slots itself. The
     /// suspension survives restarts and the database outage during an engine upgrade; it ends only with
-    /// <see cref="ResumeAsync"/>. The client performs no DDL: the <c>wallaby.control</c> table is created
+    /// <see cref="ResumeAsync(CancellationToken)"/>. The client performs no DDL: the <c>wallaby.control</c> table is created
     /// by the Wallaby host, so a suspension-aware host must have run against the database at least once.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -140,10 +140,41 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// Note: nodes deployed with the <c>Suspend()</c> builder flag re-assert their suspension — deploy
     /// them without the flag instead of resuming remotely.
     /// </summary>
-    public async Task<WallabyControlState> ResumeAsync(CancellationToken ct = default)
+    public Task<WallabyControlState> ResumeAsync(CancellationToken ct = default)
+        => ResumeAsync(purge: false, ct);
+
+    /// <summary>
+    /// End a suspension, optionally purging sink destinations ahead of the re-backfill that serves the
+    /// resume. A plain re-backfill only upserts current rows, so documents whose deletes were committed
+    /// while suspended (no slot existed to stream them) would linger in sinks; <paramref name="purge"/>
+    /// empties each mapped destination first so the re-backfill converges sinks to exactly the current
+    /// table contents (sinks must implement <c>ISinkPurger</c>; others are skipped with a warning, and
+    /// destinations are temporarily incomplete while their re-backfill runs). The purge request is
+    /// persisted with the resume itself and consumed by the repair, so it survives restarts; when
+    /// nothing is suspended, neither the resume nor the purge takes effect. See
+    /// <see cref="ResumeAsync(CancellationToken)"/> for the resume semantics.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="purge"/> was requested but the <c>wallaby.control</c> table predates purge
+    /// support: no Wallaby version with a purge-aware schema has run against the database.
+    /// </exception>
+    public async Task<WallabyControlState> ResumeAsync(bool purge, CancellationToken ct = default)
     {
-        var transitioned = await ControlOperations.ResumeAsync(_dataSource, configurationOriginOnly: false, ct);
-        _logger.ResumeRequested(transitioned);
+        bool transitioned;
+        try
+        {
+            transitioned = await ControlOperations.ResumeAsync(
+                _dataSource, configurationOriginOnly: false, ct, purge: purge);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn && purge)
+        {
+            throw new InvalidOperationException(
+                "This database's wallaby.control table has no purge_on_resume column: no Wallaby version " +
+                "with purge-on-resume support has run against it. Deploy a newer Wallaby host first (it " +
+                "migrates the column at startup), or resume without purge and request per-table purge " +
+                "backfills via RequestBackfillAsync(table, purge: true).", ex);
+        }
+        _logger.ResumeRequested(transitioned, purge);
         return await GetStateAsync(ct);
     }
 
@@ -264,8 +295,8 @@ internal static partial class WallabyControlClientLog
     [LoggerMessage(Level = LogLevel.Information, Message = "No Wallaby host finalized the suspension within the grace period; dropping the managed slots from this client.")]
     internal static partial void ClientFinalizing(this ILogger logger);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby resume requested (transitioned={Transitioned}).")]
-    internal static partial void ResumeRequested(this ILogger logger, bool transitioned);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby resume requested (transitioned={Transitioned}, purge={Purge}).")]
+    internal static partial void ResumeRequested(this ILogger logger, bool transitioned, bool purge);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table {Table} (purge={Purge}).")]
     internal static partial void BackfillRequested(this ILogger logger, string table, bool purge);

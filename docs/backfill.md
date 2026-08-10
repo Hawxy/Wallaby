@@ -102,6 +102,9 @@ A purge runs before a fresh backfill when:
 - a **manual request** asks for it (`RequestBackfillAsync(..., purge: true)`, in-host or via Wallaby.Client);
 - **slot-gap repair** is configured to purge (`PurgeOnSlotGapRepair`, default off), making slot-loss
   recovery fully convergent;
+- a **resume** asks for it (`ResumeAsync(purge: true)` via Wallaby.Client), so deletes committed while
+  the installation was [suspended](/operations/external-control#suspend-and-resume) converge without
+  enabling `PurgeOnSlotGapRepair` globally;
 - a **version change** triggers the re-backfill and the mapping opted in
   (`WithBackfillVersion("v4", purgeOnChange: true)`), so documents whose ids or shape changed don't
   linger under old keys.

@@ -37,13 +37,19 @@ Wallaby closes that hole with the `wallaby.checkpoint` row it maintains alongsid
 checkpoint is **behind the slot's consistent point**, the slot must have been recreated after that
 checkpoint was written. If so, Wallaby logs an error naming the missed LSN range and automatically marks every
 mapped table for [re-backfill](/backfill), converging the sinks. An invalidated slot (`wal_status=lost`)
-is detected the same way, it is dropped and recreated, then repaired via the same path. Duplicates from
+is detected the same way, it is dropped and recreated, then repaired via the same path. A **rewound WAL
+history** is caught too: a checkpoint *ahead* of a just-recreated slot's consistent point is impossible
+in a continuous history (the checkpoint predates the drop, and any WAL since puts the new slot above
+it), so it can only mean the cluster was rebuilt (a restore, or a blue/green-style upgrade) and the
+repair fires rather than misreading the stale LSN as continuity. Duplicates from
 the re-snapshot are absorbed by the idempotent upsert-by-id sink contract. The re-backfill is
 upsert-only, so deletes (and truncates) that happened inside the missed range are not converged —
 removing those stale documents needs a destination purge. Enable
 [`PurgeOnSlotGapRepair`](/configuration) to have the repair
 [purge sink destinations](/backfill#purging-before-a-backfill) before it re-backfills, making the
-recovery fully convergent.
+recovery fully convergent; for the planned suspend/resume case, a single resume can request the same
+via [`ResumeAsync(purge: true)`](/operations/external-control#suspend-and-resume) without the global
+option.
 
 ### Unavailable-value self-healing (reselect)
 

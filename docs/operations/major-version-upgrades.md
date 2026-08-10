@@ -84,8 +84,9 @@ var suspended = await control.SuspendAsync(new WallabySuspendOptions
 
 // ... run the engine upgrade ...
 
-// After the upgrade: nodes wake, recreate slots, and re-backfill.
-await control.ResumeAsync();
+// After the upgrade: nodes wake, recreate slots, and re-backfill. purge: true also empties each
+// mapped destination first, so deletes committed during the window converge too (needs ISinkPurger).
+await control.ResumeAsync(purge: true);
 
 // Inspect at any time: state, who/why/when, and every managed slot's live server status.
 var state = await control.GetStateAsync();
@@ -138,6 +139,13 @@ SELECT pg_notify('wallaby_control', '');
 - **External slots** are recreated too, but their consumers' positions are gone: the external tool must
   re-sync from scratch (the same situation as any dropped slot). Plan its re-sync alongside the upgrade.
 - Until the re-backfill completes, sinks are stale by however long the suspension lasted.
+- The re-backfill is upsert-only: rows **deleted** during the window leave stale documents behind
+  unless the resume requested a [destination purge](/backfill#purging-before-a-backfill)
+  (`ResumeAsync(purge: true)`, or the `PurgeOnSlotGapRepair` option).
+- The repair also fires when the upgrade **rebuilt the cluster** (restore, blue/green) instead of
+  upgrading in place: the rewound WAL history is
+  [detected](/how-it-works#slot-loss-gap-detection) even though the surviving checkpoint's LSN reads
+  as ahead of the new slot.
 
 ## Operational notes
 

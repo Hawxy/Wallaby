@@ -201,6 +201,56 @@ public class ControlClientTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task Resume_with_purge_records_the_purge_for_the_repair()
+    {
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureStateSchemaAsync();
+            await client.SuspendAsync(new WallabySuspendOptions
+            {
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+
+            var resumed = await client.ResumeAsync(purge: true);
+
+            // The flag rides the resume transition durably; the host's slot-gap repair consumes it.
+            resumed.State.ShouldBe(WallabySuspensionState.Running);
+            (await ReadPurgeOnResumeAsync()).ShouldBeTrue();
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task Resume_with_purge_when_nothing_is_suspended_does_not_mark()
+    {
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureStateSchemaAsync();
+
+            (await client.ResumeAsync(purge: true)).State.ShouldBe(WallabySuspensionState.Running);
+
+            // No transition, no purge: the flag only ever accompanies an actual resume.
+            (await ReadPurgeOnResumeAsync()).ShouldBeFalse();
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    private async Task<bool> ReadPurgeOnResumeAsync()
+    {
+        await using var cmd = pg.DataSource.CreateCommand("SELECT purge_on_resume FROM wallaby.control");
+        return await cmd.ExecuteScalarAsync() is true;
+    }
+
+    [Test]
     public async Task A_stranded_suspend_request_converges_when_retried()
     {
         await using var client = new WallabyControlClient(pg.ConnectionString);

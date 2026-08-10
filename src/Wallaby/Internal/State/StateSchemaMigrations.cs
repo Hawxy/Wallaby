@@ -23,7 +23,7 @@ namespace Wallaby.Internal.State;
 internal static class StateSchemaMigrations
 {
     /// <summary>The schema version this build requires; the highest version in <see cref="Steps"/>.</summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     /// <summary>
     /// Baseline: the full schema as deployed by the 1.0.0 betas. Databases bootstrapped by those betas
@@ -125,6 +125,14 @@ internal static class StateSchemaMigrations
         ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS configuration_asserted_at timestamptz;
         """;
 
+    /// <summary>
+    /// Set by a resume that asks for purging sink destinations; consumed and cleared by the slot-gap
+    /// repair that serves the resume.
+    /// </summary>
+    private const string ControlResumePurgeFlag = """
+        ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS purge_on_resume boolean NOT NULL DEFAULT false;
+        """;
+
     public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
-        [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat)];
+        [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag)];
 }

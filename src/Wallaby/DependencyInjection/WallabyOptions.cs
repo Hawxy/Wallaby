@@ -52,7 +52,9 @@ public sealed class WallabyOptions
     /// Purge sink destinations before the automatic re-backfill that repairs a slot-loss gap, so the
     /// recovery also removes documents whose deletes fell inside the gap. Requires sinks to implement
     /// <see cref="Wallaby.Abstractions.ISinkPurger"/> (others are skipped with a warning). While each
-    /// table's re-backfill runs, its purged destinations are temporarily incomplete.
+    /// table's re-backfill runs, its purged destinations are temporarily incomplete. Independent of
+    /// this option, a single resume can request the same purge per operation via the control client's
+    /// <c>ResumeAsync(purge: true)</c>.
     /// </summary>
     public bool PurgeOnSlotGapRepair { get; set; }
 

@@ -132,6 +132,66 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
     }
 
     [Test]
+    public async Task Resume_with_purge_converges_deletes_committed_while_suspended()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            // One capture across both nodes: it plays the durable external destination whose stale
+            // documents only a purge can remove.
+            var capture = new CaptureSink();
+            int categoryId, keptId, staleId;
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, capture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                categoryId = await Db.AddCategoryAsync();
+                keptId = await Db.AddProductAsync(categoryId, $"kept_{names.Suffix}");
+                staleId = await Db.AddProductAsync(categoryId, $"stale_{names.Suffix}");
+                await capture.WaitForDocumentsAsync([keptId.ToString(), staleId.ToString()]);
+
+                await client.SuspendAsync(new WallabySuspendOptions { Timeout = TimeSpan.FromSeconds(60) });
+                await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+            }
+
+            // Deleted while no slot exists: the delete is never streamed, and the resume re-backfill
+            // only upserts current rows, so without a purge the document would linger forever.
+            await Db.DeleteProductAsync(staleId);
+
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, capture)))
+            {
+                await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+
+                await client.ResumeAsync(purge: true);
+
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                await Polling.UntilAsync(() => capture.Purges.Count > 0);
+                await capture.WaitForDocumentsAsync([keptId.ToString()]);
+
+                capture.Purges.ShouldContain(p => p.TableName == "products");
+                var latest = capture.LatestByDocumentId(destination: "products");
+                latest.ContainsKey(staleId.ToString()).ShouldBeFalse();
+                latest[keptId.ToString()].Document!["name"].ShouldBe($"kept_{names.Suffix}");
+
+                // The repair consumed the flag, so a later unrelated repair will not purge unrequested.
+                (await ReadPurgeOnResumeAsync()).ShouldBeFalse();
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    private async Task<bool> ReadPurgeOnResumeAsync()
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT purge_on_resume FROM wallaby.control", conn);
+        return await cmd.ExecuteScalarAsync() is true;
+    }
+
+    [Test]
     public async Task A_resume_before_the_first_checkpoint_still_re_backfills()
     {
         await using var names = ReplicationScope.Unique(pg.ConnectionString);
@@ -175,6 +235,70 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         {
             await ResetControlAsync();
         }
+    }
+
+    [Test]
+    public async Task A_resume_onto_a_rewound_wal_history_still_re_backfills()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            // Phase 0: stream one product, then suspend remotely.
+            var firstCapture = new CaptureSink();
+            int categoryId, firstId;
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, firstCapture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                categoryId = await Db.AddCategoryAsync();
+                firstId = await Db.AddProductAsync(categoryId, $"before_{names.Suffix}");
+                await firstCapture.WaitForDocumentsAsync([firstId.ToString()]);
+
+                await client.SuspendAsync(new WallabySuspendOptions { Timeout = TimeSpan.FromSeconds(60) });
+                await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+            }
+
+            // Simulates the cluster being rebuilt during the outage (restore, blue/green): the wallaby
+            // tables survive with the old timeline's checkpoint, whose LSN is far ahead of anything the
+            // new cluster will allocate. Naive LSN comparison would read this as continuity.
+            await SetCheckpointAsync(names.Slot, "FFFF/FFFF0000");
+            var missedId = await Db.AddProductAsync(categoryId, $"missed_{names.Suffix}");
+
+            // Resume: the rewind must be detected and repaired; only the re-backfill can deliver the
+            // missed product.
+            var secondCapture = new CaptureSink();
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, secondCapture)))
+            {
+                await WallabyReadiness.WaitForSuspendedAsync(node.Services);
+
+                await client.ResumeAsync();
+
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                await secondCapture.WaitForDocumentsAsync([firstId.ToString(), missedId.ToString()]);
+                node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    // Overwrites (or creates) the slot's checkpoint row, standing in for a checkpoint written on a
+    // different WAL timeline.
+    private async Task SetCheckpointAsync(string slot, string lsn)
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            """
+            INSERT INTO wallaby.checkpoint (slot_name, confirmed_lsn, updated_at)
+            VALUES (@s, @l::pg_lsn, now())
+            ON CONFLICT (slot_name) DO UPDATE SET confirmed_lsn = EXCLUDED.confirmed_lsn, updated_at = now()
+            """, conn);
+        cmd.Parameters.AddWithValue("s", slot);
+        cmd.Parameters.AddWithValue("l", lsn);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     [Test]

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
+using Wallaby.Client.Internal;
 using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
@@ -246,7 +247,9 @@ internal sealed class LeaderSession(
     /// drop), so every change between the two LSNs was never streamed. A recreated slot with no
     /// checkpoint at all is the same gap observed before the first interval-throttled checkpoint save
     /// (e.g. suspend/resume early in an install's life, or while it only ever backfilled), so it
-    /// repairs too. Repairs by marking all mapped tables for re-backfill; the marks are durable before
+    /// repairs too, as does a checkpoint ahead of a just-recreated slot's consistent point (a WAL
+    /// history rewound by a cluster rebuild, where LSN comparison proves nothing about continuity).
+    /// Repairs by marking all mapped tables for re-backfill; the marks are durable before
     /// the checkpoint advances to the consistent point, so a crash mid-repair re-detects on the next
     /// leader session.
     /// </summary>
@@ -272,6 +275,15 @@ internal sealed class LeaderSession(
             }
             _logger.SlotRecreatedBeforeFirstCheckpoint(options.SlotName, consistentPoint);
         }
+        else if (selfConfig.SlotRecreated && checkpoint.ConfirmedLsn > consistentLsn)
+        {
+            // Impossible in a continuous WAL history: the checkpoint predates the drop, and any WAL
+            // since (even the suspension's own control writes) puts a new slot's consistent point
+            // above it. The WAL clock went backward (the cluster was rebuilt by a restore or a
+            // blue/green style upgrade), so LSN comparison proves nothing about continuity; repair.
+            _logger.WalHistoryRewindDetected(
+                options.SlotName, consistentPoint, new NpgsqlLogSequenceNumber(checkpoint.ConfirmedLsn).ToString());
+        }
         else if (checkpoint.ConfirmedLsn >= consistentLsn)
         {
             return;
@@ -290,14 +302,27 @@ internal sealed class LeaderSession(
             ["wallaby.lsn.consistent"] = consistentPoint,
         }));
 
+        // A resume can request purging per operation (ResumeAsync(purge: true)); it ORs with the static
+        // option, and an existing pending purge mark stays sticky (matching manual requests).
+        var purgeResume = await ControlOperations.ReadPurgeOnResumeAsync(dataSource.Source, ct);
+
         foreach (var table in components.BackfillTables)
         {
             var existing = await components.BackfillStore.GetAsync(table.Table.QualifiedName, ct);
             await components.BackfillStore.SaveAsync(
                 new BackfillState(
                     table.Table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
-                    null, 0, DateTimeOffset.UtcNow, Purge: options.PurgeOnSlotGapRepair),
+                    null, 0, DateTimeOffset.UtcNow,
+                    Purge: options.PurgeOnSlotGapRepair || purgeResume || existing?.Purge == true),
                 ct);
+        }
+
+        // Consume the flag between the marks and the checkpoint: a crash before this line re-reads it,
+        // a crash after it re-repairs with the purge preserved in the sticky marks, and a repair for a
+        // later unrelated slot loss never purges unrequested.
+        if (purgeResume)
+        {
+            await ControlOperations.ClearPurgeOnResumeAsync(dataSource.Source, ct);
         }
 
         await components.CheckpointsDirect.SaveAsync(
@@ -357,6 +382,9 @@ internal static partial class LeaderSessionLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot {Slot} was recreated (at {ConsistentPoint}) before its first checkpoint was written: changes committed while the slot was gone were never streamed. Re-backfilling all mapped tables to converge sinks.")]
     internal static partial void SlotRecreatedBeforeFirstCheckpoint(this ILogger logger, string slot, string consistentPoint);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot {Slot} was recreated at {ConsistentPoint}, but the stored checkpoint {CheckpointLsn} is ahead of it. The WAL history was rewound (the cluster was rebuilt, e.g. by a restore or a blue/green upgrade), so changes since the checkpoint cannot be located in this cluster's WAL. Re-backfilling all mapped tables to converge sinks.")]
+    internal static partial void WalHistoryRewindDetected(this ILogger logger, string slot, string consistentPoint, string checkpointLsn);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Resolved {Host} as the primary for the replication connection (multi-host connection string).")]
     internal static partial void ReplicationPrimaryResolved(this ILogger logger, string host);

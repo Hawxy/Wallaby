@@ -71,6 +71,13 @@ the installation across restarts and database outages until an explicit `ResumeA
 On resume, nodes recreate their slots and re-backfill every mapped table. 
 For more information on this feature, see the [major-version upgrade runbook](/operations/major-version-upgrades).
 
+The re-backfill is upsert-only, so documents whose **deletes** were committed while suspended would
+linger in sinks. `ResumeAsync(purge: true)` additionally
+[purges each mapped destination](/backfill#purging-before-a-backfill) before its re-backfill, converging
+sinks to exactly the current table contents (sinks must implement `ISinkPurger`; destinations are
+temporarily incomplete while the re-backfill runs). The purge request is persisted with the resume, so
+it survives restarts and is honored by whichever node repairs the gap.
+
 Options on `WallabySuspendOptions`:
 
 | Option | Default | Meaning |
