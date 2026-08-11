@@ -266,7 +266,7 @@ public class FanoutQueueWorkerTests
 
         // Capture the counter as the healthy pass starts (before its reset), and stop once the worker idles.
         var queue = new ThrowOnceQueue(
-            onHealthyPass: () => failuresSeenOnHealthyPass = status.Current.ConsecutiveFanoutFailures,
+            onHealthyPass: () => failuresSeenOnHealthyPass = status.Current.ConsecutiveFanoutPassFailures,
             onIdle: stop.Cancel);
 
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
@@ -277,7 +277,8 @@ public class FanoutQueueWorkerTests
         await worker.RunAsync(stop.Token);
 
         failuresSeenOnHealthyPass.ShouldBe(1); // the failed pass was recorded...
-        status.Current.ConsecutiveFanoutFailures.ShouldBe(0); // ...and the healthy pass reset it
+        status.Current.ConsecutiveFanoutPassFailures.ShouldBe(0); // ...and the healthy pass reset it
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(0); // a pass failure never inflates the job streak
         status.Current.LastError.ShouldBe("InvalidOperationException: poison pass");
     }
 }

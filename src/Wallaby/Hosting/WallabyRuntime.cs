@@ -117,9 +117,7 @@ internal sealed class WallabyRuntime
             {
                 // The lock is reachable and held by another node — a healthy standby, not an error.
                 backoff.Reset();
-                _status.EnterStandby();
-                _status.ResetLeaderFailures();
-                _status.ResetFanoutFailures();
+                _status.EnterStandby(); // a standby claims no failure streaks; the transition clears them
                 _logger.Standby(_options.SlotName);
                 await DelaySafeAsync(_options.Advanced.StandbyRetryInterval, ct);
                 continue;
@@ -137,8 +135,7 @@ internal sealed class WallabyRuntime
                         _instrumentation, _status);
                     var outcome = await session.RunAsync(ct);
                     backoff.Reset();
-                    _status.ResetLeaderFailures();
-                    _status.ResetFanoutFailures();
+                    _status.ResetFailureStreaks();
                     if (outcome == LeaderSessionOutcome.SuspendRequested)
                     {
                         // The session released the slot and we still hold the cluster lock, so nothing

@@ -87,8 +87,24 @@ public class WallabyHealthCheckTests
         // Live replication is unaffected, so a restart wouldn't fix it: loud, but not a restart signal.
         result.Status.ShouldBe(HealthStatus.Degraded);
         result.Description.ShouldNotBeNull();
-        result.Description.ShouldContain("5 consecutive job failures");
+        result.Description.ShouldContain("5 consecutive failures");
         result.Description.ShouldContain("bad lookup values");
+    }
+
+    [Test]
+    public async Task Persistent_worker_pass_failures_grade_degraded_too()
+    {
+        // The queue/store being unreachable is as loud as a failing job or table.
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveFanoutPassFailures = 5 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        (await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None))
+            .Status.ShouldBe(HealthStatus.Degraded);
+
+        var backfill = Snap(WallabyNodeRole.Leader) with { ConsecutiveBackfillPassFailures = 5 };
+        (await new WallabyHealthCheck(new FakeStatus(backfill))
+                .CheckHealthAsync(new HealthCheckContext(), CancellationToken.None))
+            .Status.ShouldBe(HealthStatus.Degraded);
     }
 
     [Test]

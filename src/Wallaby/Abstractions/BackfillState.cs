@@ -7,9 +7,6 @@ namespace Wallaby.Abstractions;
 /// </remarks>
 public enum BackfillStatus
 {
-    /// <summary>No backfill has been recorded for the table.</summary>
-    NotStarted,
-
     /// <summary>A backfill has been requested (manually or automatically) and is awaiting/running on the leader.</summary>
     Requested,
 

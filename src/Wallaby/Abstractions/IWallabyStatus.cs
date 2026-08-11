@@ -58,10 +58,17 @@ public sealed record WallabyStatusSnapshot
     public int ConsecutiveLeaderFailures { get; init; }
 
     /// <summary>
-    /// Consecutive failed fan-out drain passes. Nonzero means the fan-out worker is stuck retrying (e.g. a
-    /// poison scoped re-snapshot) with backoff; live replication is unaffected. Reset on a healthy pass.
+    /// The worst pending fan-out job's persisted failure streak (its <c>attempts</c> column). Nonzero
+    /// means a job is failing and retrying with backoff (e.g. a poison scoped re-snapshot) while the rest
+    /// of the queue drains and live replication is unaffected. Cleared when the job finally completes.
     /// </summary>
     public int ConsecutiveFanoutFailures { get; init; }
+
+    /// <summary>
+    /// Consecutive failed fan-out drain passes: the queue itself was unreachable, as opposed to one
+    /// job failing (<see cref="ConsecutiveFanoutFailures"/>). In-memory; reset by a clean pass.
+    /// </summary>
+    public int ConsecutiveFanoutPassFailures { get; init; }
 
     /// <summary>
     /// The worst failing table's consecutive backfill failures. Nonzero means at least one table's
@@ -69,6 +76,12 @@ public sealed record WallabyStatusSnapshot
     /// replication are unaffected. Cleared when the failing table's run finally starts fresh or completes.
     /// </summary>
     public int ConsecutiveBackfillFailures { get; init; }
+
+    /// <summary>
+    /// Consecutive failed backfill scheduler passes: the state store itself was unreachable, as opposed
+    /// to one table failing (<see cref="ConsecutiveBackfillFailures"/>). In-memory; reset by a clean pass.
+    /// </summary>
+    public int ConsecutiveBackfillPassFailures { get; init; }
 
     /// <summary>When the current suspension was requested; null unless <see cref="Role"/> is <see cref="WallabyNodeRole.Suspended"/>.</summary>
     public DateTimeOffset? SuspendedSince { get; init; }

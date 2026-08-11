@@ -65,7 +65,7 @@ internal sealed class FanoutQueueWorker(
             catch (Exception ex)
             {
                 logger.WorkerPassFailed(ex);
-                status?.RecordFanoutFailure($"{ex.GetType().Name}: {ex.Message}");
+                status?.RecordFanoutPassFailure($"{ex.GetType().Name}: {ex.Message}");
                 try { await Task.Delay(backoff.Next(), ct); }
                 catch (OperationCanceledException) { break; }
             }

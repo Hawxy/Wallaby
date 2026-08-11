@@ -56,13 +56,17 @@ builder.Services.AddHealthChecks().AddWallaby(configure: o =>
 
 The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
 `leaderSince`, `suspendedSince`, `suspensionReason`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
-`consecutiveLeaderFailures`, `consecutiveFanoutFailures`, `consecutiveBackfillFailures`, `slotName`, and one
+`consecutiveLeaderFailures`, `consecutiveFanoutFailures`, `consecutiveFanoutPassFailures`,
+`consecutiveBackfillFailures`, `consecutiveBackfillPassFailures`, `slotName`, and one
 `lastSinkDeliveryAt:<sink>` entry per sink that has accepted a batch this session. A nonzero
 `consecutiveFanoutFailures` means one or more fan-out jobs are failing and retrying with backoff; the rest
 of the queue keeps draining. The value is the worst failing job's persisted attempt count, so it holds
 while that job is backed off (healthy jobs draining alongside cannot mask it) and clears once the job
 finally completes. `consecutiveBackfillFailures` works the same way for per-table backfills: the worst
-failing table's persisted attempt count, cleared when its run finally starts fresh or completes.
+failing table's persisted attempt count, cleared when its run finally starts fresh or completes. The
+`...PassFailures` variants count the worker's own loop failing outright (the queue or state store
+unreachable) rather than one job or table; each subsystem's Degraded grade fires on the worse of its
+two counters against the same threshold.
 
 `consecutiveLeaderFailures` (the counter behind the crash-loop grade) only resets on real progress or a
 clean step-down - not just because a failing session ran for a while first - so the grade holds even when

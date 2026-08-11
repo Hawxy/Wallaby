@@ -119,7 +119,7 @@ internal sealed class BackfillScheduler(
             catch (Exception ex)
             {
                 logger.SchedulerPassFailed(ex);
-                status?.RecordBackfillFailure($"{ex.GetType().Name}: {ex.Message}");
+                status?.RecordBackfillPassFailure($"{ex.GetType().Name}: {ex.Message}");
                 try { await Task.Delay(errorBackoff.Next(), ct); }
                 catch (OperationCanceledException) { break; }
                 passDue = true;
@@ -209,7 +209,7 @@ internal sealed class BackfillScheduler(
 
         return state.Status switch
         {
-            BackfillStatus.Requested or BackfillStatus.NotStarted => new(BackfillAction.Fresh, state.Purge),
+            BackfillStatus.Requested => new(BackfillAction.Fresh, state.Purge),
             // Re-purging mid-run would delete the chunks the run already delivered.
             BackfillStatus.InProgress => new(BackfillAction.Resume, Purge: false),
             // A cancelled table stays skipped (even on a version change) until a new request marks it

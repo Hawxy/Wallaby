@@ -7,9 +7,6 @@ namespace Wallaby.Client;
 /// </remarks>
 public enum WallabyBackfillStatus
 {
-    /// <summary>No backfill has been recorded for the table.</summary>
-    NotStarted,
-
     /// <summary>A backfill has been requested and is awaiting/running on the leader.</summary>
     Requested,
 

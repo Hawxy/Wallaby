@@ -35,16 +35,20 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             { Role: WallabyNodeRole.Suspended } => HealthCheckResult.Degraded(
                 "Wallaby is suspended: managed replication slots are dropped until an explicit resume.", exception: null, data),
             // Dependent documents go stale, but live replication is fine: loud, not a restart signal.
-            { ConsecutiveFanoutFailures: var fanoutFailures } when fanoutThreshold > 0 && fanoutFailures >= fanoutThreshold =>
+            // Graded on the worse of the two facts: a failing job (persisted streak) or a failing pass
+            // (queue unreachable) both mean fan-out is not converging.
+            { ConsecutiveFanoutFailures: var fanoutJobs, ConsecutiveFanoutPassFailures: var fanoutPasses }
+                when fanoutThreshold > 0 && Math.Max(fanoutJobs, fanoutPasses) >= fanoutThreshold =>
                 HealthCheckResult.Degraded(
-                    $"Wallaby dependent fan-out is failing ({fanoutFailures} consecutive job failures); " +
+                    $"Wallaby dependent fan-out is failing ({Math.Max(fanoutJobs, fanoutPasses)} consecutive failures); " +
                     "documents that depend on those tables are going stale." +
                     (snapshot.LastError is { } fanoutError ? $" Last error: {fanoutError}" : string.Empty),
                     exception: null, data),
             // One table's backfill retrying with backoff; live replication and other tables are fine.
-            { ConsecutiveBackfillFailures: var backfillFailures } when backfillThreshold > 0 && backfillFailures >= backfillThreshold =>
+            { ConsecutiveBackfillFailures: var backfillTables, ConsecutiveBackfillPassFailures: var backfillPasses }
+                when backfillThreshold > 0 && Math.Max(backfillTables, backfillPasses) >= backfillThreshold =>
                 HealthCheckResult.Degraded(
-                    $"A Wallaby backfill is failing ({backfillFailures} consecutive failures); " +
+                    $"A Wallaby backfill is failing ({Math.Max(backfillTables, backfillPasses)} consecutive failures); " +
                     "that table's sinks are not converging." +
                     (snapshot.LastError is { } backfillError ? $" Last error: {backfillError}" : string.Empty),
                     exception: null, data),
@@ -64,7 +68,9 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             ["lastAcknowledgedLsn"] = s.LastAcknowledgedLsn,
             ["consecutiveLeaderFailures"] = s.ConsecutiveLeaderFailures,
             ["consecutiveFanoutFailures"] = s.ConsecutiveFanoutFailures,
+            ["consecutiveFanoutPassFailures"] = s.ConsecutiveFanoutPassFailures,
             ["consecutiveBackfillFailures"] = s.ConsecutiveBackfillFailures,
+            ["consecutiveBackfillPassFailures"] = s.ConsecutiveBackfillPassFailures,
             ["slotName"] = s.SlotName,
         };
         if (s.LastError is { } error) data["lastError"] = error;
