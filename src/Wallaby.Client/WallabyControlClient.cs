@@ -411,7 +411,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
             : WallabySuspensionOrigin.Client;
         return new WallabyControlState(
             state, origin, row.Reason, row.RequestedBy, row.RequestedAt, row.SuspendedAt, row.ResumedAt,
-            mapped, row.PublicationsWidened, row.WidenedAt, row.WidenedBy);
+            mapped, row.PublicationsWidened, row.WidenedAt, row.WidenedBy, row.PurgeOnResume);
     }
 
     /// <summary>Disposes the data source when this client owns it (the connection-string constructor).</summary>

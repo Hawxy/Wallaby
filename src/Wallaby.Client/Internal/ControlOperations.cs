@@ -14,7 +14,8 @@ internal sealed record ControlRow(
     DateTimeOffset? ResumedAt,
     bool PublicationsWidened = false,
     DateTimeOffset? WidenedAt = null,
-    string? WidenedBy = null);
+    string? WidenedBy = null,
+    bool PurgeOnResume = false);
 
 /// <summary>A <c>wallaby.slot_registry</c> entry joined against the server's live slot catalog.</summary>
 internal sealed record ManagedSlotRow(
@@ -68,19 +69,21 @@ internal static class ControlOperations
 
     /// <summary>
     /// Read the control row. With <paramref name="includeWidening"/> false the pre-widening column set
-    /// is selected (the flag reads false), serving schemas older than
+    /// is selected (the widening and purge flags read false), serving schemas older than
     /// <see cref="ControlContract.WideningSchemaVersion"/>.
     /// </summary>
     public static async Task<ControlRow?> ReadAsync(
         NpgsqlDataSource dataSource, bool includeWidening, CancellationToken ct)
     {
-        var wideningColumns = includeWidening
-            ? "publications_widened, widened_at, widened_by"
-            : "false, NULL::timestamptz, NULL::text";
+        // purge_on_resume predates widening (v4 vs v6), but rides the same gate: the only reads that
+        // predate it come through this fallback, and the flag is purely informational there.
+        var versionedColumns = includeWidening
+            ? "publications_widened, widened_at, widened_by, purge_on_resume"
+            : "false, NULL::timestamptz, NULL::text, false";
         await using var cmd = dataSource.CreateCommand(
             $"""
              SELECT state, origin, reason, requested_by, requested_at, suspended_at, resumed_at,
-                    {wideningColumns}
+                    {versionedColumns}
              FROM {ControlContract.Table} WHERE scope = '{ControlContract.Scope}'
              """);
         try
@@ -101,7 +104,8 @@ internal static class ControlOperations
                 reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
                 reader.GetBoolean(7),
                 reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9));
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                PurgeOnResume: reader.GetBoolean(10));
         }
         catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
         {
@@ -229,7 +233,8 @@ internal static class ControlOperations
 
     /// <summary>
     /// Clear the resume purge flag. The repair calls this once its purge marks are durable, so a crash
-    /// before the marks re-reads the flag while a later unrelated repair does not purge unrequested.
+    /// before the marks re-reads the flag while a later unrelated repair does not purge unrequested; a
+    /// leader session that finds no gap to repair calls it too, discarding the spent request.
     /// Deliberately does not NOTIFY (consuming the flag is not a state transition). Host-only.
     /// </summary>
     public static async Task ClearPurgeOnResumeAsync(NpgsqlDataSource dataSource, CancellationToken ct)

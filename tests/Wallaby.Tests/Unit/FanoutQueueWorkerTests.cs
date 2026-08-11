@@ -65,7 +65,7 @@ public class FanoutQueueWorkerTests
     public async Task Job_for_a_table_not_in_the_model_is_deferred_not_dropped()
     {
         var queue = new FakeQueue(new FanoutJobRow(
-            "public.nonexistent", "hash1", BackfillStatus.Requested, ["col"], "[]", null, 0));
+            "public.nonexistent", "hash1", FanoutJobStatus.Requested, ["col"], "[]", null, 0));
 
         // The coordinator/store are never invoked on the divergent path, so a never-opened data source is fine.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
@@ -86,8 +86,8 @@ public class FanoutQueueWorkerTests
         // second is still attempted: an unhandled failure would abort the drain and starve everything
         // behind the first.
         var queue = new FakeQueue(
-            new FanoutJobRow("public.widgets", "hash1", BackfillStatus.Requested, ["col"], "[[1]]", null, 0),
-            new FanoutJobRow("public.widgets", "hash2", BackfillStatus.Requested, ["col"], "[[2]]", null, 0, Attempts: 4));
+            new FanoutJobRow("public.widgets", "hash1", FanoutJobStatus.Requested, ["col"], "[[1]]", null, 0),
+            new FanoutJobRow("public.widgets", "hash2", FanoutJobStatus.Requested, ["col"], "[[2]]", null, 0, Attempts: 4));
 
         var status = new WallabyStatus();
         await using var dataSource = NpgsqlDataSource.Create(UnreachableConnectionString);
@@ -110,7 +110,7 @@ public class FanoutQueueWorkerTests
     public async Task A_job_with_unreadable_lookup_values_is_dropped_not_retried()
     {
         var queue = new FakeQueue(new FanoutJobRow(
-            "public.widgets", "hash1", BackfillStatus.Requested, ["col"], "not json", null, 0));
+            "public.widgets", "hash1", FanoutJobStatus.Requested, ["col"], "not json", null, 0));
 
         // The coordinator is never reached: the values fail to deserialize first.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");

@@ -132,8 +132,8 @@ internal static class StateSchemaMigrations
         """;
 
     /// <summary>
-    /// Set by a resume that asks for purging sink destinations; consumed and cleared by the slot-gap
-    /// repair that serves the resume.
+    /// Set by a resume that asks for purging sink destinations; consumed by the slot-gap repair that
+    /// serves the resume, or discarded when the next leader session finds no gap to repair.
     /// </summary>
     private const string ControlResumePurgeFlag = """
         ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS purge_on_resume boolean NOT NULL DEFAULT false;
@@ -171,7 +171,30 @@ internal static class StateSchemaMigrations
         ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS last_error text;
         """;
 
+    /// <summary>
+    /// Folds <c>wallaby.checkpoint</c> into <c>wallaby.slot_registry</c>: both tables were keyed by
+    /// slot name and held LSN facts about the same slot, read together only by slot-gap repair. The
+    /// provisioner registers every slot before its first checkpoint write, so a checkpoint row without
+    /// a registry row cannot occur outside manual tampering; such orphans are dropped with the table.
+    /// </summary>
+    private const string CheckpointIntoRegistry = """
+        ALTER TABLE wallaby.slot_registry ADD COLUMN IF NOT EXISTS confirmed_lsn pg_lsn NULL;
+        ALTER TABLE wallaby.slot_registry ADD COLUMN IF NOT EXISTS checkpointed_at timestamptz NULL;
+
+        DO $$
+        BEGIN
+            IF to_regclass('wallaby.checkpoint') IS NOT NULL THEN
+                UPDATE wallaby.slot_registry r
+                SET confirmed_lsn = c.confirmed_lsn, checkpointed_at = c.updated_at
+                FROM wallaby.checkpoint c
+                WHERE c.slot_name = r.slot_name;
+                DROP TABLE wallaby.checkpoint;
+            END IF;
+        END $$;
+        """;
+
     public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
         [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag),
-         (5, RegistryPublicationOwnership), (6, ControlPublicationWidening), (7, BackfillRetryState)];
+         (5, RegistryPublicationOwnership), (6, ControlPublicationWidening), (7, BackfillRetryState),
+         (8, CheckpointIntoRegistry)];
 }

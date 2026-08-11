@@ -244,6 +244,8 @@ public class ControlClientTests(PostgresFixture pg)
 
             // The flag rides the resume transition durably; the host's slot-gap repair consumes it.
             resumed.State.ShouldBe(WallabySuspensionState.Running);
+            resumed.PurgeOnResume.ShouldBeTrue();
+            (await client.GetStateAsync()).PurgeOnResume.ShouldBeTrue();
             (await ReadPurgeOnResumeAsync()).ShouldBeTrue();
         }
         finally

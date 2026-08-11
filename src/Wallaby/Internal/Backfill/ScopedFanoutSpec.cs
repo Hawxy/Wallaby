@@ -1,7 +1,19 @@
-using Wallaby.Abstractions;
 using Wallaby.Model;
 
 namespace Wallaby.Internal.Backfill;
+
+/// <summary>
+/// The claim marker on a persisted fan-out job. Persisted by name in <c>wallaby.fanout_queue</c>
+/// (finished jobs are deleted, so these two values are the whole lifecycle).
+/// </summary>
+internal enum FanoutJobStatus
+{
+    /// <summary>Freshly triggered (or re-armed): run the scope from the start, ignoring any prior cursor.</summary>
+    Requested,
+
+    /// <summary>Claimed by a run that never completed (leader crash): resume from the persisted cursor.</summary>
+    InProgress,
+}
 
 /// <summary>
 /// Describes a scoped (filtered) re-snapshot of a primary table: re-read the rows whose
@@ -24,7 +36,7 @@ internal sealed record ScopedFanoutSpec(
 internal sealed record FanoutJobRow(
     string TableQualified,
     string LookupHash,
-    BackfillStatus Status,
+    FanoutJobStatus Status,
     IReadOnlyList<string> LookupColumns,
     string LookupValuesJson,
     string? CursorJson,

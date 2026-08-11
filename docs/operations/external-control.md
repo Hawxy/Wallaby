@@ -79,8 +79,12 @@ The re-backfill is upsert-only, so documents whose **deletes** were committed wh
 linger in sinks. `ResumeAsync(purge: true)` additionally
 [purges each mapped destination](/backfill#purging-before-a-backfill) before its re-backfill, converging
 sinks to exactly the current table contents (sinks must implement `ISinkPurger`; destinations are
-temporarily incomplete while the re-backfill runs). The purge request is persisted with the resume, so
-it survives restarts and is honored by whichever node repairs the gap.
+temporarily incomplete while the re-backfill runs). The purge request is persisted with the resume
+(visible as `PurgeOnResume` in `GetStateAsync`), so it survives restarts and is honored by whichever
+node repairs the gap. It is scoped to that repair: if the next leader finds no gap to repair — the
+suspension was resumed before any slot was actually dropped — the request is discarded with a logged
+warning rather than left armed for a later, unrelated slot-loss repair. Use
+`RequestBackfillAsync(table, purge: true)` if destinations must still be purged in that case.
 
 Options on `WallabySuspendOptions`:
 

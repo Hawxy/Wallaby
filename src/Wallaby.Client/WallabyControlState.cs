@@ -66,6 +66,12 @@ public sealed record WallabyManagedSlot(
 /// </param>
 /// <param name="WidenedAt">When the current widening was requested.</param>
 /// <param name="WidenedBy">Who requested the current widening.</param>
+/// <param name="PurgeOnResume">
+/// True while a <see cref="WallabyControlClient.ResumeAsync(bool, CancellationToken)"/>
+/// purge request is pending: the next leader session's slot-gap repair purges sink destinations before
+/// its re-backfills, then clears the flag. Discarded (with a host-side warning) if that session finds
+/// no gap to repair.
+/// </param>
 public sealed record WallabyControlState(
     WallabySuspensionState State,
     WallabySuspensionOrigin Origin,
@@ -77,4 +83,5 @@ public sealed record WallabyControlState(
     IReadOnlyList<WallabyManagedSlot> Slots,
     bool PublicationsWidened = false,
     DateTimeOffset? WidenedAt = null,
-    string? WidenedBy = null);
+    string? WidenedBy = null,
+    bool PurgeOnResume = false);

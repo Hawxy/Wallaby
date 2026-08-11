@@ -283,6 +283,7 @@ internal sealed class LeaderSession(
         var consistentPoint = selfConfig.ConsistentPoint ?? await ReadRegisteredConsistentPointAsync(ct);
         if (consistentPoint is null)
         {
+            await DiscardStalePurgeRequestAsync(ct);
             return;
         }
 
@@ -295,6 +296,7 @@ internal sealed class LeaderSession(
             // so repair. A first-ever slot (no prior registry row) has missed nothing.
             if (!selfConfig.SlotRecreated)
             {
+                await DiscardStalePurgeRequestAsync(ct);
                 return;
             }
             _logger.SlotRecreatedBeforeFirstCheckpoint(options.SlotName, consistentPoint);
@@ -310,6 +312,7 @@ internal sealed class LeaderSession(
         }
         else if (checkpoint.ConfirmedLsn >= consistentLsn)
         {
+            await DiscardStalePurgeRequestAsync(ct);
             return;
         }
         else
@@ -347,6 +350,21 @@ internal sealed class LeaderSession(
 
         await components.CheckpointsDirect.SaveAsync(
             options.SlotName, new Checkpoint(consistentLsn, DateTimeOffset.UtcNow), ct);
+    }
+
+    /// <summary>
+    /// A resume's purge request is scoped to the repair that serves the resume. When this session finds
+    /// no gap to repair (e.g. the suspension was resumed before finalize ever dropped the slot), the
+    /// request is spent: leaving the flag set would arm a later, unrelated slot-loss repair with a
+    /// purge nobody asked for.
+    /// </summary>
+    private async Task DiscardStalePurgeRequestAsync(CancellationToken ct)
+    {
+        if (await ControlOperations.ReadPurgeOnResumeAsync(dataSource.Source, ct))
+        {
+            _logger.StalePurgeRequestDiscarded();
+            await ControlOperations.ClearPurgeOnResumeAsync(dataSource.Source, ct);
+        }
     }
 
     private async Task<string?> ReadRegisteredConsistentPointAsync(CancellationToken ct)
@@ -417,6 +435,9 @@ internal static partial class LeaderSessionLog
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink {Sink}.")]
     internal static partial void SinkInitialized(this ILogger logger, string sink);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A resume requested purging sink destinations, but no slot gap needed repairing, so no re-backfill (and no purge) runs. The purge request is discarded; if destinations must still be purged, request a purging backfill explicitly.")]
+    internal static partial void StalePurgeRequestDiscarded(this ILogger logger);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Managed publications are widened to whole-table membership (requested by {WidenedBy} at {WidenedAt}): deliberately excluded columns are being published until RestorePublicationsAsync (or the raw-SQL equivalent) restores the column lists.")]
     internal static partial void PublicationsWidened(this ILogger logger, string? widenedBy, DateTimeOffset? widenedAt);

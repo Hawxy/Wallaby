@@ -32,7 +32,7 @@ The replication slot is the only source of live changes, and a slot can be destr
 A freshly created slot only streams from its creation point forward, so everything between the last applied
 change and that point would be silently missed.
 
-Wallaby closes that hole with the `wallaby.checkpoint` row it maintains alongside acknowledgements
+Wallaby closes that hole with the checkpoint it maintains on the slot's `wallaby.slot_registry` row alongside acknowledgements
 (throttled to one write per [`CheckpointSaveInterval`](/configuration)). On leadership start, if the
 checkpoint is **behind the slot's consistent point**, the slot must have been recreated after that
 checkpoint was written. If so, Wallaby logs an error naming the missed LSN range and automatically marks every

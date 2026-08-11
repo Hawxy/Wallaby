@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
-using Wallaby.Abstractions;
 using Wallaby.Internal.Backfill;
 
 namespace Wallaby.Internal.State;
@@ -161,7 +160,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         => new(
             reader.GetString(0),
             reader.GetString(1),
-            Enum.Parse<BackfillStatus>(reader.GetString(2)),
+            Enum.Parse<FanoutJobStatus>(reader.GetString(2)),
             reader.GetFieldValue<string[]>(3),
             reader.GetString(4),
             reader.IsDBNull(5) ? null : reader.GetString(5),

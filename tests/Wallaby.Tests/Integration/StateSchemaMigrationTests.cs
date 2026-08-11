@@ -51,7 +51,7 @@ public class StateSchemaMigrationTests(PostgresFixture pg)
         await EnsureAsync(db);
 
         (await ScalarAsync(db, "SELECT count(*) FROM pg_tables WHERE schemaname = 'wallaby'"))
-            .ShouldBe(7); // 6 state tables + schema_version
+            .ShouldBe(6); // 5 state tables + schema_version
         (await ScalarAsync(db, "SELECT max(version) FROM wallaby.schema_version"))
             .ShouldBe(StateSchemaMigrations.CurrentVersion);
         await using var applied = db.CreateCommand("SELECT applied_by FROM wallaby.schema_version");
@@ -79,6 +79,7 @@ public class StateSchemaMigrationTests(PostgresFixture pg)
         // Exactly what real deployments have: the beta schema (no schema_version table) with live data.
         await ExecAsync(db, "CREATE SCHEMA IF NOT EXISTS wallaby");
         await ExecAsync(db, StateSchemaMigrations.Steps[0].Ddl);
+        await ExecAsync(db, "INSERT INTO wallaby.slot_registry (slot_name, publication) VALUES ('s1', 'p1')");
         await ExecAsync(db, "INSERT INTO wallaby.checkpoint (slot_name, confirmed_lsn) VALUES ('s1', '0/2A')");
         await ExecAsync(db, "INSERT INTO wallaby.backfill_state (table_qualified, status, rows_copied) VALUES ('public.orders', 'Completed', 42)");
 
@@ -86,7 +87,12 @@ public class StateSchemaMigrationTests(PostgresFixture pg)
 
         (await ScalarAsync(db, "SELECT max(version) FROM wallaby.schema_version"))
             .ShouldBe(StateSchemaMigrations.CurrentVersion);
-        (await ScalarAsync(db, "SELECT count(*) FROM wallaby.checkpoint WHERE slot_name = 's1'")).ShouldBe(1);
+        // The checkpoint table is folded into the registry row; its LSN survives the migration.
+        (await ScalarAsync(db,
+            "SELECT count(*) FROM wallaby.slot_registry WHERE slot_name = 's1' AND confirmed_lsn = '0/2A' AND checkpointed_at IS NOT NULL"))
+            .ShouldBe(1);
+        (await ScalarAsync(db, "SELECT to_regclass('wallaby.checkpoint') IS NULL"))
+            .ShouldBe(1);
         (await ScalarAsync(db, "SELECT rows_copied FROM wallaby.backfill_state WHERE table_qualified = 'public.orders'"))
             .ShouldBe(42);
     }
@@ -145,6 +151,6 @@ public class StateSchemaMigrationTests(PostgresFixture pg)
         // One ledger row per step regardless of how many entrants raced.
         (await ScalarAsync(db, "SELECT count(*) FROM wallaby.schema_version"))
             .ShouldBe(StateSchemaMigrations.Steps.Count);
-        (await ScalarAsync(db, "SELECT count(*) FROM pg_tables WHERE schemaname = 'wallaby'")).ShouldBe(7);
+        (await ScalarAsync(db, "SELECT count(*) FROM pg_tables WHERE schemaname = 'wallaby'")).ShouldBe(6);
     }
 }
