@@ -52,6 +52,10 @@ public class FanoutQueueWorkerTests
         public Task<bool> CancelRequestAsync(string t, CancellationToken ct) => Task.FromResult(false);
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<DateTimeOffset> FailAsync(string t, string error, CancellationToken ct)
+            => Task.FromResult(DateTimeOffset.UtcNow.AddSeconds(5));
+        public Task ClearFailureAsync(string t, CancellationToken ct) => Task.CompletedTask;
+        public Task<int> MaxAttemptsAsync(CancellationToken ct) => Task.FromResult(0);
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<BackfillState>>([]);
         public INotifySubscription Subscribe() => new NoOpSubscription();

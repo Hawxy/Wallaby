@@ -160,7 +160,18 @@ internal static class StateSchemaMigrations
         ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS widened_by text NULL;
         """;
 
+    /// <summary>
+    /// Per-table retry state for backfills, mirroring the fan-out queue's: a failing table backs off on
+    /// its own schedule instead of faulting the leader session.
+    /// </summary>
+    private const string BackfillRetryState = """
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS attempts int NOT NULL DEFAULT 0;
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz NOT NULL DEFAULT now();
+        -- Nullable: "no error" is the absence of a value, which older writers also leave null.
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS last_error text;
+        """;
+
     public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
         [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag),
-         (5, RegistryPublicationOwnership), (6, ControlPublicationWidening)];
+         (5, RegistryPublicationOwnership), (6, ControlPublicationWidening), (7, BackfillRetryState)];
 }

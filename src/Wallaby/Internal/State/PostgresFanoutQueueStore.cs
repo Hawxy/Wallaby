@@ -13,10 +13,6 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
 {
     private const string DueStatuses = "('Requested', 'InProgress')";
 
-    // Per-job retry schedule, computed in SQL from the persisted attempt count so it survives a restart.
-    private static readonly TimeSpan FailureBaseDelay = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan FailureMaxDelay = TimeSpan.FromMinutes(5);
-
     public async Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct)
     {
         var columns = spec.LookupColumns.ToArray();
@@ -143,7 +139,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
             """,
             ct,
             ("t", tableQualified), ("h", lookupHash), ("e", error),
-            ("base", FailureBaseDelay), ("max", FailureMaxDelay));
+            ("base", FailureBackoff.BaseDelay), ("max", FailureBackoff.MaxDelay));
 
     public async Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
     {

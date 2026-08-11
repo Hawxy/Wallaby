@@ -21,4 +21,15 @@ public sealed class WallabyHealthCheckOptions
     /// Defaults to 5.
     /// </summary>
     public int FanoutFailureThreshold { get; set; } = 5;
+
+    /// <summary>
+    /// Consecutive failures of a table's backfill before the check reports Degraded. Live replication
+    /// and the other tables' backfills are unaffected — the failing table retries with backoff — so this
+    /// grades Degraded rather than Unhealthy, keeping a liveness probe from restart-looping the node
+    /// while still surfacing that the table's sinks are not converging. The counter tracks the worst
+    /// pending table's persisted failure streak, so it holds while that table is backed off and clears
+    /// when its run finally starts fresh or completes. Set to 0 (or negative) to disable backfill
+    /// grading. Defaults to 5.
+    /// </summary>
+    public int BackfillFailureThreshold { get; set; } = 5;
 }

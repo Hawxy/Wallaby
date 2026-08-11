@@ -63,6 +63,13 @@ public sealed record WallabyStatusSnapshot
     /// </summary>
     public int ConsecutiveFanoutFailures { get; init; }
 
+    /// <summary>
+    /// The worst failing table's consecutive backfill failures. Nonzero means at least one table's
+    /// backfill is stuck retrying with backoff (its persisted attempt count); other tables and live
+    /// replication are unaffected. Cleared when the failing table's run finally starts fresh or completes.
+    /// </summary>
+    public int ConsecutiveBackfillFailures { get; init; }
+
     /// <summary>When the current suspension was requested; null unless <see cref="Role"/> is <see cref="WallabyNodeRole.Suspended"/>.</summary>
     public DateTimeOffset? SuspendedSince { get; init; }
 

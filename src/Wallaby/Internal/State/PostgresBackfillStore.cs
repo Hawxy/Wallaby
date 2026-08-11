@@ -12,7 +12,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT status, transform_version, cursor_json, rows_copied, updated_at, purge FROM wallaby.backfill_state WHERE table_qualified = @t",
+            "SELECT status, transform_version, cursor_json, rows_copied, updated_at, purge, attempts, next_attempt_at, last_error FROM wallaby.backfill_state WHERE table_qualified = @t",
             connection);
         cmd.Parameters.AddWithValue("t", tableQualifiedName);
 
@@ -25,7 +25,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at, purge FROM wallaby.backfill_state",
+            "SELECT table_qualified, status, transform_version, cursor_json, rows_copied, updated_at, purge, attempts, next_attempt_at, last_error FROM wallaby.backfill_state",
             connection);
 
         var results = new List<BackfillState>();
@@ -41,6 +41,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
+        // A fresh run also starts a fresh failure ledger: attempts, backoff, and last_error reset.
         await using var cmd = new NpgsqlCommand(
             """
             INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, purge, updated_at)
@@ -51,7 +52,10 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
                     cursor_json = EXCLUDED.cursor_json,
                     rows_copied = EXCLUDED.rows_copied,
                     purge = EXCLUDED.purge,
-                    updated_at = EXCLUDED.updated_at
+                    updated_at = EXCLUDED.updated_at,
+                    attempts = 0,
+                    next_attempt_at = now(),
+                    last_error = NULL
             """,
             connection);
         cmd.Parameters.AddWithValue("t", state.TableQualifiedName);
@@ -95,8 +99,10 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
+        // Backed-off rows are excluded so a request against a failing table doesn't hot-loop the
+        // scheduler; it becomes due again when the backoff expires.
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified FROM wallaby.backfill_state WHERE status = 'Requested'",
+            "SELECT table_qualified FROM wallaby.backfill_state WHERE status = 'Requested' AND next_attempt_at <= now()",
             connection);
 
         var results = new List<string>();
@@ -106,6 +112,56 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
             results.Add(reader.GetString(0));
         }
         return results;
+    }
+
+    public async Task<DateTimeOffset> FailAsync(string tableQualifiedName, string error, CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+
+        // Same schedule as the fan-out queue, computed in SQL from the persisted attempt count so it
+        // survives restarts and leader changes.
+        await using var cmd = new NpgsqlCommand(
+            """
+            UPDATE wallaby.backfill_state
+            SET attempts = attempts + 1,
+                last_error = @e,
+                next_attempt_at = now() + least(@base * power(2, least(attempts, 16)), @max),
+                updated_at = now()
+            WHERE table_qualified = @t
+            RETURNING next_attempt_at
+            """,
+            connection);
+        cmd.Parameters.AddWithValue("t", tableQualifiedName);
+        cmd.Parameters.AddWithValue("e", error);
+        cmd.Parameters.AddWithValue("base", FailureBackoff.BaseDelay);
+        cmd.Parameters.AddWithValue("max", FailureBackoff.MaxDelay);
+
+        // No row can only mean the run failed before its fresh-run save; retry after the base delay.
+        var nextAttempt = await cmd.ExecuteScalarAsync(ct);
+        return nextAttempt is DateTime at
+            ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc))
+            : DateTimeOffset.UtcNow + FailureBackoff.BaseDelay;
+    }
+
+    public Task ClearFailureAsync(string tableQualifiedName, CancellationToken ct)
+        => PgExec.ExecuteAsync(
+            dataSource,
+            """
+            UPDATE wallaby.backfill_state
+            SET attempts = 0, next_attempt_at = now(), last_error = NULL, updated_at = now()
+            WHERE table_qualified = @t AND (attempts <> 0 OR last_error IS NOT NULL)
+            """,
+            ct,
+            ("t", tableQualifiedName));
+
+    public async Task<int> MaxAttemptsAsync(CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+        // Terminal rows keep their history but no longer represent pending work.
+        return (int)await PgExec.ScalarLongAsync(
+            connection,
+            "SELECT coalesce(max(attempts), 0) FROM wallaby.backfill_state WHERE status IN ('Requested', 'InProgress')",
+            ct);
     }
 
     public INotifySubscription Subscribe()
@@ -119,8 +175,12 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         var rowsCopied = reader.GetInt64(columnOffset + 3);
         var updatedAt = reader.GetFieldValue<DateTime>(columnOffset + 4);
         var purge = reader.GetBoolean(columnOffset + 5);
+        var attempts = reader.GetInt32(columnOffset + 6);
+        var nextAttemptAt = reader.GetFieldValue<DateTime>(columnOffset + 7);
+        var lastError = reader.IsDBNull(columnOffset + 8) ? null : reader.GetString(columnOffset + 8);
         return new BackfillState(
             tableQualified, status, transformVersion, cursorJson, rowsCopied,
-            new DateTimeOffset(DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)), purge);
+            new DateTimeOffset(DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)), purge,
+            attempts, new DateTimeOffset(DateTime.SpecifyKind(nextAttemptAt, DateTimeKind.Utc)), lastError);
     }
 }

@@ -124,6 +124,96 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
     }
 
     [Test]
+    public async Task A_failure_backs_off_with_attempts_and_a_recorded_error()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+
+        var first = await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+        var second = await store.FailAsync(table, "IOException: boom again", CancellationToken.None);
+
+        first.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
+        second.ShouldBeGreaterThan(first); // the delay grows per attempt
+
+        var state = await store.GetAsync(table, CancellationToken.None);
+        state.ShouldNotBeNull();
+        state.Attempts.ShouldBe(2);
+        state.LastError.ShouldBe("IOException: boom again");
+        state.NextAttemptAt.ShouldBe(second);
+
+        // Progress owns only progress: the failure ledger is untouched by a running save.
+        await store.SaveProgressAsync(table, BackfillStatus.InProgress, null, 5, CancellationToken.None);
+        (await store.GetAsync(table, CancellationToken.None))!.Attempts.ShouldBe(2);
+
+        await store.ClearFailureAsync(table, CancellationToken.None);
+        var cleared = await store.GetAsync(table, CancellationToken.None);
+        cleared!.Attempts.ShouldBe(0);
+        cleared.LastError.ShouldBeNull();
+    }
+
+    [Test]
+    public async Task A_fresh_run_save_resets_the_failure_ledger()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+        await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+
+        var state = await store.GetAsync(table, CancellationToken.None);
+        state.ShouldNotBeNull();
+        state.Attempts.ShouldBe(0);
+        state.LastError.ShouldBeNull();
+        state.NextAttemptAt.ShouldNotBeNull();
+        state.NextAttemptAt.Value.ShouldBeLessThanOrEqualTo(DateTimeOffset.UtcNow.AddSeconds(5));
+    }
+
+    [Test]
+    public async Task List_requested_excludes_a_backed_off_row()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
+        (await store.ListRequestedAsync(CancellationToken.None)).ShouldContain(table);
+
+        await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+        (await store.ListRequestedAsync(CancellationToken.None)).ShouldNotContain(table);
+
+        // Withdraw the request so the row stops counting as pending work.
+        await store.CancelRequestAsync(table, CancellationToken.None);
+    }
+
+    [Test]
+    public async Task Max_attempts_tracks_pending_rows_only()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
+        // 5 attempts outranks anything another test in this class leaves behind.
+        for (var i = 0; i < 5; i++)
+        {
+            await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+        }
+
+        (await store.MaxAttemptsAsync(CancellationToken.None)).ShouldBe(5);
+
+        // A cancelled row keeps its history but no longer represents pending work.
+        (await store.CancelRequestAsync(table, CancellationToken.None)).ShouldBeTrue();
+        (await store.GetAsync(table, CancellationToken.None))!.Attempts.ShouldBe(5);
+        (await store.MaxAttemptsAsync(CancellationToken.None)).ShouldBeLessThan(5);
+    }
+
+    [Test]
     public async Task List_requested_returns_requested_rows_only()
     {
         await EnsureSchemaAsync();

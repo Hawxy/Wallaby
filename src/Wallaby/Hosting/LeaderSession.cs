@@ -132,10 +132,12 @@ internal sealed class LeaderSession(
                 AutoBackfillNewTables = options.AutoBackfillNewTables,
                 AutoBackfillOnVersionChange = options.AutoBackfillOnVersionChange,
             },
-            _logger);
+            _logger, status);
 
         // A background-task fault fails the whole leader session (first fault wins): the task records it,
         // cancels the workload, and the fault is rethrown below so the caller halts and retries with backoff.
+        // The scheduler and fan-out worker handle their own failures internally (per-table/per-job backoff,
+        // pass-level retry), so their catches here are backstops.
         Exception? backgroundFault = null;
 
         var backfillTask = Task.Run(async () =>

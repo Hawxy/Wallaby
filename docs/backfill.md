@@ -169,6 +169,20 @@ Chunk delivery and cursor persistence are two steps, so there is a small window 
 *after* a chunk was applied to the sinks but *before* its cursor was saved. The next leader will resume from
 the last saved cursor and re-emit that chunk. This is the intended at-least-once behavior.
 
+### Failure handling
+
+A failing backfill (a throwing transform, a sink rejecting the snapshot rows, an unreadable table) never
+stops live replication or the other tables' backfills. The failure is recorded against that table alone -
+attempt count, last error, and an exponential backoff (5 s doubling to a 5 min cap) persisted in
+`wallaby.backfill_state` - and the scheduler retries the table when the backoff expires, resuming from its
+last saved cursor. A manual request for a table that is mid-backoff is served when the backoff expires,
+not immediately.
+
+Failures are visible in three places: the leader's log (one error per attempt), the `attempts`/`last_error`
+columns surfaced through `IWallabyBackfillManager.GetStatusAsync`, and the
+[health check](/operations/health-checks), which grades **Degraded** once the worst failing table crosses
+`BackfillFailureThreshold` consecutive failures.
+
 ## Scoped (fan-out) backfill
 
 The same engine also re-snapshots a *subset* of a table's rows on demand. When a [dependent fan-out](/providers/entity-framework-core/#dependent-tables)

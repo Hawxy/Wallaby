@@ -103,6 +103,48 @@ public class WallabyHealthCheckTests
     }
 
     [Test]
+    public async Task Backfill_failures_below_the_threshold_stay_healthy_and_appear_in_data()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveBackfillFailures = 3 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        result.Status.ShouldBe(HealthStatus.Healthy);
+        result.Data["consecutiveBackfillFailures"].ShouldBe(3);
+    }
+
+    [Test]
+    public async Task Persistently_failing_backfill_is_degraded_not_unhealthy()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with
+        {
+            ConsecutiveBackfillFailures = 5,
+            LastError = "InvalidOperationException: enrichment failed",
+        };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot));
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        // Live replication and the other tables are unaffected: loud, but not a restart signal.
+        result.Status.ShouldBe(HealthStatus.Degraded);
+        result.Description.ShouldNotBeNull();
+        result.Description.ShouldContain("5 consecutive failures");
+        result.Description.ShouldContain("enrichment failed");
+    }
+
+    [Test]
+    public async Task Zero_threshold_disables_backfill_grading()
+    {
+        var snapshot = Snap(WallabyNodeRole.Leader) with { ConsecutiveBackfillFailures = 100 };
+        var options = new WallabyHealthCheckOptions { BackfillFailureThreshold = 0 };
+        var check = new WallabyHealthCheck(new FakeStatus(snapshot), options);
+
+        (await check.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None))
+            .Status.ShouldBe(HealthStatus.Healthy);
+    }
+
+    [Test]
     public async Task Crash_looping_leader_is_unhealthy_with_last_error_in_description()
     {
         var snapshot = Snap(WallabyNodeRole.Leader) with

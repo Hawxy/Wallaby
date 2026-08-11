@@ -98,6 +98,20 @@ public class WallabyStatusTests
     }
 
     [Test]
+    public void Backfill_failures_track_the_worst_table_and_reconcile_from_the_store()
+    {
+        var status = new WallabyStatus();
+
+        status.RecordBackfillTableFailure("e1", attempts: 3);
+        status.RecordBackfillTableFailure("e2", attempts: 1); // another table failing less doesn't lower it
+        status.Current.ConsecutiveBackfillFailures.ShouldBe(3);
+        status.Current.LastError.ShouldBe("e2");
+
+        status.SetBackfillStreak(0); // the failing table recovered; the reconcile lowers it
+        status.Current.ConsecutiveBackfillFailures.ShouldBe(0);
+    }
+
+    [Test]
     public void EnterStandby_clears_leader_since()
     {
         var status = new WallabyStatus();

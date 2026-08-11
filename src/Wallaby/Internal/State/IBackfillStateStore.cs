@@ -9,7 +9,8 @@ internal interface IBackfillStateStore
 
     /// <summary>
     /// Unconditionally write a full state row: the scheduler's fresh-run transition, which stamps the
-    /// declared transform version and clears any pending purge mark.
+    /// declared transform version, clears any pending purge mark, and resets the failure ledger
+    /// (attempts, backoff, last error).
     /// </summary>
     Task SaveAsync(BackfillState state, CancellationToken ct);
 
@@ -38,8 +39,29 @@ internal interface IBackfillStateStore
     /// </summary>
     Task<bool> CancelRequestAsync(string tableQualifiedName, CancellationToken ct);
 
-    /// <summary>Every table name currently marked <c>Requested</c>, mapped or not.</summary>
+    /// <summary>
+    /// Every table name currently marked <c>Requested</c> and past its failure backoff, mapped or not.
+    /// </summary>
     Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Record a failed run: increment the table's attempt count, store the error, and push
+    /// <c>next_attempt_at</c> out on the shared exponential backoff schedule. Returns the time the
+    /// table becomes due again.
+    /// </summary>
+    Task<DateTimeOffset> FailAsync(string tableQualifiedName, string error, CancellationToken ct);
+
+    /// <summary>
+    /// Reset the table's failure ledger after a successful run (a fresh-run <see cref="SaveAsync"/>
+    /// resets it too; this covers a resumed run completing).
+    /// </summary>
+    Task ClearFailureAsync(string tableQualifiedName, CancellationToken ct);
+
+    /// <summary>
+    /// The worst pending table's persisted failure streak (rows still <c>Requested</c>/<c>InProgress</c>),
+    /// mirrored into status so healthy tables can't mask a backed-off failing one.
+    /// </summary>
+    Task<int> MaxAttemptsAsync(CancellationToken ct);
 
     Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct);
 

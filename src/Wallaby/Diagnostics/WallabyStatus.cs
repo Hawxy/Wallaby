@@ -103,6 +103,26 @@ internal sealed class WallabyStatus : IWallabyStatus
 
     internal void ResetFanoutFailures() => SetFanoutStreak(0);
 
+    /// <summary>A scheduler pass failed outright (the store unreachable, not one table's run).</summary>
+    internal void RecordBackfillFailure(string error) =>
+        Update(s => s with { ConsecutiveBackfillFailures = s.ConsecutiveBackfillFailures + 1, LastError = error });
+
+    /// <summary>A table's backfill failed; <paramref name="attempts"/> is its persisted failure streak.</summary>
+    internal void RecordBackfillTableFailure(string error, int attempts) =>
+        Update(s => s with
+        {
+            ConsecutiveBackfillFailures = Math.Max(s.ConsecutiveBackfillFailures, attempts),
+            LastError = error,
+        });
+
+    /// <summary>
+    /// Reconcile the counter with the store's worst pending table. Persisted attempts are the source of
+    /// truth: healthy tables running can't mask a backed-off failing one, and a recovered table's reset
+    /// ledger lowers the value on its own.
+    /// </summary>
+    internal void SetBackfillStreak(int attempts) =>
+        Update(s => s.ConsecutiveBackfillFailures == attempts ? s : s with { ConsecutiveBackfillFailures = attempts });
+
     internal void RecordProgress(ulong lsn, double lagSeconds, DateTimeOffset at) =>
         Update(s => s with
         {

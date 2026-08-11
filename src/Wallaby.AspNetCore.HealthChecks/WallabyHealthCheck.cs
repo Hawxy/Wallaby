@@ -17,6 +17,7 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
         var data = Describe(snapshot);
         var crashLoopThreshold = _options.CrashLoopFailureThreshold;
         var fanoutThreshold = _options.FanoutFailureThreshold;
+        var backfillThreshold = _options.BackfillFailureThreshold;
 
         var result = snapshot switch
         {
@@ -40,6 +41,13 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
                     "documents that depend on those tables are going stale." +
                     (snapshot.LastError is { } fanoutError ? $" Last error: {fanoutError}" : string.Empty),
                     exception: null, data),
+            // One table's backfill retrying with backoff; live replication and other tables are fine.
+            { ConsecutiveBackfillFailures: var backfillFailures } when backfillThreshold > 0 && backfillFailures >= backfillThreshold =>
+                HealthCheckResult.Degraded(
+                    $"A Wallaby backfill is failing ({backfillFailures} consecutive failures); " +
+                    "that table's sinks are not converging." +
+                    (snapshot.LastError is { } backfillError ? $" Last error: {backfillError}" : string.Empty),
+                    exception: null, data),
             _ => HealthCheckResult.Healthy("Wallaby subsystem alive.", data),
         };
 
@@ -56,6 +64,7 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             ["lastAcknowledgedLsn"] = s.LastAcknowledgedLsn,
             ["consecutiveLeaderFailures"] = s.ConsecutiveLeaderFailures,
             ["consecutiveFanoutFailures"] = s.ConsecutiveFanoutFailures,
+            ["consecutiveBackfillFailures"] = s.ConsecutiveBackfillFailures,
             ["slotName"] = s.SlotName,
         };
         if (s.LastError is { } error) data["lastError"] = error;

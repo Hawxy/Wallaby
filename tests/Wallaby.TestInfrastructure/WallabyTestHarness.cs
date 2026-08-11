@@ -346,9 +346,12 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         return await worker.DrainOnceAsync(_cts.Token);
     }
 
-    /// <summary>Run a backfill scheduler pass for the declared backfill tables (awaits completion).</summary>
+    /// <summary>
+    /// Run a backfill scheduler pass for the declared backfill tables (awaits completion). Returns the
+    /// soonest time a backed-off (failing) table becomes due again, or null when none is pending a retry.
+    /// </summary>
     /// <param name="version">Overrides the declared transform version for all backfill tables (e.g. to force a re-backfill).</param>
-    public async Task RunBackfillAsync(string? version = null)
+    public async Task<DateTimeOffset?> RunBackfillAsync(string? version = null)
         => await BuildScheduler(version).RunDueBackfillsAsync(_cts?.Token
             ?? throw new InvalidOperationException("Call StartAsync() before running a backfill."));
 
