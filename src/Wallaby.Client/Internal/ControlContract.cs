@@ -11,6 +11,24 @@ internal static class ControlContract
 {
     public const string Table = "wallaby.control";
 
+    /// <summary>
+    /// The migration ledger the host's schema bootstrapper maintains; the client reads it to adapt to
+    /// (or refuse) older schemas instead of probing for individual columns.
+    /// </summary>
+    public const string SchemaVersionLedger = "wallaby.schema_version";
+
+    /// <summary>
+    /// The wallaby state-schema version this build was compiled against. The host's migration list
+    /// aliases it (<c>StateSchemaMigrations.CurrentVersion</c>), and the client requires it for every
+    /// state-changing operation except resume — resume stays version-tolerant so an old installation
+    /// can always be unsuspended. Version 5 is the oldest schema any deployment carries, so nothing
+    /// branches on (or gates against) anything older.
+    /// </summary>
+    public const int SchemaVersion = 6;
+
+    /// <summary>Schema version that added the <c>control</c> publication-widening columns.</summary>
+    public const int WideningSchemaVersion = 6;
+
     /// <summary>LISTEN/NOTIFY channel signalled on every control-state transition.</summary>
     public const string NotifyChannel = "wallaby_control";
 

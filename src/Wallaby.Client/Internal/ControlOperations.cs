@@ -32,32 +32,46 @@ internal static class ControlOperations
     private const string ObjectInUse = "55006";
     private const string UndefinedObject = "42704";
     private const string UndefinedTable = "42P01";
-    private const string UndefinedColumn = "42703";
+    private const string InvalidSchemaName = "3F000";
 
     private const string Notify = $"SELECT pg_notify('{ControlContract.NotifyChannel}', '');";
 
     /// <summary>
-    /// Read the control row. Returns <c>null</c> when the row or the table doesn't exist (a database no
-    /// Wallaby version with suspension support has touched) — both mean "running". A control table
-    /// bootstrapped by a host without widening support reads the widening flag as false.
+    /// The version the host's schema migrations have brought this database to, read from the
+    /// <c>wallaby.schema_version</c> ledger. 0 when the ledger (or the wallaby schema) doesn't exist: a
+    /// database no ledger-maintaining Wallaby host has ever run against. Drives every version-dependent
+    /// decision — column-set selection for reads, and the client's refusal of writes the schema cannot
+    /// serve — replacing per-column 42703 probing.
     /// </summary>
-    public static async Task<ControlRow?> ReadAsync(NpgsqlDataSource dataSource, CancellationToken ct)
+    public static async Task<int> GetSchemaVersionAsync(NpgsqlDataSource dataSource, CancellationToken ct)
     {
         try
         {
-            return await ReadAsync(dataSource, includeWidening: true, ct);
+            await using var cmd = dataSource.CreateCommand(
+                $"SELECT coalesce(max(version), 0) FROM {ControlContract.SchemaVersionLedger}");
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn)
+        catch (PostgresException ex) when (ex.SqlState is UndefinedTable or InvalidSchemaName)
         {
-            return await ReadAsync(dataSource, includeWidening: false, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
-        {
-            return null;
+            return 0;
         }
     }
 
-    private static async Task<ControlRow?> ReadAsync(
+    /// <summary>
+    /// Read the control row at the current schema version. Returns <c>null</c> when the row or the
+    /// table doesn't exist (a database no Wallaby host has touched) — both mean "running". Throws
+    /// 42703 against a schema older than the widening columns; the host heals that by migrating and
+    /// retrying, the client by passing the ledger-derived <c>includeWidening</c> to the overload.
+    /// </summary>
+    public static Task<ControlRow?> ReadAsync(NpgsqlDataSource dataSource, CancellationToken ct)
+        => ReadAsync(dataSource, includeWidening: true, ct);
+
+    /// <summary>
+    /// Read the control row. With <paramref name="includeWidening"/> false the pre-widening column set
+    /// is selected (the flag reads false), serving schemas older than
+    /// <see cref="ControlContract.WideningSchemaVersion"/>.
+    /// </summary>
+    public static async Task<ControlRow?> ReadAsync(
         NpgsqlDataSource dataSource, bool includeWidening, CancellationToken ct)
     {
         var wideningColumns = includeWidening
@@ -69,34 +83,43 @@ internal static class ControlOperations
                     {wideningColumns}
              FROM {ControlContract.Table} WHERE scope = '{ControlContract.Scope}'
              """);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
+        try
+        {
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct))
+            {
+                return null;
+            }
+
+            return new ControlRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4),
+                reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+                reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
+                reader.GetBoolean(7),
+                reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9));
+        }
+        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
         {
             return null;
         }
-
-        return new ControlRow(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.IsDBNull(2) ? null : reader.GetString(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4),
-            reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
-            reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
-            reader.GetBoolean(7),
-            reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9));
     }
 
     /// <summary>
     /// Transition Running → SuspendRequested. A suspension already requested or in force is left
     /// untouched (including its origin, so a configuration flag never converts a client suspension
     /// into an auto-resumable one, and vice versa). Returns true when this call made the transition.
+    /// The transition also ends any publication widening — the finalize drops the managed publications
+    /// outright, and resume recreates them with their configured narrow lists — so a widened flag
+    /// never survives into (or past) a suspension.
     /// A configuration-origin request also stamps <c>configuration_asserted_at</c> in the same
     /// statement, so a flag-less node's grace-guarded auto-resume can never observe the request
-    /// without its liveness heartbeat. Only the host asserts that origin (after ensuring the state
-    /// schema), so client-origin calls never reference the column and stay compatible with databases
-    /// bootstrapped by older hosts.
+    /// without its liveness heartbeat. Callers ensure the schema is current (the host bootstraps
+    /// before asserting; the client gates on the ledger version).
     /// </summary>
     public static async Task<bool> RequestSuspendAsync(
         NpgsqlDataSource dataSource, string origin, string? reason, string? requestedBy, CancellationToken ct)
@@ -111,7 +134,8 @@ internal static class ControlOperations
              ON CONFLICT (scope) DO UPDATE
                  SET state = EXCLUDED.state, origin = EXCLUDED.origin, reason = EXCLUDED.reason,
                      requested_by = EXCLUDED.requested_by, requested_at = EXCLUDED.requested_at,
-                     resumed_at = NULL, updated_at = EXCLUDED.updated_at{assertUpdate}
+                     resumed_at = NULL, publications_widened = false, widened_at = NULL, widened_by = NULL,
+                     updated_at = EXCLUDED.updated_at{assertUpdate}
                  WHERE control.state = '{ControlContract.StateRunning}';
              {Notify}
              """);
@@ -151,9 +175,9 @@ internal static class ControlOperations
     /// actually transitioned (a refused resume must not wake the cluster). Returns true when this call
     /// made the transition; false includes the table not existing (nothing to resume).
     /// With <paramref name="purge"/>, the same transition stamps <c>purge_on_resume</c>, asking the
-    /// slot-gap repair that serves the resume to purge sink destinations before its re-backfills; a
-    /// database bootstrapped by a host without the column surfaces <c>42703</c> to the caller rather
-    /// than silently dropping the request.
+    /// slot-gap repair that serves the resume to purge sink destinations before its re-backfills.
+    /// The resume references only columns every deployed schema carries, so an old installation can
+    /// always be unsuspended.
     /// </summary>
     public static async Task<bool> ResumeAsync(
         NpgsqlDataSource dataSource, bool configurationOriginOnly, CancellationToken ct,
@@ -189,12 +213,6 @@ internal static class ControlOperations
         catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
         {
             return false;
-        }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn && assertionGrace is not null && !purge)
-        {
-            // The heartbeat column doesn't exist (a database last touched by an older host), so no live
-            // asserter can be stamping it; resume with the pre-heartbeat semantics.
-            return await ResumeAsync(dataSource, configurationOriginOnly, ct);
         }
     }
 
@@ -239,41 +257,21 @@ internal static class ControlOperations
 
     /// <summary>
     /// Every slot Wallaby manages (<c>wallaby.slot_registry</c>) joined with whether it currently exists
-    /// on the server and is being streamed. Empty when the registry table doesn't exist; a registry
-    /// bootstrapped by a host without <c>publication_managed</c> reads every publication as unmanaged
-    /// (never authorize a drop no current-version provisioner has stamped).
+    /// on the server and is being streamed. Empty when the registry table doesn't exist.
     /// </summary>
     public static async Task<IReadOnlyList<ManagedSlotRow>> ListManagedSlotsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct)
     {
-        try
-        {
-            return await ListManagedSlotsAsync(dataSource, includePublicationManaged: true, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn)
-        {
-            return await ListManagedSlotsAsync(dataSource, includePublicationManaged: false, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
-        {
-            return [];
-        }
-    }
-
-    private static async Task<IReadOnlyList<ManagedSlotRow>> ListManagedSlotsAsync(
-        NpgsqlDataSource dataSource, bool includePublicationManaged, CancellationToken ct)
-    {
-        var managedColumn = includePublicationManaged ? "r.publication_managed" : "false";
         // The retained-WAL diff is guarded: pg_current_wal_lsn() errors on a standby in recovery,
         // and a slot missing from the server has no restart_lsn.
         await using var cmd = dataSource.CreateCommand(
-            $"""
+            """
              SELECT r.slot_name, r.publication, r.kind,
                     s.slot_name IS NOT NULL AS exists_on_server, COALESCE(s.active, false) AS active,
                     CASE WHEN s.restart_lsn IS NOT NULL AND NOT pg_is_in_recovery()
                          THEN pg_wal_lsn_diff(pg_current_wal_lsn(), s.restart_lsn)::bigint
                     END AS retained_wal_bytes,
-                    {managedColumn} AS publication_managed,
+                    r.publication_managed,
                     EXISTS (SELECT 1 FROM pg_publication p
                             JOIN pg_publication_rel pr ON pr.prpubid = p.oid
                             WHERE p.pubname = r.publication
@@ -282,25 +280,32 @@ internal static class ControlOperations
              LEFT JOIN pg_replication_slots s USING (slot_name)
              ORDER BY r.slot_name
              """);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var slots = new List<ManagedSlotRow>();
-        while (await reader.ReadAsync(ct))
+        try
         {
-            slots.Add(new ManagedSlotRow(
-                reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                reader.GetBoolean(3), reader.GetBoolean(4),
-                reader.IsDBNull(5) ? null : reader.GetInt64(5),
-                reader.GetBoolean(6), reader.GetBoolean(7)));
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            var slots = new List<ManagedSlotRow>();
+            while (await reader.ReadAsync(ct))
+            {
+                slots.Add(new ManagedSlotRow(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                    reader.GetBoolean(3), reader.GetBoolean(4),
+                    reader.IsDBNull(5) ? null : reader.GetInt64(5),
+                    reader.GetBoolean(6), reader.GetBoolean(7)));
+            }
+            return slots;
         }
-        return slots;
+        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        {
+            return [];
+        }
     }
 
     /// <summary>
     /// Request publication widening: set <c>publications_widened</c> while Running (a suspension already
     /// drops the managed publications, so widening one is meaningless — refused by the guard). Inserts
-    /// the control row when the table exists but no suspension was ever recorded; a table bootstrapped
-    /// by a host without widening support surfaces <c>42703</c>, and no table at all <c>42P01</c>.
-    /// Returns true when this call set the flag (false: already widened, or not Running).
+    /// the control row when the table exists but no suspension was ever recorded. Returns true when
+    /// this call set the flag (false: already widened, or not Running). Callers gate on the ledger
+    /// version first, so the widening columns exist.
     /// </summary>
     public static async Task<bool> RequestWidenAsync(
         NpgsqlDataSource dataSource, string? requestedBy, CancellationToken ct)
@@ -325,63 +330,48 @@ internal static class ControlOperations
 
     /// <summary>
     /// Clear the widening flag; the next leader term's reconcile re-narrows the publications (nothing
-    /// blocks on it). Returns true when this call cleared it; false includes the table or column not
-    /// existing (nothing could have widened).
+    /// blocks on it). Returns true when this call cleared it. Callers gate on the ledger version first.
     /// </summary>
     public static async Task<bool> RestoreWidenAsync(NpgsqlDataSource dataSource, CancellationToken ct)
     {
-        try
-        {
-            await using var cmd = dataSource.CreateCommand(
-                $"""
-                 WITH restored AS (
-                     UPDATE {ControlContract.Table}
-                     SET publications_widened = false, widened_at = NULL, widened_by = NULL, updated_at = now()
-                     WHERE scope = '{ControlContract.Scope}' AND publications_widened
-                     RETURNING 1
-                 )
-                 SELECT count(*), CASE WHEN count(*) > 0 THEN pg_notify('{ControlContract.NotifyChannel}', '') END
-                 FROM restored
-                 """);
-            return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) > 0;
-        }
-        catch (PostgresException ex) when (ex.SqlState is UndefinedTable or UndefinedColumn)
-        {
-            return false;
-        }
+        await using var cmd = dataSource.CreateCommand(
+            $"""
+             WITH restored AS (
+                 UPDATE {ControlContract.Table}
+                 SET publications_widened = false, widened_at = NULL, widened_by = NULL, updated_at = now()
+                 WHERE scope = '{ControlContract.Scope}' AND publications_widened
+                 RETURNING 1
+             )
+             SELECT count(*), CASE WHEN count(*) > 0 THEN pg_notify('{ControlContract.NotifyChannel}', '') END
+             FROM restored
+             """);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) > 0;
     }
 
     /// <summary>
     /// Every Wallaby-managed publication that still carries a column list or row filter on the server —
-    /// the set an <c>ALTER COLUMN ... TYPE</c> migration would still be refused over. Empty when the
-    /// registry table or ownership column doesn't exist (nothing a current-version host narrowed).
+    /// the set an <c>ALTER COLUMN ... TYPE</c> migration would still be refused over. Callers gate on
+    /// the ledger version first.
     /// </summary>
     public static async Task<IReadOnlyList<string>> ListNarrowedPublicationsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct)
     {
-        try
+        await using var cmd = dataSource.CreateCommand(
+            """
+            SELECT DISTINCT r.publication
+            FROM wallaby.slot_registry r
+            JOIN pg_publication p ON p.pubname = r.publication
+            JOIN pg_publication_rel pr ON pr.prpubid = p.oid
+            WHERE r.publication_managed AND (pr.prattrs IS NOT NULL OR pr.prqual IS NOT NULL)
+            ORDER BY r.publication
+            """);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var publications = new List<string>();
+        while (await reader.ReadAsync(ct))
         {
-            await using var cmd = dataSource.CreateCommand(
-                """
-                SELECT DISTINCT r.publication
-                FROM wallaby.slot_registry r
-                JOIN pg_publication p ON p.pubname = r.publication
-                JOIN pg_publication_rel pr ON pr.prpubid = p.oid
-                WHERE r.publication_managed AND (pr.prattrs IS NOT NULL OR pr.prqual IS NOT NULL)
-                ORDER BY r.publication
-                """);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            var publications = new List<string>();
-            while (await reader.ReadAsync(ct))
-            {
-                publications.Add(reader.GetString(0));
-            }
-            return publications;
+            publications.Add(reader.GetString(0));
         }
-        catch (PostgresException ex) when (ex.SqlState is UndefinedTable or UndefinedColumn)
-        {
-            return [];
-        }
+        return publications;
     }
 
     /// <summary>

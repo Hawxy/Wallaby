@@ -117,12 +117,14 @@ A client-requested suspension is **never auto-resumed**. Only an explicit `Resum
 For psql-only operators, the control row can be driven directly:
 
 ```sql
--- Request suspension (a running Wallaby node drops the slots and marks it 'Suspended'):
+-- Request suspension (a running Wallaby node drops the slots and marks it 'Suspended').
+-- Entering a suspension also ends any publication widening: resume recreates the narrow lists.
 INSERT INTO wallaby.control (scope, state, origin, reason, requested_at)
 VALUES ('wallaby', 'SuspendRequested', 'client', 'PG18 upgrade', now())
 ON CONFLICT (scope) DO UPDATE
     SET state = 'SuspendRequested', origin = 'client', reason = EXCLUDED.reason,
-        requested_at = now(), updated_at = now()
+        requested_at = now(), publications_widened = false, widened_at = NULL, widened_by = NULL,
+        updated_at = now()
     WHERE control.state = 'Running';
 SELECT pg_notify('wallaby_control', '');
 

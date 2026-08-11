@@ -12,13 +12,24 @@ namespace Wallaby.Internal.Control;
 /// </summary>
 internal sealed class PostgresControlStore(WallabyDataSource dataSource, WallabyOptions options, ILogger logger)
 {
-    /// <summary>The control row; <c>null</c> (no row/table yet) means running.</summary>
-    public Task<ControlRow?> ReadAsync(CancellationToken ct)
-        => ControlOperations.ReadAsync(dataSource.Source, ct);
-
-    /// <summary>True when the row exists and is not in the running state.</summary>
-    public async Task<bool> IsSuspensionInEffectAsync(CancellationToken ct)
-        => await ReadAsync(ct) is { } row && row.State != ControlContract.StateRunning;
+    /// <summary>
+    /// The control row; <c>null</c> (no row/table yet) means running. A control table predating this
+    /// build's columns (an upgraded deployment reading before any leader bootstrapped) is healed by
+    /// applying the pending schema steps and retrying, so every later operation in the same pass sees
+    /// a current schema.
+    /// </summary>
+    public async Task<ControlRow?> ReadAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await ControlOperations.ReadAsync(dataSource.Source, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            await EnsureStateSchemaAsync(ct);
+            return await ControlOperations.ReadAsync(dataSource.Source, ct);
+        }
+    }
 
     /// <summary>
     /// How stale the configuration-assertion heartbeat must be before a flag-less node auto-resumes.
@@ -42,10 +53,7 @@ internal sealed class PostgresControlStore(WallabyDataSource dataSource, Wallaby
     /// </summary>
     public async Task<bool> RequestConfigurationSuspendAsync(string? reason, CancellationToken ct)
     {
-        await using (var connection = await dataSource.Source.OpenConnectionAsync(ct))
-        {
-            await new StateSchemaBootstrapper(logger).EnsureAsync(connection, ct);
-        }
+        await EnsureStateSchemaAsync(ct);
         return await ControlOperations.RequestSuspendAsync(
             dataSource.Source, ControlContract.OriginConfiguration, reason, Environment.MachineName, ct);
     }
@@ -53,23 +61,16 @@ internal sealed class PostgresControlStore(WallabyDataSource dataSource, Wallaby
     /// <summary>
     /// Refresh the configuration-assertion liveness heartbeat; called by a flag-carrying node on every
     /// gate pass while its suspension is in force, so flag-less nodes keep refusing the auto-resume.
+    /// The gate reads the control row (healing an old schema) before it heartbeats, so the column
+    /// exists by the time this runs.
     /// </summary>
-    public async Task HeartbeatConfigurationAssertionAsync(CancellationToken ct)
+    public Task HeartbeatConfigurationAssertionAsync(CancellationToken ct)
+        => ControlOperations.HeartbeatConfigurationAssertionAsync(dataSource.Source, ct);
+
+    private async Task EnsureStateSchemaAsync(CancellationToken ct)
     {
-        try
-        {
-            await ControlOperations.HeartbeatConfigurationAssertionAsync(dataSource.Source, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == "42703")
-        {
-            // The control row was written by an older host and the heartbeat column is missing; apply
-            // the pending schema steps and retry.
-            await using (var connection = await dataSource.Source.OpenConnectionAsync(ct))
-            {
-                await new StateSchemaBootstrapper(logger).EnsureAsync(connection, ct);
-            }
-            await ControlOperations.HeartbeatConfigurationAssertionAsync(dataSource.Source, ct);
-        }
+        await using var connection = await dataSource.Source.OpenConnectionAsync(ct);
+        await new StateSchemaBootstrapper(logger).EnsureAsync(connection, ct);
     }
 
     /// <summary>

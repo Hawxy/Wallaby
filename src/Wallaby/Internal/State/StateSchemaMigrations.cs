@@ -1,3 +1,5 @@
+using Wallaby.Client.Internal;
+
 namespace Wallaby.Internal.State;
 
 /// <summary>
@@ -22,8 +24,12 @@ namespace Wallaby.Internal.State;
 /// </remarks>
 internal static class StateSchemaMigrations
 {
-    /// <summary>The schema version this build requires; the highest version in <see cref="Steps"/>.</summary>
-    public const int CurrentVersion = 6;
+    /// <summary>
+    /// The schema version this build requires; the highest version in <see cref="Steps"/>. Declared on
+    /// the shared contract so the remote client's schema gate and this migration list agree — a new
+    /// step bumps <see cref="ControlContract.SchemaVersion"/>.
+    /// </summary>
+    public const int CurrentVersion = ControlContract.SchemaVersion;
 
     /// <summary>
     /// Baseline: the full schema as deployed by the 1.0.0 betas. Databases bootstrapped by those betas

@@ -188,7 +188,94 @@ public class WidenPublicationsTests(PostgresFixture pg)
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(() => client.WidenPublicationsAsync());
 
-        ex.Message.ShouldContain("wallaby.control");
+        ex.Message.ShouldContain("Deploy a Wallaby host");
+    }
+
+    [Test]
+    public async Task A_pre_widening_schema_reads_fine_but_refuses_widening()
+    {
+        // A dedicated database hand-written at schema version 5 (the last version before the widening
+        // columns), simulating an installation whose hosts haven't upgraded yet.
+        await ExecAsync("CREATE DATABASE widen_old_schema");
+        var builder = new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Database = "widen_old_schema" };
+        await using var source = NpgsqlDataSource.Create(builder.ConnectionString);
+        await using (var setup = source.CreateCommand(
+            """
+            CREATE SCHEMA wallaby;
+            CREATE TABLE wallaby.schema_version (
+                version int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), applied_by text NOT NULL);
+            INSERT INTO wallaby.schema_version (version, applied_by) VALUES (5, 'test');
+            CREATE TABLE wallaby.control (
+                scope        text        PRIMARY KEY DEFAULT 'wallaby',
+                state        text        NOT NULL DEFAULT 'Running',
+                origin       text        NOT NULL DEFAULT 'client',
+                reason       text        NULL,
+                requested_by text        NULL,
+                requested_at timestamptz NULL,
+                suspended_at timestamptz NULL,
+                resumed_at   timestamptz NULL,
+                updated_at   timestamptz NOT NULL DEFAULT now(),
+                configuration_asserted_at timestamptz NULL,
+                purge_on_resume boolean NOT NULL DEFAULT false);
+            INSERT INTO wallaby.control (scope, state, suspended_at) VALUES ('wallaby', 'Suspended', now());
+            CREATE TABLE wallaby.slot_registry (
+                slot_name        text        PRIMARY KEY,
+                publication      text        NOT NULL,
+                consistent_point pg_lsn      NULL,
+                kind             text        NOT NULL DEFAULT 'primary',
+                created_at       timestamptz NOT NULL DEFAULT now(),
+                publication_managed boolean NOT NULL DEFAULT false);
+            INSERT INTO wallaby.slot_registry (slot_name, publication, publication_managed)
+            VALUES ('old_slot', 'old_pub', true);
+            """))
+        {
+            await setup.ExecuteNonQueryAsync();
+        }
+        await using var client = new WallabyControlClient(builder.ConnectionString);
+
+        // Reads adapt to the ledger version: the widening flag reads false, ownership reads through.
+        var state = await client.GetStateAsync();
+        state.State.ShouldBe(WallabySuspensionState.Suspended);
+        state.PublicationsWidened.ShouldBeFalse();
+        state.Slots.Single().PublicationManaged.ShouldBeTrue();
+
+        // Writes the schema cannot serve are refused with the found version.
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => client.WidenPublicationsAsync());
+        ex.Message.ShouldContain("version 5");
+
+        // Resume stays version-tolerant: an old installation can always be unsuspended.
+        (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);
+    }
+
+    [Test]
+    public async Task Suspend_ends_the_widening()
+    {
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureStateSchemaAsync();
+            (await client.WidenPublicationsAsync(new WallabyWidenOptions
+            {
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            })).PublicationsWidened.ShouldBeTrue();
+
+            var suspended = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                HostGracePeriod = TimeSpan.Zero,
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+
+            // Suspension supersedes widening: the managed publications are dropped outright, and
+            // resume recreates them with their configured narrow lists.
+            suspended.PublicationsWidened.ShouldBeFalse();
+            suspended.WidenedAt.ShouldBeNull();
+            (await client.ResumeAsync()).PublicationsWidened.ShouldBeFalse();
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
     }
 
     [Test]

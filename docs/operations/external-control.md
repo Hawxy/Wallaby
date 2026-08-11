@@ -94,7 +94,7 @@ Options on `WallabySuspendOptions`:
 | `Progress` | `null` | `IProgress<WallabyControlState>` reporting each poll. |
 
 ::: warning
-A **client-requested** suspension is never auto-resumed not by restarts, not by fresh deployments.
+A **client-requested** suspension is never auto-resumed: not by restarts, not by fresh deployments.
 Only an explicit `ResumeAsync` ends it.
 :::
 
@@ -139,8 +139,9 @@ Semantics worth knowing:
   or filters manually before the migration.
 - **Widen while suspended is refused** — a suspension already dropped the managed publications, so the
   migration runs freely; resume first if widening was what you meant.
-- **Suspend while widened is allowed**: the flag persists, resume recreates the publications *wide*,
-  and a later restore re-narrows them.
+- **Suspending while widened ends the widening**: the suspension drops the managed publications
+  outright, and resume recreates them with their configured narrow lists. Re-widen afterwards if a
+  migration is still pending.
 - Choosing between the two: engine upgrade (slots must not exist) ⇒
   [suspend](/operations/major-version-upgrades); schema migration only ⇒ widen.
 
@@ -182,12 +183,14 @@ semantics. See [Backfill](/backfill) for how snapshots run and what
 
 ## Requirements and privileges
 
-- **The client never creates schema objects.** The control tables are created by the Wallaby host at
-  startup, so each operation requires a host to have run against the database at least once (a
-  suspension-aware version for suspend/resume, a widening-aware one for
-  `WidenPublicationsAsync`); `SuspendAsync`, `WidenPublicationsAsync`, and `RequestBackfillAsync` throw
-  a descriptive `InvalidOperationException` otherwise. Reads (`GetStateAsync`, `GetBackfillStatusAsync`)
-  will always work. The only DDL it ever runs targets Wallaby-managed publications, and only in the
+- **The client never creates schema objects.** The `wallaby` schema is created and migrated by the
+  Wallaby host at startup, and the client checks its version ledger (`wallaby.schema_version`) instead
+  of probing: `SuspendAsync`, `WidenPublicationsAsync`, and `RestorePublicationsAsync` require the
+  schema version the client was built against and throw a descriptive `InvalidOperationException`
+  naming the found version otherwise (`RequestBackfillAsync` only needs a host to have run at all).
+  `ResumeAsync` deliberately works against any schema version, so an old installation can always be
+  unsuspended. Reads (`GetStateAsync`, `GetBackfillStatusAsync`) will always work — their column set
+  adapts to the ledger. The only DDL it ever runs targets Wallaby-managed publications, and only in the
   no-host fallbacks: dropping them when it finalizes a suspension, and rewriting their membership when
   it applies a widening — in both cases objects the host recreates or re-narrows from configuration.
 - Suspending needs the same rights Wallaby itself uses: drop its replication slots and update the
