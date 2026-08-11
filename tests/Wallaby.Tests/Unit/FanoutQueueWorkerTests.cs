@@ -46,8 +46,9 @@ public class FanoutQueueWorkerTests
     {
         public Task<BackfillState?> GetAsync(string t, CancellationToken ct) => Task.FromResult<BackfillState?>(null);
         public Task SaveAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task SaveProgressAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task RequestAsync(string t, string? v, bool purge, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(string t, BackfillStatus s, string? c, long r, CancellationToken ct)
+            => Task.CompletedTask;
+        public Task RequestAsync(string t, bool purge, CancellationToken ct) => Task.CompletedTask;
         public Task<bool> CancelRequestAsync(string t, CancellationToken ct) => Task.FromResult(false);
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);

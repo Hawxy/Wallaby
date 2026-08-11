@@ -30,6 +30,7 @@
     <Compile Include="..\Wallaby.Client\Internal\ControlContract.cs" Link="Internal\Control\ControlContract.cs" />
     <Compile Include="..\Wallaby.Client\Internal\ControlOperations.cs" Link="Internal\Control\ControlOperations.cs" />
     <Compile Include="..\Wallaby.Client\Internal\BackfillContract.cs" Link="Internal\Control\BackfillContract.cs" />
+    <Compile Include="..\Wallaby.Client\Internal\BackfillOperations.cs" Link="Internal\Control\BackfillOperations.cs" />
   </ItemGroup>
 
   <ItemGroup>

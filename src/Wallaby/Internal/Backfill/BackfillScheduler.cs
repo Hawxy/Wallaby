@@ -113,7 +113,7 @@ internal sealed class BackfillScheduler(
             }
 
             logger.BackfillScheduled(decision.Action, qualifiedName, table.TransformVersion);
-            await coordinator.BackfillTableAsync(table.Table, table.TransformVersion, ct);
+            await coordinator.BackfillTableAsync(table.Table, ct);
         }
     }
 

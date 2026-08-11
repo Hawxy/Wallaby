@@ -21,14 +21,13 @@ internal sealed class DefaultBackfillManager(WallabyModel model, IBackfillStateS
     public Task RequestBackfillAsync(Type entityClrType, CancellationToken ct = default)
         => RequestBackfillAsync(entityClrType, purge: false, ct);
 
-    public async Task RequestBackfillAsync(Type entityClrType, bool purge, CancellationToken ct = default)
+    public Task RequestBackfillAsync(Type entityClrType, bool purge, CancellationToken ct = default)
     {
         var table = model.FindByClrType(entityClrType)
             ?? throw new WallabyConfigurationException(
                 $"Cannot request a backfill for '{entityClrType.FullName}': it is not a captured table.");
 
-        var existing = await store.GetAsync(table.QualifiedName, ct);
-        await store.RequestAsync(table.QualifiedName, existing?.TransformVersion, purge, ct);
+        return store.RequestAsync(table.QualifiedName, purge, ct);
     }
 
     public Task<bool> CancelBackfillAsync<TEntity>(CancellationToken ct = default) where TEntity : class

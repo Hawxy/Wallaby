@@ -1,5 +1,6 @@
 using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Client.Internal;
 
 namespace Wallaby.Internal.State;
 
@@ -36,20 +37,12 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         return results;
     }
 
-    public Task SaveAsync(BackfillState state, CancellationToken ct)
-        => UpsertAsync(state, guardRequested: false, ct);
-
-    public Task SaveProgressAsync(BackfillState state, CancellationToken ct)
-        => UpsertAsync(state, guardRequested: true, ct);
-
-    private async Task UpsertAsync(BackfillState state, bool guardRequested, CancellationToken ct)
+    public async Task SaveAsync(BackfillState state, CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
-        // The guard makes a progress save lose to a concurrent manual request: the row stays 'Requested'
-        // and the scheduler re-runs the table fresh.
         await using var cmd = new NpgsqlCommand(
-            $"""
+            """
             INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, purge, updated_at)
             VALUES (@t, @s, @v, @c::jsonb, @r, @p, now())
             ON CONFLICT (table_qualified) DO UPDATE
@@ -59,7 +52,6 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
                     rows_copied = EXCLUDED.rows_copied,
                     purge = EXCLUDED.purge,
                     updated_at = EXCLUDED.updated_at
-            {(guardRequested ? "WHERE wallaby.backfill_state.status <> 'Requested'" : string.Empty)}
             """,
             connection);
         cmd.Parameters.AddWithValue("t", state.TableQualifiedName);
@@ -71,46 +63,33 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task RequestAsync(string tableQualifiedName, string? transformVersion, bool purge, CancellationToken ct)
+    public async Task SaveProgressAsync(
+        string tableQualifiedName, BackfillStatus status, string? cursorJson, long rowsCopied, CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
 
-        // The trailing pg_notify rides the same auto-committed batch, so the wake-up is delivered
-        // atomically with the row becoming visible. Purge is sticky-OR: a pending purge mark is only
-        // cleared by the fresh run that serves it, never by a racing plain request.
+        // Progress owns only progress: transform_version keeps the value the fresh run started with,
+        // and a purge mark is never touched. The guard makes the save lose to a concurrent manual
+        // request: the row stays 'Requested' and the scheduler re-runs the table fresh.
         await using var cmd = new NpgsqlCommand(
-            $"""
-            INSERT INTO wallaby.backfill_state (table_qualified, status, transform_version, cursor_json, rows_copied, purge, updated_at)
-            VALUES (@t, 'Requested', @v, NULL, 0, @p, now())
-            ON CONFLICT (table_qualified) DO UPDATE
-                SET status = 'Requested',
-                    transform_version = EXCLUDED.transform_version,
-                    cursor_json = NULL,
-                    rows_copied = 0,
-                    purge = wallaby.backfill_state.purge OR EXCLUDED.purge,
-                    updated_at = now();
-            SELECT pg_notify('{WallabySchema.BackfillNotifyChannel}', '');
+            """
+            UPDATE wallaby.backfill_state
+            SET status = @s, cursor_json = @c::jsonb, rows_copied = @r, updated_at = now()
+            WHERE table_qualified = @t AND status <> 'Requested'
             """,
             connection);
         cmd.Parameters.AddWithValue("t", tableQualifiedName);
-        cmd.Parameters.AddWithValue("v", (object?)transformVersion ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("p", purge);
+        cmd.Parameters.AddWithValue("s", status.ToString());
+        cmd.Parameters.AddWithValue("c", (object?)cursorJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("r", rowsCopied);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<bool> CancelRequestAsync(string tableQualifiedName, CancellationToken ct)
-    {
-        await using var connection = await dataSource.OpenConnectionAsync(ct);
+    public Task RequestAsync(string tableQualifiedName, bool purge, CancellationToken ct)
+        => BackfillOperations.RequestAsync(dataSource, tableQualifiedName, purge, ct);
 
-        return await PgExec.ExecuteAsync(
-            connection,
-            """
-            UPDATE wallaby.backfill_state
-            SET status = 'Cancelled', purge = false, updated_at = now()
-            WHERE table_qualified = @t AND status = 'Requested'
-            """,
-            ct, ("t", tableQualifiedName)) > 0;
-    }
+    public Task<bool> CancelRequestAsync(string tableQualifiedName, CancellationToken ct)
+        => BackfillOperations.CancelAsync(dataSource, tableQualifiedName, ct);
 
     public async Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
     {

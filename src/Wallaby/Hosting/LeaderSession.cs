@@ -325,18 +325,14 @@ internal sealed class LeaderSession(
         }));
 
         // A resume can request purging per operation (ResumeAsync(purge: true)); it ORs with the static
-        // option, and an existing pending purge mark stays sticky (matching manual requests).
+        // option, and the shared request statement keeps an existing pending purge mark sticky and the
+        // stamped transform version intact (matching manual requests).
         var purgeResume = await ControlOperations.ReadPurgeOnResumeAsync(dataSource.Source, ct);
+        var purgeRepair = options.PurgeOnSlotGapRepair || purgeResume;
 
         foreach (var table in components.BackfillTables)
         {
-            var existing = await components.BackfillStore.GetAsync(table.Table.QualifiedName, ct);
-            await components.BackfillStore.SaveAsync(
-                new BackfillState(
-                    table.Table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
-                    null, 0, DateTimeOffset.UtcNow,
-                    Purge: options.PurgeOnSlotGapRepair || purgeResume || existing?.Purge == true),
-                ct);
+            await components.BackfillStore.RequestAsync(table.Table.QualifiedName, purgeRepair, ct);
         }
 
         // Consume the flag between the marks and the checkpoint: a crash before this line re-reads it,

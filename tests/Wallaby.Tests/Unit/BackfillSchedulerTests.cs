@@ -132,8 +132,9 @@ public class BackfillSchedulerTests
         public INotifySubscription Subscribe() => new WaitSignal(Events, onWait);
 
         public Task SaveAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task SaveProgressAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task RequestAsync(string t, string? v, bool purge, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(string t, BackfillStatus s, string? c, long r, CancellationToken ct)
+            => Task.CompletedTask;
+        public Task RequestAsync(string t, bool purge, CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<BackfillState>>([]);
     }

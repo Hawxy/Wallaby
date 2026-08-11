@@ -473,8 +473,7 @@ internal sealed class WallabyPipeline(
         logger.FanoutKeyCapExceeded(table.QualifiedName);
         if (backfillStore is not null)
         {
-            // The scheduler writes the declared version as the fresh run starts, so null loses nothing.
-            await backfillStore.RequestAsync(table.QualifiedName, transformVersion: null, purge: false, ct);
+            await backfillStore.RequestAsync(table.QualifiedName, purge: false, ct);
         }
     }
 
