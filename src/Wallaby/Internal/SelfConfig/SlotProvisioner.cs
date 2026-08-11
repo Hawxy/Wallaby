@@ -16,7 +16,8 @@ internal sealed class SlotProvisioner(ILogger logger)
     /// (suspension finalize, manual drop, server invalidation), so stream continuity cannot be assumed.
     /// </summary>
     public async Task<(bool Created, string? ConsistentPoint, bool Recreated)> EnsureAsync(
-        NpgsqlConnection connection, string slot, string publication, string kind, CancellationToken ct)
+        NpgsqlConnection connection, string slot, string publication, string kind, bool publicationManaged,
+        CancellationToken ct)
     {
         var existing = await GetSlotAsync(connection, slot, ct);
         if (existing is not null)
@@ -39,7 +40,8 @@ internal sealed class SlotProvisioner(ILogger logger)
             {
                 // Record the adopted slot so wallaby.slot_registry reflects reality (we don't know its original
                 // consistent point, so keep any value already recorded).
-                await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint: null, kind, ct);
+                await UpsertSlotRegistryAsync(
+                    connection, slot, publication, consistentPoint: null, kind, publicationManaged, ct);
                 return (false, null, false);
             }
 
@@ -56,7 +58,7 @@ internal sealed class SlotProvisioner(ILogger logger)
         var consistentPoint = await PgExec.ScalarStringAsync(
             connection, "SELECT lsn::text FROM pg_create_logical_replication_slot(@s, 'pgoutput')", ct, ("s", slot));
 
-        await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint, kind, ct);
+        await UpsertSlotRegistryAsync(connection, slot, publication, consistentPoint, kind, publicationManaged, ct);
 
         logger.SlotCreated(slot, consistentPoint);
         return (true, consistentPoint, alreadyRegistered);
@@ -81,19 +83,21 @@ internal sealed class SlotProvisioner(ILogger logger)
     }
 
     private static Task UpsertSlotRegistryAsync(
-        NpgsqlConnection connection, string slot, string publication, string? consistentPoint, string kind, CancellationToken ct)
+        NpgsqlConnection connection, string slot, string publication, string? consistentPoint, string kind,
+        bool publicationManaged, CancellationToken ct)
         => PgExec.ExecuteAsync(
             connection,
             """
-            INSERT INTO wallaby.slot_registry (slot_name, publication, consistent_point, kind)
-            VALUES (@s, @p, @cp::pg_lsn, @k)
+            INSERT INTO wallaby.slot_registry (slot_name, publication, consistent_point, kind, publication_managed)
+            VALUES (@s, @p, @cp::pg_lsn, @k, @m)
             ON CONFLICT (slot_name) DO UPDATE
                 SET publication = EXCLUDED.publication,
                     consistent_point = COALESCE(EXCLUDED.consistent_point, slot_registry.consistent_point),
-                    kind = EXCLUDED.kind
+                    kind = EXCLUDED.kind,
+                    publication_managed = EXCLUDED.publication_managed
             """,
             ct,
-            ("s", slot), ("p", publication), ("cp", consistentPoint), ("k", kind));
+            ("s", slot), ("p", publication), ("cp", consistentPoint), ("k", kind), ("m", publicationManaged));
 }
 
 /// <summary>Source-generated log messages for <see cref="SlotProvisioner"/>.</summary>

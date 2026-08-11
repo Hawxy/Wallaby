@@ -40,6 +40,14 @@ public class ControlClientTests(PostgresFixture pg)
         return (long)(await cmd.ExecuteScalarAsync())!;
     }
 
+    private async Task<long> CountPublicationsAsync(params string[] names)
+    {
+        await using var cmd = pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM pg_publication WHERE pubname = ANY($1)");
+        cmd.Parameters.AddWithValue(names);
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
     // The client performs no DDL itself, so these tests simulate a host having run against the
     // database with the real bootstrapper (single source of truth for the wallaby DDL).
     private Task EnsureStateSchemaAsync() => WallabyStateSchema.EnsureAsync(pg.DataSource);
@@ -103,21 +111,28 @@ public class ControlClientTests(PostgresFixture pg)
     }
 
     [Test]
-    public async Task Suspend_without_a_host_drops_managed_slots_from_the_client()
+    public async Task Suspend_without_a_host_drops_managed_slots_and_publications_from_the_client()
     {
         var suffix = Guid.NewGuid().ToString("N");
         var primary = $"cdc_slot_{suffix}";
         var external = $"elt_slot_{suffix}";
+        var unmanaged = $"byo_slot_{suffix}";
         await using var client = new WallabyControlClient(pg.ConnectionString);
         try
         {
             await EnsureStateSchemaAsync();
+            await ExecAsync($"CREATE TABLE quiesce_target_{suffix} (id int PRIMARY KEY, code text)");
+            await ExecAsync($"CREATE PUBLICATION pub_{suffix} FOR TABLE quiesce_target_{suffix} (id, code)");
+            await ExecAsync($"CREATE PUBLICATION ext_pub_{suffix} FOR TABLE quiesce_target_{suffix}");
+            await ExecAsync($"CREATE PUBLICATION byo_pub_{suffix} FOR TABLE quiesce_target_{suffix}");
             await ExecAsync($"SELECT pg_create_logical_replication_slot('{primary}', 'pgoutput')");
             await ExecAsync($"SELECT pg_create_logical_replication_slot('{external}', 'pgoutput')");
             await ExecAsync(
                 $"""
-                 INSERT INTO wallaby.slot_registry (slot_name, publication, kind)
-                 VALUES ('{primary}', 'pub_{suffix}', 'primary'), ('{external}', 'ext_pub_{suffix}', 'external')
+                 INSERT INTO wallaby.slot_registry (slot_name, publication, kind, publication_managed)
+                 VALUES ('{primary}', 'pub_{suffix}', 'primary', true),
+                        ('{external}', 'ext_pub_{suffix}', 'external', true),
+                        ('{unmanaged}', 'byo_pub_{suffix}', 'primary', false)
                  """);
 
             var state = await client.SuspendAsync(new WallabySuspendOptions
@@ -131,13 +146,25 @@ public class ControlClientTests(PostgresFixture pg)
             state.Origin.ShouldBe(WallabySuspensionOrigin.Client);
             state.Reason.ShouldBe("PG18 upgrade");
             state.SuspendedAt.ShouldNotBeNull();
-            state.Slots.Count.ShouldBe(2);
+            state.Slots.Count.ShouldBe(3);
             state.Slots.ShouldAllBe(s => !s.ExistsOnServer);
             (await CountSlotsAsync(primary, external)).ShouldBe(0);
+
+            // Managed publications are dropped with the slots; the unmanaged one (Wallaby cannot
+            // recreate it) survives.
+            (await CountPublicationsAsync($"pub_{suffix}", $"ext_pub_{suffix}")).ShouldBe(0);
+            (await CountPublicationsAsync($"byo_pub_{suffix}")).ShouldBe(1);
+
+            // The quiesced state is the point: a column-type migration blocked by the publication
+            // column list now runs.
+            await ExecAsync($"ALTER TABLE quiesce_target_{suffix} ALTER COLUMN code TYPE varchar(64)");
         }
         finally
         {
-            await ExecAsync($"DELETE FROM wallaby.slot_registry WHERE slot_name IN ('{primary}', '{external}')");
+            await ExecAsync($"DROP PUBLICATION IF EXISTS byo_pub_{suffix}");
+            await ExecAsync($"DROP TABLE IF EXISTS quiesce_target_{suffix}");
+            await ExecAsync(
+                $"DELETE FROM wallaby.slot_registry WHERE slot_name IN ('{primary}', '{external}', '{unmanaged}')");
             await ResetControlAsync();
         }
     }

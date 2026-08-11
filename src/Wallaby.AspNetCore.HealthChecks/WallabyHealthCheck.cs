@@ -62,6 +62,13 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
         if (s.LeaderSince is { } leaderSince) data["leaderSince"] = leaderSince;
         if (s.SuspendedSince is { } suspendedSince) data["suspendedSince"] = suspendedSince;
         if (s.SuspensionReason is { } suspensionReason) data["suspensionReason"] = suspensionReason;
+        // Deliberately Healthy while widened: capture is fully functional, only the column-list
+        // narrowing is temporarily lifted.
+        if (s.PublicationsWidened)
+        {
+            data["publicationsWidened"] = true;
+            if (s.PublicationsWidenedAt is { } widenedAt) data["publicationsWidenedAt"] = widenedAt;
+        }
         if (s.LastProgressAt is { } progress) data["lastProgressAt"] = progress;
         if (s.LastIngestionLagSeconds >= 0) data["lastIngestionLagSeconds"] = s.LastIngestionLagSeconds;
         foreach (var (sink, at) in s.LastSinkDeliveryAt)

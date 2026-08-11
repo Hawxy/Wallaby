@@ -71,6 +71,11 @@ internal sealed class WallabyStatus : IWallabyStatus
             SuspendedSince = since, SuspensionReason = reason,
         });
 
+    internal void SetPublicationsWidened(bool widened, DateTimeOffset? at) =>
+        Update(s => s.PublicationsWidened == widened && s.PublicationsWidenedAt == at
+            ? s
+            : s with { PublicationsWidened = widened, PublicationsWidenedAt = at });
+
     internal void RecordLeaderFailure(string error) =>
         Update(s => s with { ConsecutiveLeaderFailures = s.ConsecutiveLeaderFailures + 1, LastError = error });
 

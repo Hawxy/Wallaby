@@ -30,5 +30,11 @@ internal sealed record SelfConfigResult(
 /// </summary>
 internal interface ISelfConfigurator
 {
-    Task<SelfConfigResult> EnsureConfiguredAsync(WallabyModel model, CancellationToken ct);
+    /// <summary>
+    /// With <paramref name="widenPublications"/> every managed publication reconciles to plain
+    /// whole-table membership (no column lists), so schema migrations blocked by publication column
+    /// lists can run; the next reconcile without the flag restores the narrow lists.
+    /// </summary>
+    Task<SelfConfigResult> EnsureConfiguredAsync(
+        WallabyModel model, CancellationToken ct, bool widenPublications = false);
 }

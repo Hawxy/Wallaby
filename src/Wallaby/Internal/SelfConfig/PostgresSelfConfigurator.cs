@@ -25,7 +25,8 @@ internal sealed class PostgresSelfConfigurator(
     private readonly SlotProvisioner _slots = new(logger);
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
-    public async Task<SelfConfigResult> EnsureConfiguredAsync(WallabyModel model, CancellationToken ct)
+    public async Task<SelfConfigResult> EnsureConfiguredAsync(
+        WallabyModel model, CancellationToken ct, bool widenPublications = false)
     {
         using var activity = _instr.StartSelfConfig();
         activity?.SetTag(WallabyInstrumentation.SlotTag, options.SlotName);
@@ -42,14 +43,15 @@ internal sealed class PostgresSelfConfigurator(
 
             var warnings = new List<string>();
             var publication = await _publications.EnsureAsync(
-                connection, options.PublicationName, DesiredTables(model).ToList(), options.ManagePublicationTables,
-                warnings, ct);
+                connection, options.PublicationName, DesiredTables(model, widenPublications).ToList(),
+                options.ManagePublicationTables, warnings, ct);
             if (!publication.ViaRoot)
             {
                 await ValidatePartitionedCapturesAsync(connection, model, ct);
             }
             var (slotCreated, consistentPoint, slotRecreated) = await _slots.EnsureAsync(
-                connection, options.SlotName, options.PublicationName, kind: "primary", ct);
+                connection, options.SlotName, options.PublicationName, kind: "primary",
+                publicationManaged: options.ManagePublicationTables, ct);
             await ValidateReplicaIdentityAsync(connection, model, warnings, ct);
             var externalResults = await EnsureExternalSlotsAsync(connection, ct);
 
@@ -106,8 +108,9 @@ internal sealed class PostgresSelfConfigurator(
                 .ToList();
             var publication = await _publications.EnsureAsync(
                 connection, spec.PublicationName, tables, reconcile: true, warnings: null, ct);
+            // External publications are always Wallaby-created from the declaration, so always managed.
             var (slotCreated, _, _) = await _slots.EnsureAsync(
-                connection, spec.SlotName, spec.PublicationName, kind: "external", ct);
+                connection, spec.SlotName, spec.PublicationName, kind: "external", publicationManaged: true, ct);
             logger.ExternalSlotConfigured(spec.SlotName, spec.PublicationName);
             results.Add(new ExternalSlotResult(spec.SlotName, spec.PublicationName, publication.Created, slotCreated));
         }
@@ -115,12 +118,13 @@ internal sealed class PostgresSelfConfigurator(
         return results;
     }
 
-    private IEnumerable<PublicationTableSpec> DesiredTables(WallabyModel model)
+    private IEnumerable<PublicationTableSpec> DesiredTables(WallabyModel model, bool widenPublications)
     {
         // RequiresFullReplicaIdentity tables are never listed, regardless of current relreplident: the
         // user is being told to flip them to FULL, and a list would turn that flip into publisher-side
-        // DML errors on the application's own UPDATE/DELETE statements.
-        var listEligible = options.PublicationColumnLists && options.ManagePublicationTables;
+        // DML errors on the application's own UPDATE/DELETE statements. While widening is in effect,
+        // every table publishes whole so blocked column-type migrations can run.
+        var listEligible = options.PublicationColumnLists && options.ManagePublicationTables && !widenPublications;
         foreach (var table in model.Tables)
         {
             // Only deliberately narrowed tables are listed. A list pins every column in it against

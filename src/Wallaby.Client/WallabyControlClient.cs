@@ -191,6 +191,131 @@ public sealed class WallabyControlClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Temporarily widen every Wallaby-managed publication to plain whole-table membership (no column
+    /// lists), so schema migrations refused over publication column lists or row filters
+    /// (<c>cannot alter type of a column used by a publication...</c>) can run — without suspending:
+    /// no slot drop, no capture gap, no re-backfill. A running host applies the change by bouncing its
+    /// leader session (an atomic <c>SET TABLE</c>, streaming pauses for one re-election); with no host
+    /// running, this client rewrites the publications itself after
+    /// <see cref="WallabyWidenOptions.HostGracePeriod"/>. While widened, deliberately excluded columns
+    /// are published; restore the narrow lists with <see cref="RestorePublicationsAsync"/> once the
+    /// migration is done. Unmanaged publications (<c>ManagePublicationTables = false</c>) are never
+    /// touched. Idempotent when already widened.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The database has no <c>wallaby.control</c> table (no widening-aware Wallaby version has run
+    /// against it), the host that bootstrapped it predates widening support, or the installation is
+    /// suspended — a suspension already drops the managed publications, so blocked migrations run now.
+    /// </exception>
+    /// <exception cref="WallabyControlTimeoutException">
+    /// The <see cref="WallabyWidenOptions.Timeout"/> expired while some managed publication still
+    /// carries a column list or row filter. The request stays persisted.
+    /// </exception>
+    public async Task<WallabyControlState> WidenPublicationsAsync(
+        WallabyWidenOptions? options = null, CancellationToken ct = default)
+    {
+        options ??= new WallabyWidenOptions();
+        bool transitioned;
+        try
+        {
+            transitioned = await ControlOperations.RequestWidenAsync(
+                _dataSource, options.RequestedBy ?? Environment.MachineName, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            throw new InvalidOperationException(
+                "This database has no wallaby.control table: no widening-aware Wallaby version has run " +
+                "against it. Deploy a Wallaby host with publication-widening support first — it creates " +
+                "the control table at startup.", ex);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            throw new InvalidOperationException(
+                "This database's wallaby.control table predates publication widening: no Wallaby version " +
+                "with widening support has run against it. Deploy a newer Wallaby host first (it migrates " +
+                "the columns at startup).", ex);
+        }
+        _logger.WidenRequested(transitioned);
+
+        if (!transitioned)
+        {
+            var current = await GetStateAsync(ct);
+            if (current.State != WallabySuspensionState.Running)
+            {
+                throw new InvalidOperationException(
+                    "The installation is suspended; widening is refused because a suspension already " +
+                    "drops the managed publications — blocked schema migrations run freely now. Run the " +
+                    "migration, or ResumeAsync first if you meant to widen instead of suspending.");
+            }
+            // Already widened: idempotent — fall through so the wait still verifies completion.
+        }
+
+        if (!options.WaitForCompletion)
+        {
+            return await GetStateAsync(ct);
+        }
+
+        var start = Stopwatch.GetTimestamp();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(options.Timeout);
+        var state = await GetStateAsync(ct);
+        IReadOnlyList<string> narrowed = [];
+        try
+        {
+            while (true)
+            {
+                state = await GetStateAsync(deadline.Token);
+                options.Progress?.Report(state);
+                if (!state.PublicationsWidened)
+                {
+                    // Restored (or never set: resumed/suspended race) underneath us; report reality
+                    // rather than fighting over the flag.
+                    return state;
+                }
+                narrowed = await ControlOperations.ListNarrowedPublicationsAsync(_dataSource, deadline.Token);
+                if (narrowed.Count == 0)
+                {
+                    return state;
+                }
+
+                // Past the grace period, any still-narrowed managed publication is rewritten from here —
+                // covers no host running; harmless against a live host applying it concurrently.
+                if (Stopwatch.GetElapsedTime(start) >= options.HostGracePeriod)
+                {
+                    _logger.ClientWidening();
+                    await ControlOperations.WidenPublicationsDirectAsync(_dataSource, _logger, deadline.Token);
+                    continue;
+                }
+
+                await Task.Delay(PollInterval, deadline.Token);
+            }
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new WallabyControlTimeoutException(
+                $"Publication widening did not complete within {options.Timeout}. Publications still " +
+                $"carrying a column list or row filter: {string.Join(", ", narrowed)}. The request stays " +
+                "persisted; a running host applies it on its next leader term.",
+                state);
+        }
+    }
+
+    /// <summary>
+    /// End a publication widening: clear the flag so the next leader term's reconcile restores the
+    /// narrow column lists. Returns immediately with the current state — nothing blocks on the
+    /// re-narrowing (it lands within seconds when a host is running, or on the next host startup
+    /// otherwise; watch it via <see cref="GetStateAsync"/> and each slot's
+    /// <see cref="WallabyManagedSlot.PublicationNarrowed"/>). Only a host restores: the narrow lists
+    /// come from the captured model, which this client doesn't have. A no-op when nothing is widened.
+    /// </summary>
+    public async Task<WallabyControlState> RestorePublicationsAsync(CancellationToken ct = default)
+    {
+        var transitioned = await ControlOperations.RestoreWidenAsync(_dataSource, ct);
+        _logger.RestoreRequested(transitioned);
+        return await GetStateAsync(ct);
+    }
+
+    /// <summary>
     /// Request a (re)backfill of <paramref name="tableQualifiedName"/> (schema-qualified, e.g.
     /// <c>public.orders</c>). The request is persisted — it survives restarts and is served by whichever
     /// node holds leadership, signalled instantly via LISTEN/NOTIFY. A request made while the table is
@@ -260,7 +385,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
         var mapped = slots.Count == 0
             ? []
             : slots.Select(s => new WallabyManagedSlot(
-                    s.SlotName, s.Publication, s.Kind, s.ExistsOnServer, s.Active, s.RetainedWalBytes))
+                    s.SlotName, s.Publication, s.Kind, s.ExistsOnServer, s.Active, s.RetainedWalBytes,
+                    s.PublicationManaged, s.PublicationNarrowed))
                 .ToList() as IReadOnlyList<WallabyManagedSlot>;
         if (row is null)
         {
@@ -279,7 +405,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
             ? WallabySuspensionOrigin.Configuration
             : WallabySuspensionOrigin.Client;
         return new WallabyControlState(
-            state, origin, row.Reason, row.RequestedBy, row.RequestedAt, row.SuspendedAt, row.ResumedAt, mapped);
+            state, origin, row.Reason, row.RequestedBy, row.RequestedAt, row.SuspendedAt, row.ResumedAt,
+            mapped, row.PublicationsWidened, row.WidenedAt, row.WidenedBy);
     }
 
     /// <summary>Disposes the data source when this client owns it (the connection-string constructor).</summary>
@@ -297,6 +424,15 @@ internal static partial class WallabyControlClientLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby resume requested (transitioned={Transitioned}, purge={Purge}).")]
     internal static partial void ResumeRequested(this ILogger logger, bool transitioned, bool purge);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Publication widening requested (transitioned={Transitioned}).")]
+    internal static partial void WidenRequested(this ILogger logger, bool transitioned);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "No Wallaby host applied the publication widening within the grace period; rewriting the managed publications from this client.")]
+    internal static partial void ClientWidening(this ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Publication restore requested (transitioned={Transitioned}); the narrow column lists are reapplied by the next Wallaby leader term.")]
+    internal static partial void RestoreRequested(this ILogger logger, bool transitioned);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill requested for table {Table} (purge={Purge}).")]
     internal static partial void BackfillRequested(this ILogger logger, string table, bool purge);

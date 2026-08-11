@@ -11,11 +11,15 @@ internal sealed record ControlRow(
     string? RequestedBy,
     DateTimeOffset? RequestedAt,
     DateTimeOffset? SuspendedAt,
-    DateTimeOffset? ResumedAt);
+    DateTimeOffset? ResumedAt,
+    bool PublicationsWidened = false,
+    DateTimeOffset? WidenedAt = null,
+    string? WidenedBy = null);
 
 /// <summary>A <c>wallaby.slot_registry</c> entry joined against the server's live slot catalog.</summary>
 internal sealed record ManagedSlotRow(
-    string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active, long? RetainedWalBytes);
+    string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active, long? RetainedWalBytes,
+    bool PublicationManaged, bool PublicationNarrowed);
 
 /// <summary>
 /// Self-contained SQL operations on the wallaby control plane, shared verbatim between the host and the
@@ -34,36 +38,54 @@ internal static class ControlOperations
 
     /// <summary>
     /// Read the control row. Returns <c>null</c> when the row or the table doesn't exist (a database no
-    /// Wallaby version with suspension support has touched) — both mean "running".
+    /// Wallaby version with suspension support has touched) — both mean "running". A control table
+    /// bootstrapped by a host without widening support reads the widening flag as false.
     /// </summary>
     public static async Task<ControlRow?> ReadAsync(NpgsqlDataSource dataSource, CancellationToken ct)
     {
         try
         {
-            await using var cmd = dataSource.CreateCommand(
-                $"""
-                 SELECT state, origin, reason, requested_by, requested_at, suspended_at, resumed_at
-                 FROM {ControlContract.Table} WHERE scope = '{ControlContract.Scope}'
-                 """);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct))
-            {
-                return null;
-            }
-
-            return new ControlRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4),
-                reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
-                reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6));
+            return await ReadAsync(dataSource, includeWidening: true, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn)
+        {
+            return await ReadAsync(dataSource, includeWidening: false, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
         {
             return null;
         }
+    }
+
+    private static async Task<ControlRow?> ReadAsync(
+        NpgsqlDataSource dataSource, bool includeWidening, CancellationToken ct)
+    {
+        var wideningColumns = includeWidening
+            ? "publications_widened, widened_at, widened_by"
+            : "false, NULL::timestamptz, NULL::text";
+        await using var cmd = dataSource.CreateCommand(
+            $"""
+             SELECT state, origin, reason, requested_by, requested_at, suspended_at, resumed_at,
+                    {wideningColumns}
+             FROM {ControlContract.Table} WHERE scope = '{ControlContract.Scope}'
+             """);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new ControlRow(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4),
+            reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+            reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
+            reader.GetBoolean(7),
+            reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9));
     }
 
     /// <summary>
@@ -217,36 +239,20 @@ internal static class ControlOperations
 
     /// <summary>
     /// Every slot Wallaby manages (<c>wallaby.slot_registry</c>) joined with whether it currently exists
-    /// on the server and is being streamed. Empty when the registry table doesn't exist.
+    /// on the server and is being streamed. Empty when the registry table doesn't exist; a registry
+    /// bootstrapped by a host without <c>publication_managed</c> reads every publication as unmanaged
+    /// (never authorize a drop no current-version provisioner has stamped).
     /// </summary>
     public static async Task<IReadOnlyList<ManagedSlotRow>> ListManagedSlotsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct)
     {
         try
         {
-            // The retained-WAL diff is guarded: pg_current_wal_lsn() errors on a standby in recovery,
-            // and a slot missing from the server has no restart_lsn.
-            await using var cmd = dataSource.CreateCommand(
-                """
-                SELECT r.slot_name, r.publication, r.kind,
-                       s.slot_name IS NOT NULL AS exists_on_server, COALESCE(s.active, false) AS active,
-                       CASE WHEN s.restart_lsn IS NOT NULL AND NOT pg_is_in_recovery()
-                            THEN pg_wal_lsn_diff(pg_current_wal_lsn(), s.restart_lsn)::bigint
-                       END AS retained_wal_bytes
-                FROM wallaby.slot_registry r
-                LEFT JOIN pg_replication_slots s USING (slot_name)
-                ORDER BY r.slot_name
-                """);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            var slots = new List<ManagedSlotRow>();
-            while (await reader.ReadAsync(ct))
-            {
-                slots.Add(new ManagedSlotRow(
-                    reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                    reader.GetBoolean(3), reader.GetBoolean(4),
-                    reader.IsDBNull(5) ? null : reader.GetInt64(5)));
-            }
-            return slots;
+            return await ListManagedSlotsAsync(dataSource, includePublicationManaged: true, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == UndefinedColumn)
+        {
+            return await ListManagedSlotsAsync(dataSource, includePublicationManaged: false, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
         {
@@ -254,8 +260,179 @@ internal static class ControlOperations
         }
     }
 
+    private static async Task<IReadOnlyList<ManagedSlotRow>> ListManagedSlotsAsync(
+        NpgsqlDataSource dataSource, bool includePublicationManaged, CancellationToken ct)
+    {
+        var managedColumn = includePublicationManaged ? "r.publication_managed" : "false";
+        // The retained-WAL diff is guarded: pg_current_wal_lsn() errors on a standby in recovery,
+        // and a slot missing from the server has no restart_lsn.
+        await using var cmd = dataSource.CreateCommand(
+            $"""
+             SELECT r.slot_name, r.publication, r.kind,
+                    s.slot_name IS NOT NULL AS exists_on_server, COALESCE(s.active, false) AS active,
+                    CASE WHEN s.restart_lsn IS NOT NULL AND NOT pg_is_in_recovery()
+                         THEN pg_wal_lsn_diff(pg_current_wal_lsn(), s.restart_lsn)::bigint
+                    END AS retained_wal_bytes,
+                    {managedColumn} AS publication_managed,
+                    EXISTS (SELECT 1 FROM pg_publication p
+                            JOIN pg_publication_rel pr ON pr.prpubid = p.oid
+                            WHERE p.pubname = r.publication
+                              AND (pr.prattrs IS NOT NULL OR pr.prqual IS NOT NULL)) AS publication_narrowed
+             FROM wallaby.slot_registry r
+             LEFT JOIN pg_replication_slots s USING (slot_name)
+             ORDER BY r.slot_name
+             """);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var slots = new List<ManagedSlotRow>();
+        while (await reader.ReadAsync(ct))
+        {
+            slots.Add(new ManagedSlotRow(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                reader.GetBoolean(3), reader.GetBoolean(4),
+                reader.IsDBNull(5) ? null : reader.GetInt64(5),
+                reader.GetBoolean(6), reader.GetBoolean(7)));
+        }
+        return slots;
+    }
+
     /// <summary>
-    /// Drop every registry-tracked slot still on the server, then mark the suspension finalized.
+    /// Request publication widening: set <c>publications_widened</c> while Running (a suspension already
+    /// drops the managed publications, so widening one is meaningless — refused by the guard). Inserts
+    /// the control row when the table exists but no suspension was ever recorded; a table bootstrapped
+    /// by a host without widening support surfaces <c>42703</c>, and no table at all <c>42P01</c>.
+    /// Returns true when this call set the flag (false: already widened, or not Running).
+    /// </summary>
+    public static async Task<bool> RequestWidenAsync(
+        NpgsqlDataSource dataSource, string? requestedBy, CancellationToken ct)
+    {
+        await using var cmd = dataSource.CreateCommand(
+            $"""
+             WITH widened AS (
+                 INSERT INTO {ControlContract.Table} (scope, publications_widened, widened_at, widened_by, updated_at)
+                 VALUES ('{ControlContract.Scope}', true, now(), @by, now())
+                 ON CONFLICT (scope) DO UPDATE
+                     SET publications_widened = true, widened_at = now(), widened_by = EXCLUDED.widened_by,
+                         updated_at = now()
+                     WHERE control.state = '{ControlContract.StateRunning}' AND NOT control.publications_widened
+                 RETURNING 1
+             )
+             SELECT count(*), CASE WHEN count(*) > 0 THEN pg_notify('{ControlContract.NotifyChannel}', '') END
+             FROM widened
+             """);
+        cmd.Parameters.AddWithValue("by", (object?)requestedBy ?? DBNull.Value);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) > 0;
+    }
+
+    /// <summary>
+    /// Clear the widening flag; the next leader term's reconcile re-narrows the publications (nothing
+    /// blocks on it). Returns true when this call cleared it; false includes the table or column not
+    /// existing (nothing could have widened).
+    /// </summary>
+    public static async Task<bool> RestoreWidenAsync(NpgsqlDataSource dataSource, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = dataSource.CreateCommand(
+                $"""
+                 WITH restored AS (
+                     UPDATE {ControlContract.Table}
+                     SET publications_widened = false, widened_at = NULL, widened_by = NULL, updated_at = now()
+                     WHERE scope = '{ControlContract.Scope}' AND publications_widened
+                     RETURNING 1
+                 )
+                 SELECT count(*), CASE WHEN count(*) > 0 THEN pg_notify('{ControlContract.NotifyChannel}', '') END
+                 FROM restored
+                 """);
+            return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) > 0;
+        }
+        catch (PostgresException ex) when (ex.SqlState is UndefinedTable or UndefinedColumn)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Every Wallaby-managed publication that still carries a column list or row filter on the server —
+    /// the set an <c>ALTER COLUMN ... TYPE</c> migration would still be refused over. Empty when the
+    /// registry table or ownership column doesn't exist (nothing a current-version host narrowed).
+    /// </summary>
+    public static async Task<IReadOnlyList<string>> ListNarrowedPublicationsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = dataSource.CreateCommand(
+                """
+                SELECT DISTINCT r.publication
+                FROM wallaby.slot_registry r
+                JOIN pg_publication p ON p.pubname = r.publication
+                JOIN pg_publication_rel pr ON pr.prpubid = p.oid
+                WHERE r.publication_managed AND (pr.prattrs IS NOT NULL OR pr.prqual IS NOT NULL)
+                ORDER BY r.publication
+                """);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            var publications = new List<string>();
+            while (await reader.ReadAsync(ct))
+            {
+                publications.Add(reader.GetString(0));
+            }
+            return publications;
+        }
+        catch (PostgresException ex) when (ex.SqlState is UndefinedTable or UndefinedColumn)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Widen still-narrowed managed publications directly — the no-host fallback. The client has no
+    /// entity model, so each publication's current membership is read from the catalog and re-issued as
+    /// one atomic <c>SET TABLE</c> without column lists or row filters (legal under a live slot).
+    /// Idempotent; a publication with no members is skipped.
+    /// </summary>
+    public static async Task WidenPublicationsDirectAsync(
+        NpgsqlDataSource dataSource, ILogger logger, CancellationToken ct)
+    {
+        foreach (var pub in await ListNarrowedPublicationsAsync(dataSource, ct))
+        {
+            var tables = new List<string>();
+            await using (var list = dataSource.CreateCommand(
+                """
+                SELECT n.nspname, c.relname
+                FROM pg_publication p
+                JOIN pg_publication_rel pr ON pr.prpubid = p.oid
+                JOIN pg_class c ON c.oid = pr.prrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE p.pubname = @p
+                ORDER BY 1, 2
+                """))
+            {
+                list.Parameters.AddWithValue("p", pub);
+                await using var reader = await list.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    tables.Add($"{QuoteIdentifier(reader.GetString(0))}.{QuoteIdentifier(reader.GetString(1))}");
+                }
+            }
+            if (tables.Count == 0)
+            {
+                continue;
+            }
+
+            await using var cmd = dataSource.CreateCommand(
+                $"ALTER PUBLICATION {QuoteIdentifier(pub)} SET TABLE {string.Join(", ", tables)}");
+            await cmd.ExecuteNonQueryAsync(ct);
+            logger.ManagedPublicationWidened(pub, tables.Count);
+        }
+    }
+
+    /// <summary>
+    /// Drop every registry-tracked slot still on the server, then every Wallaby-managed publication
+    /// (recreated from configuration on resume; slots first, so nothing is decoding through a
+    /// publication being removed), then mark the suspension finalized. With both gone, the installation
+    /// is fully quiesced: the upgrade precheck passes and schema migrations blocked by publication
+    /// column lists or row filters (<c>ALTER COLUMN ... TYPE</c>) run freely. Unmanaged publications
+    /// (<c>ManagePublicationTables=false</c>) are never touched — Wallaby cannot recreate them.
     /// A slot busy with an active consumer (<c>55006</c>) is retried on <paramref name="busyRetryDelay"/>
     /// until it frees or <paramref name="ct"/> cancels; a concurrently dropped slot is ignored. A resume
     /// observed mid-finalize stops the drops immediately — the waking hosts are recreating the slots.
@@ -265,6 +442,7 @@ internal static class ControlOperations
     public static async Task<bool> FinalizeSuspensionAsync(
         NpgsqlDataSource dataSource, TimeSpan busyRetryDelay, ILogger logger, CancellationToken ct)
     {
+        IReadOnlyList<ManagedSlotRow> registry;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
@@ -274,7 +452,8 @@ internal static class ControlOperations
                 return false;
             }
 
-            var present = (await ListManagedSlotsAsync(dataSource, ct)).Where(s => s.ExistsOnServer).ToList();
+            registry = await ListManagedSlotsAsync(dataSource, ct);
+            var present = registry.Where(s => s.ExistsOnServer).ToList();
             if (present.Count == 0)
             {
                 break;
@@ -308,8 +487,19 @@ internal static class ControlOperations
             // Loop to re-list: verifies every drop landed before the state is marked Suspended.
         }
 
+        foreach (var pub in registry.Where(s => s.PublicationManaged).Select(s => s.Publication).Distinct())
+        {
+            await using var cmd = dataSource.CreateCommand(
+                $"DROP PUBLICATION IF EXISTS {QuoteIdentifier(pub)}");
+            await cmd.ExecuteNonQueryAsync(ct);
+            logger.ManagedPublicationDropped(pub);
+        }
+
         return await TryMarkSuspendedAsync(dataSource, ct);
     }
+
+    private static string QuoteIdentifier(string identifier)
+        => "\"" + identifier.Replace("\"", "\"\"") + "\"";
 }
 
 /// <summary>Source-generated log messages for <see cref="ControlOperations"/>.</summary>
@@ -320,4 +510,10 @@ internal static partial class ControlOperationsLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Replication slot {Slot} is in use by an active consumer; retrying the drop.")]
     internal static partial void ManagedSlotBusy(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Dropped managed publication {Publication} for suspension; it is recreated from configuration on resume.")]
+    internal static partial void ManagedPublicationDropped(this ILogger logger, string publication);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Widened managed publication {Publication} to whole-table membership ({TableCount} table(s)); column lists are restored by the next leader term after RestorePublicationsAsync.")]
+    internal static partial void ManagedPublicationWidened(this ILogger logger, string publication, int tableCount);
 }

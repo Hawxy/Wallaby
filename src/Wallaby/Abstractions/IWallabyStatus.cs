@@ -69,6 +69,16 @@ public sealed record WallabyStatusSnapshot
     /// <summary>The reason recorded with the current suspension, if any.</summary>
     public string? SuspensionReason { get; init; }
 
+    /// <summary>
+    /// True while managed publications are temporarily widened to whole-table membership (so schema
+    /// migrations blocked by publication column lists can run). Capture is fully functional, but
+    /// deliberately excluded columns are being published until a restore.
+    /// </summary>
+    public bool PublicationsWidened { get; init; }
+
+    /// <summary>When the current publication widening was requested; null when not widened.</summary>
+    public DateTimeOffset? PublicationsWidenedAt { get; init; }
+
     /// <summary>The replication slot name.</summary>
     public string SlotName { get; init; } = "";
 

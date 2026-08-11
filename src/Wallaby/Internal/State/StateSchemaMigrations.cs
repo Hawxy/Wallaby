@@ -23,7 +23,7 @@ namespace Wallaby.Internal.State;
 internal static class StateSchemaMigrations
 {
     /// <summary>The schema version this build requires; the highest version in <see cref="Steps"/>.</summary>
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 6;
 
     /// <summary>
     /// Baseline: the full schema as deployed by the 1.0.0 betas. Databases bootstrapped by those betas
@@ -133,6 +133,28 @@ internal static class StateSchemaMigrations
         ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS purge_on_resume boolean NOT NULL DEFAULT false;
         """;
 
+    /// <summary>
+    /// Whether Wallaby owns the slot's publication (created it and can recreate it from configuration),
+    /// authorizing suspension finalize to drop it alongside the slot. Defaults false so only a
+    /// current-version provisioner stamp — never the migration itself — marks a publication droppable
+    /// (an unmanaged <c>ManagePublicationTables=false</c> publication must never be dropped).
+    /// </summary>
+    private const string RegistryPublicationOwnership = """
+        ALTER TABLE wallaby.slot_registry ADD COLUMN IF NOT EXISTS publication_managed boolean NOT NULL DEFAULT false;
+        """;
+
+    /// <summary>
+    /// Set while managed publications are temporarily widened to whole-table membership so schema
+    /// migrations blocked by publication column lists (ALTER COLUMN TYPE) can run without a suspension;
+    /// cleared by a restore, applied by the next leader term's reconcile.
+    /// </summary>
+    private const string ControlPublicationWidening = """
+        ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS publications_widened boolean NOT NULL DEFAULT false;
+        ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS widened_at timestamptz NULL;
+        ALTER TABLE wallaby.control ADD COLUMN IF NOT EXISTS widened_by text NULL;
+        """;
+
     public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
-        [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag)];
+        [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag),
+         (5, RegistryPublicationOwnership), (6, ControlPublicationWidening)];
 }

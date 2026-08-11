@@ -191,11 +191,11 @@ the third-party consumer.
 **Migrating a column-listed table.** Postgres pins the columns in a publication's column list: while the
 list is in place, `ALTER TABLE ... ALTER COLUMN ... TYPE` (even a widening) and `DROP COLUMN` on a listed
 column are rejected, and `DROP COLUMN ... CASCADE` succeeds by removing the table from the publication
-entirely - which silently stops capturing it until the next startup reconciles the publication. To change
-a listed column, widen the table to whole-row publishing first
-(`ALTER PUBLICATION ... SET TABLE`, keeping the other members' lists intact), run the migration, and let
-the next startup re-narrow it. Tables without a declared selection are never listed, so their migrations
-are unaffected.
+entirely - which silently stops capturing it until the next startup reconciles the publication. The
+built-in fix is [publication widening](/operations/external-control#widening-publications-for-schema-migrations):
+`WidenPublicationsAsync` temporarily lifts every managed column list (no capture gap, no re-backfill),
+the migration runs, and `RestorePublicationsAsync` re-narrows. Tables without a declared selection are
+never listed, so their migrations are unaffected.
 :::
 
 ::: warning

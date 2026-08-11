@@ -53,6 +53,16 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
                 state.State.ShouldBe(WallabySuspensionState.Suspended);
                 state.Slots.ShouldContain(s => s.SlotName == names.Slot && !s.ExistsOnServer);
                 state.Slots.ShouldContain(s => s.SlotName == extSlot && !s.ExistsOnServer);
+
+                // Only this test's slots: the shared session database holds registry rows from other
+                // tests, including deliberately unmanaged ones.
+                state.Slots.Single(s => s.SlotName == names.Slot).PublicationManaged.ShouldBeTrue();
+                state.Slots.Single(s => s.SlotName == extSlot).PublicationManaged.ShouldBeTrue();
+
+                // Both publications were Wallaby-created, so they are dropped with the slots: the
+                // installation is fully quiesced and publication-blocked schema migrations run freely.
+                (await PublicationExistsAsync(names.Publication)).ShouldBeFalse();
+                (await PublicationExistsAsync(extPub)).ShouldBeFalse();
                 await WallabyReadiness.WaitForSuspendedAsync(node.Services);
                 node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
             }
@@ -75,6 +85,8 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
                 var latest = secondCapture.LatestByDocumentId(destination: "products");
                 latest[missedId.ToString()].Document!["name"].ShouldBe($"missed_{names.Suffix}");
                 (await SlotExistsAsync(extSlot)).ShouldBeTrue();
+                (await PublicationExistsAsync(names.Publication)).ShouldBeTrue();
+                (await PublicationExistsAsync(extPub)).ShouldBeTrue();
                 node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
             }
         }
@@ -533,6 +545,16 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         await using var cmd = new NpgsqlCommand(
             "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", conn);
         cmd.Parameters.AddWithValue("s", slot);
+        return (long)(await cmd.ExecuteScalarAsync())! > 0;
+    }
+
+    private async Task<bool> PublicationExistsAsync(string publication)
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_publication WHERE pubname = @p", conn);
+        cmd.Parameters.AddWithValue("p", publication);
         return (long)(await cmd.ExecuteScalarAsync())! > 0;
     }
 
