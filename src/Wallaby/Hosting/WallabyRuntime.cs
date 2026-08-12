@@ -78,6 +78,7 @@ internal sealed class WallabyRuntime
             {
                 var (gate, row) = await ControlGateEvaluator.EvaluateAsync(
                     _control, _options.Suspended, _options.SuspensionReason, _logger, ct);
+                _status.SetPublicationsWidened(row?.PublicationsWidened ?? false, row?.WidenedAt);
                 if (gate == ControlGateAction.Finalize)
                 {
                     await TryFinalizeSuspensionAsync(ct);
@@ -116,9 +117,7 @@ internal sealed class WallabyRuntime
             {
                 // The lock is reachable and held by another node — a healthy standby, not an error.
                 backoff.Reset();
-                _status.EnterStandby();
-                _status.ResetLeaderFailures();
-                _status.ResetFanoutFailures();
+                _status.EnterStandby(); // a standby claims no failure streaks; the transition clears them
                 _logger.Standby(_options.SlotName);
                 await DelaySafeAsync(_options.Advanced.StandbyRetryInterval, ct);
                 continue;
@@ -136,8 +135,7 @@ internal sealed class WallabyRuntime
                         _instrumentation, _status);
                     var outcome = await session.RunAsync(ct);
                     backoff.Reset();
-                    _status.ResetLeaderFailures();
-                    _status.ResetFanoutFailures();
+                    _status.ResetFailureStreaks();
                     if (outcome == LeaderSessionOutcome.SuspendRequested)
                     {
                         // The session released the slot and we still hold the cluster lock, so nothing
@@ -150,6 +148,12 @@ internal sealed class WallabyRuntime
                     {
                         // We stepped down because the lock dropped (not an error); re-elect immediately.
                         _logger.LeadershipLost(_options.SlotName);
+                    }
+                    else if (outcome == LeaderSessionOutcome.Reconfigure)
+                    {
+                        // The widening flag flipped: re-elect immediately so the next term's bootstrap
+                        // reconciles the publications. The slot was never touched, so no re-backfill.
+                        _logger.ReconfiguringPublications(_options.SlotName);
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -295,4 +299,7 @@ internal static partial class WallabyRuntimeLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby suspension ended; re-entering leader election for slot {Slot}. Expect a full re-backfill of all mapped tables.")]
     internal static partial void SuspensionEnded(this ILogger logger, string slot);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Publication widening flag changed; re-entering leader election for slot {Slot} to reconcile publication membership.")]
+    internal static partial void ReconfiguringPublications(this ILogger logger, string slot);
 }

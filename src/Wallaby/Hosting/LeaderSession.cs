@@ -32,6 +32,13 @@ internal enum LeaderSessionOutcome
     /// touching slots, and the caller (still holding the lock) finalizes by dropping them.
     /// </summary>
     SuspendRequested,
+
+    /// <summary>
+    /// The publication-widening flag flipped mid-term: the session wound down so the next term's
+    /// bootstrap reconciles the publications to the new width. Handled like a lost lock (immediate
+    /// re-election, no finalize): the slot is untouched, so no gap and no re-backfill.
+    /// </summary>
+    Reconfigure,
 }
 
 /// <summary>
@@ -63,10 +70,19 @@ internal sealed class LeaderSession(
         var controlStore = new PostgresControlStore(dataSource, options, _logger);
 
         // A suspension in force must be honored before self-config can recreate any slot. Tolerates a
-        // database no suspension-aware version has touched (no control table reads as running).
-        if (await controlStore.IsSuspensionInEffectAsync(ct))
+        // database no suspension-aware version has touched (no control table reads as running). The same
+        // read fixes this term's publication-width baseline: bootstrap reconciles to it, and the watcher
+        // bounces the session when the flag flips, so a flip between here and the watcher's first read
+        // cannot be missed.
+        var controlRow = await controlStore.ReadAsync(ct);
+        if (controlRow is not null && controlRow.State != ControlContract.StateRunning)
         {
             return LeaderSessionOutcome.SuspendRequested;
+        }
+        var widenPublications = controlRow?.PublicationsWidened ?? false;
+        if (widenPublications)
+        {
+            _logger.PublicationsWidened(controlRow?.WidenedBy, controlRow?.WidenedAt);
         }
 
         // Cancel the whole leader workload on shutdown OR when the handle reports the lock was lost (its
@@ -76,7 +92,7 @@ internal sealed class LeaderSession(
 
         try
         {
-            await BootstrapAsync(linked.Token);
+            await BootstrapAsync(widenPublications, linked.Token);
         }
         catch (OperationCanceledException) when (leadership.Lost.IsCancellationRequested && !ct.IsCancellationRequested)
         {
@@ -116,10 +132,12 @@ internal sealed class LeaderSession(
                 AutoBackfillNewTables = options.AutoBackfillNewTables,
                 AutoBackfillOnVersionChange = options.AutoBackfillOnVersionChange,
             },
-            _logger);
+            _logger, status);
 
         // A background-task fault fails the whole leader session (first fault wins): the task records it,
         // cancels the workload, and the fault is rethrown below so the caller halts and retries with backoff.
+        // The scheduler and fan-out worker handle their own failures internally (per-table/per-job backoff,
+        // pass-level retry), so their catches here are backstops.
         Exception? backgroundFault = null;
 
         var backfillTask = Task.Run(async () =>
@@ -138,7 +156,8 @@ internal sealed class LeaderSession(
         // session winds down and releases the slot; the caller then drops it. Its first read also closes
         // the race where a suspension lands between this session's pre-check and slot creation. Never
         // faults the session; transient read errors are retried inside.
-        var controlWatcher = new ControlStateWatcher(controlStore, options.Advanced.ControlPollInterval, _logger);
+        var controlWatcher = new ControlStateWatcher(
+            controlStore, widenPublications, options.Advanced.ControlPollInterval, _logger);
         var controlTask = Task.Run(async () =>
         {
             try { await controlWatcher.RunAsync(linked, linked.Token); }
@@ -213,6 +232,10 @@ internal sealed class LeaderSession(
             // outcome the slot is released and free to drop while the cluster lock is still held.
             return LeaderSessionOutcome.SuspendRequested;
         }
+        if (controlWatcher.ReconfigureObserved)
+        {
+            return LeaderSessionOutcome.Reconfigure;
+        }
         if (backgroundFault is not null)
         {
             ExceptionDispatchInfo.Capture(backgroundFault).Throw(); // fail the session so the caller retries with backoff
@@ -224,13 +247,14 @@ internal sealed class LeaderSession(
 
     // Self-configure, repair any slot-loss gap, and initialize sinks, grouped under one bootstrap span so
     // a slow startup (slot creation, index setup) is visible as a single trace per leadership term.
-    private async Task BootstrapAsync(CancellationToken ct)
+    private async Task BootstrapAsync(bool widenPublications, CancellationToken ct)
     {
         using var bootstrap = instrumentation.StartLeaderBootstrap();
         bootstrap?.SetTag(WallabyInstrumentation.SlotTag, options.SlotName);
         try
         {
-            var selfConfig = await components.SelfConfigurator.EnsureConfiguredAsync(components.Model, ct);
+            var selfConfig = await components.SelfConfigurator.EnsureConfiguredAsync(
+                components.Model, ct, widenPublications);
             await RepairSlotGapAsync(selfConfig, ct);
             await InitializeSinksAsync(ct);
         }
@@ -259,6 +283,7 @@ internal sealed class LeaderSession(
         var consistentPoint = selfConfig.ConsistentPoint ?? await ReadRegisteredConsistentPointAsync(ct);
         if (consistentPoint is null)
         {
+            await DiscardStalePurgeRequestAsync(ct);
             return;
         }
 
@@ -271,6 +296,7 @@ internal sealed class LeaderSession(
             // so repair. A first-ever slot (no prior registry row) has missed nothing.
             if (!selfConfig.SlotRecreated)
             {
+                await DiscardStalePurgeRequestAsync(ct);
                 return;
             }
             _logger.SlotRecreatedBeforeFirstCheckpoint(options.SlotName, consistentPoint);
@@ -286,6 +312,7 @@ internal sealed class LeaderSession(
         }
         else if (checkpoint.ConfirmedLsn >= consistentLsn)
         {
+            await DiscardStalePurgeRequestAsync(ct);
             return;
         }
         else
@@ -303,18 +330,14 @@ internal sealed class LeaderSession(
         }));
 
         // A resume can request purging per operation (ResumeAsync(purge: true)); it ORs with the static
-        // option, and an existing pending purge mark stays sticky (matching manual requests).
+        // option, and the shared request statement keeps an existing pending purge mark sticky and the
+        // stamped transform version intact (matching manual requests).
         var purgeResume = await ControlOperations.ReadPurgeOnResumeAsync(dataSource.Source, ct);
+        var purgeRepair = options.PurgeOnSlotGapRepair || purgeResume;
 
         foreach (var table in components.BackfillTables)
         {
-            var existing = await components.BackfillStore.GetAsync(table.Table.QualifiedName, ct);
-            await components.BackfillStore.SaveAsync(
-                new BackfillState(
-                    table.Table.QualifiedName, BackfillStatus.Requested, existing?.TransformVersion,
-                    null, 0, DateTimeOffset.UtcNow,
-                    Purge: options.PurgeOnSlotGapRepair || purgeResume || existing?.Purge == true),
-                ct);
+            await components.BackfillStore.RequestAsync(table.Table.QualifiedName, purgeRepair, ct);
         }
 
         // Consume the flag between the marks and the checkpoint: a crash before this line re-reads it,
@@ -327,6 +350,21 @@ internal sealed class LeaderSession(
 
         await components.CheckpointsDirect.SaveAsync(
             options.SlotName, new Checkpoint(consistentLsn, DateTimeOffset.UtcNow), ct);
+    }
+
+    /// <summary>
+    /// A resume's purge request is scoped to the repair that serves the resume. When this session finds
+    /// no gap to repair (e.g. the suspension was resumed before finalize ever dropped the slot), the
+    /// request is spent: leaving the flag set would arm a later, unrelated slot-loss repair with a
+    /// purge nobody asked for.
+    /// </summary>
+    private async Task DiscardStalePurgeRequestAsync(CancellationToken ct)
+    {
+        if (await ControlOperations.ReadPurgeOnResumeAsync(dataSource.Source, ct))
+        {
+            _logger.StalePurgeRequestDiscarded();
+            await ControlOperations.ClearPurgeOnResumeAsync(dataSource.Source, ct);
+        }
     }
 
     private async Task<string?> ReadRegisteredConsistentPointAsync(CancellationToken ct)
@@ -397,4 +435,10 @@ internal static partial class LeaderSessionLog
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Initialized sink {Sink}.")]
     internal static partial void SinkInitialized(this ILogger logger, string sink);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A resume requested purging sink destinations, but no slot gap needed repairing, so no re-backfill (and no purge) runs. The purge request is discarded; if destinations must still be purged, request a purging backfill explicitly.")]
+    internal static partial void StalePurgeRequestDiscarded(this ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Managed publications are widened to whole-table membership (requested by {WidenedBy} at {WidenedAt}): deliberately excluded columns are being published until RestorePublicationsAsync (or the raw-SQL equivalent) restores the column lists.")]
+    internal static partial void PublicationsWidened(this ILogger logger, string? widenedBy, DateTimeOffset? widenedAt);
 }

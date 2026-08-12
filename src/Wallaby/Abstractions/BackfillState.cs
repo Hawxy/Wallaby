@@ -7,9 +7,6 @@ namespace Wallaby.Abstractions;
 /// </remarks>
 public enum BackfillStatus
 {
-    /// <summary>No backfill has been recorded for the table.</summary>
-    NotStarted,
-
     /// <summary>A backfill has been requested (manually or automatically) and is awaiting/running on the leader.</summary>
     Requested,
 
@@ -44,6 +41,15 @@ public enum BackfillStatus
 /// A sink purge is due before the next fresh run (see <see cref="ISinkPurger"/>); cleared when
 /// that run starts, so a resumed backfill never re-purges.
 /// </param>
+/// <param name="Attempts">
+/// Consecutive failures of this table's backfill. The scheduler retries with exponential backoff per
+/// table (other tables keep running); reset when a run starts fresh or completes.
+/// </param>
+/// <param name="NextAttemptAt">
+/// Not before this time will the scheduler run the table again (failure backoff); null or a past time
+/// means it is due whenever the scheduler next decides to run it.
+/// </param>
+/// <param name="LastError">The most recent failure (exception type + message); null when not failing.</param>
 public sealed record BackfillState(
     string TableQualifiedName,
     BackfillStatus Status,
@@ -51,4 +57,7 @@ public sealed record BackfillState(
     string? CursorJson,
     long RowsCopied,
     DateTimeOffset UpdatedAt,
-    bool Purge = false);
+    bool Purge = false,
+    int Attempts = 0,
+    DateTimeOffset? NextAttemptAt = null,
+    string? LastError = null);

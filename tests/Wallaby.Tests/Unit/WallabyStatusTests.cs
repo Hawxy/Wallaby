@@ -56,16 +56,22 @@ public class WallabyStatusTests
     }
 
     [Test]
-    public void Leader_failures_increment_and_reset()
+    public void Leader_failures_increment_and_a_clean_session_end_resets_every_streak()
     {
         var status = new WallabyStatus();
 
         status.RecordLeaderFailure("e1");
         status.RecordLeaderFailure("e2");
+        status.RecordFanoutPassFailure("e3");
+        status.RecordBackfillTableFailure("e4", attempts: 2);
         status.Current.ConsecutiveLeaderFailures.ShouldBe(2);
 
-        status.ResetLeaderFailures();
-        status.Current.ConsecutiveLeaderFailures.ShouldBe(0);
+        status.ResetFailureStreaks();
+
+        var snapshot = status.Current;
+        snapshot.ConsecutiveLeaderFailures.ShouldBe(0);
+        snapshot.ConsecutiveFanoutPassFailures.ShouldBe(0);
+        snapshot.ConsecutiveBackfillFailures.ShouldBe(0);
     }
 
     [Test]
@@ -84,17 +90,40 @@ public class WallabyStatusTests
     }
 
     [Test]
-    public void Fanout_failures_increment_set_the_error_and_reset()
+    public void Fanout_pass_failures_and_the_job_streak_are_separate_facts()
     {
         var status = new WallabyStatus();
 
-        status.RecordFanoutFailure("e1");
-        status.RecordFanoutFailure("e2");
-        status.Current.ConsecutiveFanoutFailures.ShouldBe(2);
+        // Pass failures (queue unreachable) never inflate the persisted job streak.
+        status.RecordFanoutPassFailure("e1");
+        status.RecordFanoutPassFailure("e2");
+        status.Current.ConsecutiveFanoutPassFailures.ShouldBe(2);
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(0);
         status.Current.LastError.ShouldBe("e2");
 
-        status.ResetFanoutFailures();
-        status.Current.ConsecutiveFanoutFailures.ShouldBe(0);
+        // A job failure mirrors its persisted attempts without touching the pass counter.
+        status.RecordFanoutJobFailure("e3", attempts: 4);
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(4);
+        status.Current.ConsecutiveFanoutPassFailures.ShouldBe(2);
+
+        // A clean pass reconciles the streak from the store and clears the pass counter.
+        status.SetFanoutStreak(1);
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(1);
+        status.Current.ConsecutiveFanoutPassFailures.ShouldBe(0);
+    }
+
+    [Test]
+    public void Backfill_failures_track_the_worst_table_and_reconcile_from_the_store()
+    {
+        var status = new WallabyStatus();
+
+        status.RecordBackfillTableFailure("e1", attempts: 3);
+        status.RecordBackfillTableFailure("e2", attempts: 1); // another table failing less doesn't lower it
+        status.Current.ConsecutiveBackfillFailures.ShouldBe(3);
+        status.Current.LastError.ShouldBe("e2");
+
+        status.SetBackfillStreak(0); // the failing table recovered; the reconcile lowers it
+        status.Current.ConsecutiveBackfillFailures.ShouldBe(0);
     }
 
     [Test]
@@ -139,6 +168,68 @@ public class WallabyStatusTests
         status.EnterLeader(DateTimeOffset.UtcNow);
         status.Current.SuspendedSince.ShouldBeNull();
         status.Current.SuspensionReason.ShouldBeNull();
+    }
+
+    [Test]
+    public void MarkStopped_clears_the_previous_roles_context()
+    {
+        var status = new WallabyStatus();
+        status.EnterLeader(DateTimeOffset.UtcNow);
+
+        status.MarkStopped();
+
+        var snapshot = status.Current;
+        snapshot.Role.ShouldBe(WallabyNodeRole.Stopped);
+        snapshot.LeaderSince.ShouldBeNull();
+        snapshot.Faulted.ShouldBeFalse();
+
+        status.EnterSuspended(DateTimeOffset.UtcNow, "upgrade");
+        status.MarkStopped();
+        status.Current.SuspendedSince.ShouldBeNull();
+        status.Current.SuspensionReason.ShouldBeNull();
+    }
+
+    [Test]
+    public void Entering_a_role_clears_a_previous_fault()
+    {
+        var status = new WallabyStatus();
+        status.MarkFaulted("Boom: bad");
+
+        status.EnterStandby();
+
+        status.Current.Faulted.ShouldBeFalse();
+        status.Current.Role.ShouldBe(WallabyNodeRole.Standby);
+    }
+
+    [Test]
+    public void EnterSuspended_clears_the_failure_streaks()
+    {
+        // A crash-looped node entering a planned suspension window must read Suspended (Degraded),
+        // not crash-looping (Unhealthy): the health check's crash-loop grade outranks Suspended.
+        var status = new WallabyStatus();
+        status.RecordLeaderFailure("e1");
+        status.RecordLeaderFailure("e2");
+        status.RecordBackfillTableFailure("e3", attempts: 7);
+
+        status.EnterSuspended(DateTimeOffset.UtcNow, "upgrade");
+
+        var snapshot = status.Current;
+        snapshot.ConsecutiveLeaderFailures.ShouldBe(0);
+        snapshot.ConsecutiveBackfillFailures.ShouldBe(0);
+    }
+
+    [Test]
+    public void EnterStandby_clears_the_failure_streaks()
+    {
+        var status = new WallabyStatus();
+        status.RecordLeaderFailure("e1");
+        status.RecordFanoutJobFailure("e2", attempts: 3);
+
+        status.EnterStandby();
+
+        var snapshot = status.Current;
+        snapshot.ConsecutiveLeaderFailures.ShouldBe(0);
+        snapshot.ConsecutiveFanoutFailures.ShouldBe(0);
     }
 
     [Test]

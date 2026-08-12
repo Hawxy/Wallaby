@@ -11,8 +11,8 @@ replication slot exists**, failing the precheck with:
 > Please drop all logical replication slots and try again.
 
 Wallaby's **suspension** solves this: it drops every replication slot Wallaby manages (its primary slot
-*and* any [external slots](/external-slots)), then idles durably across app restarts and the database
-outage during the upgrade until you explicitly resume. On resume, Wallaby recreates its slots and
+*and* any [external slots](/external-slots)) along with every Wallaby-managed publication, then idles
+durably across app restarts and the database outage during the upgrade until you explicitly resume. On resume, Wallaby recreates its slots and
 publications and recovers via [slot-loss gap detection](/how-it-works#slot-loss-gap-detection): every
 mapped table is **fully re-backfilled**, so idempotent sinks converge on their own.
 
@@ -117,12 +117,14 @@ A client-requested suspension is **never auto-resumed**. Only an explicit `Resum
 For psql-only operators, the control row can be driven directly:
 
 ```sql
--- Request suspension (a running Wallaby node drops the slots and marks it 'Suspended'):
+-- Request suspension (a running Wallaby node drops the slots and marks it 'Suspended').
+-- Entering a suspension also ends any publication widening: resume recreates the narrow lists.
 INSERT INTO wallaby.control (scope, state, origin, reason, requested_at)
 VALUES ('wallaby', 'SuspendRequested', 'client', 'PG18 upgrade', now())
 ON CONFLICT (scope) DO UPDATE
     SET state = 'SuspendRequested', origin = 'client', reason = EXCLUDED.reason,
-        requested_at = now(), updated_at = now()
+        requested_at = now(), publications_widened = false, widened_at = NULL, widened_by = NULL,
+        updated_at = now()
     WHERE control.state = 'Running';
 SELECT pg_notify('wallaby_control', '');
 
@@ -151,6 +153,14 @@ SELECT pg_notify('wallaby_control', '');
 
 - **Health checks** report `Degraded` while suspended. Don't alert-page on it
   during a planned upgrade window; do alert if it persists after.
+- **Schema migrations run freely while suspended.** Because managed publications are dropped with the
+  slots, `ALTER COLUMN ... TYPE` statements otherwise refused with *"cannot alter type of a column used
+  by a publication WHERE clause"* (or its column-list equivalent) succeed during the window — the
+  natural time to run them. A publication Wallaby doesn't own (`ManagePublicationTables=false`, or one
+  created by a third-party tool) is never dropped; clear those manually before such a migration.
+  Not upgrading the engine? Don't suspend just for a blocked migration —
+  [widen the publications](/operations/external-control#widening-publications-for-schema-migrations)
+  instead: no capture gap, no re-backfill.
 - **Backfill requests** made while suspended stay persisted and are absorbed by the resume's full
   re-backfill.
 - The suspension is **installation-wide**: one control row governs every node and every managed slot on

@@ -147,7 +147,7 @@ public class HeartbeatTests(TestModelPostgresFixture pg)
     private async Task<ulong> CheckpointLsnAsync(string slot)
     {
         await using var cmd = pg.DataSource.CreateCommand(
-            "SELECT confirmed_lsn FROM wallaby.checkpoint WHERE slot_name = $1");
+            "SELECT confirmed_lsn FROM wallaby.slot_registry WHERE slot_name = $1");
         cmd.Parameters.AddWithValue(slot);
         return await cmd.ExecuteScalarAsync() is NpgsqlLogSequenceNumber lsn ? (ulong)lsn : 0UL;
     }

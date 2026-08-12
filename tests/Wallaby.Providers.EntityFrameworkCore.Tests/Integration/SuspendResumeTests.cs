@@ -53,6 +53,16 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
                 state.State.ShouldBe(WallabySuspensionState.Suspended);
                 state.Slots.ShouldContain(s => s.SlotName == names.Slot && !s.ExistsOnServer);
                 state.Slots.ShouldContain(s => s.SlotName == extSlot && !s.ExistsOnServer);
+
+                // Only this test's slots: the shared session database holds registry rows from other
+                // tests, including deliberately unmanaged ones.
+                state.Slots.Single(s => s.SlotName == names.Slot).PublicationManaged.ShouldBeTrue();
+                state.Slots.Single(s => s.SlotName == extSlot).PublicationManaged.ShouldBeTrue();
+
+                // Both publications were Wallaby-created, so they are dropped with the slots: the
+                // installation is fully quiesced and publication-blocked schema migrations run freely.
+                (await PublicationExistsAsync(names.Publication)).ShouldBeFalse();
+                (await PublicationExistsAsync(extPub)).ShouldBeFalse();
                 await WallabyReadiness.WaitForSuspendedAsync(node.Services);
                 node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
             }
@@ -75,6 +85,8 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
                 var latest = secondCapture.LatestByDocumentId(destination: "products");
                 latest[missedId.ToString()].Document!["name"].ShouldBe($"missed_{names.Suffix}");
                 (await SlotExistsAsync(extSlot)).ShouldBeTrue();
+                (await PublicationExistsAsync(names.Publication)).ShouldBeTrue();
+                (await PublicationExistsAsync(extPub)).ShouldBeTrue();
                 node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
             }
         }
@@ -175,6 +187,49 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
 
                 // The repair consumed the flag, so a later unrelated repair will not purge unrequested.
                 (await ReadPurgeOnResumeAsync()).ShouldBeFalse();
+            }
+        }
+        finally
+        {
+            await ResetControlAsync();
+        }
+    }
+
+    [Test]
+    public async Task A_purge_request_left_by_an_unfinalized_suspension_is_discarded_not_armed_for_later()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            var capture = new CaptureSink();
+            int categoryId, firstId;
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, capture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                categoryId = await Db.AddCategoryAsync();
+                firstId = await Db.AddProductAsync(categoryId, $"kept_{names.Suffix}");
+                await capture.WaitForDocumentsAsync([firstId.ToString()]);
+            }
+
+            // With no host running, the request is never finalized: no slot is dropped. The resume
+            // still stamps the purge flag; the state surface shows the pending request.
+            await client.SuspendAsync(new WallabySuspendOptions { WaitForCompletion = false });
+            var resumed = await client.ResumeAsync(purge: true);
+            resumed.PurgeOnResume.ShouldBeTrue();
+            (await SlotExistsAsync(names.Slot)).ShouldBeTrue();
+
+            // WAL continuity is intact, so the next leader finds no gap: the stale request must be
+            // discarded during bootstrap, not left armed for a later unrelated slot-loss repair.
+            var secondCapture = new CaptureSink();
+            await using (var node = await WallabyTestNode.StartAsync(BuildServices(names, secondCapture)))
+            {
+                await WallabyReadiness.WaitForStreamingAsync(node.Services);
+                (await ReadPurgeOnResumeAsync()).ShouldBeFalse();
+
+                var liveId = await Db.AddProductAsync(categoryId, $"live_{names.Suffix}");
+                await secondCapture.WaitForDocumentsAsync([liveId.ToString()]);
+                secondCapture.Purges.ShouldBeEmpty();
             }
         }
         finally
@@ -284,7 +339,7 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         }
     }
 
-    // Overwrites (or creates) the slot's checkpoint row, standing in for a checkpoint written on a
+    // Overwrites the slot's stored checkpoint, standing in for a checkpoint written on a
     // different WAL timeline.
     private async Task SetCheckpointAsync(string slot, string lsn)
     {
@@ -292,9 +347,9 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(
             """
-            INSERT INTO wallaby.checkpoint (slot_name, confirmed_lsn, updated_at)
-            VALUES (@s, @l::pg_lsn, now())
-            ON CONFLICT (slot_name) DO UPDATE SET confirmed_lsn = EXCLUDED.confirmed_lsn, updated_at = now()
+            UPDATE wallaby.slot_registry
+            SET confirmed_lsn = @l::pg_lsn, checkpointed_at = now()
+            WHERE slot_name = @s
             """, conn);
         cmd.Parameters.AddWithValue("s", slot);
         cmd.Parameters.AddWithValue("l", lsn);
@@ -521,7 +576,8 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
     {
         await using var conn = new NpgsqlConnection(pg.ConnectionString);
         await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand("DELETE FROM wallaby.checkpoint WHERE slot_name = @s", conn);
+        await using var cmd = new NpgsqlCommand(
+            "UPDATE wallaby.slot_registry SET confirmed_lsn = NULL, checkpointed_at = NULL WHERE slot_name = @s", conn);
         cmd.Parameters.AddWithValue("s", slot);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -533,6 +589,16 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
         await using var cmd = new NpgsqlCommand(
             "SELECT count(*) FROM pg_replication_slots WHERE slot_name = @s", conn);
         cmd.Parameters.AddWithValue("s", slot);
+        return (long)(await cmd.ExecuteScalarAsync())! > 0;
+    }
+
+    private async Task<bool> PublicationExistsAsync(string publication)
+    {
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_publication WHERE pubname = @p", conn);
+        cmd.Parameters.AddWithValue("p", publication);
         return (long)(await cmd.ExecuteScalarAsync())! > 0;
     }
 

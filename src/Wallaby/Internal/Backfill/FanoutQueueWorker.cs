@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.State;
 using Wallaby.Model;
@@ -65,7 +64,7 @@ internal sealed class FanoutQueueWorker(
             catch (Exception ex)
             {
                 logger.WorkerPassFailed(ex);
-                status?.RecordFanoutFailure($"{ex.GetType().Name}: {ex.Message}");
+                status?.RecordFanoutPassFailure($"{ex.GetType().Name}: {ex.Message}");
                 try { await Task.Delay(backoff.Next(), ct); }
                 catch (OperationCanceledException) { break; }
             }
@@ -156,7 +155,7 @@ internal sealed class FanoutQueueWorker(
         var spec = new ScopedFanoutSpec(lookup.Table, job.LookupColumns, values);
 
         // Requested = run fresh; an orphaned InProgress (leader crashed mid-run) resumes from its cursor.
-        var fresh = job.Status == BackfillStatus.Requested;
+        var fresh = job.Status == FanoutJobStatus.Requested;
         var startBatch = 0;
         object?[]? startCursor = null;
         if (!fresh && !KeysetCodec.TryDeserializeScopedCursor(

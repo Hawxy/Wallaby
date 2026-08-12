@@ -17,6 +17,7 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
         var data = Describe(snapshot);
         var crashLoopThreshold = _options.CrashLoopFailureThreshold;
         var fanoutThreshold = _options.FanoutFailureThreshold;
+        var backfillThreshold = _options.BackfillFailureThreshold;
 
         var result = snapshot switch
         {
@@ -34,11 +35,22 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             { Role: WallabyNodeRole.Suspended } => HealthCheckResult.Degraded(
                 "Wallaby is suspended: managed replication slots are dropped until an explicit resume.", exception: null, data),
             // Dependent documents go stale, but live replication is fine: loud, not a restart signal.
-            { ConsecutiveFanoutFailures: var fanoutFailures } when fanoutThreshold > 0 && fanoutFailures >= fanoutThreshold =>
+            // Graded on the worse of the two facts: a failing job (persisted streak) or a failing pass
+            // (queue unreachable) both mean fan-out is not converging.
+            { ConsecutiveFanoutFailures: var fanoutJobs, ConsecutiveFanoutPassFailures: var fanoutPasses }
+                when fanoutThreshold > 0 && Math.Max(fanoutJobs, fanoutPasses) >= fanoutThreshold =>
                 HealthCheckResult.Degraded(
-                    $"Wallaby dependent fan-out is failing ({fanoutFailures} consecutive job failures); " +
+                    $"Wallaby dependent fan-out is failing ({Math.Max(fanoutJobs, fanoutPasses)} consecutive failures); " +
                     "documents that depend on those tables are going stale." +
                     (snapshot.LastError is { } fanoutError ? $" Last error: {fanoutError}" : string.Empty),
+                    exception: null, data),
+            // One table's backfill retrying with backoff; live replication and other tables are fine.
+            { ConsecutiveBackfillFailures: var backfillTables, ConsecutiveBackfillPassFailures: var backfillPasses }
+                when backfillThreshold > 0 && Math.Max(backfillTables, backfillPasses) >= backfillThreshold =>
+                HealthCheckResult.Degraded(
+                    $"A Wallaby backfill is failing ({Math.Max(backfillTables, backfillPasses)} consecutive failures); " +
+                    "that table's sinks are not converging." +
+                    (snapshot.LastError is { } backfillError ? $" Last error: {backfillError}" : string.Empty),
                     exception: null, data),
             _ => HealthCheckResult.Healthy("Wallaby subsystem alive.", data),
         };
@@ -56,12 +68,22 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             ["lastAcknowledgedLsn"] = s.LastAcknowledgedLsn,
             ["consecutiveLeaderFailures"] = s.ConsecutiveLeaderFailures,
             ["consecutiveFanoutFailures"] = s.ConsecutiveFanoutFailures,
+            ["consecutiveFanoutPassFailures"] = s.ConsecutiveFanoutPassFailures,
+            ["consecutiveBackfillFailures"] = s.ConsecutiveBackfillFailures,
+            ["consecutiveBackfillPassFailures"] = s.ConsecutiveBackfillPassFailures,
             ["slotName"] = s.SlotName,
         };
         if (s.LastError is { } error) data["lastError"] = error;
         if (s.LeaderSince is { } leaderSince) data["leaderSince"] = leaderSince;
         if (s.SuspendedSince is { } suspendedSince) data["suspendedSince"] = suspendedSince;
         if (s.SuspensionReason is { } suspensionReason) data["suspensionReason"] = suspensionReason;
+        // Deliberately Healthy while widened: capture is fully functional, only the column-list
+        // narrowing is temporarily lifted.
+        if (s.PublicationsWidened)
+        {
+            data["publicationsWidened"] = true;
+            if (s.PublicationsWidenedAt is { } widenedAt) data["publicationsWidenedAt"] = widenedAt;
+        }
         if (s.LastProgressAt is { } progress) data["lastProgressAt"] = progress;
         if (s.LastIngestionLagSeconds >= 0) data["lastIngestionLagSeconds"] = s.LastIngestionLagSeconds;
         foreach (var (sink, at) in s.LastSinkDeliveryAt)

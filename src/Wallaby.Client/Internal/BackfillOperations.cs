@@ -7,20 +7,22 @@ internal sealed record BackfillStateRow(
     string TableQualified, string Status, long RowsCopied, DateTimeOffset UpdatedAt);
 
 /// <summary>
-/// The remote client's SQL against <see cref="BackfillContract.Table"/>. The host owns the richer
-/// bookkeeping (cursors, transform versions, progress guards); the client only persists requests and
-/// reads status, addressing tables by schema-qualified name since it has no entity model.
+/// Request/cancel/read SQL against <see cref="BackfillContract.Table"/>, shared verbatim between the
+/// host and the remote client (compile-linked like <see cref="ControlOperations"/>), so "mark a table
+/// Requested" has exactly one statement and one set of preservation rules. The host additionally owns
+/// the run bookkeeping (fresh-run stamps, progress saves) in its own store.
 /// </summary>
 internal static class BackfillOperations
 {
     private const string UndefinedTable = "42P01";
 
     /// <summary>
-    /// Persist a backfill request: mark the table's row <c>Requested</c> with progress reset, and signal
-    /// the backfill channel so the leader's scheduler serves it immediately. An existing row keeps its
-    /// transform version (the host compares it against the deployed version) and its purge mark is
-    /// sticky-OR (a pending purge survives a plain request); a table Wallaby has never backfilled gets a
-    /// fresh row. Throws <c>42P01</c> when no Wallaby host has ever run.
+    /// The single request write path: manual requests, the remote client, the slot-gap repair, and the
+    /// fan-out overflow all issue this statement. Marks the table's row <c>Requested</c> with progress
+    /// reset and signals the backfill channel so the leader's scheduler serves it immediately. An
+    /// existing row keeps its transform version (stamped only by the scheduler's fresh-run write) and
+    /// its purge mark is sticky-OR (a pending purge survives a plain request); a table Wallaby has never
+    /// backfilled gets a fresh row. Throws <c>42P01</c> when no Wallaby host has ever run.
     /// </summary>
     public static async Task RequestAsync(
         NpgsqlDataSource dataSource, string tableQualifiedName, bool purge, CancellationToken ct)

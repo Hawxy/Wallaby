@@ -65,7 +65,7 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
             default, ("p", names.Publication))).ShouldBe(7L);
 
         // State tables exist.
-        foreach (var table in new[] { "wallaby.checkpoint", "wallaby.backfill_state", "wallaby.slot_registry", "wallaby.fanout_queue" })
+        foreach (var table in new[] { "wallaby.backfill_state", "wallaby.slot_registry", "wallaby.fanout_queue" })
         {
             (await PgExec.ScalarStringAsync(conn,
                 "SELECT to_regclass(@t)::text", default, ("t", table))).ShouldBe(table);

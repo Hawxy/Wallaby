@@ -103,7 +103,8 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan SlotLagSampleInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Minimum interval between writes of the <c>wallaby.checkpoint</c> row. The row backs slot-loss gap
+    /// Minimum interval between checkpoint writes to the slot's <c>wallaby.slot_registry</c> row. The
+    /// checkpoint backs slot-loss gap
     /// detection and observability; the authoritative resume position is the slot's
     /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a
     /// detected gap, and the repair is a re-backfill either way). <see cref="TimeSpan.Zero"/> writes on

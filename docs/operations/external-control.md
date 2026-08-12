@@ -66,17 +66,25 @@ var suspended = await control.SuspendAsync(new WallabySuspendOptions
 await control.ResumeAsync();
 ```
 
-`SuspendAsync` durably drops **every** replication slot Wallaby manages (primary and external) and idles
-the installation across restarts and database outages until an explicit `ResumeAsync`.
-On resume, nodes recreate their slots and re-backfill every mapped table. 
+`SuspendAsync` durably drops **every** replication slot Wallaby manages (primary and external) — and
+every **Wallaby-managed publication** with them, so the database is fully quiesced: the upgrade precheck
+passes, and schema migrations blocked by publication column lists or row filters
+(`cannot alter type of a column used by a publication...`) run freely during the window. A publication
+Wallaby doesn't own (`ManagePublicationTables = false`) is never touched. The suspension idles the
+installation across restarts and database outages until an explicit `ResumeAsync`.
+On resume, nodes recreate their slots and publications and re-backfill every mapped table. 
 For more information on this feature, see the [major-version upgrade runbook](/operations/major-version-upgrades).
 
 The re-backfill is upsert-only, so documents whose **deletes** were committed while suspended would
 linger in sinks. `ResumeAsync(purge: true)` additionally
 [purges each mapped destination](/backfill#purging-before-a-backfill) before its re-backfill, converging
 sinks to exactly the current table contents (sinks must implement `ISinkPurger`; destinations are
-temporarily incomplete while the re-backfill runs). The purge request is persisted with the resume, so
-it survives restarts and is honored by whichever node repairs the gap.
+temporarily incomplete while the re-backfill runs). The purge request is persisted with the resume
+(visible as `PurgeOnResume` in `GetStateAsync`), so it survives restarts and is honored by whichever
+node repairs the gap. It is scoped to that repair: if the next leader finds no gap to repair — the
+suspension was resumed before any slot was actually dropped — the request is discarded with a logged
+warning rather than left armed for a later, unrelated slot-loss repair. Use
+`RequestBackfillAsync(table, purge: true)` if destinations must still be purged in that case.
 
 Options on `WallabySuspendOptions`:
 
@@ -90,9 +98,60 @@ Options on `WallabySuspendOptions`:
 | `Progress` | `null` | `IProgress<WallabyControlState>` reporting each poll. |
 
 ::: warning
-A **client-requested** suspension is never auto-resumed not by restarts, not by fresh deployments.
+A **client-requested** suspension is never auto-resumed: not by restarts, not by fresh deployments.
 Only an explicit `ResumeAsync` ends it.
 :::
+
+## Widening publications for schema migrations
+
+Postgres refuses `ALTER TABLE ... ALTER COLUMN ... TYPE` (and `DROP COLUMN`) on any column pinned by a
+[publication column list](/configuration#publication-column-lists) or row filter. Suspension clears
+this, but at the cost of a capture outage and a full re-backfill, which is overkill when
+the operator just needs to run a migration. **Widening** is the lighter tool:
+
+```csharp
+// Temporarily reconcile every managed publication to whole-table membership (no column lists).
+await control.WidenPublicationsAsync();
+
+// ... run the blocked migration ...
+
+// Clear the flag; the next leader term reapplies the narrow lists from the captured model.
+await control.RestorePublicationsAsync();
+```
+
+No slot is dropped and the checkpoint stays continuous, so there is **no capture gap and no
+re-backfill**.
+
+`RestorePublicationsAsync` sends a request for the host to restore the publication list.
+
+Semantics worth knowing:
+
+- **While widened, deliberately excluded columns are published**: Data minimization via
+  `Consumes`/`ConsumesAllExcept` is temporarily lifted at the server (client-side selection still
+  filters what sinks receive). The leader logs a warning each term while the flag is set, and the
+  [health check](/operations/health-checks) stays **Healthy** with `publicationsWidened`/`publicationsWidenedAt`
+  in its data.
+- **Unmanaged publications**: (`ManagePublicationTables = false`) are never touched. Clear their lists
+  or filters manually before the migration.
+- **Widen while suspended is refused**: a suspension already dropped the managed publications.
+- **Suspending while widened ends the widening**: the suspension drops the managed publications
+  outright, and resume recreates them with their configured narrow lists.
+- Choosing between the two: engine upgrade (slots must not exist) ⇒
+  [suspend](/operations/major-version-upgrades); schema migration only ⇒ widen.
+
+For psql-only operators, the raw-SQL equivalent of the guarded transitions:
+
+```sql
+-- Widen (only while Running; a host bounce or the client fallback applies it):
+UPDATE wallaby.control SET publications_widened = true, widened_at = now(), updated_at = now()
+WHERE state = 'Running' AND NOT publications_widened;
+SELECT pg_notify('wallaby_control', '');
+
+-- Restore:
+UPDATE wallaby.control SET publications_widened = false, widened_at = NULL, widened_by = NULL, updated_at = now()
+WHERE publications_widened;
+SELECT pg_notify('wallaby_control', '');
+```
 
 ## Triggering backfills
 
@@ -106,22 +165,21 @@ var status = await control.GetBackfillStatusAsync();   // every tracked table's 
 ```
 
 Identical semantics to the in-host manager: the request is persisted (it survives restarts), the current
-leader is signalled instantly, and a request made while the table is already backfilling wins — the
-table re-runs from the start. The client has no entity model, so tables are addressed by
-schema-qualified name; a request for a table Wallaby doesn't capture stays `Requested` until a mapping
-for it deploys (the leader warns once per term about such requests).
-`CancelBackfillAsync` withdraws a queued request before the leader serves it — including its pending
-purge mark, the escape hatch for a mis-fired `purge: true` — and returns whether a request was
-withdrawn; see [cancelling a queued request](/backfill#cancelling-a-queued-request) for the exact
-semantics. See [Backfill](/backfill) for how snapshots run and what
+leader is signalled instantly, and a request made while the table is already backfilling wins.
+The client has no entity model, so tables are addressed by schema-qualified name.
+
+`CancelBackfillAsync` withdraws a queued request before the leader serves it and returns whether a request was
+withdrawn (see [cancelling a queued request](/backfill#cancelling-a-queued-request) for the exact
+semantics). See [Backfill](/backfill) for how snapshots run and what
 [`purge: true`](/backfill#purging-before-a-backfill) converges.
 
 ## Requirements and privileges
 
-- **The client never performs DDL.** The control tables are created by the Wallaby host at startup, so
-  each operation requires a host to have run against the database at least once (a suspension-aware
-  version for suspend/resume); `SuspendAsync` and `RequestBackfillAsync` throw a descriptive
-  `InvalidOperationException` otherwise. Reads (`GetStateAsync`, `GetBackfillStatusAsync`) will always work.
+- **The client never creates schema objects.** The `wallaby` schema is created and migrated by the
+  Wallaby host at startup, and the client checks its version ledger (`wallaby.schema_version`).
+  The only DDL it ever runs targets Wallaby-managed publications, and only in the
+  no-host fallbacks: dropping them when it finalizes a suspension, and rewriting their membership when
+  it applies a widening, in both cases objects the host recreates or re-narrows from configuration.
 - Suspending needs the same rights Wallaby itself uses: drop its replication slots and update the
   `wallaby` schema's tables.
 - Operations are visible to the installation's own diagnostics: a suspension turns the

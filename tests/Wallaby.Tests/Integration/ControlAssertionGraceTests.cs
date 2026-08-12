@@ -128,38 +128,33 @@ public class ControlAssertionGraceTests(PostgresFixture pg)
     }
 
     [Test]
-    public async Task A_missing_heartbeat_column_is_healed_by_the_heartbeat()
+    public async Task An_old_control_schema_is_healed_by_the_control_read()
     {
         var store = Store();
         await store.RequestConfigurationSuspendAsync(null, CancellationToken.None);
-        // A database last touched by a pre-heartbeat host: no column, and a ledger that doesn't know v3.
-        await ExecAsync("ALTER TABLE wallaby.control DROP COLUMN configuration_asserted_at");
-        await ExecAsync("DELETE FROM wallaby.schema_version WHERE version >= 3");
+        // Rewind to version 5, the oldest schema any deployment carries. The pending migration adds
+        // columns the control read selects, which is what makes the read the heal point: it migrates
+        // and retries, so everything later in the same gate pass finds its columns.
+        await ExecAsync(
+            """
+            ALTER TABLE wallaby.control
+                DROP COLUMN publications_widened,
+                DROP COLUMN widened_at,
+                DROP COLUMN widened_by
+            """);
+        await ExecAsync("DELETE FROM wallaby.schema_version WHERE version >= 6");
 
-        await store.HeartbeatConfigurationAssertionAsync(CancellationToken.None);
-
-        (await AssertedAtAsync()).ShouldNotBeNull();
+        var row = await store.ReadAsync(CancellationToken.None);
+        row!.State.ShouldBe(ControlContract.StateSuspendRequested);
+        row.PublicationsWidened.ShouldBeFalse();
+        (await SchemaVersionAsync()).ShouldBe(ControlContract.SchemaVersion);
     }
 
-    [Test]
-    public async Task A_missing_heartbeat_column_falls_back_to_the_ungraced_resume()
+    private async Task<int> SchemaVersionAsync()
     {
-        var store = Store();
-        await store.RequestConfigurationSuspendAsync(null, CancellationToken.None);
-        await ExecAsync("ALTER TABLE wallaby.control DROP COLUMN configuration_asserted_at");
-        await ExecAsync("DELETE FROM wallaby.schema_version WHERE version >= 3");
-        try
-        {
-            // No column means no heartbeats can exist: pre-heartbeat semantics, resume immediately.
-            (await store.ResumeConfigurationSuspensionAsync(CancellationToken.None)).ShouldBeTrue();
-            (await StateAsync()).ShouldBe(ControlContract.StateRunning);
-        }
-        finally
-        {
-            // Restore the schema for the tests that follow.
-            await using var conn = await pg.DataSource.OpenConnectionAsync();
-            await new StateSchemaBootstrapper().EnsureAsync(conn, CancellationToken.None);
-        }
+        await using var cmd = pg.DataSource.CreateCommand(
+            "SELECT coalesce(max(version), 0) FROM wallaby.schema_version");
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
     private async Task ExecAsync(string sql)

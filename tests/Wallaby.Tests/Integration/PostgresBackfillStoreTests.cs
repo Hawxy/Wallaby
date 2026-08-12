@@ -26,12 +26,12 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var table = UniqueTable("orders");
 
         await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
-        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
 
         // The running backfill keeps writing progress (including its final Completed) — all no-ops now.
         await store.SaveProgressAsync(
-            State(table, BackfillStatus.InProgress, """{"v":1}""", rows: 42), CancellationToken.None);
-        await store.SaveProgressAsync(State(table, BackfillStatus.Completed, rows: 99), CancellationToken.None);
+            table, BackfillStatus.InProgress, """{"v":1}""", 42, CancellationToken.None);
+        await store.SaveProgressAsync(table, BackfillStatus.Completed, null, 99, CancellationToken.None);
 
         var state = await store.GetAsync(table, CancellationToken.None);
         state.ShouldNotBeNull();
@@ -49,16 +49,39 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
 
         await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
         await store.SaveProgressAsync(
-            State(table, BackfillStatus.InProgress, """{"v":1}""", rows: 42), CancellationToken.None);
+            table, BackfillStatus.InProgress, """{"v":1}""", 42, CancellationToken.None);
 
         var state = await store.GetAsync(table, CancellationToken.None);
         state.ShouldNotBeNull();
         state.Status.ShouldBe(BackfillStatus.InProgress);
         state.CursorJson.ShouldNotBeNull();
         state.RowsCopied.ShouldBe(42);
+        // Progress owns only progress: the version stamped by the fresh-run save is untouched.
+        state.TransformVersion.ShouldBe("v1");
 
-        await store.SaveProgressAsync(State(table, BackfillStatus.Completed, rows: 99), CancellationToken.None);
-        (await store.GetAsync(table, CancellationToken.None))!.Status.ShouldBe(BackfillStatus.Completed);
+        await store.SaveProgressAsync(table, BackfillStatus.Completed, null, 99, CancellationToken.None);
+        var completed = await store.GetAsync(table, CancellationToken.None);
+        completed!.Status.ShouldBe(BackfillStatus.Completed);
+        completed.TransformVersion.ShouldBe("v1");
+    }
+
+    [Test]
+    public async Task A_request_preserves_the_stamped_transform_version()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.SaveAsync(State(table, BackfillStatus.Completed), CancellationToken.None);
+
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
+
+        var state = await store.GetAsync(table, CancellationToken.None);
+        state.ShouldNotBeNull();
+        state.Status.ShouldBe(BackfillStatus.Requested);
+        state.TransformVersion.ShouldBe("v1");
+        state.CursorJson.ShouldBeNull();
+        state.RowsCopied.ShouldBe(0);
     }
 
     [Test]
@@ -71,7 +94,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         // Prime the subscription so it is LISTENing before the request — otherwise the NOTIFY is missed.
         await subscription.WaitAsync(TimeSpan.FromMilliseconds(100), CancellationToken.None);
 
-        await store.RequestAsync(UniqueTable("orders"), null, purge: false, CancellationToken.None);
+        await store.RequestAsync(UniqueTable("orders"), purge: false, CancellationToken.None);
 
         var stopwatch = Stopwatch.StartNew();
         await subscription.WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
@@ -88,16 +111,106 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var store = new PostgresBackfillStore(pg.DataSource);
         var table = UniqueTable("orders");
 
-        await store.RequestAsync(table, "v1", purge: true, CancellationToken.None);
+        await store.RequestAsync(table, purge: true, CancellationToken.None);
         (await store.GetAsync(table, CancellationToken.None))!.Purge.ShouldBeTrue();
 
         // A racing plain request must not clear the pending purge.
-        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
         (await store.GetAsync(table, CancellationToken.None))!.Purge.ShouldBeTrue();
 
         // The scheduler's fresh-run transition clears it (Purge defaults false).
         await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
         (await store.GetAsync(table, CancellationToken.None))!.Purge.ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task A_failure_backs_off_with_attempts_and_a_recorded_error()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+
+        var first = await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+        var second = await store.FailAsync(table, "IOException: boom again", CancellationToken.None);
+
+        first.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
+        second.ShouldBeGreaterThan(first); // the delay grows per attempt
+
+        var state = await store.GetAsync(table, CancellationToken.None);
+        state.ShouldNotBeNull();
+        state.Attempts.ShouldBe(2);
+        state.LastError.ShouldBe("IOException: boom again");
+        state.NextAttemptAt.ShouldBe(second);
+
+        // Progress owns only progress: the failure ledger is untouched by a running save.
+        await store.SaveProgressAsync(table, BackfillStatus.InProgress, null, 5, CancellationToken.None);
+        (await store.GetAsync(table, CancellationToken.None))!.Attempts.ShouldBe(2);
+
+        await store.ClearFailureAsync(table, CancellationToken.None);
+        var cleared = await store.GetAsync(table, CancellationToken.None);
+        cleared!.Attempts.ShouldBe(0);
+        cleared.LastError.ShouldBeNull();
+    }
+
+    [Test]
+    public async Task A_fresh_run_save_resets_the_failure_ledger()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+        await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress), CancellationToken.None);
+
+        var state = await store.GetAsync(table, CancellationToken.None);
+        state.ShouldNotBeNull();
+        state.Attempts.ShouldBe(0);
+        state.LastError.ShouldBeNull();
+        state.NextAttemptAt.ShouldNotBeNull();
+        state.NextAttemptAt.Value.ShouldBeLessThanOrEqualTo(DateTimeOffset.UtcNow.AddSeconds(5));
+    }
+
+    [Test]
+    public async Task List_requested_excludes_a_backed_off_row()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
+        (await store.ListRequestedAsync(CancellationToken.None)).ShouldContain(table);
+
+        await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+        (await store.ListRequestedAsync(CancellationToken.None)).ShouldNotContain(table);
+
+        // Withdraw the request so the row stops counting as pending work.
+        await store.CancelRequestAsync(table, CancellationToken.None);
+    }
+
+    [Test]
+    public async Task Max_attempts_tracks_pending_rows_only()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("orders");
+
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
+        // 5 attempts outranks anything another test in this class leaves behind.
+        for (var i = 0; i < 5; i++)
+        {
+            await store.FailAsync(table, "IOException: boom", CancellationToken.None);
+        }
+
+        (await store.MaxAttemptsAsync(CancellationToken.None)).ShouldBe(5);
+
+        // A cancelled row keeps its history but no longer represents pending work.
+        (await store.CancelRequestAsync(table, CancellationToken.None)).ShouldBeTrue();
+        (await store.GetAsync(table, CancellationToken.None))!.Attempts.ShouldBe(5);
+        (await store.MaxAttemptsAsync(CancellationToken.None)).ShouldBeLessThan(5);
     }
 
     [Test]
@@ -108,7 +221,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var requested = UniqueTable("a");
         var inProgress = UniqueTable("b");
 
-        await store.RequestAsync(requested, null, purge: false, CancellationToken.None);
+        await store.RequestAsync(requested, purge: false, CancellationToken.None);
         await store.SaveAsync(State(inProgress, BackfillStatus.InProgress), CancellationToken.None);
 
         // The shared database may hold requests from other tests, so assert membership, not equality.
@@ -125,7 +238,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var store = new PostgresBackfillStore(pg.DataSource);
         var table = UniqueTable("orders");
 
-        await store.RequestAsync(table, "v1", purge: true, CancellationToken.None);
+        await store.RequestAsync(table, purge: true, CancellationToken.None);
 
         (await store.CancelRequestAsync(table, CancellationToken.None)).ShouldBeTrue();
 
@@ -157,9 +270,9 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         var store = new PostgresBackfillStore(pg.DataSource);
         var table = UniqueTable("orders");
 
-        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
         await store.CancelRequestAsync(table, CancellationToken.None);
-        await store.RequestAsync(table, "v1", purge: false, CancellationToken.None);
+        await store.RequestAsync(table, purge: false, CancellationToken.None);
 
         (await store.GetAsync(table, CancellationToken.None))!.Status.ShouldBe(BackfillStatus.Requested);
     }

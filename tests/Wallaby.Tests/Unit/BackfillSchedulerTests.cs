@@ -105,6 +105,96 @@ public class BackfillSchedulerTests
             .ShouldBe(new BackfillDecision(BackfillAction.Skip, Purge: false));
     }
 
+    // ---- per-table failure isolation ----
+
+    private sealed class RecordingStore(Func<string, BackfillState?> stateFor) : IBackfillStateStore
+    {
+        public List<string> Saved { get; } = [];
+        public List<string> Failed { get; } = [];
+        public DateTimeOffset NextAttempt { get; } = DateTimeOffset.UtcNow.AddSeconds(5);
+
+        public Task<BackfillState?> GetAsync(string t, CancellationToken ct) => Task.FromResult(stateFor(t));
+        public Task SaveAsync(BackfillState state, CancellationToken ct)
+        {
+            Saved.Add(state.TableQualifiedName);
+            return Task.CompletedTask;
+        }
+        public Task<DateTimeOffset> FailAsync(string t, string error, CancellationToken ct)
+        {
+            Failed.Add(t);
+            return Task.FromResult(NextAttempt);
+        }
+
+        public Task SaveProgressAsync(string t, BackfillStatus s, string? c, long r, CancellationToken ct)
+            => Task.CompletedTask;
+        public Task RequestAsync(string t, bool purge, CancellationToken ct) => Task.CompletedTask;
+        public Task<bool> CancelRequestAsync(string t, CancellationToken ct) => Task.FromResult(false);
+        public Task ClearFailureAsync(string t, CancellationToken ct) => Task.CompletedTask;
+        public Task<int> MaxAttemptsAsync(CancellationToken ct) => Task.FromResult(0);
+        public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<BackfillState>>([]);
+        public INotifySubscription Subscribe() => new WaitSignal([], () => { });
+    }
+
+    private static BackfillScheduler SchedulerFor(RecordingStore store, out NpgsqlDataSource dataSource)
+    {
+        CapturedTable Table(string name) => new()
+        {
+            EntityClrType = typeof(object),
+            Schema = "public",
+            TableName = name,
+            Columns = [],
+            PrimaryKey = [],
+        };
+
+        // Port 1 refuses connections, so any coordinator run fails fast.
+        dataSource = NpgsqlDataSource.Create("Host=localhost;Port=1;Username=u;Password=p;Database=d;Timeout=1");
+        var coordinator = new WatermarkBackfillCoordinator(dataSource, store, NullLogger.Instance);
+        return new BackfillScheduler(
+            [
+                new BackfillTable(Table("products"), "v1", PurgeOnVersionChange: false, PurgeTargets: []),
+                new BackfillTable(Table("orders"), "v1", PurgeOnVersionChange: false, PurgeTargets: []),
+            ],
+            store, coordinator,
+            new SinkPurgeRunner(new Dictionary<string, ISink>(), WallabyInstrumentation.NoOp, NullLogger.Instance),
+            new BackfillSchedulerOptions(), NullLogger.Instance);
+    }
+
+    [Test]
+    public async Task A_failing_table_backs_off_alone_and_the_pass_continues()
+    {
+        var store = new RecordingStore(_ => null); // both tables are new => Fresh, and both runs fail
+        var scheduler = SchedulerFor(store, out var dataSource);
+        await using var _ = dataSource;
+
+        var nextRetryAt = await scheduler.RunDueBackfillsAsync(CancellationToken.None);
+
+        // The first table's failure did not abort the pass: both ran, both recorded their own backoff.
+        store.Saved.ShouldBe(["public.products", "public.orders"]);
+        store.Failed.ShouldBe(["public.products", "public.orders"]);
+        nextRetryAt.ShouldBe(store.NextAttempt);
+    }
+
+    [Test]
+    public async Task A_table_in_backoff_is_left_until_due()
+    {
+        var notBefore = DateTimeOffset.UtcNow.AddMinutes(5);
+        var store = new RecordingStore(t => new BackfillState(
+            t, BackfillStatus.Requested, "v1", CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow,
+            Purge: false, Attempts: 1, NextAttemptAt: notBefore, LastError: "boom"));
+        var scheduler = SchedulerFor(store, out var dataSource);
+        await using var _ = dataSource;
+
+        var nextRetryAt = await scheduler.RunDueBackfillsAsync(CancellationToken.None);
+
+        // Requested but backed off: nothing runs until the backoff expires.
+        store.Saved.ShouldBeEmpty();
+        store.Failed.ShouldBeEmpty();
+        nextRetryAt.ShouldBe(notBefore);
+    }
+
     // ---- request loop ----
 
     // Every pass sees Completed at the declared version (Skip), so the coordinator is never invoked and
@@ -132,8 +222,13 @@ public class BackfillSchedulerTests
         public INotifySubscription Subscribe() => new WaitSignal(Events, onWait);
 
         public Task SaveAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task SaveProgressAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task RequestAsync(string t, string? v, bool purge, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(string t, BackfillStatus s, string? c, long r, CancellationToken ct)
+            => Task.CompletedTask;
+        public Task RequestAsync(string t, bool purge, CancellationToken ct) => Task.CompletedTask;
+        public Task<DateTimeOffset> FailAsync(string t, string error, CancellationToken ct)
+            => Task.FromResult(DateTimeOffset.UtcNow.AddSeconds(5));
+        public Task ClearFailureAsync(string t, CancellationToken ct) => Task.CompletedTask;
+        public Task<int> MaxAttemptsAsync(CancellationToken ct) => Task.FromResult(0);
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<BackfillState>>([]);
     }

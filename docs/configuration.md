@@ -46,7 +46,7 @@ You shouldn't modify these unless you know what you're doing:
 | `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/providers/entity-framework-core/#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
 | `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval is only a safety net for a missed notification. |
 | `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
-| `CheckpointSaveInterval` | `5s` | Minimum interval between writes of the `wallaby.checkpoint` row, which backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
+| `CheckpointSaveInterval` | `5s` | Minimum interval between checkpoint writes to the slot's `wallaby.slot_registry` row; the checkpoint backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
 | `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing; see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
 | `SlotLagSampleInterval` | `30s` | How often the leader samples the WAL bytes the server retains for the slot, published as the `wallaby.slot.retained_wal` gauge (see [observability](/operations/observability#metrics)). `Zero` disables sampling. |
 | `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
@@ -191,11 +191,11 @@ the third-party consumer.
 **Migrating a column-listed table.** Postgres pins the columns in a publication's column list: while the
 list is in place, `ALTER TABLE ... ALTER COLUMN ... TYPE` (even a widening) and `DROP COLUMN` on a listed
 column are rejected, and `DROP COLUMN ... CASCADE` succeeds by removing the table from the publication
-entirely - which silently stops capturing it until the next startup reconciles the publication. To change
-a listed column, widen the table to whole-row publishing first
-(`ALTER PUBLICATION ... SET TABLE`, keeping the other members' lists intact), run the migration, and let
-the next startup re-narrow it. Tables without a declared selection are never listed, so their migrations
-are unaffected.
+entirely - which silently stops capturing it until the next startup reconciles the publication. The
+built-in fix is [publication widening](/operations/external-control#widening-publications-for-schema-migrations):
+`WidenPublicationsAsync` temporarily lifts every managed column list (no capture gap, no re-backfill),
+the migration runs, and `RestorePublicationsAsync` re-narrows. Tables without a declared selection are
+never listed, so their migrations are unaffected.
 :::
 
 ::: warning

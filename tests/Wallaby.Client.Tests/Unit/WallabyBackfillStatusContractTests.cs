@@ -8,6 +8,6 @@ public class WallabyBackfillStatusContractTests
         // Parsed from the strings the host's BackfillStatus persists in wallaby.backfill_state
         // (whose pin test carries the same list): never rename.
         Enum.GetNames<WallabyBackfillStatus>()
-            .ShouldBe(["NotStarted", "Requested", "InProgress", "Completed", "Cancelled"]);
+            .ShouldBe(["Requested", "InProgress", "Completed", "Cancelled"]);
     }
 }

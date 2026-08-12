@@ -48,7 +48,7 @@ internal sealed class WatermarkBackfillCoordinator(
     // ---- backfill task side ----
 
     /// <summary>Snapshot a whole table chunk-by-chunk, resuming from persisted state. The live pipeline must be running.</summary>
-    public async Task BackfillTableAsync(CapturedTable table, string? transformVersion, CancellationToken ct)
+    public async Task BackfillTableAsync(CapturedTable table, CancellationToken ct)
     {
         // One token per run, deliberately not persisted: a crash-resume re-delivers under a fresh token,
         // which is harmless (upsert-only) and avoids a state column.
@@ -78,13 +78,10 @@ internal sealed class WatermarkBackfillCoordinator(
             // Guarded save: a manual request arriving mid-run wins over every later progress write,
             // so the row stays Requested and the scheduler re-runs the table fresh.
             (cur, rows, hasMore, token) => store.SaveProgressAsync(
-                new BackfillState(
-                    table.QualifiedName,
-                    hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
-                    transformVersion,
-                    KeysetCodec.SerializeCursor(cur, pkColumns),
-                    rows,
-                    DateTimeOffset.UtcNow),
+                table.QualifiedName,
+                hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
+                KeysetCodec.SerializeCursor(cur, pkColumns),
+                rows,
                 token),
             ct);
 

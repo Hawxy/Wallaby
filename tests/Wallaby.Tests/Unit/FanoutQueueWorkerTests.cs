@@ -46,11 +46,16 @@ public class FanoutQueueWorkerTests
     {
         public Task<BackfillState?> GetAsync(string t, CancellationToken ct) => Task.FromResult<BackfillState?>(null);
         public Task SaveAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task SaveProgressAsync(BackfillState state, CancellationToken ct) => Task.CompletedTask;
-        public Task RequestAsync(string t, string? v, bool purge, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveProgressAsync(string t, BackfillStatus s, string? c, long r, CancellationToken ct)
+            => Task.CompletedTask;
+        public Task RequestAsync(string t, bool purge, CancellationToken ct) => Task.CompletedTask;
         public Task<bool> CancelRequestAsync(string t, CancellationToken ct) => Task.FromResult(false);
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<DateTimeOffset> FailAsync(string t, string error, CancellationToken ct)
+            => Task.FromResult(DateTimeOffset.UtcNow.AddSeconds(5));
+        public Task ClearFailureAsync(string t, CancellationToken ct) => Task.CompletedTask;
+        public Task<int> MaxAttemptsAsync(CancellationToken ct) => Task.FromResult(0);
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<BackfillState>>([]);
         public INotifySubscription Subscribe() => new NoOpSubscription();
@@ -60,7 +65,7 @@ public class FanoutQueueWorkerTests
     public async Task Job_for_a_table_not_in_the_model_is_deferred_not_dropped()
     {
         var queue = new FakeQueue(new FanoutJobRow(
-            "public.nonexistent", "hash1", BackfillStatus.Requested, ["col"], "[]", null, 0));
+            "public.nonexistent", "hash1", FanoutJobStatus.Requested, ["col"], "[]", null, 0));
 
         // The coordinator/store are never invoked on the divergent path, so a never-opened data source is fine.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
@@ -81,8 +86,8 @@ public class FanoutQueueWorkerTests
         // second is still attempted: an unhandled failure would abort the drain and starve everything
         // behind the first.
         var queue = new FakeQueue(
-            new FanoutJobRow("public.widgets", "hash1", BackfillStatus.Requested, ["col"], "[[1]]", null, 0),
-            new FanoutJobRow("public.widgets", "hash2", BackfillStatus.Requested, ["col"], "[[2]]", null, 0, Attempts: 4));
+            new FanoutJobRow("public.widgets", "hash1", FanoutJobStatus.Requested, ["col"], "[[1]]", null, 0),
+            new FanoutJobRow("public.widgets", "hash2", FanoutJobStatus.Requested, ["col"], "[[2]]", null, 0, Attempts: 4));
 
         var status = new WallabyStatus();
         await using var dataSource = NpgsqlDataSource.Create(UnreachableConnectionString);
@@ -105,7 +110,7 @@ public class FanoutQueueWorkerTests
     public async Task A_job_with_unreadable_lookup_values_is_dropped_not_retried()
     {
         var queue = new FakeQueue(new FanoutJobRow(
-            "public.widgets", "hash1", BackfillStatus.Requested, ["col"], "not json", null, 0));
+            "public.widgets", "hash1", FanoutJobStatus.Requested, ["col"], "not json", null, 0));
 
         // The coordinator is never reached: the values fail to deserialize first.
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
@@ -261,7 +266,7 @@ public class FanoutQueueWorkerTests
 
         // Capture the counter as the healthy pass starts (before its reset), and stop once the worker idles.
         var queue = new ThrowOnceQueue(
-            onHealthyPass: () => failuresSeenOnHealthyPass = status.Current.ConsecutiveFanoutFailures,
+            onHealthyPass: () => failuresSeenOnHealthyPass = status.Current.ConsecutiveFanoutPassFailures,
             onIdle: stop.Cancel);
 
         await using var dataSource = NpgsqlDataSource.Create("Host=localhost;Username=u;Password=p;Database=d");
@@ -272,7 +277,8 @@ public class FanoutQueueWorkerTests
         await worker.RunAsync(stop.Token);
 
         failuresSeenOnHealthyPass.ShouldBe(1); // the failed pass was recorded...
-        status.Current.ConsecutiveFanoutFailures.ShouldBe(0); // ...and the healthy pass reset it
+        status.Current.ConsecutiveFanoutPassFailures.ShouldBe(0); // ...and the healthy pass reset it
+        status.Current.ConsecutiveFanoutFailures.ShouldBe(0); // a pass failure never inflates the job streak
         status.Current.LastError.ShouldBe("InvalidOperationException: poison pass");
     }
 }

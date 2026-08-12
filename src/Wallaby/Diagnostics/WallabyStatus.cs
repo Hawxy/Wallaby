@@ -50,35 +50,65 @@ internal sealed class WallabyStatus : IWallabyStatus
         }
     }
 
+    /// <summary>
+    /// Role transitions are total: every role-scoped field is rewritten on every transition (cleared
+    /// unless the new role sets it), so nothing leaks from a previous role and the invariants documented
+    /// on <see cref="WallabyStatusSnapshot"/> hold by construction.
+    /// </summary>
+    private void TransitionTo(WallabyNodeRole role, Func<WallabyStatusSnapshot, WallabyStatusSnapshot>? apply = null) =>
+        Update(s =>
+        {
+            var next = s with
+            {
+                Role = role,
+                Faulted = false,
+                LeaderSince = null,
+                SuspendedSince = null,
+                SuspensionReason = null,
+            };
+            return apply is null ? next : apply(next);
+        });
+
+    // Failure streaks belong to a (crash-looping) leader; a node that is not leading claims none. The
+    // persisted fan-out/backfill attempts survive in the store and re-mirror on the next leader's passes.
+    private static WallabyStatusSnapshot ClearFailureStreaks(WallabyStatusSnapshot s) => s with
+    {
+        ConsecutiveLeaderFailures = 0,
+        ConsecutiveFanoutFailures = 0,
+        ConsecutiveFanoutPassFailures = 0,
+        ConsecutiveBackfillFailures = 0,
+        ConsecutiveBackfillPassFailures = 0,
+    };
+
+    // Leader failure streaks deliberately survive re-entering leadership: a crash-looping leader keeps
+    // accumulating across sessions, which is what the health check's crash-loop grade reads.
     internal void EnterLeader(DateTimeOffset since) =>
-        Update(s => s with
-        {
-            Role = WallabyNodeRole.Leader, LeaderSince = since, Faulted = false,
-            SuspendedSince = null, SuspensionReason = null,
-        });
+        TransitionTo(WallabyNodeRole.Leader, s => s with { LeaderSince = since });
 
-    internal void EnterStandby() =>
-        Update(s => s with
-        {
-            Role = WallabyNodeRole.Standby, LeaderSince = null,
-            SuspendedSince = null, SuspensionReason = null,
-        });
+    internal void EnterStandby() => TransitionTo(WallabyNodeRole.Standby, ClearFailureStreaks);
 
+    // Clearing the streaks keeps a previously crash-looping node from reading Unhealthy through a
+    // planned suspension window (the crash-loop grade outranks the Suspended grade).
     internal void EnterSuspended(DateTimeOffset? since, string? reason) =>
-        Update(s => s with
+        TransitionTo(WallabyNodeRole.Suspended, s => ClearFailureStreaks(s) with
         {
-            Role = WallabyNodeRole.Suspended, LeaderSince = null,
             SuspendedSince = since, SuspensionReason = reason,
         });
+
+    internal void SetPublicationsWidened(bool widened, DateTimeOffset? at) =>
+        Update(s => s.PublicationsWidened == widened && s.PublicationsWidenedAt == at
+            ? s
+            : s with { PublicationsWidened = widened, PublicationsWidenedAt = at });
 
     internal void RecordLeaderFailure(string error) =>
         Update(s => s with { ConsecutiveLeaderFailures = s.ConsecutiveLeaderFailures + 1, LastError = error });
 
-    internal void ResetLeaderFailures() =>
-        Update(s => s.ConsecutiveLeaderFailures == 0 ? s : s with { ConsecutiveLeaderFailures = 0 });
+    /// <summary>A clean leader-session end (step-down, suspension wind-down): no streak survives it.</summary>
+    internal void ResetFailureStreaks() => Update(ClearFailureStreaks);
 
-    internal void RecordFanoutFailure(string error) =>
-        Update(s => s with { ConsecutiveFanoutFailures = s.ConsecutiveFanoutFailures + 1, LastError = error });
+    /// <summary>A fan-out drain pass failed outright (the queue unreachable, not one job's run).</summary>
+    internal void RecordFanoutPassFailure(string error) =>
+        Update(s => s with { ConsecutiveFanoutPassFailures = s.ConsecutiveFanoutPassFailures + 1, LastError = error });
 
     /// <summary>A fan-out job failed; <paramref name="attempts"/> is its persisted failure streak.</summary>
     internal void RecordFanoutJobFailure(string error, int attempts) =>
@@ -89,14 +119,33 @@ internal sealed class WallabyStatus : IWallabyStatus
         });
 
     /// <summary>
-    /// Reconcile the counter with the store's worst pending job. Persisted attempts are the source of
-    /// truth: healthy jobs draining can't mask a backed-off failing job, and a recovered job's deleted
-    /// row lowers the value on its own.
+    /// A clean drain pass: reconcile the job streak with the store's worst pending job and clear the
+    /// pass-failure counter. Persisted attempts are the source of truth: healthy jobs draining can't
+    /// mask a backed-off failing job, and a recovered job's deleted row lowers the value on its own.
     /// </summary>
     internal void SetFanoutStreak(int attempts) =>
-        Update(s => s.ConsecutiveFanoutFailures == attempts ? s : s with { ConsecutiveFanoutFailures = attempts });
+        Update(s => s with { ConsecutiveFanoutFailures = attempts, ConsecutiveFanoutPassFailures = 0 });
 
-    internal void ResetFanoutFailures() => SetFanoutStreak(0);
+    /// <summary>A backfill scheduler pass failed outright (the store unreachable, not one table's run).</summary>
+    internal void RecordBackfillPassFailure(string error) =>
+        Update(s => s with { ConsecutiveBackfillPassFailures = s.ConsecutiveBackfillPassFailures + 1, LastError = error });
+
+    /// <summary>A table's backfill failed; <paramref name="attempts"/> is its persisted failure streak.</summary>
+    internal void RecordBackfillTableFailure(string error, int attempts) =>
+        Update(s => s with
+        {
+            ConsecutiveBackfillFailures = Math.Max(s.ConsecutiveBackfillFailures, attempts),
+            LastError = error,
+        });
+
+    /// <summary>
+    /// A clean scheduler pass: reconcile the table streak with the store's worst pending table and clear
+    /// the pass-failure counter. Persisted attempts are the source of truth: healthy tables running
+    /// can't mask a backed-off failing one, and a recovered table's reset ledger lowers the value on
+    /// its own.
+    /// </summary>
+    internal void SetBackfillStreak(int attempts) =>
+        Update(s => s with { ConsecutiveBackfillFailures = attempts, ConsecutiveBackfillPassFailures = 0 });
 
     internal void RecordProgress(ulong lsn, double lagSeconds, DateTimeOffset at) =>
         Update(s => s with
@@ -113,8 +162,7 @@ internal sealed class WallabyStatus : IWallabyStatus
     internal void RecordSinkDelivered(string sink, DateTimeOffset at) => _sinkDeliveries[sink] = at;
 
     internal void MarkFaulted(string error) =>
-        Update(s => s with { Role = WallabyNodeRole.Stopped, Faulted = true, LastError = error });
+        TransitionTo(WallabyNodeRole.Stopped, s => s with { Faulted = true, LastError = error });
 
-    internal void MarkStopped() =>
-        Update(s => s with { Role = WallabyNodeRole.Stopped });
+    internal void MarkStopped() => TransitionTo(WallabyNodeRole.Stopped);
 }

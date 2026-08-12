@@ -154,9 +154,9 @@ export const nodes: IntNode[] = [
   },
   {
     id: 'checkpoint', x: 496, y: 553, w: 188, h: 59,
-    title: 'wallaby.checkpoint',
+    title: 'checkpoint',
     subs: [],
-    detail: 'A single row holding the last applied LSN, saved alongside acknowledgements (throttled to one write per CheckpointSaveInterval). If a recreated slot\'s consistent point is ever ahead of it, changes were missed - Wallaby logs the exact range and repairs it by re-backfill.',
+    detail: 'The slot\'s wallaby.slot_registry row records the last applied LSN, saved alongside acknowledgements (throttled to one write per CheckpointSaveInterval). If a recreated slot\'s consistent point is ever ahead of it, changes were missed - Wallaby logs the exact range and repairs it by re-backfill.',
     links: [
       { text: 'slot-loss gap detection', href: '/how-it-works#slot-loss-gap-detection' },
       { text: 'configuration', href: '/configuration' },
@@ -269,7 +269,7 @@ export const scenarios: IntScenario[] = [
       { nodes: ['dispatch'], edges: ['transform-dispatch'], caption: 'the dispatcher writes independent sinks concurrently - retry with backoff, never skip' },
       { nodes: SINKS, edges: ALL_SINK_DROPS, fx: 'deliver', caption: 'each sink upserts by document id - idempotent, so a redelivery is harmless' },
       { nodes: ['ack'], edges: ALL_SINK_ACKS, caption: 'only after every sink accepts does wallaby acknowledge the transaction' },
-      { nodes: ['slot', 'checkpoint'], edges: ['ack-slot', 'ack-checkpoint'], fx: 'flush', caption: 'the slot\'s flushed lsn advances and wallaby.checkpoint records it - at-least-once, end to end' },
+      { nodes: ['slot', 'checkpoint'], edges: ['ack-slot', 'ack-checkpoint'], fx: 'flush', caption: 'the slot\'s flushed lsn advances and the checkpoint in wallaby.slot_registry records it - at-least-once, end to end' },
     ],
   },
   {
@@ -312,7 +312,7 @@ export const scenarios: IntScenario[] = [
     steps: [
       { nodes: ['slot'], warn: ['slot'], caption: 'the slot is gone - invalidated under wal pressure, lost in a failover, or dropped by hand' },
       { nodes: ['stream'], warn: ['slot'], caption: 'a fresh slot only streams forward from its creation point - on its own, the gap would be silent' },
-      { nodes: ['checkpoint', 'stream'], warn: ['slot'], caption: 'wallaby.checkpoint is behind the new slot\'s consistent point: changes were missed, and the exact lsn range is logged' },
+      { nodes: ['checkpoint', 'stream'], warn: ['slot'], caption: 'the stored checkpoint is behind the new slot\'s consistent point: changes were missed, and the exact lsn range is logged' },
       { nodes: ['backfill'], blue: true, caption: 'every mapped table is marked for re-backfill automatically' },
       { nodes: ['backfill', 'tables'], edges: ['backfill-tables'], blue: true, caption: 'keyset snapshots re-read the tables…' },
       { nodes: ['materialize', 'route', 'transform', 'dispatch'], edges: ['backfill-materialize', 'materialize-route', 'route-transform', 'transform-dispatch'], blue: true, caption: '…and replay through the standard pipeline' },

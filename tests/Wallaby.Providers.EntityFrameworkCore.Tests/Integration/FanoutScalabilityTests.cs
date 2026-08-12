@@ -359,13 +359,13 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         await store.EnqueueAsync(spec, CancellationToken.None);
         var due = await store.GetNextDueAsync(CancellationToken.None);
         due.ShouldNotBeNull();
-        due!.Status.ShouldBe(BackfillStatus.Requested);
+        due!.Status.ShouldBe(FanoutJobStatus.Requested);
 
         // Marking in progress with a cursor makes it a resumable in-progress job.
         await store.MarkInProgressAsync(
             due.TableQualified, due.LookupHash, KeysetCodec.SerializeCursor([42], ["id"]), CancellationToken.None);
         var resumed = await store.GetNextDueAsync(CancellationToken.None);
-        resumed!.Status.ShouldBe(BackfillStatus.InProgress);
+        resumed!.Status.ShouldBe(FanoutJobStatus.InProgress);
         resumed.CursorJson.ShouldNotBeNull();
 
         // Completing it (guarded on InProgress) deletes the row.
@@ -376,7 +376,7 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         // A repeat trigger after completion enqueues a single fresh row.
         await store.EnqueueAsync(spec, CancellationToken.None);
         var rearmed = await store.GetNextDueAsync(CancellationToken.None);
-        rearmed!.Status.ShouldBe(BackfillStatus.Requested);
+        rearmed!.Status.ShouldBe(FanoutJobStatus.Requested);
         (await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash)
             .ShouldBe(1);
     }
@@ -475,6 +475,6 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
 
         var remaining = await store.ListAsync(CancellationToken.None);
         remaining.Count.ShouldBe(1);
-        remaining[0].Status.ShouldBe(BackfillStatus.Requested);
+        remaining[0].Status.ShouldBe(FanoutJobStatus.Requested);
     }
 }
