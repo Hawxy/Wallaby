@@ -41,8 +41,8 @@ internal static class ControlOperations
     /// The version the host's schema migrations have brought this database to, read from the
     /// <c>wallaby.schema_version</c> ledger. 0 when the ledger (or the wallaby schema) doesn't exist: a
     /// database no ledger-maintaining Wallaby host has ever run against. Drives every version-dependent
-    /// decision — column-set selection for reads, and the client's refusal of writes the schema cannot
-    /// serve — replacing per-column 42703 probing.
+    /// decision: column-set selection for reads, and the client's refusal of writes the schema cannot
+    /// serve.
     /// </summary>
     public static async Task<int> GetSchemaVersionAsync(NpgsqlDataSource dataSource, CancellationToken ct)
     {
@@ -60,7 +60,7 @@ internal static class ControlOperations
 
     /// <summary>
     /// Read the control row at the current schema version. Returns <c>null</c> when the row or the
-    /// table doesn't exist (a database no Wallaby host has touched) — both mean "running". Throws
+    /// table doesn't exist (a database no Wallaby host has touched); both mean "running". Throws
     /// 42703 against a schema older than the widening columns; the host heals that by migrating and
     /// retrying, the client by passing the ledger-derived <c>includeWidening</c> to the overload.
     /// </summary>
@@ -117,8 +117,8 @@ internal static class ControlOperations
     /// Transition Running → SuspendRequested. A suspension already requested or in force is left
     /// untouched (including its origin, so a configuration flag never converts a client suspension
     /// into an auto-resumable one, and vice versa). Returns true when this call made the transition.
-    /// The transition also ends any publication widening — the finalize drops the managed publications
-    /// outright, and resume recreates them with their configured narrow lists — so a widened flag
+    /// The transition also ends any publication widening: the finalize drops the managed publications
+    /// outright, and resume recreates them with their configured narrow lists, so a widened flag
     /// never survives into (or past) a suspension.
     /// A configuration-origin request also stamps <c>configuration_asserted_at</c> in the same
     /// statement, so a flag-less node's grace-guarded auto-resume can never observe the request
@@ -307,7 +307,7 @@ internal static class ControlOperations
 
     /// <summary>
     /// Request publication widening: set <c>publications_widened</c> while Running (a suspension already
-    /// drops the managed publications, so widening one is meaningless — refused by the guard). Inserts
+    /// drops the managed publications, so widening one is meaningless and the guard refuses it). Inserts
     /// the control row when the table exists but no suspension was ever recorded. Returns true when
     /// this call set the flag (false: already widened, or not Running). Callers gate on the ledger
     /// version first, so the widening columns exist.
@@ -354,7 +354,7 @@ internal static class ControlOperations
     }
 
     /// <summary>
-    /// Every Wallaby-managed publication that still carries a column list or row filter on the server —
+    /// Every Wallaby-managed publication that still carries a column list or row filter on the server:
     /// the set an <c>ALTER COLUMN ... TYPE</c> migration would still be refused over. Callers gate on
     /// the ledger version first.
     /// </summary>
@@ -380,7 +380,7 @@ internal static class ControlOperations
     }
 
     /// <summary>
-    /// Widen still-narrowed managed publications directly — the no-host fallback. The client has no
+    /// Widen still-narrowed managed publications directly (the no-host fallback). The client has no
     /// entity model, so each publication's current membership is read from the catalog and re-issued as
     /// one atomic <c>SET TABLE</c> without column lists or row filters (legal under a live slot).
     /// Idempotent; a publication with no members is skipped.
@@ -427,7 +427,7 @@ internal static class ControlOperations
     /// publication being removed), then mark the suspension finalized. With both gone, the installation
     /// is fully quiesced: the upgrade precheck passes and schema migrations blocked by publication
     /// column lists or row filters (<c>ALTER COLUMN ... TYPE</c>) run freely. Unmanaged publications
-    /// (<c>ManagePublicationTables=false</c>) are never touched — Wallaby cannot recreate them.
+    /// (<c>ManagePublicationTables=false</c>) are never touched; Wallaby cannot recreate them.
     /// A slot busy with an active consumer (<c>55006</c>) is retried on <paramref name="busyRetryDelay"/>
     /// until it frees or <paramref name="ct"/> cancels; a concurrently dropped slot is ignored. A resume
     /// observed mid-finalize stops the drops immediately — the waking hosts are recreating the slots.

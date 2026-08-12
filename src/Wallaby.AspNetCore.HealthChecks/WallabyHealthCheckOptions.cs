@@ -15,8 +15,8 @@ public sealed class WallabyHealthCheckOptions
     /// Consecutive fan-out failures before the check reports Degraded: the worse of the worst pending
     /// job's persisted failure streak (holds while that job is backed off, even as other jobs drain;
     /// clears when it finally completes) and the drain loop's consecutive pass failures (the queue
-    /// itself unreachable). Live replication is unaffected by either — only the dependent re-syncs they
-    /// would have driven — so this grades Degraded rather than Unhealthy, keeping a liveness probe from
+    /// itself unreachable). Live replication is unaffected by either (only the dependent re-syncs they
+    /// would have driven), so this grades Degraded rather than Unhealthy, keeping a liveness probe from
     /// restart-looping the node while still surfacing that some documents are going stale. Set to 0
     /// (or negative) to disable fan-out grading. Defaults to 5.
     /// </summary>
@@ -26,8 +26,8 @@ public sealed class WallabyHealthCheckOptions
     /// Consecutive backfill failures before the check reports Degraded: the worse of the worst pending
     /// table's persisted failure streak (holds while that table is backed off; clears when its run
     /// finally starts fresh or completes) and the scheduler's consecutive pass failures (the state
-    /// store itself unreachable). Live replication and the other tables' backfills are unaffected —
-    /// the failing table retries with backoff — so this grades Degraded rather than Unhealthy, keeping
+    /// store itself unreachable). Live replication and the other tables' backfills are unaffected
+    /// (the failing table retries with backoff), so this grades Degraded rather than Unhealthy, keeping
     /// a liveness probe from restart-looping the node while still surfacing that the table's sinks are
     /// not converging. Set to 0 (or negative) to disable backfill grading. Defaults to 5.
     /// </summary>

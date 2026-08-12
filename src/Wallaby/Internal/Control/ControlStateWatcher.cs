@@ -5,8 +5,8 @@ namespace Wallaby.Internal.Control;
 
 /// <summary>
 /// Leader-side control watcher: observes the control row (LISTEN + fallback poll) and cancels the leader
-/// workload when a suspension is requested — so the session winds down cleanly and releases the slot for
-/// the runtime to drop — or when the publication-widening flag flips against the session's baseline, so
+/// workload when a suspension is requested (so the session winds down cleanly and releases the slot for
+/// the runtime to drop) or when the publication-widening flag flips against the session's baseline, so
 /// the next term's bootstrap reconciles the publications to the new width (a plain session bounce: the
 /// slot is untouched and checkpoint continuity holds). A transient read failure is logged and retried; it
 /// must never fault a healthy streaming session, so unlike the backfill/fan-out tasks this one only ends

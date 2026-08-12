@@ -213,7 +213,7 @@ public class SuspendResumeTests(TestModelPostgresFixture pg)
             }
 
             // With no host running, the request is never finalized: no slot is dropped. The resume
-            // still stamps the purge flag — the state surface shows the pending request.
+            // still stamps the purge flag; the state surface shows the pending request.
             await client.SuspendAsync(new WallabySuspendOptions { WaitForCompletion = false });
             var resumed = await client.ResumeAsync(purge: true);
             resumed.PurgeOnResume.ShouldBeTrue();

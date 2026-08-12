@@ -60,7 +60,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
-    /// run against it) — deploy a newer host first; it migrates the schema at startup.
+    /// run against it): deploy a newer host first; it migrates the schema at startup.
     /// </exception>
     /// <exception cref="WallabyControlTimeoutException">
     /// The <see cref="WallabySuspendOptions.Timeout"/> expired before every slot was dropped — typically a
@@ -89,8 +89,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
                 // Resumed underneath us (another operator, or a host deployed without suspension in
                 // mind); report reality rather than fighting over the state.
                 || state.State == WallabySuspensionState.Running),
-            // Past the grace period, any slot still (or newly) on the server is dropped from here —
-            // covers no host running, a finalizer crash, and a slot recreated by an old-version node.
+            // Past the grace period, any slot still (or newly) on the server is dropped from here.
+            // Covers no host running, a finalizer crash, and a slot recreated by an old-version node.
             fallbackAsync: async token =>
             {
                 _logger.ClientFinalizing();
@@ -136,7 +136,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
 
     /// <summary>
     /// Read the current control-plane state: suspension status and every managed slot joined with its
-    /// live server state. Never requires DDL rights and works against any schema vintage — the column
+    /// live server state. Never requires DDL rights and works against any schema vintage: the column
     /// set adapts to the ledger version, and a database without the control table reads as
     /// <see cref="WallabySuspensionState.Running"/>.
     /// </summary>
@@ -159,8 +159,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// The single schema gate for state-changing operations: refuse (with the found version) instead of
-    /// probing per column, so every operation behaves uniformly against an older database.
+    /// The single schema gate for state-changing operations: refuse with the found version, so every
+    /// operation behaves uniformly against an older database.
     /// </summary>
     private async Task RequireCurrentSchemaAsync(CancellationToken ct)
     {
@@ -182,7 +182,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// <summary>
     /// Temporarily widen every Wallaby-managed publication to plain whole-table membership (no column
     /// lists), so schema migrations refused over publication column lists or row filters
-    /// (<c>cannot alter type of a column used by a publication...</c>) can run — without suspending:
+    /// (<c>cannot alter type of a column used by a publication...</c>) can run without suspending:
     /// no slot drop, no capture gap, no re-backfill. A running host applies the change by bouncing its
     /// leader session (an atomic <c>SET TABLE</c>, streaming pauses for one re-election); with no host
     /// running, this client rewrites the publications itself after
@@ -193,8 +193,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
-    /// run against it), or the installation is suspended — a suspension already drops the managed
-    /// publications, so blocked migrations run now.
+    /// run against it), or the installation is suspended (a suspension already drops the managed
+    /// publications, so blocked migrations run now).
     /// </exception>
     /// <exception cref="WallabyControlTimeoutException">
     /// The <see cref="WallabyWidenOptions.Timeout"/> expired while some managed publication still
@@ -219,7 +219,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
                     "drops the managed publications — blocked schema migrations run freely now. Run the " +
                     "migration, or ResumeAsync first if you meant to widen instead of suspending.");
             }
-            // Already widened: idempotent — fall through so the wait still verifies completion.
+            // Already widened: idempotent, fall through so the wait still verifies completion.
         }
 
         if (!options.WaitForCompletion)
@@ -241,8 +241,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
                 narrowed = await ControlOperations.ListNarrowedPublicationsAsync(_dataSource, token);
                 return narrowed.Count == 0;
             },
-            // Past the grace period, any still-narrowed managed publication is rewritten from here —
-            // covers no host running; harmless against a live host applying it concurrently.
+            // Past the grace period, any still-narrowed managed publication is rewritten from here.
+            // Covers no host running; harmless against a live host applying it concurrently.
             fallbackAsync: async token =>
             {
                 _logger.ClientWidening();
@@ -257,14 +257,14 @@ public sealed class WallabyControlClient : IAsyncDisposable
 
     /// <summary>
     /// End a publication widening: clear the flag so the next leader term's reconcile restores the
-    /// narrow column lists. Returns immediately with the current state — nothing blocks on the
+    /// narrow column lists. Returns immediately with the current state; nothing blocks on the
     /// re-narrowing (it lands within seconds when a host is running, or on the next host startup
     /// otherwise; watch it via <see cref="GetStateAsync"/> and each slot's
     /// <see cref="WallabyManagedSlot.PublicationNarrowed"/>). Only a host restores: the narrow lists
     /// come from the captured model, which this client doesn't have. A no-op when nothing is widened.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The database's wallaby schema is older than this client requires — nothing it could have widened.
+    /// The database's wallaby schema is older than this client requires; nothing it could have widened.
     /// </exception>
     public async Task<WallabyControlState> RestorePublicationsAsync(CancellationToken ct = default)
     {

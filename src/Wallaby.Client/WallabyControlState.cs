@@ -41,7 +41,7 @@ public enum WallabySuspensionOrigin
 /// (<c>ManagePublicationTables=false</c>) is left untouched.
 /// </param>
 /// <param name="PublicationNarrowed">
-/// Whether <paramref name="Publication"/> currently carries a column list or row filter on the server —
+/// Whether <paramref name="Publication"/> currently carries a column list or row filter on the server,
 /// the condition that refuses <c>ALTER COLUMN ... TYPE</c> on the referenced columns. Live progress for
 /// <see cref="WallabyControlClient.WidenPublicationsAsync"/>: widening completes when no managed
 /// publication is narrowed.

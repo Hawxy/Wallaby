@@ -39,7 +39,7 @@ public class BackfillFailureTests(TestModelPostgresFixture pg)
             var nextRetryAt = await harness.RunBackfillAsync(version);
             nextRetryAt.ShouldNotBeNull();
 
-            // No rows reached the sink, so the checkpoint must not read as done — and the failure ledger
+            // No rows reached the sink, so the checkpoint must not read as done, and the failure ledger
             // carries the cause.
             var state = (await harness.BackfillManager.GetStatusAsync()).Single(s => s.TransformVersion == version);
             state.Status.ShouldBe(BackfillStatus.InProgress);

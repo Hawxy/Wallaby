@@ -14,7 +14,7 @@ namespace Wallaby.Providers.EntityFrameworkCore.Tests.Integration;
 /// <summary>
 /// Publication widening end to end against a live streaming node: a schema migration refused over the
 /// publication column list runs after <c>WidenPublicationsAsync</c> (the host applies the widen by
-/// bouncing its leader session — no slot drop, no re-backfill), and <c>RestorePublicationsAsync</c>
+/// bouncing its leader session: no slot drop, no re-backfill), and <c>RestorePublicationsAsync</c>
 /// re-narrows on the next term with capture flowing throughout.
 /// </summary>
 [NotInParallel]
@@ -38,7 +38,7 @@ public class RemoteWidenTests(TestModelPostgresFixture pg)
             await capture.WaitForDocumentsAsync([firstId.ToString()]);
 
             // The deliberate Description exclusion narrowed products, so the column list refuses the
-            // type migration — the situation this feature exists for.
+            // type migration, the situation this feature exists for.
             (await ProductsNarrowedAsync(names.Publication)).ShouldBeTrue();
             var blocked = await Should.ThrowAsync<PostgresException>(
                 () => ExecAsync("""ALTER TABLE public.products ALTER COLUMN "Name" TYPE varchar(200)"""));
@@ -76,8 +76,8 @@ public class RemoteWidenTests(TestModelPostgresFixture pg)
             await Polling.UntilAsync(
                 () => !node.Services.GetRequiredService<IWallabyStatus>().Current.PublicationsWidened);
 
-            // The whole cycle ran on the original slot: the backfill row was never rewritten — no
-            // slot-loss gap, no re-backfill (suspension's cost, which widening exists to avoid).
+            // The whole cycle ran on the original slot: the backfill row was never rewritten, so no
+            // slot-loss gap and no re-backfill (suspension's cost, which widening exists to avoid).
             (await ReadProductsBackfillStampAsync()).ShouldBe(backfillBefore);
             node.Services.GetRequiredService<IWallabyStatus>().Current.Faulted.ShouldBeFalse();
         }

@@ -8,8 +8,8 @@ public sealed record WallabyWidenOptions
 
     /// <summary>
     /// Wait until every managed publication is verified widened (no column lists or row filters remain)
-    /// before returning — i.e. until the blocked migration will actually run. When false, the request is
-    /// persisted and signalled and the call returns immediately — poll
+    /// before returning, i.e. until the blocked migration will actually run. When false, the request is
+    /// persisted and signalled and the call returns immediately; poll
     /// <see cref="WallabyControlClient.GetStateAsync"/> for completion.
     /// </summary>
     public bool WaitForCompletion { get; init; } = true;
@@ -23,7 +23,7 @@ public sealed record WallabyWidenOptions
 
     /// <summary>
     /// Overall deadline for <see cref="WaitForCompletion"/>. On expiry a
-    /// <see cref="WallabyControlTimeoutException"/> carries the last observed state — the request stays
+    /// <see cref="WallabyControlTimeoutException"/> carries the last observed state; the request stays
     /// persisted, so the widening still completes once a host applies it.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(2);

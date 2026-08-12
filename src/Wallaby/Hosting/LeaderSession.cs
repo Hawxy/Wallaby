@@ -36,7 +36,7 @@ internal enum LeaderSessionOutcome
     /// <summary>
     /// The publication-widening flag flipped mid-term: the session wound down so the next term's
     /// bootstrap reconciles the publications to the new width. Handled like a lost lock (immediate
-    /// re-election, no finalize) — the slot is untouched, so no gap and no re-backfill.
+    /// re-election, no finalize): the slot is untouched, so no gap and no re-backfill.
     /// </summary>
     Reconfigure,
 }

@@ -26,7 +26,7 @@ internal static class StateSchemaMigrations
 {
     /// <summary>
     /// The schema version this build requires; the highest version in <see cref="Steps"/>. Declared on
-    /// the shared contract so the remote client's schema gate and this migration list agree — a new
+    /// the shared contract so the remote client's schema gate and this migration list agree; a new
     /// step bumps <see cref="ControlContract.SchemaVersion"/>.
     /// </summary>
     public const int CurrentVersion = ControlContract.SchemaVersion;
@@ -142,7 +142,7 @@ internal static class StateSchemaMigrations
     /// <summary>
     /// Whether Wallaby owns the slot's publication (created it and can recreate it from configuration),
     /// authorizing suspension finalize to drop it alongside the slot. Defaults false so only a
-    /// current-version provisioner stamp — never the migration itself — marks a publication droppable
+    /// current-version provisioner stamp (never the migration itself) marks a publication droppable
     /// (an unmanaged <c>ManagePublicationTables=false</c> publication must never be dropped).
     /// </summary>
     private const string RegistryPublicationOwnership = """

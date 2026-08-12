@@ -152,7 +152,7 @@ internal sealed class WallabyRuntime
                     else if (outcome == LeaderSessionOutcome.Reconfigure)
                     {
                         // The widening flag flipped: re-elect immediately so the next term's bootstrap
-                        // reconciles the publications. The slot was never touched — no re-backfill.
+                        // reconciles the publications. The slot was never touched, so no re-backfill.
                         _logger.ReconfiguringPublications(_options.SlotName);
                     }
                 }

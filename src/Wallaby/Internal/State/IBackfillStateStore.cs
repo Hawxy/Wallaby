@@ -17,7 +17,7 @@ internal interface IBackfillStateStore
     /// <summary>
     /// Write a running backfill's progress (status, cursor, row count) and nothing else: the transform
     /// version keeps the value the fresh run started with, and a purge mark is never touched. A no-op
-    /// when the row was concurrently marked <c>Requested</c> — the request survives and the table
+    /// when the row was concurrently marked <c>Requested</c>; the request survives and the table
     /// re-runs fresh.
     /// </summary>
     Task SaveProgressAsync(
@@ -27,7 +27,7 @@ internal interface IBackfillStateStore
     /// Mark a table <c>Requested</c> (cursor and row count reset) and signal the backfill notify channel,
     /// atomically with the row becoming visible. The single request write path (manual, remote client,
     /// slot-gap repair, fan-out overflow): an existing row keeps its transform version, and purge is
-    /// sticky-OR — true marks a sink purge due before the fresh run, false leaves any pending mark in
+    /// sticky-OR: true marks a sink purge due before the fresh run, false leaves any pending mark in
     /// place (sticky until served).
     /// </summary>
     Task RequestAsync(string tableQualifiedName, bool purge, CancellationToken ct);

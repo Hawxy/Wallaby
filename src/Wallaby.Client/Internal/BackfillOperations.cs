@@ -17,7 +17,7 @@ internal static class BackfillOperations
     private const string UndefinedTable = "42P01";
 
     /// <summary>
-    /// The single request write path — manual requests, the remote client, the slot-gap repair, and the
+    /// The single request write path: manual requests, the remote client, the slot-gap repair, and the
     /// fan-out overflow all issue this statement. Marks the table's row <c>Requested</c> with progress
     /// reset and signals the backfill channel so the leader's scheduler serves it immediately. An
     /// existing row keeps its transform version (stamped only by the scheduler's fresh-run write) and

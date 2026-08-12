@@ -75,7 +75,7 @@ internal sealed class LogicalReplicationStream(
         try
         {
             _connection.SetReplicationStatus(new NpgsqlLogSequenceNumber(lsn));
-            await _connection.SendStatusUpdate(ct);
+            await SendStatusUpdateGuardedAsync(ct);
         }
         finally
         {
@@ -103,11 +103,38 @@ internal sealed class LogicalReplicationStream(
         await _statusLock.WaitAsync(abort);
         try
         {
-            await _connection.SendStatusUpdate(abort);
+            await SendStatusUpdateGuardedAsync(abort);
         }
         finally
         {
             _statusLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Send a status update, translating the exceptions Npgsql leaks when the replication stream
+    /// terminates concurrently with the send. Npgsql 10.0.3's <c>SendFeedback</c> swallows every
+    /// exception from the send itself (including cancellation), then re-arms its status timer with a
+    /// null-forgiving dereference in a finally block; the replication enumerator's teardown disposes
+    /// and nulls that timer without synchronizing with an in-flight send. A send overlapping a
+    /// pending stream read (the batcher's in-flight read, see <see cref="KeepaliveGuard"/>) can
+    /// therefore surface <see cref="NullReferenceException"/> or
+    /// <see cref="ObjectDisposedException"/> when that read observes cancellation or a connection
+    /// fault and terminates the enumerator. Streaming has always begun by the time this is called,
+    /// so those exceptions prove the stream terminated: report cancellation when the token is
+    /// cancelled, otherwise a descriptive failure (the underlying fault, if any, surfaces on the
+    /// next stream read).
+    /// </summary>
+    private async Task SendStatusUpdateGuardedAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _connection.SendStatusUpdate(ct);
+        }
+        catch (Exception ex) when (ex is NullReferenceException or ObjectDisposedException)
+        {
+            ct.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Replication stream terminated during a status update.", ex);
         }
     }
 
@@ -140,7 +167,9 @@ internal sealed class LogicalReplicationStream(
     /// then). The one deliberate overlap is the pipeline's batch ack while such a read is pending: the
     /// same <c>SendFeedback</c> path Npgsql's own <c>WalReceiverStatusInterval</c> timer (default 10s,
     /// active in every deployment) already exercises concurrently with reads, with all feedback writers
-    /// serialized inside Npgsql; re-verify on Npgsql major upgrades.
+    /// serialized inside Npgsql. The write path is safe, but stream termination during the overlap is
+    /// not: the pending read tearing down the enumerator races the send's timer re-arm (see
+    /// <see cref="SendStatusUpdateGuardedAsync"/>); re-verify both on Npgsql upgrades.
     /// </summary>
     internal sealed class KeepaliveGuard : IAsyncDisposable
     {
