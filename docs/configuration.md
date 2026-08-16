@@ -164,7 +164,8 @@ is published with a matching column list - `CREATE PUBLICATION ... TABLE product
 the excluded columns are filtered inside Postgres: they are never decoded by the WAL sender or sent over
 the wire. Dependent-only tables, which Wallaby narrows automatically to their primary key and lookup
 columns, are listed for the same reason. Column lists are reconciled on every startup; drift is applied
-atomically with a single `ALTER PUBLICATION ... SET TABLE`.
+atomically with a single `ALTER PUBLICATION ... SET TABLE`, and every column-listed table is logged with
+the columns filtered at the server.
 
 Column lists are a bandwidth and data-minimization optimization, not a correctness mechanism: what a
 mapping consumes is decided client-side by the selection, which applies even with lists disabled. In

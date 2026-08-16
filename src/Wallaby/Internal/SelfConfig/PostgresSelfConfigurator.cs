@@ -45,6 +45,19 @@ internal sealed class PostgresSelfConfigurator(
             var publication = await _publications.EnsureAsync(
                 connection, options.PublicationName, DesiredTables(model, widenPublications).ToList(),
                 options.ManagePublicationTables, warnings, ct);
+            foreach (var narrowedTable in publication.NarrowedTables)
+            {
+                var entity = model.Tables.FirstOrDefault(
+                    t => t.Schema == narrowedTable.Schema && t.TableName == narrowedTable.Table);
+                logger.PublicationColumnsFiltered(
+                    narrowedTable.QualifiedName,
+                    entity?.EntityClrType.Name ?? "?",
+                    options.PublicationName,
+                    narrowedTable.PublishedColumns.Count,
+                    narrowedTable.FilteredColumns.Count == 0
+                        ? "(none)"
+                        : string.Join(", ", narrowedTable.FilteredColumns));
+            }
             if (!publication.ViaRoot)
             {
                 await ValidatePartitionedCapturesAsync(connection, model, ct);
@@ -288,4 +301,7 @@ internal static partial class PostgresSelfConfiguratorLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Warning}")]
     internal static partial void ConfigurationWarning(this ILogger logger, string warning);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Table {Table} (entity {Entity}) is published with a {PublishedCount}-column list in publication {Publication}; columns filtered at the server: {FilteredColumns}.")]
+    internal static partial void PublicationColumnsFiltered(this ILogger logger, string table, string entity, string publication, int publishedCount, string filteredColumns);
 }

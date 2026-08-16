@@ -19,6 +19,13 @@ internal sealed record TableCatalogInfo(
 internal static class ColumnListPlanner
 {
     /// <summary>
+    /// Appended to every demotion warning: publishing whole rows costs bandwidth, not data exposure,
+    /// because the declared selection still filters columns in memory before sinks see them.
+    /// </summary>
+    private const string SelectionStillApplies =
+        " The declared selection still filters the columns in memory before sinks see them.";
+
+    /// <summary>
     /// Returns the effective spec (possibly demoted to whole-table), a warning when demoted, and the
     /// generated columns removed from the list (never publishable, rejected by column-list DDL).
     /// </summary>
@@ -38,7 +45,8 @@ internal static class ColumnListPlanner
         {
             return (candidate with { Columns = null },
                 $"Table {candidate.QualifiedName} is partitioned; publishing all columns " +
-                "(a column list cannot be validated against each partition's replica identity).",
+                "(a column list cannot be validated against each partition's replica identity)." +
+                SelectionStillApplies,
                 []);
         }
 
@@ -46,7 +54,8 @@ internal static class ColumnListPlanner
         {
             return (candidate with { Columns = null },
                 $"Table {candidate.QualifiedName} has REPLICA IDENTITY FULL; publishing all columns " +
-                "(a publication column list must cover the replica identity, and FULL covers every column).",
+                "(a publication column list must cover the replica identity, and FULL covers every column)." +
+                SelectionStillApplies,
                 []);
         }
 
@@ -72,7 +81,8 @@ internal static class ColumnListPlanner
                 .Where(ic => !columns.Contains(ic, StringComparer.Ordinal));
             return (candidate with { Columns = null },
                 $"Table {candidate.QualifiedName} uses REPLICA IDENTITY USING INDEX with column(s) " +
-                $"{string.Join(", ", uncovered)} outside the captured set; publishing all columns.",
+                $"{string.Join(", ", uncovered)} outside the captured set; publishing all columns." +
+                SelectionStillApplies,
                 omittedGenerated);
         }
 

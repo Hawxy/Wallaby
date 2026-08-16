@@ -1,5 +1,7 @@
 using System.Linq.Expressions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Wallaby.Abstractions;
@@ -39,7 +41,7 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     };
 
     private PostgresSelfConfigurator CreateConfigurator(
-        WallabyNames names, bool columnLists = true, bool manageTables = true) =>
+        WallabyNames names, bool columnLists = true, bool manageTables = true, ILogger? logger = null) =>
         new(pg.DataSource,
             new SelfConfigOptions
             {
@@ -48,7 +50,7 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
                 PublicationColumnLists = columnLists,
                 ManagePublicationTables = manageTables,
             },
-            NullLogger.Instance);
+            logger ?? NullLogger.Instance);
 
     // prattrs is the source of truth: pg_publication_tables.attnames expands whole-table members to
     // all columns and cannot distinguish them from an explicit all-columns list.
@@ -100,6 +102,29 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
         // The tables nobody narrowed keep every column free to ALTER and DROP.
         columns.Values.Count(c => c is not null).ShouldBe(1);
         columns["categories"].ShouldBeNull();
+    }
+
+    [Test]
+    public async Task Startup_reports_each_column_listed_table_with_its_filtered_columns()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        var model = BuildTestModel(Selection<Product>(ColumnSelectionMode.Exclude, nameof(Product.Description)));
+
+        var log = new FakeLogCollector();
+        await CreateConfigurator(names, logger: new FakeLogger(log))
+            .EnsureConfiguredAsync(model, CancellationToken.None);
+
+        var reports = log.GetSnapshot().Where(r => r.Message.Contains("filtered at the server")).ToList();
+        reports.Count.ShouldBe(1);
+        reports[0].Message.ShouldContain("public.products");
+        reports[0].Message.ShouldContain("(entity Product)");
+        reports[0].Message.ShouldContain(nameof(Product.Description));
+
+        // Reported on every startup, not only when the ensure changed something.
+        log.Clear();
+        await CreateConfigurator(names, logger: new FakeLogger(log))
+            .EnsureConfiguredAsync(model, CancellationToken.None);
+        log.GetSnapshot().Count(r => r.Message.Contains("filtered at the server")).ShouldBe(1);
     }
 
     [Test]

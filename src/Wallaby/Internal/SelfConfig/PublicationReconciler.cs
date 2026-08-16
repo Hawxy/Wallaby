@@ -4,10 +4,25 @@ using Npgsql;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
-/// Outcome of ensuring a publication: whether it was created, and whether it publishes via the
-/// partition root (always true for a managed publication after the ensure).
+/// Outcome of ensuring a publication: whether it was created, whether it publishes via the
+/// partition root (always true for a managed publication after the ensure), and the tables it
+/// publishes with a column list.
 /// </summary>
-internal readonly record struct PublicationEnsureResult(bool Created, bool ViaRoot);
+internal readonly record struct PublicationEnsureResult(
+    bool Created, bool ViaRoot, IReadOnlyList<NarrowedPublicationTable> NarrowedTables);
+
+/// <summary>
+/// A table the ensured publication publishes with a column list. <see cref="FilteredColumns"/> are the
+/// physical columns the server filters out of the stream (never decoded or sent).
+/// </summary>
+internal sealed record NarrowedPublicationTable(
+    string Schema,
+    string Table,
+    IReadOnlyList<string> PublishedColumns,
+    IReadOnlyList<string> FilteredColumns)
+{
+    public string QualifiedName => $"{Schema}.{Table}";
+}
 
 /// <summary>
 /// Creates a publication for the desired table set, or reconciles an existing one: membership drift is
@@ -40,7 +55,7 @@ internal sealed class PublicationReconciler(ILogger logger)
             }
         }
 
-        var resolved = await ResolveColumnListsAsync(connection, desiredTables, warnings, ct);
+        var (resolved, narrowed) = await ResolveColumnListsAsync(connection, desiredTables, warnings, ct);
 
         if (existing is null)
         {
@@ -50,7 +65,7 @@ internal sealed class PublicationReconciler(ILogger logger)
                 $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList} " +
                 "WITH (publish_via_partition_root = true)", ct);
             logger.PublicationCreated(pub, resolved.Count);
-            return new PublicationEnsureResult(Created: true, ViaRoot: true);
+            return new PublicationEnsureResult(Created: true, ViaRoot: true, narrowed);
         }
 
         if (reconcile)
@@ -72,28 +87,32 @@ internal sealed class PublicationReconciler(ILogger logger)
                 logger.PublicationViaRootEnabled(pub);
             }
             await ReconcileTablesAsync(connection, pub, resolved, ct);
-            return new PublicationEnsureResult(Created: false, ViaRoot: true);
+            return new PublicationEnsureResult(Created: false, ViaRoot: true, narrowed);
         }
 
-        return new PublicationEnsureResult(Created: false, ViaRoot: existing.Value.ViaRoot);
+        // Used as-is (unreconciled), so the desired column lists were not applied.
+        return new PublicationEnsureResult(Created: false, ViaRoot: existing.Value.ViaRoot, NarrowedTables: []);
     }
 
     /// <summary>
     /// Resolve candidate column lists against live catalog state (replica identity, generated columns),
     /// demoting to whole-table where a list would be unsafe. No-op when every candidate is whole-table.
+    /// Also reports the tables that end up column-listed, with the physical columns filtered out.
     /// </summary>
-    private async Task<IReadOnlyList<PublicationTableSpec>> ResolveColumnListsAsync(
-        NpgsqlConnection connection,
-        IReadOnlyList<PublicationTableSpec> candidates,
-        List<string>? warnings,
-        CancellationToken ct)
+    private async Task<(IReadOnlyList<PublicationTableSpec> Resolved, IReadOnlyList<NarrowedPublicationTable> Narrowed)>
+        ResolveColumnListsAsync(
+            NpgsqlConnection connection,
+            IReadOnlyList<PublicationTableSpec> candidates,
+            List<string>? warnings,
+            CancellationToken ct)
     {
         if (candidates.All(c => c.Columns is null))
         {
-            return candidates;
+            return (candidates, []);
         }
 
         var catalog = new Dictionary<(string Schema, string Table), TableCatalogInfo>();
+        var physicalColumns = new Dictionary<(string Schema, string Table), string[]>();
         await using (var cmd = new NpgsqlCommand(
             """
             SELECT n.nspname, c.relname, c.relkind::text, c.relreplident::text,
@@ -104,7 +123,10 @@ internal sealed class PublicationReconciler(ILogger logger)
                    COALESCE((SELECT array_agg(a.attname::text)
                              FROM pg_attribute a
                              WHERE a.attrelid = c.oid AND a.attnum > 0
-                               AND NOT a.attisdropped AND a.attgenerated <> ''), '{}') AS generated_cols
+                               AND NOT a.attisdropped AND a.attgenerated <> ''), '{}') AS generated_cols,
+                   COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
+                             FROM pg_attribute a
+                             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '{}') AS all_cols
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             JOIN unnest(@schemas, @tables) AS d(s, t) ON n.nspname = d.s AND c.relname = d.t
@@ -116,15 +138,18 @@ internal sealed class PublicationReconciler(ILogger logger)
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
-                catalog[(reader.GetString(0), reader.GetString(1))] = new TableCatalogInfo(
+                var key = (reader.GetString(0), reader.GetString(1));
+                catalog[key] = new TableCatalogInfo(
                     reader.GetString(2),
                     reader.GetString(3),
                     reader.GetFieldValue<string[]>(4),
                     reader.GetFieldValue<string[]>(5));
+                physicalColumns[key] = reader.GetFieldValue<string[]>(6);
             }
         }
 
         var resolved = new List<PublicationTableSpec>(candidates.Count);
+        var narrowed = new List<NarrowedPublicationTable>();
         foreach (var candidate in candidates)
         {
             var (effective, warning, omittedGenerated) = ColumnListPlanner.Plan(
@@ -139,8 +164,16 @@ internal sealed class PublicationReconciler(ILogger logger)
                 logger.GeneratedColumnOmitted(column, candidate.QualifiedName);
             }
             resolved.Add(effective);
+
+            if (effective.Columns is not null &&
+                physicalColumns.TryGetValue((candidate.Schema, candidate.Table), out var physical))
+            {
+                narrowed.Add(new NarrowedPublicationTable(
+                    candidate.Schema, candidate.Table, effective.Columns,
+                    physical.Where(c => !effective.Columns.Contains(c, StringComparer.Ordinal)).ToList()));
+            }
         }
-        return resolved;
+        return (resolved, narrowed);
     }
 
     private async Task ReconcileTablesAsync(
