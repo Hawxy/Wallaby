@@ -8,7 +8,7 @@ documents to pluggable **destinations** (sinks) with at-least-once delivery. It 
 the publication and replication slot from your model, supports **versioned backfill** (initial
 snapshots and shape-change reindexes), and is **cluster-safe** via leader election.
 
-**Meilisearch**, **Kafka**, **OpenSearch**, and **HTTP/webhook** sinks are supported out of the box.
+**Meilisearch**, **Kafka**, **Elasticsearch**, **OpenSearch**, and **HTTP/webhook** sinks are supported out of the box.
 Contributions for additional sinks are welcome.
 
 Requires Postgres 15+ and .NET 10+.
@@ -23,6 +23,7 @@ Requires Postgres 15+ and .NET 10+.
 | `Wallaby.Providers.EntityFrameworkCore`  | EF Core storage provider.                |
 | `Wallaby.Providers.Marten`               | Marten storage provider.                 |
 | `Wallaby.Sinks.Http`           | HTTP/webhook destination sink.           |
+| `Wallaby.Sinks.Elasticsearch`  | Elasticsearch destination sink.          |
 | `Wallaby.Sinks.Kafka`          | Kafka destination sink (keyed messages, tombstone deletes). |
 | `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
 | `Wallaby.Sinks.OpenSearch`     | OpenSearch destination sink.             |

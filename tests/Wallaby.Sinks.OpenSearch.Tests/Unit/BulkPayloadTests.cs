@@ -1,11 +1,11 @@
 using System.Text;
 using System.Text.Json;
-using Wallaby.Sinks.OpenSearch.Internal;
+using Wallaby.Sinks;
 using static Wallaby.Sinks.OpenSearch.Tests.Unit.SinkTestHelpers;
 
 namespace Wallaby.Sinks.OpenSearch.Tests.Unit;
 
-/// <summary>NDJSON shape of the <c>_bulk</c> bodies produced by <see cref="BulkWriter"/>.</summary>
+/// <summary>NDJSON shape of the <c>_bulk</c> bodies produced by <see cref="BulkJson"/>.</summary>
 public class BulkPayloadTests
 {
     private static string[] Lines(byte[] payload)
@@ -17,7 +17,7 @@ public class BulkPayloadTests
 
     private static byte[] Write(IReadOnlyList<Wallaby.Abstractions.SinkRecord> records,
         int offset = 0, int? count = null, string? defaultIndex = null)
-        => BulkWriter.Write(SinkName, records, offset, count ?? records.Count, defaultIndex, serializerOptions: null);
+        => BulkJson.Write(SinkName, records, offset, count ?? records.Count, defaultIndex, serializerOptions: null);
 
     [Test]
     public void Upsert_writes_an_action_line_and_a_document_line()

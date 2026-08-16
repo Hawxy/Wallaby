@@ -67,24 +67,21 @@ public static class SinkEnvelopeJson
         writer.WriteEndObject();
     }
 
-    /// <summary>
-    /// Writes the document's field bag as a JSON object at the writer's current position.
-    /// <paramref name="serializerOptionsName"/> is the sink's serializer-options setting, named in the no-fallback error.
-    /// </summary>
+    /// <summary>Writes the document's field bag as a JSON object at the writer's current position.</summary>
     public static void WriteDocument(Utf8JsonWriter writer, IReadOnlyDictionary<string, object?> document,
-        string documentId, JsonSerializerOptions? serializerOptions, string serializerOptionsName)
+        string documentId, JsonSerializerOptions? serializerOptions)
     {
         writer.WriteStartObject();
         foreach (var field in document)
         {
             writer.WritePropertyName(field.Key);
-            WriteValue(writer, field.Value, field.Key, documentId, serializerOptions, serializerOptionsName);
+            WriteValue(writer, field.Value, field.Key, documentId, serializerOptions);
         }
         writer.WriteEndObject();
     }
 
     private static void WriteValue(Utf8JsonWriter writer, object? value, string key, string documentId,
-        JsonSerializerOptions? serializerOptions, string serializerOptionsName)
+        JsonSerializerOptions? serializerOptions)
     {
         switch (value)
         {
@@ -112,18 +109,18 @@ public static class SinkEnvelopeJson
             case byte[] bytes: writer.WriteBase64StringValue(bytes); break;
             case Uri uri: writer.WriteStringValue(uri.ToString()); break;
             case IReadOnlyDictionary<string, object?> nested:
-                WriteDocument(writer, nested, documentId, serializerOptions, serializerOptionsName);
+                WriteDocument(writer, nested, documentId, serializerOptions);
                 break;
             case IEnumerable sequence:
                 writer.WriteStartArray();
                 foreach (var item in sequence)
                 {
-                    WriteValue(writer, item, key, documentId, serializerOptions, serializerOptionsName);
+                    WriteValue(writer, item, key, documentId, serializerOptions);
                 }
                 writer.WriteEndArray();
                 break;
             default:
-                WriteFallback(writer, value, key, documentId, serializerOptions, serializerOptionsName);
+                WriteFallback(writer, value, key, documentId, serializerOptions);
                 break;
         }
     }
@@ -135,14 +132,14 @@ public static class SinkEnvelopeJson
         Justification = "Consumer-supplied SerializerOptions resolve types through their own TypeInfoResolver " +
                         "(source-generated on AOT); the reflection default only runs when IsReflectionEnabledByDefault is true.")]
     private static void WriteFallback(Utf8JsonWriter writer, object value, string key, string documentId,
-        JsonSerializerOptions? serializerOptions, string serializerOptionsName)
+        JsonSerializerOptions? serializerOptions)
     {
         if (serializerOptions is null && !JsonSerializer.IsReflectionEnabledByDefault)
         {
             throw new NotSupportedException(
                 $"Document '{documentId}' field '{key}' has type '{value.GetType()}', which has no built-in JSON " +
                 "encoding, and reflection-based serialization is disabled (trimmed/NativeAOT host). Set " +
-                $"{serializerOptionsName} with a source-generated JsonSerializerContext covering the type.");
+                "Options.SerializerOptions with a source-generated JsonSerializerContext covering the type.");
         }
 
         JsonSerializer.Serialize(writer, value, value.GetType(), serializerOptions ?? JsonSerializerOptions.Default);

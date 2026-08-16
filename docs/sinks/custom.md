@@ -131,8 +131,7 @@ writer.WriteStartObject();
 writer.WriteString("id", record.DocumentId);
 writer.WriteString("idempotencyKey", SinkEnvelopeJson.IdempotencyKey(record));
 writer.WritePropertyName("document");
-SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId,
-    serializerOptions: null, serializerOptionsName: "MySinkOptions.SerializerOptions");
+SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions: null);
 SinkEnvelopeJson.WriteMetadata(writer, record.Metadata);  // a "metadata" property
 writer.WriteEndObject();
 ```

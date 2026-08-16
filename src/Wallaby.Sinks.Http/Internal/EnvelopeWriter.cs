@@ -11,8 +11,6 @@ namespace Wallaby.Sinks.Http.Internal;
 /// </summary>
 internal static class EnvelopeWriter
 {
-    private const string SerializerOptionsName = "HttpSinkOptions.SerializerOptions";
-
     /// <summary>
     /// Write records <paramref name="offset"/>..<paramref name="offset"/>+<paramref name="count"/> as one
     /// envelope into <paramref name="buffer"/> (the caller owns and may reuse it between calls).
@@ -70,7 +68,7 @@ internal static class EnvelopeWriter
         if (!record.IsDeletion)
         {
             writer.WritePropertyName("document");
-            SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions, SerializerOptionsName);
+            SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions);
         }
 
         SinkEnvelopeJson.WriteMetadata(writer, record.Metadata);

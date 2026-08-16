@@ -80,6 +80,7 @@ export default defineConfig({
           { text: 'Meilisearch', link: '/sinks/meilisearch' },
           { text: 'HTTP (Webhook)', link: '/sinks/http' },
           { text: 'Kafka', link: '/sinks/kafka' },
+          { text: 'Elasticsearch', link: '/sinks/elasticsearch' },
           { text: 'OpenSearch', link: '/sinks/opensearch' },
           { text: 'Custom', link: '/sinks/custom' },
         ]
