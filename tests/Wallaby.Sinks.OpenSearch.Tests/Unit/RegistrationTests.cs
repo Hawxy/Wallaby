@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Wallaby.DependencyInjection;
 
 namespace Wallaby.Sinks.OpenSearch.Tests.Unit;
@@ -10,7 +11,7 @@ public class RegistrationTests
     [Arguments("opensearch/relative")]
     public void Endpoint_must_be_an_absolute_url(string endpoint)
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
 
         Should.Throw<ArgumentException>(() => builder.AddOpenSearchSink("search", o => o.Endpoint = endpoint))
             .Message.ShouldContain("absolute");
@@ -19,7 +20,7 @@ public class RegistrationTests
     [Test]
     public void Max_actions_per_request_must_be_positive()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
 
         Should.Throw<ArgumentException>(() => builder.AddOpenSearchSink("search", o =>
         {
@@ -31,7 +32,7 @@ public class RegistrationTests
     [Test]
     public void Password_requires_a_username()
     {
-        var builder = new WallabyBuilder();
+        var builder = new WallabyBuilder(new ServiceCollection());
 
         Should.Throw<ArgumentException>(() => builder.AddOpenSearchSink("search", o =>
         {

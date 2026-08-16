@@ -5,6 +5,7 @@
     <PackageId>Wallaby.Sinks.OpenSearch</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Description>OpenSearch destination/sink for Wallaby: keep OpenSearch indexes in sync with Postgres changes.</Description>
+    <PackageTags>opensearch;search;sink</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

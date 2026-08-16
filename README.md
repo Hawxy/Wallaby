@@ -8,7 +8,7 @@ documents to pluggable **destinations** (sinks) with at-least-once delivery. It 
 the publication and replication slot from your model, supports **versioned backfill** (initial
 snapshots and shape-change reindexes), and is **cluster-safe** via leader election.
 
-**Meilisearch**, **Kafka**, and **HTTP/webhook** sinks are supported out of the box.
+**Meilisearch**, **Kafka**, **OpenSearch**, and **HTTP/webhook** sinks are supported out of the box.
 Contributions for additional sinks are welcome.
 
 Requires Postgres 15+ and .NET 10+.
@@ -25,6 +25,7 @@ Requires Postgres 15+ and .NET 10+.
 | `Wallaby.Sinks.Http`           | HTTP/webhook destination sink.           |
 | `Wallaby.Sinks.Kafka`          | Kafka destination sink (keyed messages, tombstone deletes). |
 | `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
+| `Wallaby.Sinks.OpenSearch`     | OpenSearch destination sink.             |
 | `Wallaby.Client`               | Standalone remote control plane (suspend/resume, backfills, inspection) via Postgres |
 | `Wallaby.Testing`              | End-to-end pipeline test harness with real logical replication. |
 | `Wallaby.AspNetCore.HealthChecks` | ASP.NET Core health check for Wallaby nodes. |
