@@ -46,9 +46,10 @@ public static class OpenSearchBuilderExtensions
 
     private static void Validate(OpenSearchSinkOptions options)
     {
-        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out _))
+        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var endpoint)
+            || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("OpenSearchSinkOptions.Endpoint must be an absolute URL.", nameof(options));
+            throw new ArgumentException("OpenSearchSinkOptions.Endpoint must be an absolute http(s) URL.", nameof(options));
         }
         if (options.MaxActionsPerRequest <= 0)
         {
@@ -61,6 +62,10 @@ public static class OpenSearchBuilderExtensions
         if (options.Password is not null && options.Username is null)
         {
             throw new ArgumentException("OpenSearchSinkOptions.Password requires Username.", nameof(options));
+        }
+        if (options.Username is not null && options.Password is null)
+        {
+            throw new ArgumentException("OpenSearchSinkOptions.Username requires Password.", nameof(options));
         }
     }
 }

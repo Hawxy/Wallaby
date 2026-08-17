@@ -73,9 +73,10 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.BackfillStarting(table.QualifiedName);
 
+        using var activity = _instr.StartBackfill(table.QualifiedName, WallabyInstrumentation.BackfillKindTable);
+
         var rowsCopied = await RunChunkLoopAsync(
-            pager, table.QualifiedName, WallabyInstrumentation.BackfillKindTable, fanoutKeys: 0,
-            trigger: default, cursor, startRows,
+            pager, table.QualifiedName, activity, cursor, startRows,
             // Guarded save: a manual request arriving mid-run wins over every later progress write,
             // so the row stays Requested and the scheduler re-runs the table fresh.
             (cur, rows, hasMore, token) => store.SaveProgressAsync(
@@ -86,6 +87,7 @@ internal sealed class WatermarkBackfillCoordinator(
                 token),
             ct);
 
+        activity?.SetTag("wallaby.backfill.rows", rowsCopied);
         logger.BackfillComplete(table.QualifiedName, rowsCopied);
     }
 
@@ -114,7 +116,10 @@ internal sealed class WatermarkBackfillCoordinator(
 
         logger.ScopedFanoutStarting(spec.PrimaryTable.QualifiedName, spec.LookupValues.Count);
 
-        // Hoisted above the batch loop so one scoped run shares one token across all its filter batches.
+        // Hoisted above the batch loop so one scoped run shares one root span and one token across all
+        // its filter batches.
+        using var activity = _instr.StartBackfill(
+            spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count, trigger);
         var runId = Guid.NewGuid().ToString("N");
         var rowsCopied = startRows;
         for (var b = startBatch; b < filters.Count; b++)
@@ -124,8 +129,8 @@ internal sealed class WatermarkBackfillCoordinator(
             var pager = new KeysetPager(spec.PrimaryTable, filters[batch], runId);
 
             rowsCopied = await RunChunkLoopAsync(
-                pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,
-                trigger, batch == startBatch ? startCursor : null, rowsCopied,
+                pager, spec.PrimaryTable.QualifiedName, activity,
+                batch == startBatch ? startCursor : null, rowsCopied,
                 // A finished non-final batch persists (batch + 1, null): resume at the next batch's start.
                 (cur, rows, hasMore, token) => saveProgress(
                     hasMore ? batch : batch + 1,
@@ -136,12 +141,13 @@ internal sealed class WatermarkBackfillCoordinator(
                 ct);
         }
 
+        activity?.SetTag("wallaby.backfill.rows", rowsCopied);
         logger.ScopedFanoutComplete(spec.PrimaryTable.QualifiedName, rowsCopied);
         return rowsCopied;
     }
 
     private async Task<long> RunChunkLoopAsync(
-        KeysetPager pager, string qualifiedTable, string backfillKind, int fanoutKeys, ActivityContext trigger,
+        KeysetPager pager, string qualifiedTable, Activity? activity,
         object?[]? startCursor, long startRows,
         Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
     {
@@ -158,17 +164,6 @@ internal sealed class WatermarkBackfillCoordinator(
         // the coordinator already fans live keys into every active window. Costs at most two chunks in memory.
         (PendingWindow Window, BackfillChunk Chunk, long ChunkStart)? inFlight = null;
         PendingWindow? current = null;
-
-        using var activity = _instr.StartBackfill(trigger);
-        if (activity is not null)
-        {
-            activity.SetTag(WallabyInstrumentation.TableTag, qualifiedTable);
-            activity.SetTag(WallabyInstrumentation.BackfillKindTag, backfillKind);
-            if (fanoutKeys > 0)
-            {
-                activity.SetTag("wallaby.fanout.keys", fanoutKeys);
-            }
-        }
 
         _instr.BackfillStarted();
         try
@@ -239,7 +234,6 @@ internal sealed class WatermarkBackfillCoordinator(
             _instr.BackfillCompleted();
         }
 
-        activity?.SetTag("wallaby.backfill.rows", rowsCopied);
         return rowsCopied;
 
         async Task SettleAsync((PendingWindow Window, BackfillChunk Chunk, long ChunkStart) entry)

@@ -9,7 +9,9 @@ public class RegistrationTests
     [Test]
     [Arguments("")]
     [Arguments("opensearch/relative")]
-    public void Endpoint_must_be_an_absolute_url(string endpoint)
+    [Arguments("localhost:9200")]
+    [Arguments("ftp://opensearch.local")]
+    public void Endpoint_must_be_an_absolute_http_url(string endpoint)
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
@@ -39,5 +41,17 @@ public class RegistrationTests
             o.Endpoint = "http://opensearch.local:9200";
             o.Password = "secret";
         })).Message.ShouldContain("Username");
+    }
+
+    [Test]
+    public void Username_requires_a_password()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddOpenSearchSink("search", o =>
+        {
+            o.Endpoint = "http://opensearch.local:9200";
+            o.Username = "admin";
+        })).Message.ShouldContain("Password");
     }
 }

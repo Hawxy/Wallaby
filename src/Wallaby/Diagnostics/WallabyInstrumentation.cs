@@ -30,6 +30,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string DeliveryOutcomeTag = "wallaby.delivery.outcome";
     internal const string DestinationTag = "wallaby.destination";
     internal const string BackfillKindTag = "wallaby.backfill.kind";
+    internal const string FanoutKeysTag = "wallaby.fanout.keys";
     internal const string BatchTxnCountTag = "wallaby.batch.txn_count";
     internal const string BatchFlushReasonTag = "wallaby.batch.flush_reason";
     internal const string TxnCommitLsnTag = "wallaby.txn.lsn.commit";
@@ -258,9 +259,24 @@ public sealed class WallabyInstrumentation : IDisposable
     /// Root span for one backfill run (whole-table or scoped fan-out); chunks link back to it. A scoped
     /// fan-out run passes the enqueuing trigger's context so the run links back to the trace that caused it.
     /// </summary>
-    internal Activity? StartBackfill(ActivityContext trigger = default) => _activitySource.StartActivity(
-        BackfillActivity, ActivityKind.Internal, parentContext: default,
-        links: trigger == default ? null : [new ActivityLink(trigger)]);
+    internal Activity? StartBackfill(string qualifiedTable, string backfillKind, int fanoutKeys = 0, ActivityContext trigger = default)
+    {
+        var activity = _activitySource.StartActivity(
+            BackfillActivity, ActivityKind.Internal, parentContext: default,
+            links: trigger == default ? null : [new ActivityLink(trigger)]);
+        if (activity is null)
+        {
+            return null;
+        }
+
+        activity.SetTag(TableTag, qualifiedTable);
+        activity.SetTag(BackfillKindTag, backfillKind);
+        if (fanoutKeys > 0)
+        {
+            activity.SetTag(FanoutKeysTag, fanoutKeys);
+        }
+        return activity;
+    }
 
     // The chunk is delivered inside a slot commit, so it parents under that transaction's span; the link
     // ties it back to the backfill run that produced it (which lives in a different trace).

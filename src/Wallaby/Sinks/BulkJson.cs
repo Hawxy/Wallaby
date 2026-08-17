@@ -72,11 +72,16 @@ public static class BulkJson
     /// Deleting an already-absent document is success (deletes are idempotent under at-least-once delivery);
     /// throttling/server item failures are retryable (re-sending the whole chunk is safe; actions are
     /// idempotent by <c>_id</c>); other item rejections (mapping/parse) are permanent. A permanent item
-    /// outweighs retryable ones. Null when every action applied.
-    /// <paramref name="sinkDisplayName"/> names the destination system in failure messages.
+    /// outweighs retryable ones. Null when every action applied; a missing or unparseable body is
+    /// retryable. <paramref name="sinkDisplayName"/> names the destination system in failure messages.
     /// </summary>
-    public static DeliveryResult? ClassifyItems(string body, string sinkDisplayName)
+    public static DeliveryResult? ClassifyItems(string? body, string sinkDisplayName)
     {
+        if (string.IsNullOrEmpty(body))
+        {
+            return DeliveryResult.Retry($"{sinkDisplayName} returned an empty bulk response body.");
+        }
+
         int retryable = 0, permanent = 0;
         string? firstPermanent = null;
 

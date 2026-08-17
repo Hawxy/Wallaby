@@ -54,7 +54,8 @@ cdc.AddOpenSearchSink("search", s => { /* ... */ })
 ## Indexes
 
 The sink does not create or configure indexes: an index auto-creates on first write with dynamic
-mapping. For explicit settings or mappings (analyzers, `knn_vector` fields, shard counts, …),
+mapping (provided the cluster's `action.auto_create_index` setting allows it, as it does by
+default). For explicit settings or mappings (analyzers, `knn_vector` fields, shard counts, …),
 create the index up front — via Dev Tools, your infrastructure tooling, or a deployment script.
 In-sink index bootstrapping is planned.
 

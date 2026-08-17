@@ -164,6 +164,19 @@ public class DeliveryTests
     }
 
     [Test]
+    [Arguments("not json")]
+    [Arguments("")]
+    public async Task Unrecognized_or_empty_bulk_response_is_retryable(string body)
+    {
+        using var sink = Sink(new CapturingConnection(body));
+
+        var result = await sink.DeliverAsync(
+            Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
+    }
+
+    [Test]
     public async Task Transport_failure_is_retryable()
     {
         using var sink = Sink(new CapturingConnection("", exception: new HttpRequestException("connection refused")));

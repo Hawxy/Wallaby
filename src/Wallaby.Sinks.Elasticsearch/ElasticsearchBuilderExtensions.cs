@@ -46,9 +46,10 @@ public static class ElasticsearchBuilderExtensions
 
     private static void Validate(ElasticsearchSinkOptions options)
     {
-        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out _))
+        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var endpoint)
+            || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("ElasticsearchSinkOptions.Endpoint must be an absolute URL.", nameof(options));
+            throw new ArgumentException("ElasticsearchSinkOptions.Endpoint must be an absolute http(s) URL.", nameof(options));
         }
         if (options.MaxActionsPerRequest <= 0)
         {
@@ -58,15 +59,19 @@ public static class ElasticsearchBuilderExtensions
         {
             throw new ArgumentException("ElasticsearchSinkOptions.TimeoutMs must be positive.", nameof(options));
         }
-        if (options.Password is not null && options.Username is null)
-        {
-            throw new ArgumentException("ElasticsearchSinkOptions.Password requires Username.", nameof(options));
-        }
         if (options.ApiKey is not null && options.Username is not null)
         {
             throw new ArgumentException(
                 "ElasticsearchSinkOptions.ApiKey and Username are mutually exclusive; configure one authentication scheme.",
                 nameof(options));
+        }
+        if (options.Password is not null && options.Username is null)
+        {
+            throw new ArgumentException("ElasticsearchSinkOptions.Password requires Username.", nameof(options));
+        }
+        if (options.Username is not null && options.Password is null)
+        {
+            throw new ArgumentException("ElasticsearchSinkOptions.Username requires Password.", nameof(options));
         }
     }
 }

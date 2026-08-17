@@ -54,7 +54,8 @@ cdc.AddElasticsearchSink("search", s => { /* ... */ })
 ## Indices
 
 The sink does not create or configure indices: an index auto-creates on first write with dynamic
-mapping. For explicit settings or mappings (analyzers, `dense_vector` fields, shard counts, …),
+mapping (provided the cluster's `action.auto_create_index` setting allows it, as it does by
+default). For explicit settings or mappings (analyzers, `dense_vector` fields, shard counts, …),
 create the index up front — via Kibana Dev Tools, your infrastructure tooling, or a deployment
 script. In-sink index bootstrapping is planned.
 

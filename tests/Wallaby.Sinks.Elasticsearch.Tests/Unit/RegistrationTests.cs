@@ -9,7 +9,9 @@ public class RegistrationTests
     [Test]
     [Arguments("")]
     [Arguments("elasticsearch/relative")]
-    public void Endpoint_must_be_an_absolute_url(string endpoint)
+    [Arguments("localhost:9200")]
+    [Arguments("ftp://elasticsearch.local")]
+    public void Endpoint_must_be_an_absolute_http_url(string endpoint)
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
@@ -51,6 +53,18 @@ public class RegistrationTests
             o.Endpoint = "http://elasticsearch.local:9200";
             o.Password = "secret";
         })).Message.ShouldContain("Username");
+    }
+
+    [Test]
+    public void Username_requires_a_password()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o =>
+        {
+            o.Endpoint = "http://elasticsearch.local:9200";
+            o.Username = "elastic";
+        })).Message.ShouldContain("Password");
     }
 
     [Test]
