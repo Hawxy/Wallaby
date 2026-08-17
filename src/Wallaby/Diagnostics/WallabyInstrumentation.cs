@@ -36,6 +36,7 @@ public sealed class WallabyInstrumentation : IDisposable
     internal const string TxnEndLsnTag = "wallaby.txn.lsn.end";
     internal const string TxnSizeTag = "wallaby.txn.size";
     internal const string TxnStreamedTag = "wallaby.txn.streamed";
+    internal const string SpillRowsTag = "wallaby.spill.rows";
     internal const string IngestionLagTag = "wallaby.ingestion.lag_s";
     internal const string WatermarkTag = "wallaby.watermark";
     internal const string HeartbeatTag = "wallaby.heartbeat";
@@ -83,6 +84,8 @@ public sealed class WallabyInstrumentation : IDisposable
     private readonly Counter<long> _sinkRecordsDelivered;
     private readonly Counter<long> _sinkDeliveryFailures;
     private readonly Counter<long> _changesReselected;
+    private readonly Counter<long> _spillRows;
+    private readonly Counter<long> _spillFlushes;
     private readonly Counter<long> _backfillRows;
     private readonly UpDownCounter<int> _backfillActive;
     private readonly Histogram<double> _backfillChunkDuration;
@@ -136,6 +139,12 @@ public sealed class WallabyInstrumentation : IDisposable
         _changesReselected = _meter.CreateCounter<long>(
             "wallaby.changes.reselected", unit: "{change}",
             description: "Changes healed by re-reading the row after an unavailable (unchanged TOAST) value, by outcome.");
+        _spillRows = _meter.CreateCounter<long>(
+            "wallaby.spill.rows", unit: "{change}",
+            description: "Changes written to the transaction spill while streamed (large) transactions are buffered before commit.");
+        _spillFlushes = _meter.CreateCounter<long>(
+            "wallaby.spill.flushes", unit: "{flush}",
+            description: "Spill buffer flushes (binary COPY batches into wallaby.stream_buffer) by the database spill backend.");
         _backfillRows = _meter.CreateCounter<long>(
             "wallaby.backfill.rows", unit: "{row}", description: "Rows copied during backfill.");
         _backfillActive = _meter.CreateUpDownCounter<int>(
@@ -184,6 +193,10 @@ public sealed class WallabyInstrumentation : IDisposable
         if (!transaction.IsStreamed)
         {
             activity.SetTag(TxnSizeTag, transaction.Changes.Count);
+        }
+        else
+        {
+            activity.SetTag(SpillRowsTag, transaction.SpilledChanges);
         }
         // Marks the tiny transactions that exist only to bracket a backfill chunk, so they can be
         // filtered in a trace viewer.
@@ -241,8 +254,13 @@ public sealed class WallabyInstrumentation : IDisposable
     internal Activity? StartTransform() => _activitySource.StartActivity(TransformActivity);
     internal Activity? StartSinkDelivery() => _activitySource.StartActivity(SinkDeliverActivity, ActivityKind.Producer);
 
-    /// <summary>Root span for one backfill run (whole-table or scoped fan-out); chunks link back to it.</summary>
-    internal Activity? StartBackfill() => _activitySource.StartActivity(BackfillActivity);
+    /// <summary>
+    /// Root span for one backfill run (whole-table or scoped fan-out); chunks link back to it. A scoped
+    /// fan-out run passes the enqueuing trigger's context so the run links back to the trace that caused it.
+    /// </summary>
+    internal Activity? StartBackfill(ActivityContext trigger = default) => _activitySource.StartActivity(
+        BackfillActivity, ActivityKind.Internal, parentContext: default,
+        links: trigger == default ? null : [new ActivityLink(trigger)]);
 
     // The chunk is delivered inside a slot commit, so it parents under that transaction's span; the link
     // ties it back to the backfill run that produced it (which lives in a different trace).
@@ -323,6 +341,24 @@ public sealed class WallabyInstrumentation : IDisposable
         if (lagSeconds >= 0)
         {
             _ingestionLag.Record(lagSeconds, new KeyValuePair<string, object?>(SlotTag, slot));
+        }
+    }
+
+    /// <summary>One change written to the transaction spill (a streamed transaction is buffering before commit).</summary>
+    internal void RecordSpilledChange(string slot)
+    {
+        if (_spillRows.Enabled)
+        {
+            _spillRows.Add(1, new KeyValuePair<string, object?>(SlotTag, slot));
+        }
+    }
+
+    /// <summary>One spill buffer flush (a binary COPY batch into <c>wallaby.stream_buffer</c>).</summary>
+    internal void RecordSpillFlush(string slot)
+    {
+        if (_spillFlushes.Enabled)
+        {
+            _spillFlushes.Add(1, new KeyValuePair<string, object?>(SlotTag, slot));
         }
     }
 

@@ -193,8 +193,16 @@ internal static class StateSchemaMigrations
         END $$;
         """;
 
+    /// <summary>
+    /// The W3C traceparent of the trigger that enqueued (or last re-armed) a fan-out job, so the scoped
+    /// backfill's root span can link back to the triggering transaction's trace. Null when tracing was off.
+    /// </summary>
+    private const string FanoutTraceparent = """
+        ALTER TABLE wallaby.fanout_queue ADD COLUMN IF NOT EXISTS traceparent text;
+        """;
+
     public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
         [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag),
          (5, RegistryPublicationOwnership), (6, ControlPublicationWidening), (7, BackfillRetryState),
-         (8, CheckpointIntoRegistry)];
+         (8, CheckpointIntoRegistry), (9, FanoutTraceparent)];
 }

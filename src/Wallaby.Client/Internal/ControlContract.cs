@@ -24,7 +24,7 @@ internal static class ControlContract
     /// can always be unsuspended. Version 5 is the oldest schema any deployment carries, so nothing
     /// branches on (or gates against) anything older.
     /// </summary>
-    public const int SchemaVersion = 8;
+    public const int SchemaVersion = 9;
 
     /// <summary>Schema version that added the <c>control</c> publication-widening columns.</summary>
     public const int WideningSchemaVersion = 6;

@@ -1,6 +1,7 @@
 using Npgsql;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.State;
 using Wallaby.Model;
 
@@ -13,9 +14,12 @@ namespace Wallaby.Internal.Replication;
 /// re-capture) and are auto-truncated on crash. Engages only for streamed (large) transactions, so the extra
 /// source I/O is paid only then. Appends are buffered to a small bounded window and flushed via binary COPY.
 /// </summary>
-internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, string slotName) : ITransactionSpill
+internal sealed class PostgresUnloggedTableSpill(
+    NpgsqlDataSource dataSource, string slotName, WallabyInstrumentation? instrumentation = null) : ITransactionSpill
 {
     private const int FlushThreshold = 500;
+
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
     private readonly Dictionary<uint, List<(uint Subxid, RawChange Change)>> _pending = [];
     private readonly Dictionary<uint, long> _nextSeq = [];
@@ -172,5 +176,6 @@ internal sealed class PostgresUnloggedTableSpill(NpgsqlDataSource dataSource, st
 
         _nextSeq[xid] = seq;
         batch.Clear();
+        _instr.RecordSpillFlush(slotName);
     }
 }

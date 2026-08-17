@@ -32,6 +32,8 @@ internal sealed record ScopedFanoutSpec(
 /// A persisted fan-out job as read from <c>wallaby.fanout_queue</c>. The lookup values and cursor are kept
 /// as raw JSON; the worker coerces them to CLR types against the resolved primary table's columns.
 /// <paramref name="Attempts"/> counts the failed runs so far and drives the job's retry backoff.
+/// <paramref name="Traceparent"/> is the trigger's W3C trace context (null when tracing was off), letting
+/// the scoped backfill's span link back to the transaction that enqueued the job.
 /// </summary>
 internal sealed record FanoutJobRow(
     string TableQualified,
@@ -41,4 +43,5 @@ internal sealed record FanoutJobRow(
     string LookupValuesJson,
     string? CursorJson,
     long RowsCopied,
-    int Attempts = 0);
+    int Attempts = 0,
+    string? Traceparent = null);

@@ -265,8 +265,9 @@ public sealed class WallabyTestHarness : IAsyncDisposable
         }
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot);
-        _stream = new LogicalReplicationStream(ConnectionString, Names.Slot, Names.Publication, _spill, model: _model);
+        _spill = new PostgresUnloggedTableSpill(_dataSource, Names.Slot, Instrumentation);
+        _stream = new LogicalReplicationStream(
+            ConnectionString, Names.Slot, Names.Publication, _spill, model: _model, instrumentation: Instrumentation);
         _coordinator = new WatermarkBackfillCoordinator(
             _dataSource, new PostgresBackfillStore(_dataSource), NullLogger.Instance, Instrumentation)
         {

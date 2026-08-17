@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Wallaby.Abstractions;
@@ -39,6 +40,10 @@ public class StreamingTests
         var capture = harness.AddCaptureSink();
         await harness.SelfConfigureAsync();
 
+        using var spillRows = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.spill.rows");
+        using var spillFlushes = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.spill.flushes");
+        using var activities = new ActivityCapture(harness.Instrumentation);
+
         // One transaction with enough changes to exceed the 64kB reorder-buffer limit, so the server streams it.
         const int count = 2000;
         var categoryId = await harness.Db.AddCategoryAsync();
@@ -56,6 +61,16 @@ public class StreamingTests
         // And the server actually streamed it (proves the v2 path engaged, not buffer-then-send at commit).
         await Polling.UntilAsync(async () => await StreamTxnsAsync(connectionString, harness.Names.Slot) > 0L,
             TimeSpan.FromSeconds(20));
+
+        // The spill-in was visible live: every buffered change counted, and the database backend's COPY
+        // batches counted as flushes.
+        spillRows.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(count);
+        spillFlushes.GetMeasurementSnapshot().Sum(m => m.Value).ShouldBeGreaterThanOrEqualTo(1L);
+
+        // The streamed transaction's span carries the spilled-change count.
+        var streamedTxn = activities.All("transaction.process")
+            .Last(a => Equals(a.GetTagItem("wallaby.txn.streamed"), true));
+        ((int)streamedTxn.GetTagItem("wallaby.spill.rows")!).ShouldBe(count);
     }
 
     [Test]

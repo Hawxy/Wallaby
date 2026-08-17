@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -25,8 +26,8 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         await using var cmd = new NpgsqlCommand(
             $"""
             INSERT INTO wallaby.fanout_queue
-                (table_qualified, lookup_hash, lookup_columns, lookup_values, status, cursor_json, rows_copied, requested_at, updated_at)
-            VALUES (@t, @h, @cols, @vals::jsonb, 'Requested', NULL, 0, now(), now())
+                (table_qualified, lookup_hash, lookup_columns, lookup_values, status, cursor_json, rows_copied, requested_at, updated_at, traceparent)
+            VALUES (@t, @h, @cols, @vals::jsonb, 'Requested', NULL, 0, now(), now(), @tp)
             ON CONFLICT (table_qualified, lookup_hash) DO UPDATE
                 SET status = 'Requested',
                     lookup_values = EXCLUDED.lookup_values,
@@ -35,7 +36,9 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
                     -- A fresh trigger clears any backoff left by earlier failures.
                     attempts = 0,
                     next_attempt_at = now(),
-                    last_error = NULL;
+                    last_error = NULL,
+                    -- The re-armed run serves the newest trigger, so that trigger's trace wins the link.
+                    traceparent = EXCLUDED.traceparent;
             SELECT pg_notify('{WallabySchema.FanoutNotifyChannel}', '');
             """,
             connection);
@@ -43,6 +46,9 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         cmd.Parameters.AddWithValue("h", hash);
         cmd.Parameters.AddWithValue("cols", columns);
         cmd.Parameters.AddWithValue("vals", valuesJson);
+        // The ambient span at enqueue time is the trigger transaction's trace (dependent.resolve or
+        // transaction.process); the drained job's backfill span links back to it.
+        cmd.Parameters.AddWithValue("tp", (object?)Activity.Current?.Id ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -54,7 +60,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
             $"""
-            SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied, attempts
+            SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied, attempts, traceparent
             FROM wallaby.fanout_queue
             WHERE status IN {DueStatuses} AND next_attempt_at <= now()
             ORDER BY next_attempt_at, requested_at
@@ -144,7 +150,7 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
-            "SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied, attempts FROM wallaby.fanout_queue",
+            "SELECT table_qualified, lookup_hash, status, lookup_columns, lookup_values, cursor_json, rows_copied, attempts, traceparent FROM wallaby.fanout_queue",
             connection);
 
         var results = new List<FanoutJobRow>();
@@ -165,7 +171,8 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
             reader.GetString(4),
             reader.IsDBNull(5) ? null : reader.GetString(5),
             reader.GetInt64(6),
-            reader.GetInt32(7));
+            reader.GetInt32(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8));
 
     /// <summary>
     /// The canonical JSON for a lookup set: tuples sorted by their serialized form so the same logical

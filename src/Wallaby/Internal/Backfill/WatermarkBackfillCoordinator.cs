@@ -74,7 +74,8 @@ internal sealed class WatermarkBackfillCoordinator(
         logger.BackfillStarting(table.QualifiedName);
 
         var rowsCopied = await RunChunkLoopAsync(
-            pager, table.QualifiedName, WallabyInstrumentation.BackfillKindTable, fanoutKeys: 0, cursor, startRows,
+            pager, table.QualifiedName, WallabyInstrumentation.BackfillKindTable, fanoutKeys: 0,
+            trigger: default, cursor, startRows,
             // Guarded save: a manual request arriving mid-run wins over every later progress write,
             // so the row stays Requested and the scheduler re-runs the table fresh.
             (cur, rows, hasMore, token) => store.SaveProgressAsync(
@@ -94,11 +95,13 @@ internal sealed class WatermarkBackfillCoordinator(
     /// batches (see <see cref="KeysetFilter.ForLookup"/>), scanned sequentially; resume is
     /// (<paramref name="startBatch"/>, <paramref name="startCursor"/>). <paramref name="saveProgress"/>
     /// receives (batch, cursor, rows, hasMore) — hasMore stays true until the last chunk of the last
-    /// batch, so the job completes only when the whole scope is done.
+    /// batch, so the job completes only when the whole scope is done. <paramref name="trigger"/> is the
+    /// enqueuing trigger's trace context (default when untraced); the run's span links back to it.
     /// </summary>
     public async Task<long> BackfillScopeAsync(
         ScopedFanoutSpec spec, int startBatch, object?[]? startCursor, long startRows,
-        Func<int, object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
+        Func<int, object?[]?, long, bool, CancellationToken, Task> saveProgress,
+        ActivityContext trigger, CancellationToken ct)
     {
         var filters = KeysetFilter.ForLookup(spec.LookupColumns, spec.LookupValues);
         if (startBatch >= filters.Count)
@@ -122,7 +125,7 @@ internal sealed class WatermarkBackfillCoordinator(
 
             rowsCopied = await RunChunkLoopAsync(
                 pager, spec.PrimaryTable.QualifiedName, WallabyInstrumentation.BackfillKindFanout, spec.LookupValues.Count,
-                batch == startBatch ? startCursor : null, rowsCopied,
+                trigger, batch == startBatch ? startCursor : null, rowsCopied,
                 // A finished non-final batch persists (batch + 1, null): resume at the next batch's start.
                 (cur, rows, hasMore, token) => saveProgress(
                     hasMore ? batch : batch + 1,
@@ -138,7 +141,7 @@ internal sealed class WatermarkBackfillCoordinator(
     }
 
     private async Task<long> RunChunkLoopAsync(
-        KeysetPager pager, string qualifiedTable, string backfillKind, int fanoutKeys,
+        KeysetPager pager, string qualifiedTable, string backfillKind, int fanoutKeys, ActivityContext trigger,
         object?[]? startCursor, long startRows,
         Func<object?[]?, long, bool, CancellationToken, Task> saveProgress, CancellationToken ct)
     {
@@ -156,7 +159,7 @@ internal sealed class WatermarkBackfillCoordinator(
         (PendingWindow Window, BackfillChunk Chunk, long ChunkStart)? inFlight = null;
         PendingWindow? current = null;
 
-        using var activity = _instr.StartBackfill();
+        using var activity = _instr.StartBackfill(trigger);
         if (activity is not null)
         {
             activity.SetTag(WallabyInstrumentation.TableTag, qualifiedTable);

@@ -115,7 +115,7 @@ internal sealed class LeaderSession(
 
         await using var stream = new LogicalReplicationStream(
             replicationConnectionString, options.SlotName, options.PublicationName, spill,
-            options.Advanced.MaxBufferedChangesPerTransaction, components.Model);
+            options.Advanced.MaxBufferedChangesPerTransaction, components.Model, instrumentation);
         var changeEventFactory = new ChangeEventFactory(
             components.Materializer, components.Reselector, _logger, instrumentation);
         var pipeline = new WallabyPipeline(
@@ -403,13 +403,9 @@ internal sealed class LeaderSession(
 
     // The configured spill factory builds the backend for this leader session; default = the database-backed spill.
     private ITransactionSpill CreateSpill()
-    {
-        var factory = config.SpillFactory ?? DefaultSpill;
-        return factory(new SpillContext(dataSource.Source, options.SlotName, services));
-    }
-
-    private static ITransactionSpill DefaultSpill(SpillContext ctx)
-        => new PostgresUnloggedTableSpill(ctx.DataSource, ctx.SlotName);
+        => config.SpillFactory is { } factory
+            ? factory(new SpillContext(dataSource.Source, options.SlotName, services))
+            : new PostgresUnloggedTableSpill(dataSource.Source, options.SlotName, instrumentation);
 }
 
 /// <summary>Source-generated log messages for <see cref="LeaderSession"/>.</summary>

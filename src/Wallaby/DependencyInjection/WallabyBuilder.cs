@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Internal.Replication;
 using Wallaby.Providers;
 using Wallaby.Sinks;
@@ -199,7 +200,8 @@ public sealed class WallabyBuilder
     /// a writable path is available.
     /// </summary>
     public WallabyBuilder SpillToDatabase()
-        => UseTransactionSpill(ctx => new PostgresUnloggedTableSpill(ctx.DataSource, ctx.SlotName));
+        => UseTransactionSpill(ctx => new PostgresUnloggedTableSpill(
+            ctx.DataSource, ctx.SlotName, ctx.Services.GetService<WallabyInstrumentation>()));
 
     /// <summary>
     /// Supply a custom <see cref="ITransactionSpill"/> backend for pgoutput v2 streamed (large) transactions —
