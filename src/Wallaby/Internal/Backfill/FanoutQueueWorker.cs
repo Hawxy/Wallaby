@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Wallaby.Diagnostics;
 using Wallaby.Internal.State;
@@ -171,12 +172,20 @@ internal sealed class FanoutQueueWorker(
 
         await store.MarkInProgressAsync(job.TableQualified, job.LookupHash, fresh ? null : job.CursorJson, ct);
 
+        // The trigger's persisted trace context (when it was traced) links the scoped backfill's span
+        // back to the transaction that enqueued the job. Unparseable values just skip the link.
+        var trigger = default(ActivityContext);
+        if (job.Traceparent is not null)
+        {
+            ActivityContext.TryParse(job.Traceparent, traceState: null, isRemote: true, out trigger);
+        }
+
         await coordinator.BackfillScopeAsync(
             spec, startBatch, startCursor, startRows,
             (batch, cursor, rows, _, token) => store.SaveProgressAsync(
                 job.TableQualified, job.LookupHash,
                 KeysetCodec.SerializeScopedCursor(batch, cursor, lookup.PkColumns), rows, token),
-            ct);
+            trigger, ct);
 
         await store.CompleteAsync(job.TableQualified, job.LookupHash, ct);
         return true;

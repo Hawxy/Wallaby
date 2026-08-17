@@ -1,6 +1,7 @@
 using System.Text;
 using Npgsql.Replication.PgOutput.Messages;
 using Wallaby.Abstractions;
+using Wallaby.Diagnostics;
 using Wallaby.Model;
 
 namespace Wallaby.Internal.Replication;
@@ -27,11 +28,18 @@ namespace Wallaby.Internal.Replication;
 /// <see cref="Watermark"/>s for the backfill coordinator.
 /// </summary>
 internal sealed class TransactionAssembler(
-    ITransactionSpill spill, int maxBufferedChangesPerTransaction = int.MaxValue, WallabyModel? model = null)
+    ITransactionSpill spill, int maxBufferedChangesPerTransaction = int.MaxValue, WallabyModel? model = null,
+    string slotName = "", WallabyInstrumentation? instrumentation = null)
 {
+    private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
+
     // Non-streamed (small) transaction: changes between Begin and Commit (the common path).
     private readonly List<RawChange> _buffer = [];
     private readonly List<Watermark> _watermarks = [];
+
+    // Changes appended to the spill per open streamed xid (savepoint rollbacks are not subtracted);
+    // stamped onto the committed transaction so its span can carry the spill volume.
+    private readonly Dictionary<uint, int> _spilledByXid = [];
 
     // True when the open non-streamed transaction carried a wallaby.heartbeat message.
     private bool _sawHeartbeat;
@@ -89,6 +97,7 @@ internal sealed class TransactionAssembler(
             case StreamAbortMessage abort when abort.SubtransactionXid == abort.TransactionXid:
                 await spill.DiscardAsync(abort.TransactionXid, ct);  // whole transaction rolled back; drop its spill
                 _streamedTruncates?.Remove(abort.TransactionXid);
+                _spilledByXid.Remove(abort.TransactionXid);
                 return null;
 
             case StreamAbortMessage abort:
@@ -108,6 +117,7 @@ internal sealed class TransactionAssembler(
                     IsStreamed = true,
                     StreamXid = streamCommit.TransactionXid,
                     Spill = spill,
+                    SpilledChanges = _spilledByXid.Remove(streamCommit.TransactionXid, out var spilled) ? spilled : 0,
                     TruncatedTables = _streamedTruncates is not null
                         && _streamedTruncates.Remove(streamCommit.TransactionXid, out var truncated)
                         ? truncated : Array.Empty<string>(),
@@ -185,6 +195,8 @@ internal sealed class TransactionAssembler(
         if (_currentStreamXid is { } xid)
         {
             await spill.AppendAsync(xid, messageXid ?? xid, change, ct);  // streamed: out of memory, no size guard needed
+            _spilledByXid[xid] = _spilledByXid.GetValueOrDefault(xid) + 1;
+            _instr.RecordSpilledChange(slotName);
             return;
         }
 

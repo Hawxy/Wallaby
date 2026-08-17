@@ -67,12 +67,14 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
 
         var categoryId = await Db.AddCategoryAsync();
         var id = await Db.AddProductAsync(categoryId, $"e2e_{names.Suffix}");
-        await Db.DeleteProductAsync(id);
 
-        var messages = Consume(topic, count: 2);
-        messages.Count.ShouldBe(2);
+        // Consume the upsert before deleting: the router collapses same-key changes within one
+        // coalesced batch to their final action, so an insert+delete landing in a single batch
+        // delivers only the tombstone.
+        var upserts = Consume(topic, count: 1);
+        upserts.Count.ShouldBe(1);
 
-        var upsert = messages[0];
+        var upsert = upserts[0];
         upsert.Message.Key.ShouldBe(id.ToString());
         Header(upsert, KafkaMessageWriter.OperationHeader).ShouldBe("upsert");
         using (var envelope = JsonDocument.Parse(upsert.Message.Value))
@@ -81,6 +83,11 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
             envelope.RootElement.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
             envelope.RootElement.GetProperty("metadata").GetProperty("table").GetString().ShouldBe("products");
         }
+
+        await Db.DeleteProductAsync(id);
+
+        var messages = Consume(topic, count: 2);
+        messages.Count.ShouldBe(2);
 
         var tombstone = messages[1];
         tombstone.Message.Key.ShouldBe(id.ToString());
@@ -141,11 +148,14 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
         var config = new ConsumerConfig
         {
             BootstrapServers = kafka.BootstrapServers,
+            // Required by the client; unused, as manual assignment skips group membership.
             GroupId = Guid.NewGuid().ToString("N"),
-            AutoOffsetReset = AutoOffsetReset.Earliest,
         };
         using var consumer = new ConsumerBuilder<string, byte[]>(config).Build();
-        consumer.Subscribe(topic);
+        // Manual assignment instead of Subscribe: sink topics have one partition, and skipping the
+        // consumer group avoids coordinator load and __consumer_offsets creation on the cold broker
+        // (the dominant source of consume timeouts under full-suite load).
+        consumer.Assign(new TopicPartitionOffset(topic, 0, Offset.Beginning));
 
         var results = new List<ConsumeResult<string, byte[]>>();
         // Generous: a cold single-broker container can take a while to serve its first produce

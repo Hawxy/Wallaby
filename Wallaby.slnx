@@ -10,9 +10,11 @@
     <Project Path="src/Wallaby.Client/Wallaby.Client.csproj" />
     <Project Path="src/Wallaby.Providers.EntityFrameworkCore/Wallaby.Providers.EntityFrameworkCore.csproj" />
     <Project Path="src/Wallaby.Providers.Marten/Wallaby.Providers.Marten.csproj" />
+    <Project Path="src/Wallaby.Sinks.Elasticsearch/Wallaby.Sinks.Elasticsearch.csproj" />
     <Project Path="src/Wallaby.Sinks.Http/Wallaby.Sinks.Http.csproj" />
     <Project Path="src/Wallaby.Sinks.Kafka/Wallaby.Sinks.Kafka.csproj" />
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
+    <Project Path="src/Wallaby.Sinks.OpenSearch/Wallaby.Sinks.OpenSearch.csproj" />
     <Project Path="src/Wallaby.Testing/Wallaby.Testing.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
   </Folder>
@@ -22,9 +24,11 @@
     <Project Path="tests/Wallaby.Client.Tests/Wallaby.Client.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.Tests/Wallaby.Providers.EntityFrameworkCore.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.Marten.Tests/Wallaby.Providers.Marten.Tests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.Elasticsearch.Tests/Wallaby.Sinks.Elasticsearch.Tests.csproj" />
     <Project Path="tests/Wallaby.Sinks.Http.Tests/Wallaby.Sinks.Http.Tests.csproj" />
     <Project Path="tests/Wallaby.Sinks.Kafka.Tests/Wallaby.Sinks.Kafka.Tests.csproj" />
     <Project Path="tests/Wallaby.Sinks.Meilisearch.Tests/Wallaby.Sinks.Meilisearch.Tests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.OpenSearch.Tests/Wallaby.Sinks.OpenSearch.Tests.csproj" />
     <Project Path="tests/Wallaby.TestInfrastructure/Wallaby.TestInfrastructure.csproj" />
     <Project Path="tests/Wallaby.Tests/Wallaby.Tests.csproj" />
     <Project Path="tests/Wallaby.TraceDemo/Wallaby.TraceDemo.csproj" />

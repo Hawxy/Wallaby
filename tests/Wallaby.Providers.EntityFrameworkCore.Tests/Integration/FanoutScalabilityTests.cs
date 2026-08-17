@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Wallaby.Abstractions;
 using Wallaby.Internal;
@@ -217,6 +218,7 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         await harness.ClearFanoutQueueAsync();
 
         using var synthetic = new MetricCollector<long>(harness.Instrumentation.Meter, "wallaby.dependent.synthetic");
+        using var activities = new ActivityCapture(harness.Instrumentation);
 
         await harness.StartAsync();
         try
@@ -245,6 +247,14 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         {
             await harness.StopAsync();
         }
+
+        // The drained job's backfill run links back to the fan-out that enqueued it (the re-arming second
+        // rename's resolve span wins the link).
+        var fanoutRun = activities.All("backfill")
+            .Last(a => (string?)a.GetTagItem("wallaby.backfill.kind") == "fanout");
+        var link = fanoutRun.Links.ShouldHaveSingleItem();
+        activities.All("dependent.resolve")
+            .ShouldContain(a => a.TraceId == link.Context.TraceId && a.SpanId == link.Context.SpanId);
     }
 
     [Test]
@@ -356,10 +366,17 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         };
         var spec = new ScopedFanoutSpec(table, ["category_id"], [new object?[] { 4242 }]);
 
-        await store.EnqueueAsync(spec, CancellationToken.None);
+        // An enqueue under an active span persists that span's traceparent with the job.
+        string? triggerId;
+        using (var trigger = new Activity("trigger").Start())
+        {
+            triggerId = trigger.Id;
+            await store.EnqueueAsync(spec, CancellationToken.None);
+        }
         var due = await store.GetNextDueAsync(CancellationToken.None);
         due.ShouldNotBeNull();
         due!.Status.ShouldBe(FanoutJobStatus.Requested);
+        due.Traceparent.ShouldBe(triggerId);
 
         // Marking in progress with a cursor makes it a resumable in-progress job.
         await store.MarkInProgressAsync(
@@ -379,6 +396,13 @@ public class FanoutScalabilityTests(TestModelPostgresFixture pg)
         rearmed!.Status.ShouldBe(FanoutJobStatus.Requested);
         (await store.ListAsync(CancellationToken.None)).Count(j => j.LookupHash == due.LookupHash)
             .ShouldBe(1);
+
+        // Re-arming an existing row overwrites its traceparent: the newest trigger's trace wins the link.
+        using (var retrigger = new Activity("retrigger").Start())
+        {
+            await store.EnqueueAsync(spec, CancellationToken.None);
+            (await store.GetNextDueAsync(CancellationToken.None))!.Traceparent.ShouldBe(retrigger.Id);
+        }
     }
 
     [Test]

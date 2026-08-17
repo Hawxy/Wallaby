@@ -55,6 +55,12 @@ internal sealed class CommittedTransaction
     /// <summary>The streamed transaction's xid (the spill key); meaningful only when <see cref="IsStreamed"/>.</summary>
     public uint StreamXid { get; init; }
 
+    /// <summary>
+    /// Changes written to the spill while this streamed transaction was buffered (savepoint rollbacks are
+    /// not subtracted, so this counts write I/O, not surviving rows). Zero for non-streamed transactions.
+    /// </summary>
+    public int SpilledChanges { get; init; }
+
     /// <summary>The spill holding a streamed transaction's changes; non-null only when <see cref="IsStreamed"/>.</summary>
     public ITransactionSpill? Spill { get; init; }
 }

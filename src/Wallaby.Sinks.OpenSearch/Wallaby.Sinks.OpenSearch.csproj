@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby.Sinks.OpenSearch</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>OpenSearch destination/sink for Wallaby: keep OpenSearch indexes in sync with Postgres changes.</Description>
+    <PackageTags>opensearch;search;sink</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.Sinks.OpenSearch.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby\Wallaby.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNet.ReproducibleBuilds">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="OpenSearch.Client" />
+  </ItemGroup>
+
+  <Import Project="../../Package.Build.props" />
+</Project>

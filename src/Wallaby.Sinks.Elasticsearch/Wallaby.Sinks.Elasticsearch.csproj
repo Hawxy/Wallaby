@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby.Sinks.Elasticsearch</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Elasticsearch destination/sink for Wallaby: keep Elasticsearch indices in sync with Postgres changes.</Description>
+    <PackageTags>elasticsearch;search;sink</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.Sinks.Elasticsearch.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby\Wallaby.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNet.ReproducibleBuilds">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Elastic.Clients.Elasticsearch" />
+  </ItemGroup>
+
+  <Import Project="../../Package.Build.props" />
+</Project>

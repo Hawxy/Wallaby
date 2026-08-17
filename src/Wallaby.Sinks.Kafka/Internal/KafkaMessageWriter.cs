@@ -15,8 +15,6 @@ namespace Wallaby.Sinks.Kafka.Internal;
 /// </summary>
 internal static class KafkaMessageWriter
 {
-    private const string SerializerOptionsName = "KafkaSinkOptions.SerializerOptions";
-
     /// <summary>Header carrying <c>upsert</c> or <c>delete</c>.</summary>
     public const string OperationHeader = "wallaby.operation";
 
@@ -65,7 +63,7 @@ internal static class KafkaMessageWriter
         }
 
         writer.WritePropertyName("document");
-        SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions, SerializerOptionsName);
+        SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions);
 
         SinkEnvelopeJson.WriteMetadata(writer, record.Metadata);
         writer.WriteEndObject();
