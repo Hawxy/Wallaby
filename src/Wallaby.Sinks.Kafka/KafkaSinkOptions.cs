@@ -1,5 +1,6 @@
 using System.Text.Json;
-using Confluent.Kafka;
+using Dekaf;
+using Dekaf.Protocol.Records;
 
 namespace Wallaby.Sinks.Kafka;
 
@@ -23,11 +24,17 @@ public sealed class KafkaSinkOptions
     public IList<KafkaTopicConfig> Topics { get; } = [];
 
     /// <summary>
-    /// Raw librdkafka settings merged over the sink's computed producer configuration (so security
-    /// settings like <c>sasl.*</c>/<c>ssl.*</c> and advanced tuning are available without the sink
-    /// wrapping every knob). Keys here win on conflict.
+    /// Connection-level settings applied to the shared Kafka client behind both the producer and the
+    /// topic-creating admin client: TLS (<c>UseTls</c>), SASL (<c>WithSaslPlain</c>,
+    /// <c>WithSaslScramSha512</c>, OAuth bearer, AWS MSK IAM), connection timeouts, and DNS behaviour.
     /// </summary>
-    public IDictionary<string, string> ClientConfig { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    public Action<KafkaClientBuilder>? ConfigureClient { get; set; }
+
+    /// <summary>
+    /// Producer settings the sink does not wrap (batch size, retry policy, socket buffers). Runs after
+    /// the sink's own producer configuration, so settings here win on conflict.
+    /// </summary>
+    public Action<ProducerBuilder<string, byte[]>>? ConfigureProducer { get; set; }
 
     /// <summary>Compression applied to produced message batches.</summary>
     public CompressionType Compression { get; set; } = CompressionType.Lz4;
@@ -36,16 +43,14 @@ public sealed class KafkaSinkOptions
     public int LingerMs { get; set; } = 5;
 
     /// <summary>
-    /// Per-message delivery ceiling in milliseconds (librdkafka <c>message.timeout.ms</c>): how long the
-    /// producer retries transient broker errors internally before the failure surfaces to the dispatcher
-    /// as retryable.
+    /// Per-message delivery ceiling in milliseconds: how long the producer retries transient broker
+    /// errors internally before the failure surfaces to the dispatcher as retryable.
     /// </summary>
     public int MessageTimeoutMs { get; set; } = 30_000;
 
     /// <summary>
-    /// Ceiling in milliseconds on the admin request that creates <see cref="Topics"/> at initialization,
-    /// so an unreachable broker fails the leader session (which retries with backoff) instead of
-    /// stalling startup on librdkafka's default admin timeout.
+    /// Ceiling in milliseconds on creating <see cref="Topics"/> at initialization, so an unreachable
+    /// broker fails the leader session (which retries with backoff) instead of stalling startup.
     /// </summary>
     public int AdminTimeoutMs { get; set; } = 30_000;
 

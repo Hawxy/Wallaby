@@ -1,5 +1,7 @@
 using System.Text.Json;
-using Confluent.Kafka;
+using Dekaf.Errors;
+using Dekaf.Producer;
+using Dekaf.Protocol;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Wallaby.Abstractions;
@@ -23,7 +25,7 @@ public class DeliveryTests
         var result = await sink.DeliverAsync(batch, CancellationToken.None);
 
         result.Status.ShouldBe(DeliveryStatus.Success);
-        produced.Select(p => (p.Topic, p.Message.Key)).ShouldBe([("products", "1"), ("other", "2"), ("products", "1")]);
+        produced.Select(p => (p.Topic, p.Key)).ShouldBe([("products", "1"), ("other", "2"), ("products", "1")]);
     }
 
     [Test]
@@ -33,10 +35,9 @@ public class DeliveryTests
 
         await sink.DeliverAsync(Batch(Delete("42")), CancellationToken.None);
 
-        var message = produced.ShouldHaveSingleItem().Message;
+        var message = produced.ShouldHaveSingleItem();
         message.Value.ShouldBeNull();
-        System.Text.Encoding.UTF8.GetString(message.Headers.GetLastBytes(KafkaMessageWriter.OperationHeader))
-            .ShouldBe("delete");
+        message.Headers.ShouldNotBeNull().GetFirstAsString(KafkaMessageWriter.OperationHeader).ShouldBe("delete");
     }
 
     [Test]
@@ -47,7 +48,7 @@ public class DeliveryTests
         await sink.DeliverAsync(
             Batch(Upsert("1", new Dictionary<string, object?> { ["name"] = "a" })), CancellationToken.None);
 
-        using var envelope = JsonDocument.Parse(produced.Single().Message.Value);
+        using var envelope = JsonDocument.Parse(produced.Single().Value);
         envelope.RootElement.GetProperty("operation").GetString().ShouldBe("upsert");
         envelope.RootElement.GetProperty("document").GetProperty("name").GetString().ShouldBe("a");
     }
@@ -89,14 +90,18 @@ public class DeliveryTests
     }
 
     [Test]
-    [Arguments(ErrorCode.MsgSizeTooLarge, DeliveryStatus.PermanentFailure)]
+    [Arguments(ErrorCode.MessageTooLarge, DeliveryStatus.PermanentFailure)]
     [Arguments(ErrorCode.TopicAuthorizationFailed, DeliveryStatus.PermanentFailure)]
-    [Arguments(ErrorCode.Local_MsgTimedOut, DeliveryStatus.RetryableFailure)]
-    [Arguments(ErrorCode.UnknownTopicOrPart, DeliveryStatus.RetryableFailure)]
-    [Arguments(ErrorCode.Local_Transport, DeliveryStatus.RetryableFailure)]
+    [Arguments(ErrorCode.SaslAuthenticationFailed, DeliveryStatus.PermanentFailure)]
+    [Arguments(ErrorCode.InvalidRecord, DeliveryStatus.PermanentFailure)]
+    [Arguments(ErrorCode.OutOfOrderSequenceNumber, DeliveryStatus.PermanentFailure)]
+    [Arguments(ErrorCode.UnknownTopicOrPartition, DeliveryStatus.RetryableFailure)]
+    [Arguments(ErrorCode.RequestTimedOut, DeliveryStatus.RetryableFailure)]
+    [Arguments(ErrorCode.NetworkException, DeliveryStatus.RetryableFailure)]
+    [Arguments(ErrorCode.NotLeaderOrFollower, DeliveryStatus.RetryableFailure)]
     public async Task Broker_errors_are_classified(ErrorCode code, DeliveryStatus expected)
     {
-        var sink = CreateSink(FailingProducer(new Error(code)));
+        var sink = CreateSink(FailingProducer(new ProduceException(code, $"broker rejected: {code}")));
 
         var result = await sink.DeliverAsync(
             Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
@@ -106,33 +111,42 @@ public class DeliveryTests
     }
 
     [Test]
-    public async Task Fatal_producer_errors_are_permanent()
+    public async Task Delivery_timeouts_are_retryable()
     {
-        var sink = CreateSink(FailingProducer(new Error(ErrorCode.OutOfOrderSequenceNumber, "fenced", isFatal: true)));
+        // KafkaTimeoutException carries no protocol error code; it must still classify as retryable.
+        var sink = CreateSink(FailingProducer(new KafkaTimeoutException("delivery timed out")));
 
         var result = await sink.DeliverAsync(
             Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
+        result.Error.ShouldNotBeNull().ShouldContain("timed out");
     }
 
     [Test]
     public async Task One_failed_report_fails_the_batch_after_all_reports_settle()
     {
         var settled = 0;
-        var producer = Substitute.For<IProducer<string, byte[]>>();
-        producer.ProduceAsync(Arg.Any<string>(), Arg.Any<Message<string, byte[]>>(), Arg.Any<CancellationToken>())
-            .Returns(
-                _ => Task.FromException<Confluent.Kafka.DeliveryResult<string, byte[]>>(
-                    new ProduceException<string, byte[]>(
-                        new Error(ErrorCode.Local_MsgTimedOut), new Confluent.Kafka.DeliveryResult<string, byte[]>())),
-                async _ =>
-                {
-                    await Task.Delay(50);
-                    Interlocked.Increment(ref settled);
-                    return new Confluent.Kafka.DeliveryResult<string, byte[]>();
-                });
+        var calls = 0;
+        var producer = Substitute.For<IKafkaProducer<string, byte[]>>();
+        producer.ProduceAsync(Arg.Any<ProducerMessage<string, byte[]>>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Interlocked.Increment(ref calls) == 1
+                ? ValueTask.FromException<RecordMetadata>(new KafkaTimeoutException("delivery timed out"))
+                : SlowSuccess());
         var sink = CreateSink(producer);
+
+        async ValueTask<RecordMetadata> SlowSuccess()
+        {
+            await Task.Delay(50);
+            Interlocked.Increment(ref settled);
+            return new RecordMetadata
+            {
+                Topic = "products",
+                Partition = 0,
+                Offset = 0,
+                Timestamp = DateTimeOffset.UnixEpoch,
+            };
+        }
 
         var result = await sink.DeliverAsync(
             Batch(
@@ -147,18 +161,17 @@ public class DeliveryTests
     [Test]
     public async Task A_synchronously_thrown_produce_exception_is_classified_not_escaped()
     {
-        // ProduceAsync throws (rather than returning a faulted task) when the local queue is full.
-        var producer = Substitute.For<IProducer<string, byte[]>>();
-        producer.ProduceAsync(Arg.Any<string>(), Arg.Any<Message<string, byte[]>>(), Arg.Any<CancellationToken>())
-            .Throws(new ProduceException<string, byte[]>(
-                new Error(ErrorCode.Local_QueueFull), new Confluent.Kafka.DeliveryResult<string, byte[]>()));
+        // ProduceAsync can throw (rather than returning a faulted task) when the local buffer is full.
+        var producer = Substitute.For<IKafkaProducer<string, byte[]>>();
+        producer.ProduceAsync(Arg.Any<ProducerMessage<string, byte[]>>(), Arg.Any<CancellationToken>())
+            .Throws(new KafkaTimeoutException("buffer full"));
         var sink = CreateSink(producer);
 
         var result = await sink.DeliverAsync(
             Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
 
         result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
-        result.Error.ShouldNotBeNull().ShouldContain("Local_QueueFull");
+        result.Error.ShouldNotBeNull().ShouldContain("buffer full");
     }
 
     [Test]
@@ -191,12 +204,12 @@ public class DeliveryTests
     public async Task Cancellation_propagates()
     {
         using var cts = new CancellationTokenSource();
-        var producer = Substitute.For<IProducer<string, byte[]>>();
-        producer.ProduceAsync(Arg.Any<string>(), Arg.Any<Message<string, byte[]>>(), Arg.Any<CancellationToken>())
-            .Returns(async call =>
+        var producer = Substitute.For<IKafkaProducer<string, byte[]>>();
+        producer.ProduceAsync(Arg.Any<ProducerMessage<string, byte[]>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
             {
-                await cts.CancelAsync();
-                return await Task.FromCanceled<Confluent.Kafka.DeliveryResult<string, byte[]>>(call.ArgAt<CancellationToken>(2));
+                cts.Cancel();
+                return new ValueTask<RecordMetadata>(Task.FromCanceled<RecordMetadata>(call.ArgAt<CancellationToken>(1)));
             });
         var sink = CreateSink(producer);
 
@@ -204,12 +217,11 @@ public class DeliveryTests
             async () => await sink.DeliverAsync(Batch(Upsert("1", new Dictionary<string, object?>())), cts.Token));
     }
 
-    private static IProducer<string, byte[]> FailingProducer(Error error)
+    private static IKafkaProducer<string, byte[]> FailingProducer(KafkaException exception)
     {
-        var producer = Substitute.For<IProducer<string, byte[]>>();
-        producer.ProduceAsync(Arg.Any<string>(), Arg.Any<Message<string, byte[]>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<Confluent.Kafka.DeliveryResult<string, byte[]>>(
-                new ProduceException<string, byte[]>(error, new Confluent.Kafka.DeliveryResult<string, byte[]>())));
+        var producer = Substitute.For<IKafkaProducer<string, byte[]>>();
+        producer.ProduceAsync(Arg.Any<ProducerMessage<string, byte[]>>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromException<RecordMetadata>(exception));
         return producer;
     }
 }
