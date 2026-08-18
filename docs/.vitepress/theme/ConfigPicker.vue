@@ -46,12 +46,16 @@ const sinks = [
     link: '/sinks/kafka',
   },
   {
-    title: 'opensearch',
-    sub: 'coming soon',
-  },
-    {
     title: 'elasticsearch',
-    sub: 'coming soon',
+    sub: 'search + analytics',
+    label: 'Elasticsearch →',
+    link: '/sinks/elasticsearch',
+  },
+  {
+    title: 'opensearch',
+    sub: 'search + analytics',
+    label: 'OpenSearch →',
+    link: '/sinks/opensearch',
   },
   {
     title: 'custom',
@@ -61,7 +65,7 @@ const sinks = [
   },
 ];
 
-// deliveries rotate across the real sinks, skipping the placeholder
+// deliveries rotate across the sinks that have pages (placeholders are skipped)
 const liveSinks = sinks.flatMap((s, i) => (s.link ? [i] : []));
 
 // 0/1 = provider path, 2 = external slots path; rotates each cycle
