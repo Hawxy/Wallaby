@@ -80,6 +80,18 @@ public class RegistrationTests
     }
 
     [Test]
+    public void Brotli_compression_is_rejected()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        {
+            o.BootstrapServers = "broker:9092";
+            o.Compression = Dekaf.Protocol.Records.CompressionType.Brotli;
+        })).Message.ShouldContain("Brotli");
+    }
+
+    [Test]
     public void A_topic_with_defaults_is_valid()
     {
         var builder = new WallabyBuilder(new ServiceCollection());

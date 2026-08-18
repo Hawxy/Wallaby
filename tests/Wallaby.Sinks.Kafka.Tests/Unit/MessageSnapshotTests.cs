@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Wallaby.Abstractions;
 using Wallaby.Sinks.Kafka.Internal;
@@ -39,7 +38,7 @@ public class MessageSnapshotTests
             Delete("43", metadata: Meta(commitIdx: 1, lsn: 27271208, action: ChangeAction.Delete)));
 
         var lines = string.Join(Environment.NewLine,
-            headers.Select(h => $"{h.Key}={Encoding.UTF8.GetString(h.GetValueBytes())}"));
+            headers.Select(h => $"{h.Key}={h.GetValueAsString()}"));
 
         await Verify(lines);
     }

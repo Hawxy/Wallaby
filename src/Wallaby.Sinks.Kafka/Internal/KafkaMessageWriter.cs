@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using Confluent.Kafka;
+using Dekaf.Serialization;
 using Wallaby.Abstractions;
 
 namespace Wallaby.Sinks.Kafka.Internal;

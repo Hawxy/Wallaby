@@ -21,7 +21,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="Dekaf" />
+    <PackageReference Include="Dekaf.Compression.Lz4" />
+    <PackageReference Include="Dekaf.Compression.Zstd" />
+    <PackageReference Include="Dekaf.Compression.Snappy" />
   </ItemGroup>
 
   <Import Project="../../Package.Build.props" />

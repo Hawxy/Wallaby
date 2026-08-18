@@ -1,4 +1,4 @@
-using Confluent.Kafka;
+using Dekaf.Producer;
 using NSubstitute;
 using Wallaby.Abstractions;
 
@@ -9,22 +9,29 @@ internal static class KafkaTestHelpers
     public const string SinkName = "kafka";
 
     /// <summary>A sink over a substituted producer that records every produced message and succeeds.</summary>
-    public static (KafkaSink Sink, List<(string Topic, Message<string, byte[]> Message)> Produced) CreateSink(
+    public static (KafkaSink Sink, List<ProducerMessage<string, byte[]>> Produced) CreateSink(
         Action<KafkaSinkOptions>? configure = null)
     {
-        var produced = new List<(string, Message<string, byte[]>)>();
-        var producer = Substitute.For<IProducer<string, byte[]>>();
-        producer.ProduceAsync(Arg.Any<string>(), Arg.Any<Message<string, byte[]>>(), Arg.Any<CancellationToken>())
+        var produced = new List<ProducerMessage<string, byte[]>>();
+        var producer = Substitute.For<IKafkaProducer<string, byte[]>>();
+        producer.ProduceAsync(Arg.Any<ProducerMessage<string, byte[]>>(), Arg.Any<CancellationToken>())
             .Returns(call =>
             {
-                produced.Add((call.ArgAt<string>(0), call.ArgAt<Message<string, byte[]>>(1)));
-                return Task.FromResult(new Confluent.Kafka.DeliveryResult<string, byte[]>());
+                var message = call.ArgAt<ProducerMessage<string, byte[]>>(0);
+                produced.Add(message);
+                return ValueTask.FromResult(new RecordMetadata
+                {
+                    Topic = message.Topic,
+                    Partition = 0,
+                    Offset = produced.Count - 1,
+                    Timestamp = DateTimeOffset.UnixEpoch,
+                });
             });
         return (CreateSink(producer, configure), produced);
     }
 
     /// <summary>A sink over the given producer (for failure-injection tests).</summary>
-    public static KafkaSink CreateSink(IProducer<string, byte[]> producer, Action<KafkaSinkOptions>? configure = null)
+    public static KafkaSink CreateSink(IKafkaProducer<string, byte[]> producer, Action<KafkaSinkOptions>? configure = null)
     {
         var options = new KafkaSinkOptions { BootstrapServers = "unused:9092" };
         configure?.Invoke(options);

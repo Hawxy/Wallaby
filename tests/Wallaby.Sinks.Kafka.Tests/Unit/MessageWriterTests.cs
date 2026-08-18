@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Wallaby.Sinks.Kafka.Internal;
 using static Wallaby.Sinks.Kafka.Tests.Unit.KafkaTestHelpers;
@@ -90,6 +89,6 @@ public class MessageWriterTests
         Header(headers, KafkaMessageWriter.CommitLsnHeader).ShouldBe("12345");
     }
 
-    private static string Header(Confluent.Kafka.Headers headers, string key) =>
-        Encoding.UTF8.GetString(headers.GetLastBytes(key));
+    private static string? Header(Dekaf.Serialization.Headers headers, string key) =>
+        headers.GetFirstAsString(key);
 }

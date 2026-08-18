@@ -1,6 +1,8 @@
-using System.Text;
 using System.Text.Json;
-using Confluent.Kafka;
+using Dekaf;
+using Dekaf.Admin;
+using Dekaf.Consumer;
+using Dekaf.Metadata;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -12,6 +14,7 @@ using Wallaby.TestInfrastructure.EntityFrameworkCore;
 using Wallaby.TestInfrastructure;
 using Wallaby.Testing;
 using Wallaby.TestModel;
+using DekafKafka = Dekaf.Kafka;
 
 namespace Wallaby.Sinks.Kafka.Tests.Integration;
 
@@ -71,13 +74,13 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
         // Consume the upsert before deleting: the router collapses same-key changes within one
         // coalesced batch to their final action, so an insert+delete landing in a single batch
         // delivers only the tombstone.
-        var upserts = Consume(topic, count: 1);
+        var upserts = await ConsumeAsync(topic, count: 1);
         upserts.Count.ShouldBe(1);
 
         var upsert = upserts[0];
-        upsert.Message.Key.ShouldBe(id.ToString());
+        upsert.Key.ShouldBe(id.ToString());
         Header(upsert, KafkaMessageWriter.OperationHeader).ShouldBe("upsert");
-        using (var envelope = JsonDocument.Parse(upsert.Message.Value))
+        using (var envelope = JsonDocument.Parse(upsert.Value))
         {
             envelope.RootElement.GetProperty("id").GetString().ShouldBe(id.ToString());
             envelope.RootElement.GetProperty("document").GetProperty("name").GetString().ShouldBe($"e2e_{names.Suffix}");
@@ -86,12 +89,12 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
 
         await Db.DeleteProductAsync(id);
 
-        var messages = Consume(topic, count: 2);
+        var messages = await ConsumeAsync(topic, count: 2);
         messages.Count.ShouldBe(2);
 
         var tombstone = messages[1];
-        tombstone.Message.Key.ShouldBe(id.ToString());
-        tombstone.Message.Value.ShouldBeNull();
+        tombstone.Key.ShouldBe(id.ToString());
+        tombstone.Value.ShouldBeNull();
         Header(tombstone, KafkaMessageWriter.OperationHeader).ShouldBe("delete");
         Header(tombstone, KafkaMessageWriter.TableHeader).ShouldBe("public.products");
     }
@@ -110,13 +113,13 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
 
         var categoryId = await Db.AddCategoryAsync();
         var id = await Db.AddProductAsync(categoryId, $"cfg_{names.Suffix}");
-        Consume(topic, count: 1).Count.ShouldBe(1);
+        (await ConsumeAsync(topic, count: 1)).Count.ShouldBe(1);
 
-        var admin = new AdminClientConfig { BootstrapServers = kafka.BootstrapServers };
-        using var client = new AdminClientBuilder(admin).Build();
-        var configs = await client.DescribeConfigsAsync(
-            [new Confluent.Kafka.Admin.ConfigResource { Type = Confluent.Kafka.Admin.ResourceType.Topic, Name = topic }]);
-        configs.Single().Entries["cleanup.policy"].Value.ShouldBe("compact");
+        await using var admin = DekafKafka.CreateAdminClient()
+            .WithBootstrapServers(kafka.BootstrapServers)
+            .Build();
+        var configs = await admin.DescribeConfigsAsync([ConfigResource.Topic(topic)]);
+        configs.Single().Value.Single(e => e.Name == "cleanup.policy").Value.ShouldBe("compact");
     }
 
     private async Task WaitForSlotActiveAsync(string slot)
@@ -143,36 +146,41 @@ public class EndToEndTests(TestModelPostgresFixture pg, KafkaFixture kafka)
         }
     }
 
-    private List<ConsumeResult<string, byte[]>> Consume(string topic, int count)
+    private sealed record ConsumedMessage(string? Key, byte[]? Value, IReadOnlyDictionary<string, string?> Headers);
+
+    private async Task<List<ConsumedMessage>> ConsumeAsync(string topic, int count)
     {
-        var config = new ConsumerConfig
-        {
-            BootstrapServers = kafka.BootstrapServers,
-            // Required by the client; unused, as manual assignment skips group membership.
-            GroupId = Guid.NewGuid().ToString("N"),
-        };
-        using var consumer = new ConsumerBuilder<string, byte[]>(config).Build();
-        // Manual assignment instead of Subscribe: sink topics have one partition, and skipping the
+        await using var consumer = await DekafKafka.CreateConsumer<string, byte[]>()
+            .WithBootstrapServers(kafka.BootstrapServers)
+            .WithAutoOffsetReset(AutoOffsetReset.Earliest)
+            .BuildAsync();
+        // Manual assignment instead of a subscription: sink topics have one partition, and skipping the
         // consumer group avoids coordinator load and __consumer_offsets creation on the cold broker
         // (the dominant source of consume timeouts under full-suite load).
-        consumer.Assign(new TopicPartitionOffset(topic, 0, Offset.Beginning));
+        consumer.Partitions.Assign([new TopicPartition(topic, 0)]);
 
-        var results = new List<ConsumeResult<string, byte[]>>();
+        var results = new List<ConsumedMessage>();
         // Generous: a cold single-broker container can take a while to serve its first produce
         // (coordinator load, idempotence PID acquisition).
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(90);
         while (results.Count < count && DateTime.UtcNow < deadline)
         {
-            var result = consumer.Consume(TimeSpan.FromMilliseconds(500));
-            if (result is not null)
+            var result = await consumer.ConsumeOneAsync(TimeSpan.FromMilliseconds(500));
+            if (result is { } message)
             {
-                results.Add(result);
+                // Headers are a lazy view over the pooled fetch batch; snapshot everything before the
+                // next poll invalidates them.
+                var headers = new Dictionary<string, string?>();
+                foreach (var header in message.Headers)
+                {
+                    headers[header.Key] = header.GetValueAsString();
+                }
+                results.Add(new ConsumedMessage(message.Key, message.Value, headers));
             }
         }
-        consumer.Close();
         return results;
     }
 
-    private static string Header(ConsumeResult<string, byte[]> result, string key) =>
-        Encoding.UTF8.GetString(result.Message.Headers.GetLastBytes(key));
+    private static string? Header(ConsumedMessage message, string key)
+        => message.Headers.GetValueOrDefault(key);
 }

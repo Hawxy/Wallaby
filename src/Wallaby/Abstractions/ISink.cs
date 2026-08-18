@@ -59,10 +59,20 @@ public sealed record SinkBatch(string SinkName, IReadOnlyList<SinkRecord> Record
 /// be idempotent (upsert/delete by <see cref="SinkRecord.DocumentId"/>) to honor at-least-once delivery.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Registering a sink hands its lifetime to Wallaby: a sink that also implements
 /// <see cref="IAsyncDisposable"/> or <see cref="IDisposable"/> is disposed once at host shutdown,
 /// after streaming has stopped. Implement <see cref="ISinkInitializer"/> for one-time setup and
 /// <see cref="ISinkPurger"/> to support purge-then-backfill convergence.
+/// </para>
+/// <para>
+/// Wallaby never delivers to one sink concurrently: <see cref="DeliverAsync"/> is invoked for one
+/// batch at a time per sink instance (different sinks receive their batches concurrently), and
+/// <see cref="ISinkInitializer.InitializeAsync"/> always completes before streaming starts, so
+/// implementations need no synchronization between those calls. The exception is
+/// <see cref="ISinkPurger.PurgeAsync"/>: the backfill scheduler runs alongside the live pipeline,
+/// so a purge can overlap an in-flight delivery.
+/// </para>
 /// </remarks>
 public interface ISink
 {

@@ -1,7 +1,15 @@
-using Confluent.Kafka;
-using Confluent.Kafka.Admin;
+using Dekaf;
+using Dekaf.Admin;
+using Dekaf.Compression.Lz4;
+using Dekaf.Compression.Snappy;
+using Dekaf.Compression.Zstd;
+using Dekaf.Errors;
+using Dekaf.Producer;
+using Dekaf.Protocol;
+using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
 using Wallaby.Sinks.Kafka.Internal;
+using CompressionType = Dekaf.Protocol.Records.CompressionType;
 using DeliveryResult = Wallaby.Abstractions.DeliveryResult;
 
 namespace Wallaby.Sinks.Kafka;
@@ -16,53 +24,107 @@ namespace Wallaby.Sinks.Kafka;
 /// message's delivery report has succeeded — consumers deduplicate replays by the
 /// <c>wallaby.idempotency-key</c> header (or let compaction absorb them).
 /// </summary>
-public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
+public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
 {
     private readonly KafkaSinkOptions _options;
+    private readonly ILoggerFactory? _loggerFactory;
 
-    private IProducer<string, byte[]>? _producer;
+    // Lazy initialization is unsynchronized by contract: ISink guarantees deliveries are serialized
+    // per sink and initialization completes before streaming starts.
+    private KafkaClient? _client;
+    private IKafkaProducer<string, byte[]>? _producer;
 
     /// <summary>
     /// Creates a sink that produces to the cluster described by <paramref name="options"/>. The
-    /// underlying producer (and its broker connections) is created on first delivery — not at
-    /// registration time — reused for the lifetime of the sink, and flushed and released when the sink
-    /// is disposed.
+    /// underlying client (and its broker connections) is created on first use — not at registration
+    /// time — reused for the lifetime of the sink, and flushed and released when the sink is disposed.
     /// </summary>
     /// <param name="name">The sink's registration name (used for routing, telemetry, and test replacement).</param>
     /// <param name="options">Cluster, topic, and delivery-behaviour settings.</param>
-    public KafkaSink(string name, KafkaSinkOptions options)
-        : this(name, options, producer: null)
+    /// <param name="loggerFactory">Receives the Kafka client's internal logs; pass the host's factory to surface them.</param>
+    public KafkaSink(string name, KafkaSinkOptions options, ILoggerFactory? loggerFactory = null)
+        : this(name, options, producer: null, loggerFactory)
     {
     }
 
-    internal KafkaSink(string name, KafkaSinkOptions options, IProducer<string, byte[]>? producer)
+    internal KafkaSink(string name, KafkaSinkOptions options, IKafkaProducer<string, byte[]>? producer, ILoggerFactory? loggerFactory = null)
     {
         Name = name;
         _options = options;
         _producer = producer;
+        _loggerFactory = loggerFactory;
     }
 
-    private IProducer<string, byte[]> GetProducer()
-        => _producer ??= new ProducerBuilder<string, byte[]>(BuildProducerConfig(_options)).Build();
-
-    private static ProducerConfig BuildProducerConfig(KafkaSinkOptions options)
+    // The client is shared by the producer and the topic-creating admin client, so connection-level
+    // settings (bootstrap, TLS, SASL) are configured once and broker connections are pooled.
+    private KafkaClient GetClient()
     {
-        var config = new ProducerConfig
+        if (_client is null)
         {
-            BootstrapServers = options.BootstrapServers,
-            // Idempotent + acks=all: broker-side dedup of librdkafka's internal retries and no loss on
-            // broker failover, while preserving per-partition produce order.
-            EnableIdempotence = true,
-            Acks = Acks.All,
-            CompressionType = options.Compression,
-            LingerMs = options.LingerMs,
-            MessageTimeoutMs = options.MessageTimeoutMs,
-        };
-        foreach (var setting in options.ClientConfig)
-        {
-            config.Set(setting.Key, setting.Value);
+            var builder = new KafkaClientBuilder()
+                .WithBootstrapServers(_options.BootstrapServers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            if (_loggerFactory is not null)
+            {
+                builder.WithLoggerFactory(_loggerFactory);
+            }
+            _options.ConfigureClient?.Invoke(builder);
+            _client = builder.Build();
         }
-        return config;
+        return _client;
+    }
+
+    private async ValueTask<IKafkaProducer<string, byte[]>> GetProducerAsync(CancellationToken ct)
+    {
+        if (_producer is not null)
+        {
+            return _producer;
+        }
+
+        // The delivery timeout must cover at least one full request plus the linger window; derive the
+        // per-request bound from the configured ceiling so any valid MessageTimeoutMs builds.
+        var requestTimeoutMs = Math.Min(30_000, _options.MessageTimeoutMs - _options.LingerMs);
+
+        var builder = GetClient().CreateProducer<string, byte[]>()
+            .WithLinger(TimeSpan.FromMilliseconds(_options.LingerMs))
+            .WithRequestTimeout(TimeSpan.FromMilliseconds(requestTimeoutMs))
+            .WithDeliveryTimeout(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs))
+            // A produce call also blocks on metadata/buffer space before enqueueing; bound that wait by
+            // the same ceiling so every delivery failure surfaces within MessageTimeoutMs.
+            .WithMaxBlock(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs));
+        ApplyCompression(builder, _options.Compression);
+        _options.ConfigureProducer?.Invoke(builder);
+
+        // Applied after ConfigureProducer so the callback cannot weaken them. Idempotent + acks=all:
+        // broker-side dedup of the producer's internal retries and no loss on broker failover, while
+        // preserving per-partition produce order; the slot only advances on that guarantee.
+        builder
+            .WithIdempotence(true)
+            .WithAcks(Acks.All);
+        return _producer = await builder.BuildAsync(ct);
+    }
+
+    // Lz4/Zstd/Snappy also register their codec, so selecting them is a single call per type.
+    private static void ApplyCompression(ProducerBuilder<string, byte[]> builder, CompressionType compression)
+    {
+        switch (compression)
+        {
+            case CompressionType.None:
+                break;
+            case CompressionType.Gzip:
+                builder.UseGzipCompression();
+                break;
+            case CompressionType.Lz4:
+                builder.UseLz4Compression();
+                break;
+            case CompressionType.Zstd:
+                builder.UseZstdCompression();
+                break;
+            case CompressionType.Snappy:
+                builder.UseSnappyCompression();
+                break;
+            default:
+                throw new NotSupportedException($"Compression type '{compression}' is not supported by the Kafka sink.");
+        }
     }
 
     /// <inheritdoc />
@@ -79,47 +141,42 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
             return;
         }
 
-        var config = new AdminClientConfig { BootstrapServers = _options.BootstrapServers };
-        foreach (var setting in _options.ClientConfig)
-        {
-            config.Set(setting.Key, setting.Value);
-        }
-
-        using var admin = new AdminClientBuilder(config).Build();
-        var specs = _options.Topics
-            .Select(t => new TopicSpecification
-            {
-                Name = t.Name,
-                NumPartitions = t.Partitions,
-                ReplicationFactor = t.ReplicationFactor,
-                Configs = t.Config.Count > 0 ? new Dictionary<string, string>(t.Config) : null,
-            })
-            .ToList();
-
-        // OperationTimeout waits for the topics to actually exist (not just be accepted), so streaming
-        // never starts against topics still propagating.
-        var timeout = TimeSpan.FromMilliseconds(_options.AdminTimeoutMs);
-        var create = admin.CreateTopicsAsync(specs, new CreateTopicsOptions
-        {
-            RequestTimeout = timeout,
-            OperationTimeout = timeout,
-        });
+        // One deadline across all topics: the admin client retries transient failures internally, so an
+        // unreachable broker would otherwise stall the leader session well past AdminTimeoutMs.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_options.AdminTimeoutMs);
 
         try
         {
-            // CreateTopicsAsync has no cancellation overload; WaitAsync abandons it on cancellation.
-            await create.WaitAsync(ct);
+            await using var admin = GetClient().CreateAdminClient().Build();
+            var createOptions = new CreateTopicsOptions { TimeoutMs = _options.AdminTimeoutMs };
+            foreach (var topic in _options.Topics)
+            {
+                var spec = new NewTopic
+                {
+                    Name = topic.Name,
+                    NumPartitions = topic.Partitions,
+                    ReplicationFactor = topic.ReplicationFactor,
+                    Configs = topic.Config.Count > 0 ? new Dictionary<string, string>(topic.Config) : null,
+                };
+
+                try
+                {
+                    // CreateTopicsAsync returns only once the topic's partitions have leaders, so
+                    // streaming never starts against a topic still propagating.
+                    await admin.CreateTopicsAsync([spec], createOptions, deadline.Token);
+                }
+                catch (KafkaException ex) when (ex.ErrorCode == ErrorCode.TopicAlreadyExists)
+                {
+                    // Created by a previous leader session or another node; topics are created one at a
+                    // time so this cannot mask a different topic's failure.
+                }
+            }
         }
-        catch (CreateTopicsException ex) when (ex.Results.TrueForAll(
-            r => r.Error.Code is ErrorCode.NoError or ErrorCode.TopicAlreadyExists))
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Observe the abandoned task's eventual fault so it never surfaces as an unobserved exception.
-            _ = create.ContinueWith(
-                static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-            throw;
+            throw new TimeoutException(
+                $"Kafka topic creation for sink '{Name}' timed out after {_options.AdminTimeoutMs}ms.");
         }
     }
 
@@ -134,8 +191,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
 
         // Validate and serialize the whole batch before the first produce, so a permanent failure can
         // never leave already-enqueued delivery reports behind.
-        var topics = new string[records.Count];
-        var messages = new Message<string, byte[]>[records.Count];
+        var messages = new ProducerMessage<string, byte[]>[records.Count];
         for (var i = 0; i < records.Count; i++)
         {
             var record = records[i];
@@ -160,27 +216,28 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
                 return DeliveryResult.Permanent($"Kafka sink message serialization failed: {ex.Message}", ex);
             }
 
-            topics[i] = topic;
-            messages[i] = new Message<string, byte[]>
+            messages[i] = new ProducerMessage<string, byte[]>
             {
+                Topic = topic,
                 Key = record.DocumentId,
-                Value = value!,
+                Value = value!, // null-forgiving: a tombstone genuinely carries a null value
                 Headers = KafkaMessageWriter.BuildHeaders(record),
             };
         }
 
-        // The produce loop runs inside the classified try: ProduceAsync throws synchronously when the
-        // local queue is full (a transient condition), and producer creation can fail transiently too —
-        // both must classify, not escape as raw exceptions the dispatcher won't retry.
+        // The produce loop runs inside the classified try: producer creation can fail transiently, and
+        // ProduceAsync can throw synchronously — both must classify, not escape as raw exceptions the
+        // dispatcher won't retry.
         var reports = new List<Task>(records.Count);
         try
         {
-            // Produce calls are pipelined (each returns on enqueue, not delivery) and librdkafka preserves
-            // produce order per partition, so per-document commit order survives batching and retries.
-            var producer = GetProducer();
+            // Produce calls are pipelined (each settles on delivery, not enqueue) and the producer
+            // preserves produce order per partition, so per-document commit order survives batching and
+            // retries.
+            var producer = await GetProducerAsync(ct);
             for (var i = 0; i < messages.Length; i++)
             {
-                reports.Add(producer.ProduceAsync(topics[i], messages[i], ct));
+                reports.Add(producer.ProduceAsync(messages[i], ct).AsTask());
             }
 
             // Every delivery report is awaited, so a batch is only reported delivered (and the LSN acked)
@@ -192,15 +249,10 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
         {
             throw;
         }
-        catch (ProduceException<string, byte[]> ex)
-        {
-            await ObserveAsync(reports);
-            return Classify(ex.Error, ex);
-        }
         catch (KafkaException ex)
         {
             await ObserveAsync(reports);
-            return Classify(ex.Error, ex);
+            return Classify(ex);
         }
     }
 
@@ -217,34 +269,34 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IDisposable
         }
     }
 
-    // librdkafka retries transient broker errors internally until MessageTimeoutMs, so what surfaces here
-    // is either fatal to the producer, a request the cluster will never accept, or a timeout worth
-    // retrying from the dispatcher with backoff.
-    private static DeliveryResult Classify(Error error, Exception exception)
+    // The producer retries retriable broker errors internally until MessageTimeoutMs, so what surfaces
+    // here is either a request the cluster will never accept or a transient condition worth retrying
+    // from the dispatcher with backoff.
+    private static DeliveryResult Classify(KafkaException exception)
     {
-        var permanent = error.IsFatal || error.Code is
-            ErrorCode.MsgSizeTooLarge or
-            ErrorCode.TopicAuthorizationFailed or
-            ErrorCode.ClusterAuthorizationFailed or
-            ErrorCode.SaslAuthenticationFailed or
-            ErrorCode.InvalidMsg;
-        var description = $"Kafka delivery failed ({error.Code}): {error.Reason}";
-        return permanent
-            ? DeliveryResult.Permanent(description, exception)
-            : DeliveryResult.Retry(description, exception);
+        // Timeouts and bootstrap DNS failures carry no protocol error code (their IsRetriable is false)
+        // but are transient infrastructure conditions, not permanent rejections.
+        var retry = exception is KafkaTimeoutException or BootstrapResolutionException || exception.IsRetriable;
+        var description = exception.ErrorCode is { } code
+            ? $"Kafka delivery failed ({code}): {exception.Message}"
+            : $"Kafka delivery failed: {exception.Message}";
+        return retry
+            ? DeliveryResult.Retry(description, exception)
+            : DeliveryResult.Permanent(description, exception);
     }
 
-    /// <summary>Flushes in-flight messages and releases the producer. Called by the runtime at host shutdown.</summary>
-    public void Dispose()
+    /// <summary>Flushes in-flight messages and releases the client. Called by the runtime at host shutdown.</summary>
+    public async ValueTask DisposeAsync()
     {
-        if (_producer is null)
+        if (_producer is not null)
         {
-            return;
+            // Un-flushed messages belong to an unacknowledged batch and would be redelivered after
+            // restart, but flushing avoids pointless redelivery on a clean shutdown.
+            await _producer.DisposeAsync();
         }
-
-        // Un-flushed messages belong to an unacknowledged batch and would be redelivered after restart,
-        // but flushing avoids pointless redelivery on a clean shutdown.
-        _producer.Flush(TimeSpan.FromSeconds(5));
-        _producer.Dispose();
+        if (_client is not null)
+        {
+            await _client.DisposeAsync();
+        }
     }
 }

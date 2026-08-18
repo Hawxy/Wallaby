@@ -1,3 +1,6 @@
+using Dekaf.Protocol.Records;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Wallaby.DependencyInjection;
 
 namespace Wallaby.Sinks.Kafka;
@@ -19,7 +22,9 @@ public static class KafkaBuilderExtensions
         configure(options);
         Validate(options);
 
-        return builder.AddSink(new KafkaSink(name, options));
+        // Registered as a factory so the sink can pick up the host's ILoggerFactory; validation has
+        // already run, so registration failures still surface eagerly.
+        return builder.AddSink(name, sp => new KafkaSink(name, options, producer: null, sp.GetService<ILoggerFactory>()));
     }
 
     /// <summary>
@@ -38,7 +43,7 @@ public static class KafkaBuilderExtensions
             var options = new KafkaSinkOptions { BootstrapServers = "" };
             configure(sp, options);
             Validate(options);
-            return new KafkaSink(name, options);
+            return new KafkaSink(name, options, producer: null, sp.GetService<ILoggerFactory>());
         });
     }
 
@@ -48,6 +53,12 @@ public static class KafkaBuilderExtensions
         {
             throw new ArgumentException("KafkaSinkOptions.BootstrapServers is required.", nameof(options));
         }
+        if (options.Compression == CompressionType.Brotli)
+        {
+            throw new ArgumentException(
+                "KafkaSinkOptions.Compression does not support Brotli; reference Dekaf.Compression.Brotli and register it via ConfigureProducer instead.",
+                nameof(options));
+        }
         if (options.MessageTimeoutMs <= 0)
         {
             throw new ArgumentException("KafkaSinkOptions.MessageTimeoutMs must be positive.", nameof(options));
@@ -55,6 +66,12 @@ public static class KafkaBuilderExtensions
         if (options.LingerMs < 0)
         {
             throw new ArgumentException("KafkaSinkOptions.LingerMs cannot be negative.", nameof(options));
+        }
+        if (options.MessageTimeoutMs <= options.LingerMs)
+        {
+            throw new ArgumentException(
+                "KafkaSinkOptions.MessageTimeoutMs must exceed LingerMs; the delivery ceiling covers the linger window plus at least one broker request.",
+                nameof(options));
         }
         if (options.AdminTimeoutMs <= 0)
         {
