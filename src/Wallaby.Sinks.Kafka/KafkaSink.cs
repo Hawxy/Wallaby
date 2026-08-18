@@ -29,6 +29,8 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
     private readonly KafkaSinkOptions _options;
     private readonly ILoggerFactory? _loggerFactory;
 
+    // Lazy initialization is unsynchronized by contract: ISink guarantees deliveries are serialized
+    // per sink and initialization completes before streaming starts.
     private KafkaClient? _client;
     private IKafkaProducer<string, byte[]>? _producer;
 
@@ -82,11 +84,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         // per-request bound from the configured ceiling so any valid MessageTimeoutMs builds.
         var requestTimeoutMs = Math.Min(30_000, _options.MessageTimeoutMs - _options.LingerMs);
 
-        // Idempotent + acks=all: broker-side dedup of the producer's internal retries and no loss on
-        // broker failover, while preserving per-partition produce order.
         var builder = GetClient().CreateProducer<string, byte[]>()
-            .WithIdempotence(true)
-            .WithAcks(Acks.All)
             .WithLinger(TimeSpan.FromMilliseconds(_options.LingerMs))
             .WithRequestTimeout(TimeSpan.FromMilliseconds(requestTimeoutMs))
             .WithDeliveryTimeout(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs))
@@ -95,6 +93,13 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
             .WithMaxBlock(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs));
         ApplyCompression(builder, _options.Compression);
         _options.ConfigureProducer?.Invoke(builder);
+
+        // Applied after ConfigureProducer so the callback cannot weaken them. Idempotent + acks=all:
+        // broker-side dedup of the producer's internal retries and no loss on broker failover, while
+        // preserving per-partition produce order; the slot only advances on that guarantee.
+        builder
+            .WithIdempotence(true)
+            .WithAcks(Acks.All);
         return _producer = await builder.BuildAsync(ct);
     }
 

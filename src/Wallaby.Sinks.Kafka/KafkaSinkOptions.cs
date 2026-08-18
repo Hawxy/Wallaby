@@ -32,7 +32,8 @@ public sealed class KafkaSinkOptions
 
     /// <summary>
     /// Producer settings the sink does not wrap (batch size, retry policy, socket buffers). Runs after
-    /// the sink's own producer configuration, so settings here win on conflict.
+    /// the sink's own producer configuration, so settings here win on conflict, except idempotence and
+    /// acks: the sink reapplies those afterwards because at-least-once delivery depends on them.
     /// </summary>
     public Action<ProducerBuilder<string, byte[]>>? ConfigureProducer { get; set; }
 
