@@ -89,7 +89,10 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
             .WithAcks(Acks.All)
             .WithLinger(TimeSpan.FromMilliseconds(_options.LingerMs))
             .WithRequestTimeout(TimeSpan.FromMilliseconds(requestTimeoutMs))
-            .WithDeliveryTimeout(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs));
+            .WithDeliveryTimeout(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs))
+            // A produce call also blocks on metadata/buffer space before enqueueing; bound that wait by
+            // the same ceiling so every delivery failure surfaces within MessageTimeoutMs.
+            .WithMaxBlock(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs));
         ApplyCompression(builder, _options.Compression);
         _options.ConfigureProducer?.Invoke(builder);
         return _producer = await builder.BuildAsync(ct);
