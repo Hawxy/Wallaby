@@ -85,6 +85,44 @@ public static class EfCoreEntityMapBuilderExtensions
         where TEntity : class
         => map.SelectColumns(ColumnSelectionMode.Exclude, PropertyNames(properties, nameof(ConsumesAllExcept)));
 
+    /// <summary>
+    /// <see cref="Consumes{TEntity}(EntityMapBuilder{TEntity}, Expression{Func{TEntity, object?}}[])"/>
+    /// by EF model property name (not column name), for members a lambda cannot name: properties not
+    /// visible from the calling assembly, shadow properties (readable via <c>ChangeEvent.Record</c>
+    /// only), and individual owned or complex leaves as dotted paths (e.g. <c>"Address.City"</c>).
+    /// Names are validated against the model at startup; the two overloads accumulate freely.
+    /// </summary>
+    public static EntityMapBuilder<TEntity> Consumes<TEntity>(
+        this EntityMapBuilder<TEntity> map, params string[] propertyNames)
+        where TEntity : class
+        => map.SelectColumns(ColumnSelectionMode.Include, ValidNames<TEntity>(propertyNames, nameof(Consumes)));
+
+    /// <summary>
+    /// <see cref="ConsumesAllExcept{TEntity}(EntityMapBuilder{TEntity}, Expression{Func{TEntity, object?}}[])"/>
+    /// by EF model property name (not column name), for members a lambda cannot name: properties not
+    /// visible from the calling assembly, shadow properties, and individual owned or complex leaves as
+    /// dotted paths (e.g. <c>"Address.City"</c>). Names are validated against the model at startup;
+    /// the two overloads accumulate freely.
+    /// </summary>
+    public static EntityMapBuilder<TEntity> ConsumesAllExcept<TEntity>(
+        this EntityMapBuilder<TEntity> map, params string[] propertyNames)
+        where TEntity : class
+        => map.SelectColumns(ColumnSelectionMode.Exclude, ValidNames<TEntity>(propertyNames, nameof(ConsumesAllExcept)));
+
+    private static string[] ValidNames<TEntity>(string[] propertyNames, string method)
+    {
+        ArgumentNullException.ThrowIfNull(propertyNames);
+        foreach (var name in propertyNames)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new WallabyConfigurationException(
+                    $"{method}<{typeof(TEntity).Name}>(...) property names must be non-empty.");
+            }
+        }
+        return propertyNames;
+    }
+
     private static string[] PropertyNames<TEntity>(
         Expression<Func<TEntity, object?>>[] properties, string method)
     {

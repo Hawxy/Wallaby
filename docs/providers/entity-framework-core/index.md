@@ -117,10 +117,24 @@ An unselected property is dropped from capture entirely. Its column is left out 
 [publication column list](/configuration#publication-column-lists) (the value never leaves the server),
 skipped during materialization, and never read during backfill.
 
+Both methods also accept **EF model property names as strings**, for members a
+lambda can't name. Such as properties not visible from the assembly doing the configuration, shadow
+properties, or a single owned/complex leaf via its dotted path:
+
+```csharp
+m.Map<Invoice>()
+    .Consumes("Number", "TenantId", "Address.City")  // "TenantId" can be internal, private, or shadow
+    .UsingTransform(...);
+```
+
+Names are validated against the EF model at startup, and string and lambda calls accumulate freely.
+A selected shadow property has no CLR member to materialize into; read it from `ChangeEvent.Record`
+in the transform.
+
 ::: warning
-Missing columns will result in missing data within your transforms: an excluded property a transform
-does read stays at its CLR default with no error. A selection is an optimization for columns no
-transform consumes - it is not the fix for a large (TOASTed) column a transform *does* read; that
+Missing columns will result in missing data within your transform. An excluded property a transform
+does read stays at its CLR default with no error. A selection is an optimization for columns that no
+transform consumes - it is not the fix for a large (TOASTed) column a transform *does* read, that
 table needs [`REPLICA IDENTITY FULL`](#replica-identity-in-migrations).
 :::
 

@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Model;
@@ -312,9 +313,108 @@ public class ColumnConsumptionTests
         registration.ColumnSelection.PropertyNames.ShouldBe([nameof(Product.Name), nameof(Product.Price)]);
     }
 
+    [Test]
+    public void String_and_expression_selections_accumulate()
+    {
+        Map(out var registration).Consumes("Name").Consumes(p => p.Price);
+
+        registration.ColumnSelection!.Mode.ShouldBe(ColumnSelectionMode.Include);
+        registration.ColumnSelection.PropertyNames.ShouldBe([nameof(Product.Name), nameof(Product.Price)]);
+    }
+
+    [Test]
+    public void ConsumesAllExcept_accepts_string_names()
+    {
+        Map(out var registration).ConsumesAllExcept("Description");
+
+        registration.ColumnSelection!.Mode.ShouldBe(ColumnSelectionMode.Exclude);
+        registration.ColumnSelection.PropertyNames.ShouldBe([nameof(Product.Description)]);
+    }
+
+    [Test]
+    public void A_blank_string_property_name_fails()
+    {
+        Should.Throw<WallabyConfigurationException>(() => Map(out _).Consumes(" "));
+    }
+
+    [Test]
+    public async Task String_names_select_private_and_shadow_properties()
+    {
+        await using var ctx = GadgetDbContext.CreateModelOnly();
+        var spec = GadgetSpec("Name", "Region", "Tenant");
+
+        var gadget = EfCoreCaptureModelBuilder.Build(ctx.Model, spec).FindByClrType(typeof(Gadget))!;
+
+        gadget.Columns.Select(c => c.PropertyName)
+            .ShouldBe(["Id", "Name", "Region", "Tenant"], ignoreOrder: true);
+    }
+
+    [Test]
+    public async Task Private_and_shadow_properties_materialize_into_the_record()
+    {
+        await using var ctx = GadgetDbContext.CreateModelOnly();
+        var materializer = new EntityMaterializer(
+            ctx.Model,
+            ColumnConsumptionResolver.Resolve(ctx.Model, GadgetSpec("Name", "Region", "Tenant")),
+            capturedTypes: [typeof(Gadget)]);
+        var change = new RawChange
+        {
+            RelationId = 1,
+            Schema = "public",
+            TableName = "gadgets",
+            Action = ChangeAction.Insert,
+            NewValues = [Col("Id", 1), Col("Name", "Gizmo"), Col("Region", "eu"), Col("Tenant", "t1")],
+        };
+
+        materializer.TryMaterialize(change, out var row).ShouldBeTrue();
+
+        ((Gadget)row!.Entity!).GetRegion().ShouldBe("eu");
+        row.Record["Region"].ShouldBe("eu");
+        // A shadow property has no CLR member; the value is carried in the record only.
+        row.Record["Tenant"].ShouldBe("t1");
+    }
+
+    private static CaptureSpec GadgetSpec(params string[] names) => new()
+    {
+        DeclaredEntities = [typeof(Gadget)],
+        DeclaredColumnSelections = new Dictionary<Type, IReadOnlyList<ColumnSelection>>
+        {
+            [typeof(Gadget)] = [new ColumnSelection(ColumnSelectionMode.Include, names)],
+        },
+    };
+
     private sealed class NotMapped
     {
         public int Id { get; set; }
         public string Payload { get; set; } = "";
+    }
+
+    /// <summary>Entity with a private mapped property and a shadow property, both lambda-unreachable.</summary>
+    public class Gadget
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        private string Region { get; set; } = "";
+
+        public string GetRegion() => Region;
+    }
+
+    private sealed class GadgetDbContext(DbContextOptions<GadgetDbContext> options) : DbContext(options)
+    {
+        public DbSet<Gadget> Gadgets => Set<Gadget>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<Gadget>(b =>
+            {
+                b.ToTable("gadgets");
+                b.HasKey(g => g.Id);
+                b.Property<string>("Region");
+                b.Property<string>("Tenant");
+            });
+
+        public static GadgetDbContext CreateModelOnly()
+            => new(new DbContextOptionsBuilder<GadgetDbContext>()
+                .UseNpgsql(TestModelFactory.ModelOnlyConnectionString)
+                .Options);
     }
 }
