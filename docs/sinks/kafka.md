@@ -48,18 +48,18 @@ builder.Services.AddWallaby(cdc =>
 | `BootstrapServers` | *(required)* | Comma-separated broker list. |
 | `DefaultTopic` | `null` | Topic for records whose mapping declares no destination; a record with neither fails permanently. |
 | `Topics` | empty | Topics to [create on startup](#topic-creation); empty skips creation entirely. |
-| `ConfigureClient` | `null` | Connection-level settings on the shared client behind the producer and admin client — [TLS/SASL](#authentication), connection timeouts, DNS behaviour. |
+| `ConfigureClient` | `null` | Connection-level settings on the shared client behind the producer and admin client [TLS/SASL](#authentication), connection timeouts, DNS behaviour. |
 | `ConfigureProducer` | `null` | Producer settings the sink does not wrap (batch size, retry policy, socket buffers); runs after the sink's own configuration, so it wins on conflict, except idempotence and acks (see below). |
 | `Compression` | `Lz4` | Message batch compression (`None`, `Gzip`, `Snappy`, `Lz4`, `Zstd`). |
 | `LingerMs` | `5` | How long the producer lingers to fill a batch before sending. |
 | `MessageTimeoutMs` | `30000` | How long the producer retries transient broker errors internally before the failure surfaces as retryable. |
 | `AdminTimeoutMs` | `30000` | Ceiling on the startup [topic-creation](#topic-creation) request; an unreachable broker fails the leader session (which retries with backoff) instead of stalling startup. |
 | `Annotations` | `null` | Static key/values echoed in every message value. |
-| `SerializerOptions` | `null` | Serializer for non-scalar document values — see [NativeAOT](#nativeaot). |
+| `SerializerOptions` | `null` | Serializer for non-scalar document values, see [NativeAOT](#nativeaot). |
 
-The producer always runs **idempotent** with `acks=all`: broker-side dedup of the producer's internal
+The producer always runs **idempotent** with `acks=all`, resulting in broker-side dedup of the producer's internal
 retries, no loss on broker failover, and per-partition produce order preserved. These two settings are
-applied after `ConfigureProducer` and cannot be overridden — acknowledging the replication slot on
+applied after `ConfigureProducer` and cannot be overridden. Acknowledging the replication slot on
 delivery is only safe when the brokers have durably accepted every message.
 
 ## Authentication
@@ -157,5 +157,5 @@ source-generated context covering the types your transforms emit:
 k.SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = MyJsonContext.Default };
 ```
 
-Dekaf is Native AOT compatible with no native dependencies, so the sink no longer carries a
-librdkafka binary — validate your publish output if you deploy NativeAOT.
+The package is marked AOT-compatible, so publishing with
+`PublishAot` needs no extra configuration beyond `SerializerOptions` above.

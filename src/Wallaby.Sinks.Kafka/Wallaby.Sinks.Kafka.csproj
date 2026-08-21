@@ -4,6 +4,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.Sinks.Kafka</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsAotCompatible>true</IsAotCompatible>
     <Description>Kafka destination/sink for Wallaby: produce Postgres changes to Kafka topics, keyed by document id with tombstone deletes.</Description>
     <PackageTags>kafka;sink</PackageTags>
   </PropertyGroup>

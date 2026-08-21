@@ -33,6 +33,7 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.spill.rows` | Counter | `wallaby.slot` | Changes written to the [transaction spill](/configuration#transaction-spill) while a streamed (large) transaction is buffered before commit. A sustained rate means a monster transaction is streaming in right now. |
 | `wallaby.spill.flushes` | Counter | `wallaby.slot` | Spill buffer flushes (binary `COPY` batches into `wallaby.stream_buffer`) by the default database spill backend; the source-database write I/O the spill costs. Not emitted by the disk or custom backends. |
 | `wallaby.dependent.synthetic` | Counter | `wallaby.table` | Synthetic parent changes emitted inline by dependent-table fan-out (a wide fan-out's offloaded tail is counted by the `backfill.*` metrics instead). |
+| `wallaby.changes.reselected` | Counter | `wallaby.table`, `wallaby.reselect.outcome` | Changes [healed by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect) after an unavailable (unchanged TOAST) value, by outcome (`healed`/`row_gone`). |
 | `wallaby.transform.duration` | Histogram (s) | `wallaby.entity`, `wallaby.sink` | Time spent invoking a mapping's transform for a batch. |
 | `wallaby.sink.delivery.duration` | Histogram (s) | `wallaby.sink`, `wallaby.delivery.outcome` | Duration of a single sink delivery attempt (its count by outcome gives attempts and retries). |
 | `wallaby.sink.records.delivered` | Counter | `wallaby.sink` | Records accepted by a sink. |
@@ -59,7 +60,7 @@ The activity source `Wallaby` emits one span per unit of work:
 
 | Span | Kind | Notable attributes |
 | --- | --- | --- |
-| `transaction.process` | Consumer | `wallaby.slot`, `wallaby.batch.txn_count` (transactions coalesced into this dispatch; `1` means one-shot), `wallaby.batch.flush_reason` (why the batch closed: `idle` - nothing more buffered, `boundary` - a streamed/watermark transaction forced an edge, `txn_cap`/`size_cap` - hit `MaxTransactionsPerBatch`/`MaxBatchSize`, `disabled` - coalescing off, `ended` - stream ended), `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end`, `wallaby.txn.size`, `wallaby.txn.streamed`, `wallaby.spill.rows` (changes written to the spill; streamed transactions only), `wallaby.ingestion.lag_s`, `wallaby.watermark` (`low`/`high`, only on the tiny transactions that bracket a backfill chunk), `wallaby.heartbeat` (`true`, only on [idle-slot heartbeat](/how-it-works#idle-slots-and-wal-retention) transactions, filter these out in trace viewers), `wallaby.truncate` (comma-joined table names, only on transactions that [truncated captured tables](/how-it-works#truncate-is-not-propagated)); status `Error` on fault |
+| `transaction.process` | Consumer | See [its own table below](#transactionprocess-attributes); status `Error` on fault |
 | `dependent.resolve` | Internal | `wallaby.table`, `wallaby.dependent.count`, `wallaby.fanout.offloaded` (bindings whose tail was queued as a scoped backfill) |
 | `route` | Internal | `wallaby.batch.size`, `wallaby.source` (`live`/`fanout`/`backfill`) |
 | `transform` | Internal | `wallaby.entity`, `wallaby.batch.size` |
@@ -73,14 +74,38 @@ The activity source `Wallaby` emits one span per unit of work:
 | `sink.initialize` | Internal | `wallaby.sink`; child of `leader.bootstrap`, one per sink with one-time setup |
 | `sink.purge` | Internal | `wallaby.sink`, `wallaby.table`, `wallaby.destination` (when the mapping declares one); one per destination [purged before a fresh backfill](/backfill#purging-before-a-backfill). A root span preceding the run's `backfill` span; status `Error` on fault |
 
-Live spans nest under the `transaction.process` root, so a single trace shows a committed transaction flowing
+### `transaction.process` attributes
+
+The root span of every live trace carries the most attributes, thus it gets its own table:
+
+| Attribute | Meaning |
+| --- | --- |
+| `wallaby.slot` | The replication slot the transaction streamed from. |
+| `wallaby.batch.txn_count` | Transactions coalesced into this dispatch; `1` means one-shot. |
+| `wallaby.batch.flush_reason` | Why the batch closed: `idle` (nothing more buffered), `boundary` (a streamed/watermark transaction forced an edge), `txn_cap`/`size_cap` (hit `MaxTransactionsPerBatch`/`MaxBatchSize`), `disabled` (coalescing off), `ended` (stream ended). |
+| `wallaby.txn.lsn.commit`, `wallaby.txn.lsn.end` | The transaction's commit and end LSNs (the batch's first and last when coalesced). |
+| `wallaby.txn.size` | Number of changes processed. |
+| `wallaby.txn.streamed` | `true` when the transaction was streamed in before commit (large transaction). |
+| `wallaby.spill.rows` | Changes written to the [transaction spill](/configuration#transaction-spill); streamed transactions only. |
+| `wallaby.ingestion.lag_s` | Delay in seconds between the source commit and Wallaby receiving it. |
+| `wallaby.watermark` | `low`/`high`; only on the tiny transactions that bracket a backfill chunk. |
+| `wallaby.heartbeat` | `true`; only on [idle-slot heartbeat](/how-it-works#idle-slots-and-wal-retention) transactions - filter these out in trace viewers. |
+| `wallaby.truncate` | Comma-joined table names; only on transactions that [truncated captured tables](/how-it-works#truncate-is-not-propagated). |
+
+Pipeline spans nest under the root `transaction.process`, so a single trace shows a committed transaction flowing
 through routing, each transform, and each sink delivery. If you also enable Npgsql tracing, the
 queries your transforms run appear nested under the `transform` (and `dependent.resolve`) spans.
 
 Anomalies are recorded as **span events**, so they show up on the span's timeline exactly when they
-happened: `retry` on `sink.deliver` (with `attempt` and `error`), `fanout.offloaded` on
-`dependent.resolve` (one per binding whose tail was queued, with `wallaby.table`), and `slot.gap` on
-`slot.repair` (with the checkpoint and consistent-point LSNs). None of these will appear on the happy path.
+happened. None of these appear on the happy path:
+
+| Event | On span | Attributes | Emitted when |
+| --- | --- | --- | --- |
+| `retry` | `sink.deliver` | `attempt`, `error` | A delivery attempt failed with a retryable error and will be retried. |
+| `change.reselected` | `transaction.process` | `wallaby.table`, `wallaby.reselect.outcome` | An unavailable (unchanged TOAST) value was [healed by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect) (`healed`), or the row was already gone (`row_gone`). |
+| `fanout.offloaded` | `dependent.resolve` | `wallaby.table` | A binding's fan-out tail was queued as a scoped backfill instead of resolving inline; one event per offloaded binding. |
+| `fanout.overflowed` | `dependent.resolve` | `wallaby.table`, `wallaby.fanout.key.cap` | A transaction touched more distinct lookup keys than the cap, so the offloaded backfill scans the whole table instead of specific keys. |
+| `slot.gap` | `slot.repair` | `wallaby.lsn.checkpoint`, `wallaby.lsn.consistent` | The slot was recreated with WAL missed since the checkpoint (`"none"` when no checkpoint existed); mapped tables were marked for re-backfill. |
 
 A backfill run gets its own `backfill` root span covering the run end-to-end, from the first chunk read
 until the last chunk's delivery is acknowledged. Each chunk is delivered *inside* a slot commit, so its

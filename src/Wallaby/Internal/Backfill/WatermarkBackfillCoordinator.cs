@@ -172,8 +172,12 @@ internal sealed class WatermarkBackfillCoordinator(
             // session alive and avoids the per-watermark open/auth overhead (two emissions per chunk).
             await using var emitter = await dataSource.OpenConnectionAsync(ct);
 
-            while (!ct.IsCancellationRequested)
+            while (true)
             {
+                // Cancellation faults the run rather than ending it: callers read a normal return as a
+                // finished scope (the fan-out worker deletes the queue job on it).
+                ct.ThrowIfCancellationRequested();
+
                 var chunkStart = WallabyInstrumentation.StartTimer();
                 current = new PendingWindow
                 {

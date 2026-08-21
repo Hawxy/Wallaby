@@ -16,6 +16,12 @@ internal sealed class WebhookSigner
 {
     private const string SecretPrefix = "whsec_";
 
+    // Standard Webhooks generates 24-byte secrets; 16 is the floor for an HMAC-SHA256 key.
+    private const int MinKeyBytes = 16;
+
+    private const string Guidance =
+        "Generate one with: \"" + SecretPrefix + "\" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).";
+
     private readonly byte[] _key;
     private readonly byte[]? _previousKey;
 
@@ -70,17 +76,26 @@ internal sealed class WebhookSigner
         var encoded = secret.StartsWith(SecretPrefix, StringComparison.Ordinal)
             ? secret[SecretPrefix.Length..]
             : secret;
+        byte[] key;
         try
         {
-            return Convert.FromBase64String(encoded);
+            key = Convert.FromBase64String(encoded);
         }
         catch (FormatException ex)
         {
             throw new WallabyConfigurationException(
                 $"HTTP sink {optionName} must be a Standard Webhooks secret: base64, optionally prefixed " +
-                $"'{SecretPrefix}'. Generate one with: \"{SecretPrefix}\" + " +
-                "Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).", ex);
+                $"'{SecretPrefix}'. {Guidance}", ex);
         }
+        if (key.Length < MinKeyBytes)
+        {
+            // An empty string (an unset environment variable binds to one) and a bare 'whsec_' both
+            // decode to zero bytes, which would sign every request with an empty HMAC key.
+            throw new WallabyConfigurationException(
+                $"HTTP sink {optionName} decodes to {key.Length} key byte(s); a signing secret must carry " +
+                $"at least {MinKeyBytes}. {Guidance}");
+        }
+        return key;
     }
 
     // The id hashes the chunk's record idempotency keys rather than the body: the envelope's sentAt

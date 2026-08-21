@@ -259,6 +259,29 @@ public class DeliveryTests
     }
 
     [Test]
+    [Arguments("")]
+    [Arguments("whsec_")]
+    [Arguments("c2hvcnQ=")] // 5 key bytes
+    public void A_secret_below_the_minimum_key_length_fails_construction(string secret)
+    {
+        var ex = Should.Throw<WallabyConfigurationException>(
+            () => CreateSink(new CapturingHandler(), o => o.SigningSecret = secret));
+
+        ex.Message.ShouldContain("at least 16");
+    }
+
+    [Test]
+    public void A_previous_secret_below_the_minimum_key_length_fails_construction()
+    {
+        Should.Throw<WallabyConfigurationException>(
+            () => CreateSink(new CapturingHandler(), o =>
+            {
+                o.SigningSecret = Secret;
+                o.PreviousSigningSecret = "whsec_";
+            }));
+    }
+
+    [Test]
     public void A_previous_secret_without_an_active_secret_fails_construction()
     {
         Should.Throw<WallabyConfigurationException>(
