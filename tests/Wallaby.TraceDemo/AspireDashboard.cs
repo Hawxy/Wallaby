@@ -15,7 +15,7 @@ public sealed class AspireDashboard
     private const int OtlpHostPort = 4317;
     private const int OtlpContainerPort = 18889;
 
-    private readonly IContainer _container = new ContainerBuilder("mcr.microsoft.com/dotnet/aspire-dashboard:9.5")
+    private readonly IContainer _container = new ContainerBuilder("mcr.microsoft.com/dotnet/aspire-dashboard:latest")
         .WithName("wallaby-trace-dashboard")
         .WithReuse(true)
         .WithEnvironment("DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS", "true")

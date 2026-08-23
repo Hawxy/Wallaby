@@ -58,9 +58,12 @@ builder.Services.AddWallaby(cdc =>
 | `SerializerOptions` | `null` | Serializer for non-scalar document values, see [NativeAOT](#nativeaot). |
 
 The producer always runs **idempotent** with `acks=all`, resulting in broker-side dedup of the producer's internal
-retries, no loss on broker failover, and per-partition produce order preserved. These two settings are
-applied after `ConfigureProducer` and cannot be overridden. Acknowledging the replication slot on
-delivery is only safe when the brokers have durably accepted every message.
+retries, no loss on broker failover as long as at least one in-sync replica survives it, and per-partition
+produce order preserved. These two settings are applied after `ConfigureProducer` and cannot be overridden.
+Acknowledging the replication slot on delivery is only safe when the brokers have durably accepted every
+message. `acks=all` waits only for the *current* in-sync set, which can shrink to the leader alone - set
+`min.insync.replicas` to at least `2` on the topic (or broker) so produces fail rather than being
+acknowledged by a single replica that might be lost.
 
 ## Authentication
 

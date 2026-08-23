@@ -53,11 +53,14 @@ internal sealed class WallabyStatus : IWallabyStatus
     /// <summary>
     /// Role transitions are total: every role-scoped field is rewritten on every transition (cleared
     /// unless the new role sets it), so nothing leaks from a previous role and the invariants documented
-    /// on <see cref="WallabyStatusSnapshot"/> hold by construction.
+    /// on <see cref="WallabyStatusSnapshot"/> hold by construction. Sink-delivery timestamps are
+    /// session-scoped, so they clear here too; a delivery racing the transition may land just after the
+    /// clear, which is within the map's documented non-atomicity.
     /// </summary>
     private void TransitionTo(WallabyNodeRole role, Func<WallabyStatusSnapshot, WallabyStatusSnapshot>? apply = null) =>
         Update(s =>
         {
+            _sinkDeliveries.Clear();
             var next = s with
             {
                 Role = role,

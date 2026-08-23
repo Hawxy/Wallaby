@@ -121,7 +121,8 @@ It runs a scenario covering every span above and exports to an Aspire Dashboard 
 ## Cardinality
 
 Metric attributes are deliberately low-cardinality: `wallaby.slot`, `wallaby.sink`, `wallaby.entity`,
-`wallaby.table`, `wallaby.action`, `wallaby.source`, and `wallaby.delivery.outcome`.
+`wallaby.table`, `wallaby.action`, `wallaby.source`, `wallaby.delivery.outcome`, and
+`wallaby.reselect.outcome` (`healed`/`row_gone`).
 
 Per-row values such as tenant/scope keys, document ids, and per-tenant destinations are **never** used as
 metric attributes as they would explode cardinality. `wallaby.destination` appears only as a **span**
