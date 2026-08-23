@@ -21,7 +21,8 @@ sink.Map<Product>()
 ```
 
 Each entity is versioned and backfilled independently, so reindexing one doesn't disturb others or the
-live stream.
+live stream. Version bumps are also how [embedding-model migrations](/rag#model-migrations) re-embed
+a corpus: encode the model in the version string and bump it with `purgeOnChange: true`.
 
 When an entity is mapped to **several sinks**, backfill state is still per table: bumping *any*
 mapping's version re-snapshots the table, and the snapshot flows through every sink mapped to it.

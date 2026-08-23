@@ -85,6 +85,44 @@ cdc.AddMeilisearchSink("meili", m =>
 `Settings` is Meilisearch's own settings type, so you have full control (ranking rules, stop words,
 synonyms, faceting, …). Setup is idempotent and re-applied on each leadership acquisition.
 
+### Embedders (vector search)
+
+`Settings.Embedders` rides the same startup settings application, so
+[AI-powered search](https://www.meilisearch.com/docs/learn/ai_powered_search/getting_started_with_ai_search)
+is declared the same way:
+
+```csharp
+m.ConfigureIndex("products", s =>
+{
+    s.SearchableAttributes = ["name", "description"];
+    s.Embedders = new Dictionary<string, Embedder>
+    {
+        ["default"] = new Embedder
+        {
+            Source = EmbedderSource.OpenAi,
+            Model = "text-embedding-3-small",
+            ApiKey = openAiKey,
+            DocumentTemplate = "{{doc.name}}: {{doc.description}}",
+        },
+    };
+});
+```
+
+With a server-side source (`OpenAi`, `HuggingFace`, `Ollama`, `Rest`), Meilisearch computes vectors
+itself from the synced documents: Wallaby delivers plain text and the index becomes semantically
+searchable with zero embedding code in your pipeline. With `EmbedderSource.UserProvided`, the
+transform carries the vector in the document's `_vectors` field instead:
+
+```csharp
+new WallabyDocument
+{
+    ["name"] = p.Name,
+    ["_vectors"] = new Dictionary<string, object?> { ["default"] = embedding }, // float[]
+};
+```
+
+See [RAG & Embeddings](/rag) for the full pattern, including re-embedding on model changes.
+
 ### Attribute validation
 
 By default (`ValidateConfiguredAttributes = true`), every upsert routed to a `ConfigureIndex`-declared index

@@ -11,6 +11,8 @@ using Marten;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.AotSmokeTest;
+using Wallaby.Sinks;
+using Wallaby.Sinks.Pgvector;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Replication;
 using Wallaby.Providers.Marten.Internal;
@@ -187,6 +189,30 @@ Check("marten capture plan derives and materializes a document", () =>
     AssertEqual(doc.Id, entity.Id, "materialized id");
     AssertEqual("roo", entity.Name, "materialized name");
     AssertEqual(doc.Id, row.PrimaryKey[0], "primary key");
+});
+
+Check("vector documents serialize reflection-free and the pgvector sink constructs", () =>
+{
+    var document = new WallabyDocument { ["name"] = "roo", ["embedding"] = new ReadOnlyMemory<float>([3f, 1f]) };
+    using var stream = new MemoryStream();
+    using (var writer = new Utf8JsonWriter(stream))
+    {
+        SinkEnvelopeJson.WriteDocument(writer, document, "1", serializerOptions: null);
+    }
+    var json = System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    if (!json.Contains("\"embedding\":[3,1]"))
+    {
+        throw new InvalidOperationException($"vector not serialized as a number array: {json}");
+    }
+
+    // Construction validates options and builds the data source without connecting.
+    var sink = new PgvectorSink("smoke", new PgvectorSinkOptions
+    {
+        ConnectionString = "Host=localhost;Database=vectors;Username=u;Password=p",
+        Dimensions = 2,
+        DefaultTable = "documents",
+    });
+    sink.DisposeAsync().AsTask().GetAwaiter().GetResult();
 });
 
 Console.WriteLine(failures == 0 ? "AOT smoke: all checks passed." : $"AOT smoke: {failures} check(s) FAILED.");

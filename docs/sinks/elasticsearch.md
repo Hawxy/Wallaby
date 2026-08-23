@@ -59,6 +59,33 @@ default). For explicit settings or mappings (analyzers, `dense_vector` fields, s
 create the index up front — via Kibana Dev Tools, your infrastructure tooling, or a deployment
 script. In-sink index bootstrapping is planned.
 
+## Vector search
+
+A transform can emit an embedding as a `float[]` or `ReadOnlyMemory<float>` field - the sink writes
+either as a plain JSON number array, with no `SerializerOptions` needed. Dynamic mapping would infer
+an ordinary `float` field, so pre-create the index with an explicit `dense_vector` mapping:
+
+```json
+PUT /products
+{
+  "mappings": {
+    "properties": {
+      "embedding": { "type": "dense_vector", "dims": 1536, "index": true, "similarity": "cosine" }
+    }
+  }
+}
+```
+
+Don't pass a quantized vector as `byte[]` - byte arrays serialize as base64 strings, not arrays.
+
+Elasticsearch can also embed for you: map the field as
+[`semantic_text`](https://www.elastic.co/docs/solutions/search/semantic-search/semantic-search-semantic-text)
+(backed by an inference endpoint) and sync plain text - the cluster chunks and embeds at index
+time, with no vectors in your pipeline at all. Weigh the prerequisites and cost profile first: the
+inference API needs an appropriate Elastic subscription (and the default ELSER endpoint needs ML
+nodes), and inference runs on every indexed document - live changes embed incrementally, but a
+[backfill](/backfill) re-runs inference over the whole corpus. See [RAG & Embeddings](/rag).
+
 ## Authentication
 
 `ApiKey` or `Username`/`Password` cover the common schemes. Everything else — Elastic Cloud ids,
