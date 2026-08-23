@@ -28,11 +28,11 @@ public class FormatTests
     [Test]
     public void Identifiers_validate_to_safe_table_names()
     {
-        PgvectorSink.IsValidIdentifier("products").ShouldBeTrue();
-        PgvectorSink.IsValidIdentifier("tenant_42").ShouldBeTrue();
-        PgvectorSink.IsValidIdentifier("").ShouldBeFalse();
-        PgvectorSink.IsValidIdentifier("bad-name").ShouldBeFalse();
-        PgvectorSink.IsValidIdentifier("x\"; DROP TABLE t;--").ShouldBeFalse();
-        PgvectorSink.IsValidIdentifier(new string('x', 64)).ShouldBeFalse();
+        PgvectorTables.IsValidIdentifier("products").ShouldBeTrue();
+        PgvectorTables.IsValidIdentifier("tenant_42").ShouldBeTrue();
+        PgvectorTables.IsValidIdentifier("").ShouldBeFalse();
+        PgvectorTables.IsValidIdentifier("bad-name").ShouldBeFalse();
+        PgvectorTables.IsValidIdentifier("x\"; DROP TABLE t;--").ShouldBeFalse();
+        PgvectorTables.IsValidIdentifier(new string('x', 64)).ShouldBeFalse();
     }
 }

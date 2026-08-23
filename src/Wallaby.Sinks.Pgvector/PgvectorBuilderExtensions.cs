@@ -1,4 +1,5 @@
 using Wallaby.DependencyInjection;
+using Wallaby.Sinks.Pgvector.Internal;
 
 namespace Wallaby.Sinks.Pgvector;
 
@@ -53,12 +54,12 @@ public static class PgvectorBuilderExtensions
         {
             throw new ArgumentException("PgvectorSinkOptions.Dimensions must be positive.", nameof(options));
         }
-        if (!PgvectorSink.IsValidIdentifier(options.Schema))
+        if (!PgvectorTables.IsValidIdentifier(options.Schema))
         {
             throw new ArgumentException(
                 "PgvectorSinkOptions.Schema must be 1-63 characters of [a-zA-Z0-9_].", nameof(options));
         }
-        if (options.DefaultTable is { } table && !PgvectorSink.IsValidIdentifier(table))
+        if (options.DefaultTable is { } table && !PgvectorTables.IsValidIdentifier(table))
         {
             throw new ArgumentException(
                 "PgvectorSinkOptions.DefaultTable must be 1-63 characters of [a-zA-Z0-9_].", nameof(options));
