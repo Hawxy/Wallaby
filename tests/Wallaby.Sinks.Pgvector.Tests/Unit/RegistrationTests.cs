@@ -40,6 +40,15 @@ public class RegistrationTests
     }
 
     [Test]
+    public void Direct_construction_validates_options()
+    {
+        // Schema and DefaultTable reach interpolated SQL, so the constructor enforces the identifier
+        // rule even when the builder's Validate is bypassed.
+        Should.Throw<ArgumentException>(() => new PgvectorSink("pgv", Valid(o => o.Schema = "bad\"schema")));
+        Should.Throw<ArgumentException>(() => new PgvectorSink("pgv", Valid(o => o.DefaultTable = "bad.table")));
+    }
+
+    [Test]
     public void A_partial_embedding_configuration_fails()
     {
         var ex = Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(

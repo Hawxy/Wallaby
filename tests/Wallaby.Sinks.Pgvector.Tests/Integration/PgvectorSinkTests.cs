@@ -179,6 +179,30 @@ public class PgvectorSinkTests(PgvectorFixture pg)
     }
 
     [Test]
+    public async Task A_stored_hash_without_a_vector_does_not_gate_re_embedding()
+    {
+        var table = UniqueTable();
+        var generator = new StubEmbeddingGenerator();
+        await using var sink = new PgvectorSink("pgv", EmbedOptions(table, generator));
+        await sink.InitializeAsync(CancellationToken.None);
+        await sink.DeliverAsync(Batch(Upsert("1", new WallabyDocument { ["name"] = "ab" })), CancellationToken.None);
+        generator.Calls.ShouldBe(1);
+
+        // An inconsistent row (hash with no vector, e.g. left by a purge racing a delivery) must
+        // re-embed instead of matching the hash.
+        await using (var cmd = pg.DataSource.CreateCommand($"UPDATE public.\"{table}\" SET embedding = NULL"))
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+        var redelivery = await sink.DeliverAsync(
+            Batch(Upsert("1", new WallabyDocument { ["name"] = "ab" })), CancellationToken.None);
+
+        redelivery.Status.ShouldBe(DeliveryStatus.Success);
+        generator.Calls.ShouldBe(2);
+        (await RowAsync(table, "1"))!.Value.Vector.ShouldBe("[2,1]");
+    }
+
+    [Test]
     public async Task The_stored_hash_survives_a_new_sink_instance()
     {
         // A restarted host (or another node) skips re-embedding: the destination is the cache.

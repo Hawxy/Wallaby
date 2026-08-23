@@ -32,6 +32,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(options);
+        PgvectorBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         var builder = new NpgsqlDataSourceBuilder(options.ConnectionString);
@@ -167,10 +168,10 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
             await using var writeBatch = new NpgsqlBatch(connection, transaction);
             foreach (var row in chunk)
             {
-                // A KeepStoredVector row exists by definition (its stored hash matched), so the update
-                // arm leaving embedding and text_hash untouched is the one that runs. Both arms guard
-                // with IS DISTINCT FROM so an identical redelivery does not rewrite the tuple (no WAL
-                // or dead-tuple churn on re-backfills of unchanged rows).
+                // A KeepStoredVector row normally exists (its stored hash matched) and takes the update
+                // arm leaving embedding and text_hash untouched. Both arms guard with IS DISTINCT FROM
+                // so an identical redelivery does not rewrite the tuple (no WAL or dead-tuple churn on
+                // re-backfills of unchanged rows).
                 var update = row.KeepStoredVector
                     ? "document = EXCLUDED.document, updated_at = now() " +
                       "WHERE t.document IS DISTINCT FROM EXCLUDED.document"
@@ -181,8 +182,12 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
                 var cmd = new NpgsqlBatchCommand(
                     $"INSERT INTO {Qualified(table)} AS t (id, text_hash, embedding, document) " +
                     $"VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET {update}");
+                // If a KeepStoredVector row vanished between the hash read and this write (e.g. a
+                // concurrent purge), the insert arm runs instead; inserting a null hash there keeps
+                // the row re-embeddable rather than pinning a matching hash to a null embedding.
+                var insertHash = row.KeepStoredVector ? null : row.Hash;
                 cmd.Parameters.Add(new NpgsqlParameter { Value = row.Id });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = (object?)row.Hash ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (object?)insertHash ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text });
                 // A Vector value infers the vector type via the plugin; a bare null is sent untyped and
                 // the server infers it from the target column.
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (object?)row.Vector ?? DBNull.Value });
@@ -312,8 +317,11 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
         string table, List<SinkRecord> upserts, CancellationToken ct)
     {
         var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        // A hash only counts alongside a stored vector; a hash next to a null embedding (however it
+        // arose) must re-embed rather than gate.
         await using var cmd = _dataSource.CreateCommand(
-            $"SELECT id, text_hash FROM {Qualified(table)} WHERE id = ANY($1) AND text_hash IS NOT NULL");
+            $"SELECT id, text_hash FROM {Qualified(table)} " +
+            "WHERE id = ANY($1) AND text_hash IS NOT NULL AND embedding IS NOT NULL");
         cmd.Parameters.Add(new NpgsqlParameter { Value = upserts.Select(u => u.DocumentId).ToArray() });
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
