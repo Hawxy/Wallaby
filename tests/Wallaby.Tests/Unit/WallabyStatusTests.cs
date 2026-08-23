@@ -272,4 +272,19 @@ public class WallabyStatusTests
 
         status.Current.LastSinkDeliveryAt["search"].ShouldBe(at.AddSeconds(5));
     }
+
+    [Test]
+    public void Sink_deliveries_are_session_scoped_and_clear_on_role_transitions()
+    {
+        var status = new WallabyStatus();
+        status.EnterLeader(DateTimeOffset.UtcNow);
+        status.RecordSinkDelivered("search", DateTimeOffset.UtcNow);
+
+        status.EnterStandby();
+        status.Current.LastSinkDeliveryAt.ShouldBeEmpty();
+
+        status.RecordSinkDelivered("search", DateTimeOffset.UtcNow);
+        status.EnterLeader(DateTimeOffset.UtcNow);
+        status.Current.LastSinkDeliveryAt.ShouldBeEmpty();
+    }
 }

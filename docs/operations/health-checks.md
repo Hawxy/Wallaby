@@ -54,24 +54,34 @@ builder.Services.AddHealthChecks().AddWallaby(configure: o =>
 });
 ```
 
-The check attaches a `data` dictionary for diagnostics: `role`, `faulted`, `lastError`, `startedAt`,
-`leaderSince`, `suspendedSince`, `suspensionReason`, `lastAcknowledgedLsn`, `lastProgressAt`, `lastIngestionLagSeconds`,
-`consecutiveLeaderFailures`, `consecutiveFanoutFailures`, `consecutiveFanoutPassFailures`,
-`consecutiveBackfillFailures`, `consecutiveBackfillPassFailures`, `slotName`, and one
-`lastSinkDeliveryAt:<sink>` entry per sink that has accepted a batch this session. A nonzero
-`consecutiveFanoutFailures` means one or more fan-out jobs are failing and retrying with backoff; the rest
-of the queue keeps draining. The value is the worst failing job's persisted attempt count, so it holds
-while that job is backed off (healthy jobs draining alongside cannot mask it) and clears once the job
-finally completes. `consecutiveBackfillFailures` works the same way for per-table backfills: the worst
-failing table's persisted attempt count, cleared when its run finally starts fresh or completes. The
-`...PassFailures` variants count the worker's own loop failing outright (the queue or state store
-unreachable) rather than one job or table; each subsystem's Degraded grade fires on the worse of its
-two counters against the same threshold.
+The check attaches a `data` dictionary for diagnostics. Keys with no value yet (for example
+`leaderSince` on a standby) are omitted:
 
-`consecutiveLeaderFailures` (the counter behind the crash-loop grade) only resets on real progress or a
-clean step-down - not just because a failing session ran for a while first - so the grade holds even when
-each session streams briefly before failing. On recovery (the poison transaction delivers, or a fixed
-transform is deployed) the first acknowledged transaction resets it and the check returns to Healthy.
+| Key | Meaning |
+| --- | --- |
+| `role` | `Starting`, `Leader`, `Standby`, `Stopped`, or `Suspended`. |
+| `faulted` | `true` once the background service has terminated. |
+| `startedAt` | When the background service started on this node. |
+| `lastError` | The most recent leader-session, fan-out, or backfill error. |
+| `leaderSince` | When this node took leadership. |
+| `suspendedSince`, `suspensionReason` | When and why the installation was [suspended](/operations/major-version-upgrades). |
+| `publicationsWidened`, `publicationsWidenedAt` | Present while managed publications are temporarily [widened](/operations/external-control#widening-publications-for-schema-migrations) to whole-table membership. Capture is fully functional, so the check stays Healthy. |
+| `lastAcknowledgedLsn` | The last LSN acknowledged back to the replication slot. |
+| `lastProgressAt` | When a transaction was last fully delivered and acknowledged. |
+| `lastIngestionLagSeconds` | Ingestion lag measured at the most recently received transaction. |
+| `consecutiveLeaderFailures` | Leader sessions that died in a row without acknowledging progress; the counter behind the crash-loop grade. |
+| `consecutiveFanoutFailures` | The worst failing fan-out job's persisted attempt count. Holds while that job is backed off (healthy jobs draining alongside cannot mask it) and clears once the job finally completes; the rest of the queue keeps draining throughout. |
+| `consecutiveFanoutPassFailures` | The fan-out worker's own loop failing outright (the queue or state store unreachable) rather than one job. |
+| `consecutiveBackfillFailures` | The worst failing table's persisted backfill attempt count, cleared when its run finally starts fresh or completes. Other tables and live replication carry on. |
+| `consecutiveBackfillPassFailures` | The backfill worker's own loop failing outright rather than one table. |
+| `slotName` | The replication slot this node manages. |
+| `lastSinkDeliveryAt:<sink>` | When each sink last accepted a batch; one entry per sink that has delivered this session. |
+
+Each subsystem's Degraded grade fires on the worse of its job and pass counters against the same
+threshold. `consecutiveLeaderFailures` only resets on real progress or a clean step-down - not just
+because a failing session ran for a while first - so the crash-loop grade holds even when each session
+streams briefly before failing. On recovery (the poison transaction delivers, or a fixed transform is
+deployed) the first acknowledged transaction resets it and the check returns to Healthy.
 
 ::: warning
 The `data` dictionary can include exception text. Don't expose a detailed `/health` response on a public

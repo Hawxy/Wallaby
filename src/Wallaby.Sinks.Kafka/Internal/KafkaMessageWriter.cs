@@ -27,8 +27,8 @@ internal static class KafkaMessageWriter
     /// <summary>Header carrying the commit LSN (decimal string; <c>0</c> for backfill reads).</summary>
     public const string CommitLsnHeader = "wallaby.commit-lsn";
 
-    private static readonly byte[] DeleteOperation = Encoding.UTF8.GetBytes("delete");
-    private static readonly byte[] UpsertOperation = Encoding.UTF8.GetBytes("upsert");
+    private static readonly byte[] DeleteOperation = "delete"u8.ToArray();
+    private static readonly byte[] UpsertOperation = "upsert"u8.ToArray();
 
     /// <summary>Headers for any record; present on tombstones too, where they are the only metadata.</summary>
     public static Headers BuildHeaders(SinkRecord record) => new()

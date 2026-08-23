@@ -109,23 +109,34 @@ Each request is a JSON envelope; `records` preserves commit order:
 }
 ```
 
-- `operation` is `upsert` (apply `document` under `id`) or `delete` (remove `id`); a delete carries no `document`.
-- `idempotencyKey` is an opaque string unique to each delivered change - store it to
-  [reject redelivered duplicates](#delivery-semantics). A backfill row's key embeds a per-run token
-  (echoed as `metadata.backfillRunId`): stable within one run, **new for every run**, so a re-backfill
-  (e.g. a `WithBackfillVersion` bump) is never suppressed by stored keys.
-- `destination` is the mapping's `ToDestination(...)` value (or a [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) result); `null` when the mapping declares none.
-- `metadata.action` is what the change meant in the source model: `insert`, `update`, `delete`, or `read`
-  (a backfill row). Providers may substitute meaning - e.g. Marten surfaces a soft-delete `UPDATE` as
-  `delete` - so it can differ from the raw WAL operation.
-- `commitLsn` is a string - the value can exceed the safe-integer range of JavaScript consumers. Backfill
-  records have `commitLsn: "0"` and omit `commitTimestamp`.
-- `type` is always `wallaby.changes`.
-- `sentAt` is **per attempt**: a retried delivery re-sends the same records with a fresh `sentAt` (and,
-  [when signed](#verifying-signatures), the same `webhook-id`). Treat requests with an equal
-  `webhook-id` as the same delivery.
-- With `Annotations` configured, the envelope carries an `annotations` object with those key/values
-  alongside `sink` and `sentAt`.
+Top-level fields:
+
+| Field | Meaning |
+| --- | --- |
+| `type` | Always `wallaby.changes`. |
+| `sink` | The sink's registered name. |
+| `sentAt` | When this request was sent - **per attempt**: a retried delivery re-sends the same records with a fresh `sentAt` (and, [when signed](#verifying-signatures), the same `webhook-id`). Treat requests with an equal `webhook-id` as the same delivery. |
+| `annotations` | Present when `Annotations` is configured: those static key/values. |
+| `records` | The change records, in commit order. |
+
+Each record:
+
+| Field | Meaning |
+| --- | --- |
+| `operation` | `upsert` (apply `document` under `id`) or `delete` (remove `id`). |
+| `id` | The document id the operation targets. |
+| `idempotencyKey` | An opaque string unique to each delivered change - store it to [reject redelivered duplicates](#delivery-semantics). A backfill row's key embeds a per-run token (echoed as `metadata.backfillRunId`): stable within one run, **new for every run**, so a re-backfill (e.g. a `WithBackfillVersion` bump) is never suppressed by stored keys. |
+| `destination` | The mapping's `ToDestination(...)` value (or a [`ScopedDestination`](/providers/entity-framework-core/multi-tenancy) result); `null` when the mapping declares none. |
+| `document` | The transform's document; upserts only, a delete carries none. |
+| `metadata.schema`, `metadata.table` | The source table the change came from. |
+| `metadata.action` | What the change meant in the source model: `insert`, `update`, `delete`, or `read` (a backfill row). Providers may substitute meaning - e.g. Marten surfaces a soft-delete `UPDATE` as `delete` - so it can differ from the raw WAL operation. |
+| `metadata.commitLsn`, `metadata.commitIdx` | The change's commit position; `(commitLsn, commitIdx)` orders live changes. `commitLsn` is a string - the value can exceed the safe-integer range of JavaScript consumers. Backfill records have `commitLsn: "0"`. |
+| `metadata.commitTimestamp` | The source transaction's commit time; omitted on backfill records. |
+| `metadata.isBackfill` | `true` on rows delivered by a [backfill](/backfill) rather than live replication. |
+| `metadata.backfillRunId` | The backfill run's per-run token; only on backfill rows. |
+
+Two contract rules for receivers:
+
 - **Ignore unknown fields.** New fields are added to the envelope additively (and some, like
   `metadata.backfillRunId`, appear only when relevant). A receiver that rejects or fails on
   unrecognized properties will break on upgrades that are compatible by contract.
@@ -185,7 +196,9 @@ webhook-signature: v1,<base64> [v1,<base64>]
 ```
 
 The signature is the HMAC-SHA256 of `{id}.{timestamp}.{body}`. The secret must be in the standard
-format (base64, optionally prefixed `whsec_`) or the sink fails at startup. Optionally generate one with:
+format (base64, optionally prefixed `whsec_`) and decode to at least 16 key bytes, or the sink fails at
+startup - an empty or too-short secret (an unset environment variable binds to `""`) would otherwise sign
+every request with a key an attacker can guess. Optionally generate one with:
 
 ```csharp
 var secret = "whsec_" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));

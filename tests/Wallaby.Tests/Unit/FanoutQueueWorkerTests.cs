@@ -154,6 +154,55 @@ public class FanoutQueueWorkerTests
         status.Current.ConsecutiveFanoutFailures.ShouldBe(0);
     }
 
+    // Cancels the drain at the last store call before the coordinator runs, so the scoped backfill is
+    // entered with a cancelled token.
+    private sealed class CancellingQueue(CancellationTokenSource cts, params FanoutJobRow[] jobs) : IFanoutQueueStore
+    {
+        private readonly Queue<FanoutJobRow> _due = new(jobs);
+        public int Completed { get; private set; }
+        public List<string> Failed { get; } = [];
+
+        public Task MarkInProgressAsync(string t, string h, string? c, CancellationToken ct)
+        {
+            cts.Cancel();
+            return Task.CompletedTask;
+        }
+
+        public Task EnqueueAsync(ScopedFanoutSpec spec, CancellationToken ct) => Task.CompletedTask;
+        public Task<FanoutJobRow?> GetNextDueAsync(CancellationToken ct)
+            => Task.FromResult(_due.Count > 0 ? _due.Dequeue() : null);
+        public Task<long> CountDueAsync(CancellationToken ct) => Task.FromResult((long)_due.Count);
+        public Task<int> MaxAttemptsAsync(CancellationToken ct) => Task.FromResult(0);
+        public Task SaveProgressAsync(string t, string h, string? c, long r, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string t, string h, CancellationToken ct) { Completed++; return Task.CompletedTask; }
+        public Task DeferAsync(string t, string h, TimeSpan d, CancellationToken ct) => Task.CompletedTask;
+        public Task FailAsync(string t, string h, string error, CancellationToken ct) { Failed.Add(t); return Task.CompletedTask; }
+        public Task<IReadOnlyList<FanoutJobRow>> ListAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<FanoutJobRow>>([]);
+        public INotifySubscription Subscribe() => new NoOpSubscription();
+    }
+
+    [Test]
+    public async Task A_cancelled_scoped_backfill_leaves_the_job_in_the_queue()
+    {
+        // Cancellation leaves the job for the next leadership term: completing it deletes the row, and
+        // nothing re-enqueues the rows the run had not copied yet. Backs off nothing either, so a
+        // shutdown does not count against the job's failure streak.
+        using var cts = new CancellationTokenSource();
+        var queue = new CancellingQueue(cts, new FanoutJobRow(
+            "public.widgets", "hash1", FanoutJobStatus.Requested, ["col"], "[[1]]", null, 0));
+
+        await using var dataSource = NpgsqlDataSource.Create(UnreachableConnectionString);
+        var coordinator = new WatermarkBackfillCoordinator(dataSource, new FakeBackfillStore(), NullLogger.Instance);
+        var worker = new FanoutQueueWorker(
+            queue, coordinator, new WallabyModel([WidgetsTable()]), NullLogger.Instance, TimeSpan.FromSeconds(1));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => worker.DrainOnceAsync(cts.Token));
+
+        queue.Completed.ShouldBe(0);   // not dropped...
+        queue.Failed.ShouldBeEmpty();  // ...and not counted as a job failure either
+    }
+
     private static CapturedTable WidgetsTable()
     {
         var id = new CapturedColumn
