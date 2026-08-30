@@ -103,6 +103,11 @@ export default defineConfig({
       { icon: 'github', link: 'https://github.com/Hawxy/Wallaby' }
     ],
 
+    footer: {
+      message: 'Released under the Apache 2.0 License.',
+      copyright: 'Copyright © 2026-present Hawxy'
+    },
+
   },
   markdown: {
     theme: { light: 'github-light-high-contrast', dark: 'ayu-dark' },

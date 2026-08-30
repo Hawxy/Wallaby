@@ -20,7 +20,7 @@ features:
   - title: Transform + Enrich
     details: Convert, enhance & flatten materialized changes into the required shape for your output destination. Use your existing EF & Marten tooling or drop down to manual SQL.
   - title: Pluggable Sinks
-    details: Ship your transformed data to anywhere it needs to go, be it a search index, vector DB or just a plain HTTP endpoint. At-least-once delivery ensures you data never goes missing.
+    details: Ship your transformed data to anywhere it needs to go, be it a search index, vector DB or just a plain HTTP endpoint. At-least-once delivery ensures your data never goes missing.
   - title: Versioned Backfilling
     details: Automatically run backfill operations as output shape is changed. Ensure your destination is always up to date.
 ---
