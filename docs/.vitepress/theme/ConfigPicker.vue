@@ -59,7 +59,7 @@ const sinks = [
   },
   {
     title: 'custom',
-    sub: 'your own delivery target',
+    sub: 'your own target',
     label: 'Custom Sinks →',
     link: '/sinks/custom',
   },

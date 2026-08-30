@@ -152,7 +152,7 @@ Leave `Topics` empty when your platform pre-provisions topics or the broker has
 ## NativeAOT
 
 The envelope structure and common scalar document values (strings, numbers, booleans, `Guid`, date/time
-types, byte arrays, nested dictionaries, and sequences of these) are written without reflection. Any other
+types, byte arrays, nested dictionaries, `ReadOnlyMemory<float>` vectors, and sequences of these) are written without reflection. Any other
 value type is serialized through `SerializerOptions`; on trimmed/NativeAOT hosts, point it at a
 source-generated context covering the types your transforms emit:
 

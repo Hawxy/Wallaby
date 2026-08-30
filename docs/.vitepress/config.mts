@@ -51,6 +51,7 @@ export default defineConfig({
           { text: 'Getting Started', link: '/getting-started' },
           { text: 'Mappings', link: '/mappings' },
           { text: 'Backfill', link: '/backfill' },
+          { text: 'RAG & Embeddings', link: '/rag' },
           { text: 'External Slots', link: '/external-slots' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Testing', link: '/testing' },
@@ -82,6 +83,7 @@ export default defineConfig({
           { text: 'Kafka', link: '/sinks/kafka' },
           { text: 'Elasticsearch', link: '/sinks/elasticsearch' },
           { text: 'OpenSearch', link: '/sinks/opensearch' },
+          { text: 'Pgvector', link: '/sinks/pgvector' },
           { text: 'Custom', link: '/sinks/custom' },
         ]
       },
@@ -100,6 +102,11 @@ export default defineConfig({
     socialLinks: [
       { icon: 'github', link: 'https://github.com/Hawxy/Wallaby' }
     ],
+
+    footer: {
+      message: 'Released under the Apache 2.0 License.',
+      copyright: 'Copyright © 2026-present JT'
+    },
 
   },
   markdown: {

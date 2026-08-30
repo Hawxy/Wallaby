@@ -15,6 +15,7 @@
     <Project Path="src/Wallaby.Sinks.Kafka/Wallaby.Sinks.Kafka.csproj" />
     <Project Path="src/Wallaby.Sinks.Meilisearch/Wallaby.Sinks.Meilisearch.csproj" />
     <Project Path="src/Wallaby.Sinks.OpenSearch/Wallaby.Sinks.OpenSearch.csproj" />
+    <Project Path="src/Wallaby.Sinks.Pgvector/Wallaby.Sinks.Pgvector.csproj" />
     <Project Path="src/Wallaby.Testing/Wallaby.Testing.csproj" />
     <Project Path="src/Wallaby/Wallaby.csproj" />
   </Folder>
@@ -23,6 +24,7 @@
     <Project Path="tests/Wallaby.Benchmarks/Wallaby.Benchmarks.csproj" />
     <Project Path="tests/Wallaby.Client.Tests/Wallaby.Client.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.Tests/Wallaby.Providers.EntityFrameworkCore.Tests.csproj" />
+    <Project Path="tests/Wallaby.Sinks.Pgvector.Tests/Wallaby.Sinks.Pgvector.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.Marten.Tests/Wallaby.Providers.Marten.Tests.csproj" />
     <Project Path="tests/Wallaby.Sinks.Elasticsearch.Tests/Wallaby.Sinks.Elasticsearch.Tests.csproj" />
     <Project Path="tests/Wallaby.Sinks.Http.Tests/Wallaby.Sinks.Http.Tests.csproj" />

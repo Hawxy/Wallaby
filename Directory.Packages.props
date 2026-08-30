@@ -18,6 +18,9 @@
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.11" />
     <PackageVersion Include="Nuke.Common" Version="10.1.0" />
     <PackageVersion Include="Polly.Core" Version="8.7.0" />
+    <!-- Pgvector sink package -->
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <PackageVersion Include="Pgvector" Version="0.3.2" />
     <!-- Meilisearch sink package -->
     <PackageVersion Include="Meilisearch" Version="0.20.0" />
     <!-- Kafka sink package -->

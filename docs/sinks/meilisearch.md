@@ -85,6 +85,42 @@ cdc.AddMeilisearchSink("meili", m =>
 `Settings` is Meilisearch's own settings type, so you have full control (ranking rules, stop words,
 synonyms, faceting, …). Setup is idempotent and re-applied on each leadership acquisition.
 
+### Embedders (vector search)
+
+[AI-powered search](https://www.meilisearch.com/docs/learn/ai_powered_search/getting_started_with_ai_search) can be setup via the 
+index configuration:
+
+```csharp
+m.ConfigureIndex("products", s =>
+{
+    s.SearchableAttributes = ["name", "description"];
+    s.Embedders = new Dictionary<string, Embedder>
+    {
+        ["default"] = new Embedder
+        {
+            Source = EmbedderSource.OpenAi,
+            Model = "text-embedding-3-small",
+            ApiKey = openAiKey,
+            DocumentTemplate = "{{doc.name}}: {{doc.description}}",
+        },
+    };
+});
+```
+
+With a server-side source (`OpenAi`, `HuggingFace`, `Ollama`, `Rest`), Meilisearch computes vectors
+itself from the synced documents. Optionally, with `EmbedderSource.UserProvided`, the
+transform carries the vector in the document's `_vectors` field instead:
+
+```csharp
+new WallabyDocument
+{
+    ["name"] = p.Name,
+    ["_vectors"] = new Dictionary<string, object?> { ["default"] = embedding }, // float[]
+};
+```
+
+See [RAG & Embeddings](/rag) for the full pattern, including re-embedding on model changes.
+
 ### Attribute validation
 
 By default (`ValidateConfiguredAttributes = true`), every upsert routed to a `ConfigureIndex`-declared index
@@ -92,7 +128,6 @@ is checked against that index's configured **searchable**, **filterable**, and *
 document is missing a key for any of them, delivery fails **permanently** with a
 `MeilisearchDocumentValidationException` (which halts the pipeline), rather than silently indexing a
 document that has a mismatched configuration. 
-A few details:
 
 - A key whose value is `null` counts as present, only an **absent** key is a failure.
 - The sink's `PrimaryKey` and Meilisearch's `*` wildcard are exempt.

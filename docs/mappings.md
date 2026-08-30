@@ -52,6 +52,9 @@ interface as a class - [`IWallabyEfTransform<T>`](/providers/entity-framework-co
 (EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) - and
 register it with `UsingTransform<TEntity, TTransform>()`. This class is registered & resolved from the container.
 
+Transforms can also enrich documents with vector embeddings for semantic search - see
+[RAG & Embeddings](/rag).
+
 ## Mapping classes
 
 Inline mappings grow the `AddWallaby` callback and can make your `Program.cs` unwieldy. Move each mapping into a

@@ -122,6 +122,23 @@ public class BulkPayloadTests
     }
 
     [Test]
+    public void Vector_values_are_written_as_number_arrays()
+    {
+        var document = new Dictionary<string, object?>
+        {
+            ["floats"] = new[] { 0.25f, -1f, 3f },
+            ["memory"] = new ReadOnlyMemory<float>([0.5f, 2f]),
+        };
+
+        var payload = Write([Upsert("1", document)]);
+
+        using var parsed = JsonDocument.Parse(Lines(payload)[1]);
+        var root = parsed.RootElement;
+        root.GetProperty("floats").EnumerateArray().Select(e => e.GetSingle()).ShouldBe([0.25f, -1f, 3f]);
+        root.GetProperty("memory").EnumerateArray().Select(e => e.GetSingle()).ShouldBe([0.5f, 2f]);
+    }
+
+    [Test]
     public void Mixed_upserts_and_deletes_preserve_record_order()
     {
         var payload = Write(
