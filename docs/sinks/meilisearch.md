@@ -87,9 +87,8 @@ synonyms, faceting, …). Setup is idempotent and re-applied on each leadership 
 
 ### Embedders (vector search)
 
-`Settings.Embedders` rides the same startup settings application, so
-[AI-powered search](https://www.meilisearch.com/docs/learn/ai_powered_search/getting_started_with_ai_search)
-is declared the same way:
+[AI-powered search](https://www.meilisearch.com/docs/learn/ai_powered_search/getting_started_with_ai_search) can be setup via the 
+index configuration:
 
 ```csharp
 m.ConfigureIndex("products", s =>
@@ -109,8 +108,7 @@ m.ConfigureIndex("products", s =>
 ```
 
 With a server-side source (`OpenAi`, `HuggingFace`, `Ollama`, `Rest`), Meilisearch computes vectors
-itself from the synced documents: Wallaby delivers plain text and the index becomes semantically
-searchable with zero embedding code in your pipeline. With `EmbedderSource.UserProvided`, the
+itself from the synced documents. Optionally, with `EmbedderSource.UserProvided`, the
 transform carries the vector in the document's `_vectors` field instead:
 
 ```csharp
@@ -130,7 +128,6 @@ is checked against that index's configured **searchable**, **filterable**, and *
 document is missing a key for any of them, delivery fails **permanently** with a
 `MeilisearchDocumentValidationException` (which halts the pipeline), rather than silently indexing a
 document that has a mismatched configuration. 
-A few details:
 
 - A key whose value is `null` counts as present, only an **absent** key is a failure.
 - The sink's `PrimaryKey` and Meilisearch's `*` wildcard are exempt.
