@@ -7,7 +7,7 @@ description: "Syncing Postgres tables into pgvector vector tables, with optional
 The `Wallaby.Sinks.Pgvector` package keeps [pgvector](https://github.com/pgvector/pgvector) tables
 continuously in sync with your source tables - the "my RAG corpus is just Postgres" setup, with no
 extra search infrastructure. Upserts are idempotent by id and deletes remove by id, so redelivery
-converges. Its headline feature is **sink-side embedding**: configure an embedding generator and the
+converges. Its main feature is **sink-side embedding**: configure an embedding generator and the
 sink embeds documents at delivery time, re-embedding only rows whose text actually changed. The
 destination table doubles as the durable embedding cache, so restarts, failovers, and re-backfills
 never re-embed unchanged text.
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS "public"."products" (
 - `text_hash` is SHA-256 over `EmbeddingVersion` + the embedded text; `embedding`/`text_hash` are
   null when `EmbedText` returned nothing for the row.
 - **No vector index is created.** Build the HNSW index yourself *after* the initial backfill -
-  index maintenance during a large bulk load is the slow way around:
+  maintaining the index during a large bulk load is slower than building it afterwards:
 
 ```sql
 CREATE INDEX ON "public"."products" USING hnsw (embedding vector_cosine_ops);
@@ -100,10 +100,10 @@ whose hash matches update `document`/`updated_at` and keep their stored vector u
 the document is unchanged too, the upsert skips the row entirely, so a re-backfill of an unchanged
 corpus costs no embedding calls *and* no row rewrites (no WAL or vacuum churn).
 
-Because the gate is the destination row itself, it needs no cache infrastructure and survives
-everything the process doesn't: restarts, leader failover, and re-backfills all skip unchanged text.
-The two ways to force re-embedding are the ones that should: changing `EmbeddingVersion` (new hash)
-and [purging](/backfill#purging-before-a-backfill) (deletes the rows, hashes included) - which is
+Because the gate is the destination row itself, it needs no cache infrastructure and is unaffected
+by restarts, leader failover, and re-backfills: all of them skip unchanged text. Re-embedding is
+forced only by changing `EmbeddingVersion` (new hash) or by
+[purging](/backfill#purging-before-a-backfill) (deletes the rows, hashes included) - which is
 exactly what `WithBackfillVersion(..., purgeOnChange: true)` does on a model migration.
 
 ## Delivery semantics
@@ -129,7 +129,7 @@ versioned re-backfill and let the purge find it already empty.
 
 ## Performance
 
-Vectors travel in pgvector's binary wire format, and identical redeliveries skip the row write
+Vectors are sent in pgvector's binary wire format, and identical redeliveries skip the row write
 server-side, so the remaining per-row cost is statement parsing: the sink pipelines its upserts in
 batches, and enabling Npgsql's automatic preparation makes the server parse each statement shape
 once instead of once per row:

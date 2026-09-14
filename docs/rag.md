@@ -10,7 +10,7 @@ transform, deletes propagate, [backfill](/backfill) seeds and re-seeds destinati
 `WithBackfillVersion` gives embedding-model migrations a one-line answer.
 
 The guiding principle: **let the destination own embedding**. When the party that stores the vector
-also computes it, no vectors transit the pipeline, there is no cache to build or invalidate, and
+also computes it, no vectors pass through the pipeline, there is no cache to build or invalidate, and
 the destination can skip re-embedding text it has already seen. Every path below follows that
 shape; computing vectors inside a transform is the fallback, not the default.
 
@@ -58,8 +58,8 @@ delivers rows that changed), but a [backfill](/backfill) re-embeds the whole cor
 
 ## Postgres as the vector store: the pgvector sink
 
-For "my RAG corpus is just Postgres", the [pgvector sink](/sinks/pgvector) plays the
-destination-embeds role itself, since Postgres has no native embedder:
+For "my RAG corpus is just Postgres", the [pgvector sink](/sinks/pgvector) does the embedding
+itself, since Postgres has no native embedder:
 
 ```csharp
 cdc.AddPgvectorSink("vectors", v =>
@@ -80,9 +80,9 @@ cdc.AddPgvectorSink("vectors", v =>
 The sink embeds at delivery time and stores a content hash next to each vector, so it
 [re-embeds only rows whose text changed](/sinks/pgvector#how-embedding-is-gated) - across restarts,
 failovers, and re-backfills, with the destination table itself as the durable cache. Embedding-API
-throttling surfaces as a retryable delivery, riding the dispatcher's normal backoff.
+throttling surfaces as a retryable delivery, which the dispatcher retries with its normal backoff.
 
-## Hand-rolled: embedding in a transform
+## Embedding in a transform
 
 For destinations that can't embed and can't be read back - Kafka topics, HTTP receivers, or a
 Meilisearch `UserProvided` embedder - compute the vector in the transform and emit it as a document

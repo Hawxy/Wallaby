@@ -169,7 +169,7 @@ the failed task):
 | Error | Outcome |
 | --- | --- |
 | Transport failures, timeouts, responses without a Meilisearch error code | **Retryable** - the dispatcher retries with exponential backoff. |
-| Environment-fixable codes: `index_not_found`, `internal`, disk/queue pressure, … | **Retryable**. Exception: `index_not_found` on a **delete** is swallowed as success — deletes don't auto-create indexes, so a delete-only batch to an index that was never written (e.g. a per-tenant `ScopedDestination` index that saw a deletion before any upsert) has nothing to remove and would otherwise retry forever. |
+| Environment-fixable codes: `index_not_found`, `internal`, disk/queue pressure, … | **Retryable**. Exception: `index_not_found` on a **delete** is treated as success, because deletes don't auto-create indexes, so a delete-only batch to an index that was never written (e.g. a per-tenant `ScopedDestination` index that saw a deletion before any upsert) has nothing to remove and would otherwise retry forever. |
 | Deterministic configuration/credential/payload errors: `invalid_api_key`, `missing_authorization_header`, `payload_too_large`, `invalid_document_id`, `missing_document_id`, `invalid_document_fields`, `invalid_document_geo_field`, `invalid_index_uid`, `invalid_index_primary_key`, `index_primary_key_already_exists`, `index_primary_key_multiple_candidates_found`, `bad_request` | **Permanent** - the pipeline halts (a `MeilisearchTaskFailedException` carries the failed task's code). |
 | A record with no destination and no `DefaultIndex`, or a document missing a [configured attribute](#attribute-validation) | **Permanent**. |
 

@@ -30,7 +30,7 @@ Durations are in **seconds** (OpenTelemetry convention);
 | --- | --- | --- | --- |
 | `wallaby.changes.received` | Counter | `wallaby.slot`, `wallaby.action`, `wallaby.source` | Materialized change events received (live and backfill). |
 | `wallaby.ingestion.lag` | Histogram (s) | `wallaby.slot` | Delay between a source transaction's commit and Wallaby receiving it. |
-| `wallaby.spill.rows` | Counter | `wallaby.slot` | Changes written to the [transaction spill](/configuration#transaction-spill) while a streamed (large) transaction is buffered before commit. A sustained rate means a monster transaction is streaming in right now. |
+| `wallaby.spill.rows` | Counter | `wallaby.slot` | Changes written to the [transaction spill](/configuration#transaction-spill) while a streamed (large) transaction is buffered before commit. A sustained rate means a large transaction is currently streaming in. |
 | `wallaby.spill.flushes` | Counter | `wallaby.slot` | Spill buffer flushes (binary `COPY` batches into `wallaby.stream_buffer`) by the default database spill backend; the source-database write I/O the spill costs. Not emitted by the disk or custom backends. |
 | `wallaby.dependent.synthetic` | Counter | `wallaby.table` | Synthetic parent changes emitted inline by dependent-table fan-out (a wide fan-out's offloaded tail is counted by the `backfill.*` metrics instead). |
 | `wallaby.changes.reselected` | Counter | `wallaby.table`, `wallaby.reselect.outcome` | Changes [healed by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect) after an unavailable (unchanged TOAST) value, by outcome (`healed`/`row_gone`). |
@@ -38,9 +38,9 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.sink.delivery.duration` | Histogram (s) | `wallaby.sink`, `wallaby.delivery.outcome` | Duration of a single sink delivery attempt (its count by outcome gives attempts and retries). |
 | `wallaby.sink.records.delivered` | Counter | `wallaby.sink` | Records accepted by a sink. |
 | `wallaby.sink.delivery.failures` | Counter | `wallaby.sink`, `wallaby.delivery.outcome` | Failed deliveries (`retryable`/`permanent`). |
-| `wallaby.sink.delivery.lag` | ObservableGauge (s) | `wallaby.sink` | Seconds since each sink last accepted a batch. Climbs while a sink is stuck retrying (or the pipeline is halted), so alert on it per sink. Absent until a sink's first delivery. |
+| `wallaby.sink.delivery.lag` | ObservableGauge (s) | `wallaby.sink` | Seconds since each sink last accepted a batch. Rises while a sink is stuck retrying (or the pipeline is halted), so alert on it per sink. Absent until a sink's first delivery. |
 | `wallaby.fanout.queue.depth` | ObservableGauge | - | Scoped fan-out jobs currently due (`Requested`/`InProgress`), sampled once per drain pass on the leader. A persistently growing depth means fan-out is falling behind its triggers. |
-| `wallaby.slot.retained_wal` | ObservableGauge (By) | `wallaby.slot` | WAL bytes the server retains for the slot (its `restart_lsn` to the current write position), sampled every [`SlotLagSampleInterval`](/configuration) on the leader. Stays small on a healthy slot (the [idle heartbeat](/how-it-works#idle-slots-and-wal-retention) keeps it advancing); sustained growth means acknowledgements have stalled and the slot is heading toward `max_slot_wal_keep_size` invalidation, so alert well below that limit. Absent until the leader's first sample. |
+| `wallaby.slot.retained_wal` | ObservableGauge (By) | `wallaby.slot` | WAL bytes the server retains for the slot (its `restart_lsn` to the current write position), sampled every [`SlotLagSampleInterval`](/configuration) on the leader. Stays small on a healthy slot (the [idle heartbeat](/how-it-works#idle-slots-and-wal-retention) keeps it advancing); sustained growth means acknowledgements have stalled and the slot will be invalidated when it reaches `max_slot_wal_keep_size`, so alert well below that limit. Absent until the leader's first sample. |
 | `wallaby.backfill.rows` | Counter | `wallaby.table` | Rows copied during backfill. |
 | `wallaby.backfill.active` | UpDownCounter | - | Tables currently being backfilled. |
 | `wallaby.backfill.chunk.duration` | Histogram (s) | `wallaby.table` | Time to read and emit one backfill chunk. |
@@ -111,7 +111,7 @@ A backfill run gets its own `backfill` root span covering the run end-to-end, fr
 until the last chunk's delivery is acknowledged. Each chunk is delivered *inside* a slot commit, so its
 `backfill.chunk` span appears in that transaction's trace and carries a **span link** back to the
 `backfill` root. From a slow backfill you can jump to the commits that delivered its chunks, and from
-an odd-looking transaction you can jump to the backfill run it was carrying. A `backfill` span that
+an unexpected transaction you can jump to the backfill run it was carrying. A `backfill` span that
 stays open far longer than its chunks take to read means the run is waiting on the pipeline to
 reach its watermarks (for example, a sink retrying).
 
@@ -125,5 +125,5 @@ Metric attributes are deliberately low-cardinality: `wallaby.slot`, `wallaby.sin
 `wallaby.reselect.outcome` (`healed`/`row_gone`).
 
 Per-row values such as tenant/scope keys, document ids, and per-tenant destinations are **never** used as
-metric attributes as they would explode cardinality. `wallaby.destination` appears only as a **span**
+metric attributes as they would make cardinality unbounded. `wallaby.destination` appears only as a **span**
 attribute, where sampling keeps the cost bounded.

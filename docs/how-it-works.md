@@ -32,7 +32,7 @@ The replication slot is the only source of live changes, and a slot can be destr
 A freshly created slot only streams from its creation point forward, so everything between the last applied
 change and that point would be silently missed.
 
-Wallaby closes that hole with the checkpoint it maintains on the slot's `wallaby.slot_registry` row alongside acknowledgements
+Wallaby detects this using the checkpoint it maintains on the slot's `wallaby.slot_registry` row alongside acknowledgements
 (throttled to one write per [`CheckpointSaveInterval`](/configuration)). On leadership start, if the
 checkpoint is **behind the slot's consistent point**, the slot must have been recreated after that
 checkpoint was written. If so, Wallaby logs an error naming the missed LSN range and automatically marks every
@@ -41,8 +41,8 @@ is detected the same way, it is dropped and recreated, then repaired via the sam
 history** is caught too: a checkpoint *ahead* of a just-recreated slot's consistent point is impossible
 in a continuous history (the checkpoint predates the drop, and any WAL since puts the new slot above
 it), so it can only mean the cluster was rebuilt (a restore, or a blue/green-style upgrade) and the
-repair fires rather than misreading the stale LSN as continuity. Duplicates from
-the re-snapshot are absorbed by the idempotent upsert-by-id sink contract. The re-backfill is
+repair runs rather than misreading the stale LSN as continuity. Duplicates from
+the re-snapshot are harmless because sinks upsert by id. The re-backfill is
 upsert-only, so deletes (and truncates) that happened inside the missed range are not converged —
 removing those stale documents needs a destination purge. Enable
 [`PurgeOnSlotGapRepair`](/configuration) to have the repair
@@ -57,7 +57,7 @@ Under `REPLICA IDENTITY DEFAULT`, an `UPDATE` that leaves a TOASTed column (larg
 omits its value from the WAL record, and there is no old tuple to fall back to. The value was never on
 the wire, so the change cannot be materialized faithfully — and because replica identity only affects
 records written *after* an `ALTER TABLE ... REPLICA IDENTITY FULL`, a change written before the flip
-stays incomplete forever, wedging the pipeline on a change it can never deliver.
+stays incomplete forever, halting the pipeline on a change it can never deliver.
 
 Wallaby heals this by **reselect** (enabled by default via
 [`ReselectUnavailableValues`](/configuration)): when materialization reports an unavailable value, the
@@ -76,7 +76,7 @@ Two properties to be aware of:
   sinks converge to current state — the same contract [backfill](/backfill) already relies on.
 - **A vanished row's change is dropped.** If the re-read finds no row, the row was deleted after this
   change committed; the `DELETE` necessarily follows later in the stream and removes the document, so
-  the incomplete change is logged and skipped rather than wedging the pipeline.
+  the incomplete change is logged and skipped rather than halting the pipeline.
 
 A failing re-read (e.g. the database is unreachable) halts the pipeline exactly like any other fault:
 nothing is acknowledged and the transaction re-streams, preserving at-least-once delivery. Deletes
@@ -97,7 +97,7 @@ The leader solves this with a **heartbeat**. Whenever no transaction has been ac
 (`pg_logical_emit_message`) on a normal connection. The message flows through the replication stream
 as an empty committed transaction and is acknowledged through the ordinary delivery path, advancing
 `confirmed_flush_lsn` (and the checkpoint) with no tables, DDL, or extra grants involved. Heartbeats
-are suppressed while real changes are beingn processed, so a busy system never emits them.
+are suppressed while real changes are being processed, so a busy system never emits them.
 
 ::: tip
 `pg_logical_emit_message` is executable by any role by default. A hardened database that revokes
@@ -110,7 +110,7 @@ default function `EXECUTE` privileges needs to re-grant it to Wallaby's role.
 When one arrives, Wallaby logs a warning naming the truncated table(s) and continues streaming. To converge, request a
 [backfill with `purge: true`](/backfill#purging-before-a-backfill) (if supported) for the affected tables.
 
-One blind spot: a `TRUNCATE` executed **directly on a leaf partition** of a
+One case is not detected: a `TRUNCATE` executed **directly on a leaf partition** of a
 partitioned table is not replicated at all when publishing via the partition
 root, so Wallaby cannot even warn. Truncating the root warns as usual.
 
@@ -124,7 +124,7 @@ under the root name. If you manage the publication yourself (`ManagePublicationT
 must have the parameter set, because leaf-named changes would match no
 mapping and be silently dropped.
 
-Some quirks still remain:
+Some limitations remain:
 
 - **Replica identity does not propagate from the root.** For mappings that need
   `REPLICA IDENTITY FULL`, every leaf must be set to FULL individually, including partitions created

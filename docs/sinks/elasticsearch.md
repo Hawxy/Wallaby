@@ -81,7 +81,7 @@ Don't pass a quantized vector as `byte[]` - byte arrays serialize as base64 stri
 Elasticsearch can also embed for you: map the field as
 [`semantic_text`](https://www.elastic.co/docs/solutions/search/semantic-search/semantic-search-semantic-text)
 (backed by an inference endpoint) and sync plain text - the cluster chunks and embeds at index
-time, with no vectors in your pipeline at all. Weigh the prerequisites and cost profile first: the
+time, with no vectors in your pipeline at all. Two things to check first: the
 inference API needs an appropriate Elastic subscription (and the default ELSER endpoint needs ML
 nodes), and inference runs on every indexed document - live changes embed incrementally, but a
 [backfill](/backfill) re-runs inference over the whole corpus. See [RAG & Embeddings](/rag).
