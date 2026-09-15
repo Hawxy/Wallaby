@@ -246,10 +246,6 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
             await Task.WhenAll(reports);
             return DeliveryResult.Success;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (KafkaException ex)
         {
             await ObserveAsync(reports);

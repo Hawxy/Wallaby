@@ -79,7 +79,14 @@ public interface ISink
     /// <summary>The unique registration name of this sink (matches mappings' target name).</summary>
     string Name { get; }
 
-    /// <summary>Deliver a batch to the destination, classifying the outcome.</summary>
+    /// <summary>
+    /// Deliver a batch to the destination, classifying the outcome: <see cref="DeliveryResult.Retry"/> for a
+    /// transient failure, <see cref="DeliveryResult.Permanent"/> for a rejection. Throw
+    /// <see cref="WallabyConfigurationException"/> for a configuration error; any other exception is treated
+    /// as a permanent failure. Cancellation of <paramref name="ct"/> propagates, and a retryable result
+    /// returned while it is cancelled is treated as cancellation, so a classifying catch-all needs no
+    /// cancellation guard.
+    /// </summary>
     Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct);
 }
 

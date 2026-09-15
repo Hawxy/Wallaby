@@ -147,13 +147,15 @@ public class ClassificationTests
     }
 
     [Test]
-    public async Task Cancellation_is_rethrown_not_classified()
+    public async Task Cancellation_classifies_as_retryable_for_the_dispatcher_to_surface()
     {
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
         var sink = Sink(new StubHandler());
 
-        await Should.ThrowAsync<OperationCanceledException>(
-            () => sink.DeliverAsync(Batch(Upsert("1")), cts.Token));
+        // The dispatcher turns a retryable result under a cancelled token into cancellation.
+        var result = await sink.DeliverAsync(Batch(Upsert("1")), cts.Token);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
     }
 }

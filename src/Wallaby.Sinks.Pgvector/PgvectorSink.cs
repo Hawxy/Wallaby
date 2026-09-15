@@ -66,10 +66,6 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
             }
             return DeliveryResult.Success;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (PermanentDeliveryException ex)
         {
             return DeliveryResult.Permanent(ex.Message, ex.InnerException);
@@ -153,8 +149,8 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
             DeliveryResult.Permanent($"Postgres rejected the delivery for sink '{Name}': {pg.MessageText}", pg),
         NpgsqlException or TimeoutException or System.IO.IOException or System.Net.Sockets.SocketException =>
             DeliveryResult.Retry($"Transient database failure for sink '{Name}': {ex.Message}", ex),
-        // A cancellation not requested by the caller is an internal timeout (e.g. inside the embedding
-        // generator's HTTP client), classified like the other sinks do.
+        // An internal timeout (e.g. inside the embedding generator's HTTP client); the caller's own
+        // cancellation is surfaced by the dispatcher from this retryable result.
         OperationCanceledException =>
             DeliveryResult.Retry($"Delivery timed out for sink '{Name}': {ex.Message}", ex),
         _ => DeliveryResult.Permanent($"Delivery failed for sink '{Name}': {ex.Message}", ex),

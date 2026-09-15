@@ -248,10 +248,6 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
             return DeliveryResult.Success;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (MeilisearchDocumentValidationException ex)
         {
             // A configured attribute is absent from the document — a configuration/transform bug. Retrying

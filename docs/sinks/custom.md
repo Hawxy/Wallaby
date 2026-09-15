@@ -47,6 +47,11 @@ Retryable failures are retried with exponential backoff and jitter. A permanent 
 retries) halts the pipeline; the batch is retried after the leader session restarts (with its own backoff),
 so a batch is never silently dropped.
 
+Throw `WallabyConfigurationException` for a configuration error (for example a record with no resolvable
+destination); any other exception thrown from `DeliverAsync` is treated as a permanent failure. Cancellation
+of `ct` propagates as-is, and a retryable result returned while `ct` is cancelled is treated as cancellation,
+so a classifying catch-all needs no cancellation guard.
+
 ## Idempotency & ordering
 
 Delivery is **at-least-once**: the replication slot only advances after a batch is durably delivered, so a

@@ -166,6 +166,29 @@ public class SinkDispatcherTelemetryTests
     }
 
     [Test]
+    public async Task A_thrown_exception_records_a_permanent_attempt_and_marks_the_span_as_error()
+    {
+        var instr = new WallabyInstrumentation();
+        using var duration = new MetricCollector<double>(instr.Meter, "wallaby.sink.delivery.duration");
+        using var activities = new ActivityCapture(instr);
+
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => throw new InvalidOperationException("kaboom")),
+        };
+
+        await Should.ThrowAsync<SinkDeliveryException>(
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance, instrumentation: instr).DispatchAsync(OneRecord(), CancellationToken.None));
+
+        var attempts = duration.GetMeasurementSnapshot();
+        attempts.Count.ShouldBe(1);
+        attempts[0].Tags.GetValueOrDefault("wallaby.delivery.outcome").ShouldBe("permanent");
+        var captured = activities.Last("sink.deliver");
+        captured.ShouldNotBeNull();
+        captured!.Status.ShouldBe(ActivityStatusCode.Error);
+    }
+
+    [Test]
     public async Task Permanent_failure_records_a_failure_and_marks_the_span_as_error()
     {
         var instr = new WallabyInstrumentation();

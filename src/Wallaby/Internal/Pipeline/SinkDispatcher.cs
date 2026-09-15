@@ -27,8 +27,8 @@ internal sealed class SinkDeliveryException(string sinkName, string error, Excep
 /// Groups routed documents by sink (preserving commit order) and delivers each group as a
 /// <see cref="SinkBatch"/>, retrying retryable failures with exponential backoff. Sinks are independent,
 /// so their batches are delivered concurrently; per-sink ordering is preserved (one batch per sink, records
-/// in commit order). A permanent failure (or exhausted retries) on any sink halts the pipeline, after
-/// every in-flight delivery has settled, so no batch is abandoned mid-write.
+/// in commit order). A permanent failure (a permanent result, a thrown exception, or exhausted retries) on
+/// any sink halts the pipeline, after every in-flight delivery has settled, so no batch is abandoned mid-write.
 /// </summary>
 internal sealed class SinkDispatcher
 {
@@ -114,7 +114,21 @@ internal sealed class SinkDispatcher
             {
                 var attempt = ++state.Attempts.Value;
                 var attemptStart = WallabyInstrumentation.StartTimer();
-                var result = await state.Sink.DeliverAsync(state.SinkBatch, token);
+                DeliveryResult result;
+                try
+                {
+                    result = await state.Sink.DeliverAsync(state.SinkBatch, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // A thrown exception is a permanent failure; a configuration error keeps its own message.
+                    result = DeliveryResult.Permanent(
+                        ex is WallabyConfigurationException ? ex.Message : $"{ex.GetType().Name}: {ex.Message}", ex);
+                }
                 var name = state.SinkBatch.SinkName;
                 var outcome = result.Status switch
                 {
@@ -142,6 +156,12 @@ internal sealed class SinkDispatcher
                             result.Exception);
                 }
             }, (Sink: sink, SinkBatch: batch, Instr: _instr, Status: _status, Activity: activity, Attempts: new StrongBox<int>()), ct);
+        }
+        catch (SinkRetryableException) when (ct.IsCancellationRequested)
+        {
+            // A retryable result under a cancelled token is the cancellation surfacing through the sink's
+            // classifier (Polly declines the retry, so the callback's exception lands here).
+            throw new OperationCanceledException(ct);
         }
         catch (Exception ex) when (ex is SinkRetryableException or SinkDeliveryException)
         {
