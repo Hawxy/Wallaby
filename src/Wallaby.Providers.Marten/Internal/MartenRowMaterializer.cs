@@ -67,7 +67,7 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         };
         if (plan.Conjoined)
         {
-            record["TenantId"] = ReadKeyValue(plan, change.NewValues, plan.TenantColumnName, typeof(string));
+            record[MartenTablePlan.TenantIdPropertyName] = ReadKeyValue(plan, change.NewValues, plan.TenantColumnName, typeof(string));
         }
         if (plan.SoftDeleted)
         {
@@ -92,7 +92,7 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
         };
         if (plan.Conjoined)
         {
-            record["TenantId"] = ReadKeyValue(plan, values, plan.TenantColumnName, typeof(string));
+            record[MartenTablePlan.TenantIdPropertyName] = ReadKeyValue(plan, values, plan.TenantColumnName, typeof(string));
         }
         if (plan.SoftDeleted)
         {

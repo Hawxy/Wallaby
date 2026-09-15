@@ -202,12 +202,13 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
                     $"Record {record.DocumentId} has no destination and no DefaultTopic is configured for sink '{Name}'.");
             }
 
+            var idempotencyKey = KafkaMessageWriter.IdempotencyKey(record);
             byte[]? value;
             try
             {
                 value = record.IsDeletion
                     ? null // Tombstone: compaction removes the document; headers still carry its context.
-                    : KafkaMessageWriter.WriteValue(record, _options.Annotations, _options.SerializerOptions);
+                    : KafkaMessageWriter.WriteValue(record, idempotencyKey, _options.Annotations, _options.SerializerOptions);
             }
             catch (Exception ex)
             {
@@ -221,7 +222,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
                 Topic = topic,
                 Key = record.DocumentId,
                 Value = value!, // null-forgiving: a tombstone genuinely carries a null value
-                Headers = KafkaMessageWriter.BuildHeaders(record),
+                Headers = KafkaMessageWriter.BuildHeaders(record, idempotencyKey),
             };
         }
 

@@ -204,16 +204,17 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             var info = await index.DeleteAllDocumentsAsync(ct);
             await WaitAsync(index, info, ct);
         }
-        // The absent index surfaces from WaitAsync when the delete-all enqueues, or synchronously
-        // when the request itself 404s.
-        catch (MeilisearchTaskFailedException ex) when (ex.Code == "index_not_found")
+        catch (Exception ex) when (IsIndexNotFound(ex))
         {
             // Nothing to purge; InitializeAsync creates configured indexes before the scheduler runs.
         }
-        catch (MeilisearchApiError ex) when (ex.Code == "index_not_found")
-        {
-        }
     }
+
+    // The absent index surfaces from WaitAsync (as a failed task) when the request enqueues, or
+    // synchronously (as an API error) when the request itself 404s.
+    private static bool IsIndexNotFound(Exception ex)
+        => ex is MeilisearchTaskFailedException { Code: "index_not_found" }
+            or MeilisearchApiError { Code: "index_not_found" };
 
     private static async Task<bool> IndexExistsAsync(MeilisearchClient client, string name, CancellationToken ct)
     {
@@ -235,24 +236,15 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         {
             var client = CreateClient();
             var groups = GroupByIndex(batch.Records);
-            if (groups.Count <= 1)
+
+            // Index-level operations are independent; fan out across indexes in parallel.
+            // Within each index we still preserve the upsert-before-delete order.
+            var tasks = new Task[groups.Count];
+            for (var i = 0; i < groups.Count; i++)
             {
-                foreach (var group in groups)
-                {
-                    await DispatchGroupAsync(client, group, ct);
-                }
+                tasks[i] = DispatchGroupAsync(client, groups[i], ct);
             }
-            else
-            {
-                // Index-level operations are independent; fan out across indexes in parallel.
-                // Within each index we still preserve the upsert-before-delete order.
-                var tasks = new Task[groups.Count];
-                for (var i = 0; i < groups.Count; i++)
-                {
-                    tasks[i] = DispatchGroupAsync(client, groups[i], ct);
-                }
-                await Task.WhenAll(tasks);
-            }
+            await Task.WhenAll(tasks);
 
             return DeliveryResult.Success;
         }
@@ -313,13 +305,8 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             }
             // Deletes don't auto-create the index (upserts do), so a delete-only batch to an index that
             // was never written has nothing to remove. Retrying can never create it; treating this as a
-            // failure would loop the whole batch forever. The 404 can surface synchronously from the
-            // request or asynchronously from the task, hence both catches.
-            catch (MeilisearchTaskFailedException ex) when (ex.Code == "index_not_found")
-            {
-                break;
-            }
-            catch (MeilisearchApiError ex) when (ex.Code == "index_not_found")
+            // failure would loop the whole batch forever.
+            catch (Exception ex) when (IsIndexNotFound(ex))
             {
                 break;
             }

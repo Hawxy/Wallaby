@@ -90,7 +90,7 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
         var tenant = conjoined
             ? new CapturedColumn
             {
-                PropertyName = "TenantId",
+                PropertyName = MartenTablePlan.TenantIdPropertyName,
                 ColumnName = mapping.Metadata.TenantId.Name,
                 ClrType = typeof(string),
                 IsPrimaryKey = true,

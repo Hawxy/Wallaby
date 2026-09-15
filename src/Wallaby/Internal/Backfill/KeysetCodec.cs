@@ -20,33 +20,7 @@ internal static class KeysetCodec
 
     /// <summary>Serialize a PK cursor and the column names it indexes, or null when the cursor is null.</summary>
     public static string? SerializeCursor(object?[]? values, IReadOnlyList<string> pkColumns)
-    {
-        if (values is null)
-        {
-            return null;
-        }
-
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteNumber("v"u8, CursorVersion);
-            writer.WriteStartArray("pk"u8);
-            foreach (var column in pkColumns)
-            {
-                writer.WriteStringValue(column);
-            }
-            writer.WriteEndArray();
-            writer.WriteStartArray("cur"u8);
-            foreach (var value in values)
-            {
-                WriteValue(writer, value);
-            }
-            writer.WriteEndArray();
-            writer.WriteEndObject();
-        }
-        return Encoding.UTF8.GetString(buffer.WrittenSpan);
-    }
+        => values is null ? null : WriteEnvelope(batch: null, values, pkColumns);
 
     /// <summary>
     /// Deserialize a PK cursor, coercing each element to the matching target type. Returns false when the
@@ -57,42 +31,15 @@ internal static class KeysetCodec
     public static bool TryDeserializeCursor(
         string? json, IReadOnlyList<string> pkColumns, IReadOnlyList<Type> targets, out object?[]? cursor)
     {
-        cursor = null;
         if (string.IsNullOrEmpty(json))
         {
+            cursor = null;
             return true;
         }
 
-        try
-        {
-            var envelope = JsonSerializer.Deserialize(json, KeysetJsonContext.Default.CursorEnvelope);
-            if (envelope is null || envelope.V != CursorVersion || envelope.Pk is null || envelope.Cur is null ||
-                envelope.Pk.Length != pkColumns.Count || envelope.Cur.Length != targets.Count)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < pkColumns.Count; i++)
-            {
-                if (!string.Equals(envelope.Pk[i], pkColumns[i], StringComparison.Ordinal))
-                {
-                    return false;
-                }
-            }
-
-            var row = new object?[envelope.Cur.Length];
-            for (var i = 0; i < row.Length; i++)
-            {
-                row[i] = ElementToClr(envelope.Cur[i], targets[i]);
-            }
-            cursor = row;
-            return true;
-        }
-        catch (Exception)
-        {
-            // Unparseable values make the cursor as unusable as malformed JSON; the caller rescans.
-            return false;
-        }
+        // A whole-table cursor always carries values; an envelope with a null "cur" is a scoped
+        // start-of-batch marker and is rejected here.
+        return TryDeserializeScopedCursor(json, pkColumns, targets, out _, out cursor) && cursor is not null;
     }
 
     /// <summary>
@@ -101,13 +48,19 @@ internal static class KeysetCodec
     /// of batch <paramref name="batch"/>"), so a crash between batches resumes at the right batch.
     /// </summary>
     public static string SerializeScopedCursor(int batch, object?[]? values, IReadOnlyList<string> pkColumns)
+        => WriteEnvelope(batch, values, pkColumns);
+
+    private static string WriteEnvelope(int? batch, object?[]? values, IReadOnlyList<string> pkColumns)
     {
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer))
         {
             writer.WriteStartObject();
             writer.WriteNumber("v"u8, CursorVersion);
-            writer.WriteNumber("b"u8, batch);
+            if (batch is { } b)
+            {
+                writer.WriteNumber("b"u8, b);
+            }
             writer.WriteStartArray("pk"u8);
             foreach (var column in pkColumns)
             {

@@ -30,9 +30,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     public WallabyControlClient(NpgsqlDataSource dataSource, ILogger<WallabyControlClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
-        _dataSource = dataSource is NpgsqlMultiHostDataSource multiHost
-            ? multiHost.WithTargetSession(TargetSessionAttributes.Primary)
-            : dataSource;
+        _dataSource = TargetPrimary(dataSource);
         _logger = logger ?? NullLogger<WallabyControlClient>.Instance;
     }
 
@@ -44,11 +42,15 @@ public sealed class WallabyControlClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _ownedDataSource = NpgsqlDataSource.Create(connectionString);
-        _dataSource = _ownedDataSource is NpgsqlMultiHostDataSource multiHost
-            ? multiHost.WithTargetSession(TargetSessionAttributes.Primary)
-            : _ownedDataSource;
+        _dataSource = TargetPrimary(_ownedDataSource);
         _logger = logger ?? NullLogger<WallabyControlClient>.Instance;
     }
+
+    // Every control operation writes, so a multi-host data source is pinned to the primary.
+    private static NpgsqlDataSource TargetPrimary(NpgsqlDataSource dataSource)
+        => dataSource is NpgsqlMultiHostDataSource multiHost
+            ? multiHost.WithTargetSession(TargetSessionAttributes.Primary)
+            : dataSource;
 
     /// <summary>
     /// Suspend the Wallaby installation: persist the request, signal any running host, and (by default)
@@ -358,7 +360,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
         var start = Stopwatch.GetTimestamp();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
-        var state = await GetStateAsync(ct);
+        WallabyControlState? state = null;
         try
         {
             while (true)
@@ -381,6 +383,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
         {
+            // A timeout before the first poll completed still reports a state (read outside the deadline).
+            state ??= await GetStateAsync(ct);
             throw new WallabyControlTimeoutException(timeoutMessage(state), state);
         }
     }

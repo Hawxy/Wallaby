@@ -18,7 +18,7 @@ public class MessageWriterTests
             ["nested"] = new Dictionary<string, object?> { ["x"] = 1 },
         }, metadata: Meta(commitIdx: 3, timestamp: DateTimeOffset.UnixEpoch));
 
-        using var envelope = JsonDocument.Parse(KafkaMessageWriter.WriteValue(record, annotations: null, serializerOptions: null));
+        using var envelope = JsonDocument.Parse(KafkaMessageWriter.WriteValue(record, KafkaMessageWriter.IdempotencyKey(record), annotations: null, serializerOptions: null));
 
         var root = envelope.RootElement;
         root.GetProperty("operation").GetString().ShouldBe("upsert");
@@ -42,8 +42,9 @@ public class MessageWriterTests
     [Test]
     public void Annotations_are_echoed()
     {
+        var record = Upsert("1", new Dictionary<string, object?> { ["name"] = "a" });
         var value = KafkaMessageWriter.WriteValue(
-            Upsert("1", new Dictionary<string, object?> { ["name"] = "a" }),
+            record, KafkaMessageWriter.IdempotencyKey(record),
             annotations: new Dictionary<string, string> { ["env"] = "prod" },
             serializerOptions: null);
 
@@ -81,7 +82,8 @@ public class MessageWriterTests
     [Test]
     public void Headers_carry_the_tombstones_only_context()
     {
-        var headers = KafkaMessageWriter.BuildHeaders(Delete("42"));
+        var tombstone = Delete("42");
+        var headers = KafkaMessageWriter.BuildHeaders(tombstone, KafkaMessageWriter.IdempotencyKey(tombstone));
 
         Header(headers, KafkaMessageWriter.OperationHeader).ShouldBe("delete");
         Header(headers, KafkaMessageWriter.IdempotencyKeyHeader).ShouldBe("12345:0:products:42");

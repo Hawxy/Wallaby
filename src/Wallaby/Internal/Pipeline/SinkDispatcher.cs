@@ -72,10 +72,10 @@ internal sealed class SinkDispatcher
 
     public async Task DispatchAsync(IReadOnlyList<RoutedDocument> routed, CancellationToken ct)
     {
-        var groups = GroupBySinkPreservingOrder(routed);
+        var groups = OrderedGrouping.GroupPreservingOrder(routed, r => r.SinkName, r => r.Record);
         if (groups.Count == 1)
         {
-            await DeliverGroupAsync(groups[0].SinkName, groups[0].Records, ct);
+            await DeliverGroupAsync(groups[0].Key, groups[0].Items, ct);
             return;
         }
 
@@ -85,7 +85,7 @@ internal sealed class SinkDispatcher
         var tasks = new Task[groups.Count];
         for (var i = 0; i < groups.Count; i++)
         {
-            tasks[i] = DeliverGroupAsync(groups[i].SinkName, groups[i].Records, ct);
+            tasks[i] = DeliverGroupAsync(groups[i].Key, groups[i].Items, ct);
         }
         await Task.WhenAll(tasks);
     }
@@ -152,59 +152,30 @@ internal sealed class SinkDispatcher
     }
 
     // Distinct destinations across the batch, in first-seen order; a per-sink batch can mix
-    // destinations when a scoped mapping resolves them per scope key.
+    // destinations when a scoped mapping resolves them per scope key. Null when no record names one.
     private static string? DescribeDestinations(List<SinkRecord> records)
+        => DistinctInOrder(records, r => r.Destination);
+
+    // Distinct source tables of a failed batch, for the halt diagnostics.
+    private static string DescribeTables(SinkBatch batch)
+        => DistinctInOrder(batch.Records, r => r.Metadata.QualifiedTableName) ?? "(none)";
+
+    private static string? DistinctInOrder(IReadOnlyList<SinkRecord> records, Func<SinkRecord, string?> select)
     {
-        List<string>? destinations = null;
+        List<string>? values = null;
         foreach (var record in records)
         {
-            if (record.Destination is { } destination)
+            if (select(record) is { } value)
             {
-                destinations ??= [];
-                if (!destinations.Contains(destination))
+                values ??= [];
+                if (!values.Contains(value))
                 {
-                    destinations.Add(destination);
+                    values.Add(value);
                 }
             }
         }
 
-        return destinations is null ? null : string.Join(", ", destinations);
-    }
-
-    // Distinct source tables of a failed batch, for the halt diagnostics.
-    private static string DescribeTables(SinkBatch batch)
-    {
-        var tables = new List<string>();
-        foreach (var record in batch.Records)
-        {
-            var table = record.Metadata.QualifiedTableName;
-            if (!tables.Contains(table))
-            {
-                tables.Add(table);
-            }
-        }
-
-        return tables.Count == 0 ? "(none)" : string.Join(", ", tables);
-    }
-
-    private static List<(string SinkName, List<SinkRecord> Records)> GroupBySinkPreservingOrder(
-        IReadOnlyList<RoutedDocument> routed)
-    {
-        var groups = new Dictionary<string, List<SinkRecord>>();
-        var order = new List<(string, List<SinkRecord>)>();
-
-        foreach (var item in routed)
-        {
-            if (!groups.TryGetValue(item.SinkName, out var list))
-            {
-                list = [];
-                groups[item.SinkName] = list;
-                order.Add((item.SinkName, list));
-            }
-            list.Add(item.Record);
-        }
-
-        return order;
+        return values is null ? null : string.Join(", ", values);
     }
 }
 

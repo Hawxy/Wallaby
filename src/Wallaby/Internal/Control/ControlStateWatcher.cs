@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Wallaby.Client.Internal;
+using Wallaby.Hosting;
 
 namespace Wallaby.Internal.Control;
 
@@ -15,17 +16,16 @@ namespace Wallaby.Internal.Control;
 internal sealed class ControlStateWatcher(
     PostgresControlStore store, bool widenedBaseline, TimeSpan pollInterval, ILogger logger)
 {
-    private volatile bool _suspendObserved;
-    private volatile bool _reconfigureObserved;
-
-    /// <summary>True when the session was cancelled because a suspension was observed.</summary>
-    public bool SuspendObserved => _suspendObserved;
+    // Written before the session cancellation that the reader awaits, so no volatile is needed.
+    private LeaderSessionOutcome? _observed;
 
     /// <summary>
-    /// True when the session was cancelled because the publication-widening flag changed; the next
-    /// leader term applies the new publication width via its normal reconcile.
+    /// Why the session was cancelled: <see cref="LeaderSessionOutcome.SuspendRequested"/> when a
+    /// suspension was observed, <see cref="LeaderSessionOutcome.Reconfigure"/> when the
+    /// publication-widening flag changed (the next leader term applies the new width via its normal
+    /// reconcile), null while neither has been seen.
     /// </summary>
-    public bool ReconfigureObserved => _reconfigureObserved;
+    public LeaderSessionOutcome? Observed => _observed;
 
     public async Task RunAsync(CancellationTokenSource sessionCts, CancellationToken ct)
     {
@@ -37,14 +37,14 @@ internal sealed class ControlStateWatcher(
                 var row = await store.ReadAsync(ct);
                 if (row is not null && row.State != ControlContract.StateRunning)
                 {
-                    _suspendObserved = true;
+                    _observed = LeaderSessionOutcome.SuspendRequested;
                     logger.SuspendObserved();
                     await sessionCts.CancelAsync();
                     return;
                 }
                 if ((row?.PublicationsWidened ?? false) != widenedBaseline)
                 {
-                    _reconfigureObserved = true;
+                    _observed = LeaderSessionOutcome.Reconfigure;
                     logger.WideningChangeObserved(row?.PublicationsWidened ?? false);
                     await sessionCts.CancelAsync();
                     return;

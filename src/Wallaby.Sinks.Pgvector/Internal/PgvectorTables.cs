@@ -103,6 +103,27 @@ internal sealed class PgvectorTables(string sinkName, NpgsqlDataSource dataSourc
     public async Task WriteAsync(
         string table, IReadOnlyList<PgvectorRow> rows, IReadOnlyList<string> deletes, CancellationToken ct)
     {
+        // A KeepStoredVector row normally exists (its stored hash matched) and takes the update arm
+        // leaving embedding and text_hash untouched - but only after re-verifying the hash and vector
+        // under the row lock, so a row changed between the hash read and this write (e.g. by a
+        // concurrent deliverer) is left intact rather than paired with a foreign vector. If the row
+        // vanished instead, the insert arm writes the hash with a null vector, which the hash read's
+        // embedding filter treats as absent, so the next delivery re-embeds. Both arms guard with
+        // IS DISTINCT FROM so an identical redelivery does not rewrite the tuple (no WAL or dead-tuple
+        // churn on re-backfills of unchanged rows). Two statement texts per table, so Npgsql's
+        // auto-prepare cache sees the same string for every row.
+        var insert = $"INSERT INTO {Qualified(table)} AS t (id, text_hash, embedding, document) " +
+                     "VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET ";
+        var keepVectorSql = insert +
+            "document = EXCLUDED.document, updated_at = now() " +
+            "WHERE t.text_hash = EXCLUDED.text_hash AND t.embedding IS NOT NULL " +
+            "AND t.document IS DISTINCT FROM EXCLUDED.document";
+        var replaceSql = insert +
+            "text_hash = EXCLUDED.text_hash, embedding = EXCLUDED.embedding, " +
+            "document = EXCLUDED.document, updated_at = now() " +
+            "WHERE (t.text_hash, t.embedding, t.document) IS DISTINCT FROM " +
+            "(EXCLUDED.text_hash, EXCLUDED.embedding, EXCLUDED.document)";
+
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
         foreach (var chunk in rows.Chunk(options.MaxRowsPerBatch))
@@ -110,25 +131,7 @@ internal sealed class PgvectorTables(string sinkName, NpgsqlDataSource dataSourc
             await using var writeBatch = new NpgsqlBatch(connection, transaction);
             foreach (var row in chunk)
             {
-                // A KeepStoredVector row normally exists (its stored hash matched) and takes the update
-                // arm leaving embedding and text_hash untouched - but only after re-verifying the hash
-                // and vector under the row lock, so a row changed between the hash read and this write
-                // (e.g. by a concurrent deliverer) is left intact rather than paired with a foreign
-                // vector. If the row vanished instead, the insert arm writes the hash with a null
-                // vector, which the hash read's embedding filter treats as absent, so the next delivery
-                // re-embeds. Both arms guard with IS DISTINCT FROM so an identical redelivery does not
-                // rewrite the tuple (no WAL or dead-tuple churn on re-backfills of unchanged rows).
-                var update = row.KeepStoredVector
-                    ? "document = EXCLUDED.document, updated_at = now() " +
-                      "WHERE t.text_hash = EXCLUDED.text_hash AND t.embedding IS NOT NULL " +
-                      "AND t.document IS DISTINCT FROM EXCLUDED.document"
-                    : "text_hash = EXCLUDED.text_hash, embedding = EXCLUDED.embedding, " +
-                      "document = EXCLUDED.document, updated_at = now() " +
-                      "WHERE (t.text_hash, t.embedding, t.document) IS DISTINCT FROM " +
-                      "(EXCLUDED.text_hash, EXCLUDED.embedding, EXCLUDED.document)";
-                var cmd = new NpgsqlBatchCommand(
-                    $"INSERT INTO {Qualified(table)} AS t (id, text_hash, embedding, document) " +
-                    $"VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET {update}");
+                var cmd = new NpgsqlBatchCommand(row.KeepStoredVector ? keepVectorSql : replaceSql);
                 cmd.Parameters.Add(new NpgsqlParameter { Value = row.Id });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (object?)row.Hash ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text });
                 // A Vector value infers the vector type via the plugin; a bare null is sent untyped and
