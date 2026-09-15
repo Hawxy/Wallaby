@@ -194,9 +194,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
     /// <inheritdoc />
     public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
     {
-        var indexName = request.Destination ?? _options.DefaultIndex
-            ?? throw new WallabyConfigurationException(
-                $"A purge for '{request.QualifiedTableName}' has no destination and no DefaultIndex is configured for sink '{Name}'.");
+        var indexName = SinkDestination.Resolve(request, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
 
         var index = CreateClient().Index(indexName);
         try
@@ -254,10 +252,6 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             // would never succeed, so fail permanently (the dispatcher halts the pipeline).
             return DeliveryResult.Permanent(ex.Message, ex);
         }
-        catch (WallabyConfigurationException ex)
-        {
-            return DeliveryResult.Permanent(ex.Message, ex);
-        }
         catch (MeilisearchTaskFailedException ex)
         {
             return ClassifyByCode(ex.Code, ex.Message, ex);
@@ -266,7 +260,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         {
             return ClassifyByCode(ex.Code, $"Meilisearch request failed ({ex.Code ?? "no code"}): {ex.Message}", ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not WallabyConfigurationException)
         {
             // Transport failures and anything without a Meilisearch error code are retryable.
             return DeliveryResult.Retry($"Meilisearch delivery failed: {ex.Message}", ex);
@@ -334,9 +328,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
         foreach (var record in records)
         {
-            var indexName = record.Destination ?? _options.DefaultIndex
-                ?? throw new WallabyConfigurationException(
-                    $"Record {record.DocumentId} has no destination and no DefaultIndex is configured for sink '{Name}'.");
+            var indexName = SinkDestination.Resolve(record, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
 
             if (!groups.TryGetValue(indexName, out var group))
             {

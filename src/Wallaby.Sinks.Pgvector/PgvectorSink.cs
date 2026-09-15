@@ -77,7 +77,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
                 ? DeliveryResult.Retry(reason, ex.InnerException)
                 : DeliveryResult.Permanent(reason, ex.InnerException);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not WallabyConfigurationException)
         {
             return Classify(ex);
         }
@@ -86,10 +86,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
     /// <inheritdoc />
     public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
     {
-        var table = request.Destination ?? _options.DefaultTable
-            ?? throw new WallabyConfigurationException(
-                $"Pgvector sink '{Name}' cannot purge for '{request.QualifiedTableName}': the mapping has no " +
-                "destination and the sink has no DefaultTable.");
+        var table = SinkDestination.Resolve(request, _options.DefaultTable, Name, nameof(_options.DefaultTable));
         _tables.RequireValidTable(table);
         await _tables.PurgeAsync(table, ct);
     }
@@ -130,10 +127,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
         var byTable = new Dictionary<string, Dictionary<string, SinkRecord>>(StringComparer.Ordinal);
         foreach (var record in records)
         {
-            var table = record.Destination ?? _options.DefaultTable
-                ?? throw new PermanentDeliveryException(
-                    $"A record for sink '{Name}' has no destination and the sink declares no DefaultTable. " +
-                    "Set ToDestination(...) on the mapping or DefaultTable on the sink.");
+            var table = SinkDestination.Resolve(record, _options.DefaultTable, Name, nameof(_options.DefaultTable));
             if (!byTable.TryGetValue(table, out var byId))
             {
                 byTable[table] = byId = new Dictionary<string, SinkRecord>(StringComparer.Ordinal);

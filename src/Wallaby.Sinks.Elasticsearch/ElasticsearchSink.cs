@@ -70,10 +70,9 @@ public sealed class ElasticsearchSink : ISink, IDisposable
             {
                 payload = BulkJson.Write(Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not WallabyConfigurationException)
             {
-                // A document value the bulk body can't encode (or a record with no resolvable index) is a
-                // transform/configuration bug; retrying would never succeed.
+                // A document value the bulk body can't encode is a transform bug; retrying would never succeed.
                 return DeliveryResult.Permanent($"Elasticsearch bulk serialization failed: {ex.Message}", ex);
             }
 

@@ -143,6 +143,10 @@ writer.WriteEndObject();
 
 The envelope shape around these pieces is yours to define.
 
+`SinkDestination.Resolve(record, sinkDefault, Name, "DefaultIndex")` is the destination fallback the
+built-in sinks share: the record's destination, else the sink's default, else a `WallabyConfigurationException`
+naming the option to set.
+
 ## The delegate sink
 
 For in-process handlers (tests, side-effects, quick integrations), you can skip the class and use a lambda:

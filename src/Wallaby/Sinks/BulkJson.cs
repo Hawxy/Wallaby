@@ -17,7 +17,7 @@ public static class BulkJson
     /// <summary>
     /// Write records <paramref name="offset"/>..<paramref name="offset"/>+<paramref name="count"/> as one
     /// bulk body. Each record's index is <see cref="SinkRecord.Destination"/>, falling back to
-    /// <paramref name="defaultIndex"/>.
+    /// <paramref name="defaultIndex"/> (see <see cref="SinkDestination"/>).
     /// </summary>
     public static byte[] Write(
         string sinkName,
@@ -33,9 +33,7 @@ public static class BulkJson
         for (var i = offset; i < offset + count; i++)
         {
             var record = records[i];
-            var index = record.Destination ?? defaultIndex
-                ?? throw new InvalidOperationException(
-                    $"Record {record.DocumentId} has no destination and no DefaultIndex is configured for sink '{sinkName}'.");
+            var index = SinkDestination.Resolve(record, defaultIndex, sinkName, "DefaultIndex");
 
             WriteAction(writer, buffer, record, index);
             if (!record.IsDeletion)

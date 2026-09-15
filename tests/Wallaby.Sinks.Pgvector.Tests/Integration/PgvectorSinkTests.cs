@@ -342,15 +342,14 @@ public class PgvectorSinkTests(PgvectorFixture pg)
     }
 
     [Test]
-    public async Task A_record_without_destination_or_default_table_fails_permanently()
+    public async Task A_record_without_destination_or_default_table_is_a_configuration_error()
     {
         await using var sink = new PgvectorSink("pgv", Options(UniqueTable(), o => o.DefaultTable = null));
 
-        var result = await sink.DeliverAsync(
-            Batch(Upsert("1", new WallabyDocument { ["name"] = "ab" }, destination: null)), CancellationToken.None);
+        var ex = await Should.ThrowAsync<WallabyConfigurationException>(() => sink.DeliverAsync(
+            Batch(Upsert("1", new WallabyDocument { ["name"] = "ab" }, destination: null)), CancellationToken.None));
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
-        result.Error!.ShouldContain("DefaultTable");
+        ex.Message.ShouldContain("DefaultTable");
     }
 
     [Test]

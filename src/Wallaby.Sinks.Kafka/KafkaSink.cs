@@ -195,12 +195,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         for (var i = 0; i < records.Count; i++)
         {
             var record = records[i];
-            var topic = record.Destination ?? _options.DefaultTopic;
-            if (topic is null)
-            {
-                return DeliveryResult.Permanent(
-                    $"Record {record.DocumentId} has no destination and no DefaultTopic is configured for sink '{Name}'.");
-            }
+            var topic = SinkDestination.Resolve(record, _options.DefaultTopic, Name, nameof(_options.DefaultTopic));
 
             var idempotencyKey = KafkaMessageWriter.IdempotencyKey(record);
             byte[]? value;

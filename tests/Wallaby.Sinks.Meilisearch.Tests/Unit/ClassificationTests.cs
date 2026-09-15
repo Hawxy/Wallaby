@@ -119,15 +119,15 @@ public class ClassificationTests
     }
 
     [Test]
-    public async Task Record_without_destination_or_default_index_fails_permanently()
+    public async Task Record_without_destination_or_default_index_is_a_configuration_error()
     {
         var stub = new StubHandler();
         var sink = Sink(stub); // no DefaultIndex configured
 
-        var result = await sink.DeliverAsync(Batch(Upsert("1", destination: null)), CancellationToken.None);
+        var ex = await Should.ThrowAsync<WallabyConfigurationException>(
+            () => sink.DeliverAsync(Batch(Upsert("1", destination: null)), CancellationToken.None));
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
-        result.Error!.ShouldContain("DefaultIndex");
+        ex.Message.ShouldContain("DefaultIndex");
         stub.Requests.ShouldBeEmpty(); // fails before any network call
     }
 
