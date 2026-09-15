@@ -195,6 +195,38 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
     }
 
     [Test]
+    public async Task Configured_embedder_applies_and_user_provided_vectors_index()
+    {
+        await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
+        var index = harness.Names.Named("products_vec");
+
+        // Embedders ride the same settings update the initializer already applies.
+        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        options.ConfigureIndex(index, s => s.Embedders = new Dictionary<string, Embedder>
+        {
+            ["default"] = new Embedder { Source = EmbedderSource.UserProvided, Dimensions = 3 },
+        });
+        harness.AddSink(TestMeilisearchSink.Create("meili", options))
+            .Project<Product>("meili", index, p => new WallabyDocument
+            {
+                ["name"] = p.Name,
+                ["_vectors"] = new Dictionary<string, object?> { ["default"] = new[] { 0.1f, 0.2f, 0.3f } },
+            });
+        await harness.SelfConfigureAsync();
+
+        var probe = new MeiliProbe(meili);
+        var categoryId = await harness.Db.AddCategoryAsync();
+        var id = await harness.Db.AddProductAsync(categoryId, "alpha");
+
+        // A rejected _vectors payload would fail the enqueue task and nothing would index.
+        await harness.RunUntilAsync(async () => await probe.NameAsync(index, id) == "alpha");
+
+        var embedders = await probe.EmbeddersAsync(index);
+        embedders.ShouldContainKey("default");
+        embedders["default"].Source.ShouldBe(EmbedderSource.UserProvided);
+    }
+
+    [Test]
     public async Task Declared_index_is_created_and_configured_on_start()
     {
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);

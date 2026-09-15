@@ -41,7 +41,7 @@ No admin endpoint or extra tooling, suspension is managed via your deployment pi
    ```
 
 2. **Run the engine upgrade.** The suspension state lives in a regular table, so it survives
-   `pg_upgrade` and the outage. Nodes ride out the downtime and stay suspended when the database
+   `pg_upgrade` and the outage. Nodes remain suspended through the downtime and after the database
    returns.
 
 3. **Deploy without the flag.** Remove `Suspend()` and deploy again. The flag-less nodes detect the
@@ -60,7 +60,7 @@ force, and a flag-less node only auto-resumes once that heartbeat has been quiet
 rollout simply **stays suspended** until the last flagged node is gone, then resumes exactly once,
 rather than the two sides flapping the slots (each flap forces a full re-backfill).
 
-The grace is also the dead time between the last flagged node stopping and the resume; lower
+The grace is also the delay between the last flagged node stopping and the resume; lower
 `Advanced.SuspensionAutoResumeGraceFloor` if your deploys are single-node and the wait matters.
 A flag-less node waiting out the grace will log that it is doing so.
 
@@ -84,7 +84,7 @@ var suspended = await control.SuspendAsync(new WallabySuspendOptions
 
 // ... run the engine upgrade ...
 
-// After the upgrade: nodes wake, recreate slots, and re-backfill. purge: true also empties each
+// After the upgrade: nodes resume, recreate slots, and re-backfill. purge: true also empties each
 // mapped destination first, so deletes committed during the window converge too (needs ISinkPurger).
 await control.ResumeAsync(purge: true);
 
@@ -161,7 +161,7 @@ SELECT pg_notify('wallaby_control', '');
   Not upgrading the engine? Don't suspend just for a blocked migration —
   [widen the publications](/operations/external-control#widening-publications-for-schema-migrations)
   instead: no capture gap, no re-backfill.
-- **Backfill requests** made while suspended stay persisted and are absorbed by the resume's full
+- **Backfill requests** made while suspended stay persisted and are covered by the resume's full
   re-backfill.
 - The suspension is **installation-wide**: one control row governs every node and every managed slot on
   that database.

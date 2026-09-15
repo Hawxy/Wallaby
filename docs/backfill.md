@@ -21,7 +21,8 @@ sink.Map<Product>()
 ```
 
 Each entity is versioned and backfilled independently, so reindexing one doesn't disturb others or the
-live stream.
+live stream. Version bumps are also how [embedding-model migrations](/rag#model-migrations) re-embed
+a corpus: encode the model in the version string and bump it with `purgeOnChange: true`.
 
 When an entity is mapped to **several sinks**, backfill state is still per table: bumping *any*
 mapping's version re-snapshots the table, and the snapshot flows through every sink mapped to it.
@@ -54,7 +55,7 @@ await backfill.RequestBackfillAsync<Product>(purge: true);
 ### Cancelling a queued request
 
 A request the leader hasn't served yet can be withdrawn with `CancelBackfillAsync`, which also clears
-any pending purge mark — the escape hatch for a mis-fired `purge: true`:
+any pending purge mark, so it is how you undo a mistaken `purge: true`:
 
 ```csharp
 var withdrew = await backfill.CancelBackfillAsync<Product>();
@@ -107,7 +108,7 @@ A purge runs before a fresh backfill when:
   enabling `PurgeOnSlotGapRepair` globally;
 - a **version change** triggers the re-backfill and the mapping opted in
   (`WithBackfillVersion("v4", purgeOnChange: true)`), so documents whose ids or shape changed don't
-  linger under old keys.
+  remain under old keys.
 
 Purging is an optional sink capability (`ISinkPurger`). The Meilisearch sink is the only sink that implements it right now.
 A sink without the capability, such as the Kafka

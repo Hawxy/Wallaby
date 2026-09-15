@@ -26,7 +26,7 @@ Deployments that run several nodes (leader + standbys, blue/green) can upgrade o
 - Migration steps are **additive** (new columns are nullable or carry a server-side `DEFAULT`, and
   columns are never renamed), so a not-yet-upgraded node keeps reading and writing correctly against an
   already-migrated schema.
-- The first upgraded node to win leadership applies the migration, the rest fast-path past it.
+- The first upgraded node to win leadership applies the migration, the rest skip it.
 - The remote [control client](/operations/external-control) tolerates schema drift in the same way: it
   performs no DDL and treats missing tables as benign.
 

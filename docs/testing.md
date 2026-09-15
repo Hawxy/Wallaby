@@ -12,13 +12,13 @@ on the documents that would have been delivered.
 dotnet add package Wallaby.Testing
 ```
 
-The package depends only on core Wallaby, so it carries no test-framework or host opinions - it works
+The package depends only on core Wallaby, so it has no test-framework or host dependency - it works
 with TUnit, xUnit or NUnit, and with `WebApplicationFactory`, `HostApplicationBuilder` or a plain
 `ServiceCollection`.
 
 ## The recipe
 
-An end-to-end CDC test has four moving parts, and the package provides a piece for each:
+An end-to-end CDC test has four parts, and the package provides a piece for each:
 
 1. A Postgres with **`wal_level = logical`** (see [Test database](#test-database) below).
 2. Your application's **real `AddWallaby` registration**, with the production sink swapped for a
@@ -71,7 +71,7 @@ you what actually arrived.
 
 ::: tip
 Delivery is **at-least-once**, so avoid asserting on record counts as a redelivered batch would make the
-test flaky. `LatestByDocumentId()` gives you the stable end-state view, which also pairs well with
+test flaky. `LatestByDocumentId()` gives you the stable end-state view, which also works well with
 snapshot testing tools like [Verify](https://github.com/VerifyTests/Verify).
 :::
 

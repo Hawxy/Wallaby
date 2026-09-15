@@ -89,7 +89,7 @@ warning when a purge is requested.
 
 ## Cleanup
 
-Registering a sink hands its lifetime to Wallaby. If your sink
+Registering a sink makes Wallaby responsible for its lifetime. If your sink
 holds resources (a client, a connection pool, a producer), implement `IAsyncDisposable` (or
 `IDisposable`):
 

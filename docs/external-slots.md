@@ -10,7 +10,7 @@ Fivetran running in **pgoutput** mode - that consumer needs its own publication 
 tables.
 
 `AddExternalSlot` lets Wallaby create and maintain those for you, so the slot is provisioned (and kept in
-sync) as part of your normal deployment instead of requiring seperate management. **Wallaby never consumes from an external slot**,
+sync) as part of your normal deployment instead of requiring separate management. **Wallaby never consumes from an external slot**,
 it just manages it for you.
 
 ## Install (Optional)

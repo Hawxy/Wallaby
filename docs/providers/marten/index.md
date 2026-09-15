@@ -133,8 +133,8 @@ disabled). If you're using soft deletes you should opt into the below rather tha
 
 ## Managed replica identity
 
-Since Marten already manages its own schema, Wallaby can hand it the replica-identity DDL too.
-Chain the schema feature onto your `AddMarten` registration:
+Since Marten already manages its own schema, Wallaby can add the replica-identity DDL to that
+management. Chain the schema feature onto your `AddMarten` registration:
 
 ```csharp
 builder.Services.AddMarten(options => { /* ... */ })

@@ -83,7 +83,7 @@ temporarily incomplete while the re-backfill runs). The purge request is persist
 (visible as `PurgeOnResume` in `GetStateAsync`), so it survives restarts and is honored by whichever
 node repairs the gap. It is scoped to that repair: if the next leader finds no gap to repair — the
 suspension was resumed before any slot was actually dropped — the request is discarded with a logged
-warning rather than left armed for a later, unrelated slot-loss repair. Use
+warning rather than left pending for a later, unrelated slot-loss repair. Use
 `RequestBackfillAsync(table, purge: true)` if destinations must still be purged in that case.
 
 Options on `WallabySuspendOptions`:
@@ -106,8 +106,8 @@ Only an explicit `ResumeAsync` ends it.
 
 Postgres refuses `ALTER TABLE ... ALTER COLUMN ... TYPE` (and `DROP COLUMN`) on any column pinned by a
 [publication column list](/configuration#publication-column-lists) or row filter. Suspension clears
-this, but at the cost of a capture outage and a full re-backfill, which is overkill when
-the operator just needs to run a migration. **Widening** is the lighter tool:
+this, but at the cost of a capture outage and a full re-backfill, which is more than a migration
+needs. **Widening** avoids both:
 
 ```csharp
 // Temporarily reconcile every managed publication to whole-table membership (no column lists).
@@ -124,7 +124,7 @@ re-backfill**.
 
 `RestorePublicationsAsync` sends a request for the host to restore the publication list.
 
-Semantics worth knowing:
+Semantics:
 
 - **While widened, deliberately excluded columns are published**: Data minimization via
   `Consumes`/`ConsumesAllExcept` is temporarily lifted at the server (client-side selection still

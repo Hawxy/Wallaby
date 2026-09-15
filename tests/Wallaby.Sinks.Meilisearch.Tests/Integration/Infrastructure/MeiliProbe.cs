@@ -57,6 +57,9 @@ public sealed class MeiliProbe(string host, string apiKey)
     /// <summary>The index's current settings.</summary>
     public Task<Settings> SettingsAsync(string index) => _client.Index(index).GetSettingsAsync();
 
+    /// <summary>The index's configured embedders (empty when none).</summary>
+    public Task<Dictionary<string, Embedder>> EmbeddersAsync(string index) => _client.Index(index).GetEmbeddersAsync();
+
     /// <summary>Delete the index and wait for the task to finish (used to prove a re-backfill repopulates it).</summary>
     public async Task DropAsync(string index)
     {

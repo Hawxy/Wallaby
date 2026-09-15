@@ -102,8 +102,8 @@ full surface.
 }
 ```
 
-A delete's value is **null** — a tombstone, so compaction removes the document. Its context travels in
-the headers, which every message carries:
+A delete's value is **null** (a tombstone), so compaction removes the document. Its metadata is carried
+in the headers, which every message has:
 
 | Header | Value |
 | --- | --- |
@@ -143,7 +143,7 @@ Failures are classified for the dispatcher:
 Add entries to `Topics` and the sink creates them on the leader before streaming begins (and again,
 idempotently, on every leadership takeover); topics that already exist are left untouched. Creation
 waits for partition leaders to be elected, so streaming never starts against a topic still propagating.
-For entity topics, `cleanup.policy=compact` is the natural fit: the latest message per document id is
+For entity topics, `cleanup.policy=compact` is the usual choice: the latest message per document id is
 the document's current state, and tombstones delete.
 
 Leave `Topics` empty when your platform pre-provisions topics or the broker has
@@ -152,7 +152,7 @@ Leave `Topics` empty when your platform pre-provisions topics or the broker has
 ## NativeAOT
 
 The envelope structure and common scalar document values (strings, numbers, booleans, `Guid`, date/time
-types, byte arrays, nested dictionaries, and sequences of these) are written without reflection. Any other
+types, byte arrays, nested dictionaries, `ReadOnlyMemory<float>` vectors, and sequences of these) are written without reflection. Any other
 value type is serialized through `SerializerOptions`; on trimmed/NativeAOT hosts, point it at a
 source-generated context covering the types your transforms emit:
 

@@ -17,7 +17,7 @@ dotnet add package Wallaby.Providers.EntityFrameworkCore
 
 ## Register
 
-Call `AddWallaby` to start and chain in your `DbContext` via `UseEntityFrameworkCore<TContext>()`. Wallaby will resolve your context regardless of if it's registered with `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
+Call `AddWallaby` to start and chain in your `DbContext` via `UseEntityFrameworkCore<TContext>()`. Wallaby will resolve your context whether it's registered with `AddDbContext<TContext>()` or `AddDbContextFactory<TContext>()`.
 
 You must also supply a connection string via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding. This is so Wallaby can manage additional connections itself. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
 
@@ -170,7 +170,7 @@ expressing intent either way:
 
 ### Enrichment via the DbContext
 
-The `db` argument is a scoped `DbContext` you can query to flatten or enrichment an aggregate:
+The `db` argument is a scoped `DbContext` you can query to flatten or enrich an aggregate:
 ```csharp
 sink.Map<Order>()
     .ToDestination("orders")
@@ -285,7 +285,7 @@ a million products). Wallaby keeps this bounded:
   re-snapshotted instead.
 - **On-demand processing**: The offloaded queue is drained by a worker woken via Postgres `LISTEN`/`NOTIFY`
   the instant a job is enqueued so the tail is picked up promptly. A periodic
-  [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a safety-net fallback.
+  [`FanoutPollInterval`](/configuration#advanced-options) (default 30s) is only a fallback for a missed notification.
 - **Coalescing**: Repeated changes to the same principal collapse into a single pending re-snapshot.
 - **Same-transaction de-duplication**: If a primary row is changed *and* one of its dependents changes in
   the same transaction, the row is emitted once (its own change wins - the transform already re-reads the

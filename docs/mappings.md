@@ -52,6 +52,9 @@ interface as a class - [`IWallabyEfTransform<T>`](/providers/entity-framework-co
 (EF Core) or [`IWallabyMartenTransform<T>`](/providers/marten/#class-based-transforms) (Marten) - and
 register it with `UsingTransform<TEntity, TTransform>()`. This class is registered & resolved from the container.
 
+Transforms can also enrich documents with vector embeddings for semantic search - see
+[RAG & Embeddings](/rag).
+
 ## Mapping classes
 
 Inline mappings grow the `AddWallaby` callback and can make your `Program.cs` unwieldy. Move each mapping into a
@@ -104,8 +107,8 @@ Because the engine deletes by key, the custom id must also be computable when th
 **fails at startup** when it is missing (with the DDL to run) - with a partial old row the delete
 would silently target a wrong or PK-named document that was never written. With full identity, EF Core
 materializes the deleted entity from the old row's values, and Marten rehydrates the deleted document
-from the old tuple's `data`; if a delete still arrives without an entity, it fails loudly rather than
-falling back to the primary key. The same applies to an entity-derived `ScopedBy` paired with
+from the old tuple's `data`; if a delete still arrives without an entity, it fails with an error rather
+than falling back to the primary key. The same applies to an entity-derived `ScopedBy` paired with
 `ScopedDestination` (deletes must resolve their destination); the `ChangeEvent` overload of `ScopedBy`
 reads captured columns instead and carries no such requirement.
 

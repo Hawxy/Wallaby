@@ -36,8 +36,8 @@ Registered as **`wallaby`** (tag `wallaby`). It reports:
   managed slots are dropped. Expected during a planned upgrade window; alert if it persists after.
   Also when [dependent fan-out](/providers/entity-framework-core/#dependent-tables) keeps failing: after
   `FanoutFailureThreshold` consecutive job failures (default **5**) the documents that depend on those
-  tables are going stale, while live replication carries on unaffected - so this is loud but is not a
-  restart signal either. And likewise when a table's [backfill](/backfill#failure-handling) keeps failing:
+  tables are going stale, while live replication carries on unaffected - so this needs attention but
+  is not a restart signal either. And likewise when a table's [backfill](/backfill#failure-handling) keeps failing:
   after `BackfillFailureThreshold` consecutive failures (default **5**) that table's sinks are not
   converging, while other tables and live replication carry on.
 - **Healthy**: In every other state: a **leader** streaming changes, a **standby** waiting to take over,

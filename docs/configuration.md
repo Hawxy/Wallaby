@@ -33,7 +33,7 @@ element decodes as `Nullable<T>[]` instead of failing the stream).
 
 ### Advanced Options
 
-Internal tuning knobs live under `o.Advanced`. These defaults should work for 99% of deployments. 
+Internal tuning options are under `o.Advanced`. These defaults should work for 99% of deployments. 
 You shouldn't modify these unless you know what you're doing:
 
 | Option | Default | Purpose |
@@ -42,14 +42,14 @@ You shouldn't modify these unless you know what you're doing:
 | `StandbyRetryInterval` | `10s` | How long a standby waits before retrying to acquire leadership. |
 | `LeaderRetryInterval` | `5s` | How long to wait before retrying after a failed leader session. |
 | `KeepaliveInterval` | `10s` | How often a replication status update is sent while a transaction is processed (keeps the connection alive during slow transforms/sinks). Keep it under the server's `wal_sender_timeout`. |
-| `MaxFanoutKeysPerTransaction` | `1 000 000` | Safety valve on the distinct [dependent-lookup](/providers/entity-framework-core/#dependent-tables) keys one transaction may fan out per binding. A wide fan-out is offloaded to the queue in bounded chunk jobs as the keys accumulate, so memory stays flat regardless of size. Past the cap the transaction has effectively rewritten the dependent table: the binding's primary table is re-snapshotted whole instead (upsert-only, so it converges the same way) and a warning is logged (1–1 000 000). |
-| `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/providers/entity-framework-core/#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval is only a safety net for a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
-| `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval is only a safety net for a missed notification. |
-| `MaxBufferedChangesPerTransaction` | `1_000_000` | Safety ceiling on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
+| `MaxFanoutKeysPerTransaction` | `1 000 000` | Cap on the distinct [dependent-lookup](/providers/entity-framework-core/#dependent-tables) keys one transaction may fan out per binding. A wide fan-out is offloaded to the queue in bounded chunk jobs as the keys accumulate, so memory stays flat regardless of size. Past the cap the transaction has effectively rewritten the dependent table: the binding's primary table is re-snapshotted whole instead (upsert-only, so it converges the same way) and a warning is logged (1–1 000 000). |
+| `FanoutPollInterval` | `30s` | Fallback poll cadence for the dependent [fan-out](/providers/entity-framework-core/#scaling-fan-out) queue. The worker is woken on demand via `LISTEN`/`NOTIFY` the instant a job is enqueued; this interval only covers a missed notification (e.g. a dropped listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle queue polls. |
+| `BackfillPollInterval` | `30s` | Fallback poll cadence for [manual backfill](/backfill#manual-backfill) requests. The leader's scheduler is woken on demand via `LISTEN`/`NOTIFY` the instant a request is persisted; this interval only covers a missed notification. |
+| `MaxBufferedChangesPerTransaction` | `1_000_000` | Upper bound on a **non-streamed** transaction's in-memory buffer; a larger transaction streams and spills instead. Exceeding it fails fast with guidance rather than exhausting memory. |
 | `CheckpointSaveInterval` | `5s` | Minimum interval between checkpoint writes to the slot's `wallaby.slot_registry` row; the checkpoint backs [slot-loss gap detection](/how-it-works#slot-loss-gap-detection).|
 | `HeartbeatInterval` | `30s` | While the pipeline is idle, how often the leader emits a tiny transactional heartbeat message so the slot's `confirmed_flush_lsn` keeps advancing; see [idle slots and WAL retention](/how-it-works#idle-slots-and-wal-retention). Suppressed while real traffic is being acknowledged; `Zero` disables. |
 | `SlotLagSampleInterval` | `30s` | How often the leader samples the WAL bytes the server retains for the slot, published as the `wallaby.slot.retained_wal` gauge (see [observability](/operations/observability#metrics)). `Zero` disables sampling. |
-| `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval is only a safety net for a missed notification. |
+| `ControlPollInterval` | `15s` | Fallback poll cadence for the [suspend/resume](/operations/major-version-upgrades) control state: the leader re-checking for a suspension request and a suspended node re-checking for a resume. Both are woken on demand via `LISTEN`/`NOTIFY` the instant the state changes; this interval only covers a missed notification. |
 | `WatermarkVisibilityFenceTimeout` | `Zero` (off) | Opt-in [visibility fence](/backfill#visibility-fence-opt-in) for watermark backfill: each chunk waits up to this long after its low watermark until no transaction in the current snapshot has already committed, closing the microsecond race where a commit lands just before the watermark but is visible to neither the chunk read nor the window. Polls `pg_xact_status` (must be callable by Wallaby's role); long-running open transactions don't pin it. On timeout a warning is logged and the chunk proceeds unfenced. |
 | `SuspensionAutoResumeGraceFloor` | `60s` | Floor on how long a flag-less node waits before auto-resuming a configuration-origin suspension whose liveness heartbeat has gone quiet; the effective grace is `max(ControlPollInterval * 4, floor)`. Keeps a [mixed rolling deployment](/operations/major-version-upgrades#mixed-rollouts) suspended instead of flapping slots, at the cost of the same wait after the last `Suspend()`-flagged node stops. |
 
@@ -171,8 +171,8 @@ Column lists are a bandwidth and data-minimization optimization, not a correctne
 mapping consumes is decided client-side by the selection, which applies even with lists disabled. In
 particular, a list is not the fix for a large (TOASTed) column a transform *reads* - that table needs
 [`REPLICA IDENTITY FULL`](/how-it-works#unavailable-value-self-healing-reselect), and a FULL table is
-never column-listed (see below). Reach for a selection when no transform reads the column; reach for
-full identity when one does.
+never column-listed (see below). Use a selection when no transform reads the column; use full
+identity when one does.
 
 Narrowing is **opt-in per table**. A table you never narrowed publishes whole rows, even when its entity
 maps only some of the physical columns, because a column list pins every column in it against schema

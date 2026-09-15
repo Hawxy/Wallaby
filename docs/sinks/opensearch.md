@@ -59,6 +59,33 @@ default). For explicit settings or mappings (analyzers, `knn_vector` fields, sha
 create the index up front — via Dev Tools, your infrastructure tooling, or a deployment script.
 In-sink index bootstrapping is planned.
 
+## Vector search
+
+A transform can emit an embedding as a `float[]` or `ReadOnlyMemory<float>` field - the sink writes
+either as a plain JSON number array, with no `SerializerOptions` needed. Dynamic mapping would infer
+an ordinary `float` field, so pre-create the index with an explicit `knn_vector` mapping:
+
+```json
+PUT /products
+{
+  "settings": { "index.knn": true },
+  "mappings": {
+    "properties": {
+      "embedding": { "type": "knn_vector", "dimension": 1536 }
+    }
+  }
+}
+```
+
+Don't pass a quantized vector as `byte[]` - byte arrays serialize as base64 strings, not arrays.
+
+OpenSearch can also embed for you: attach a
+[neural-search ingest pipeline](https://docs.opensearch.org/latest/vector-search/ai-search/semantic-search/)
+(a `text_embedding` processor over a deployed model) to the index and sync plain text - the cluster
+computes vectors at index time, with none in your pipeline at all. Note the pipeline runs on every
+indexed document, so live changes embed incrementally but a [backfill](/backfill) re-runs the model
+over the whole corpus. See [RAG & Embeddings](/rag).
+
 ## Authentication
 
 `Username`/`Password` cover basic auth. Everything else — AWS SigV4, client certificates,

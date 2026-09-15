@@ -108,6 +108,10 @@ public static class SinkEnvelopeJson
             case char c: writer.WriteStringValue(c.ToString()); break;
             case byte[] bytes: writer.WriteBase64StringValue(bytes); break;
             case Uri uri: writer.WriteStringValue(uri.ToString()); break;
+            // Embedding vectors (Embedding<float>.Vector is ReadOnlyMemory<float>); structs, so the
+            // IEnumerable arm below never sees them.
+            case ReadOnlyMemory<float> vector: WriteFloatArray(writer, vector.Span); break;
+            case Memory<float> vector: WriteFloatArray(writer, vector.Span); break;
             case IReadOnlyDictionary<string, object?> nested:
                 WriteDocument(writer, nested, documentId, serializerOptions);
                 break;
@@ -123,6 +127,16 @@ public static class SinkEnvelopeJson
                 WriteFallback(writer, value, key, documentId, serializerOptions);
                 break;
         }
+    }
+
+    private static void WriteFloatArray(Utf8JsonWriter writer, ReadOnlySpan<float> values)
+    {
+        writer.WriteStartArray();
+        foreach (var value in values)
+        {
+            writer.WriteNumberValue(value);
+        }
+        writer.WriteEndArray();
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2026",
