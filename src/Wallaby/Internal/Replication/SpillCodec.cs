@@ -1,10 +1,8 @@
-using System.Buffers;
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Wallaby.Abstractions;
@@ -64,12 +62,16 @@ internal static partial class SpillCodec
             var c = columns[i];
             if (c.IsUnchangedToast)
             {
-                result[i] = new SpillColumn(c.ColumnName, true, null, null);
+                result[i] = new SpillColumn(c.ColumnName, true, null, null, null);
+            }
+            else if (c.Value is Array array && ArrayTag(array) is { } arrayTag)
+            {
+                result[i] = new SpillColumn(c.ColumnName, false, arrayTag, null, EncodeArray(array));
             }
             else
             {
                 var (tag, text) = EncodeValue(c.Value);
-                result[i] = new SpillColumn(c.ColumnName, false, tag, text);
+                result[i] = new SpillColumn(c.ColumnName, false, tag, text, null);
             }
         }
         return result;
@@ -83,16 +85,18 @@ internal static partial class SpillCodec
             var c = columns[i];
             result[i] = c.Toast
                 ? new RawColumn { ColumnName = c.Name, Value = null, IsUnchangedToast = true }
-                : new RawColumn { ColumnName = c.Name, Value = DecodeValue(c.Tag!, c.Text) };
+                : new RawColumn
+                {
+                    ColumnName = c.Name,
+                    Value = c.Items is { } items ? DecodeTaggedArray(c.Tag!, items) : DecodeValue(c.Tag!, c.Text),
+                };
         }
         return result;
     }
 
-    // Tag + invariant-culture text per CLR type. Arrays of tagged scalars carry "a:<element-tag>" with a JSON
-    // array of element texts; Nullable<T>[] arrays (how a NULL element decodes under PerInstance array
-    // nullability) carry "an:<element-tag>" so null elements survive the round-trip. "j:<assembly-qualified-name>"
-    // is the fallback for any other type, carrying reflection-serialized JSON; it round-trips within the same
-    // process (the spill never outlives one).
+    // Tag + invariant-culture text per scalar CLR type. "j:<assembly-qualified-name>" is the fallback for any
+    // other type, carrying reflection-serialized JSON; it round-trips within the same process (the spill never
+    // outlives one).
     private static (string Tag, string? Text) EncodeValue(object? value) => value switch
     {
         null => ("0", null),
@@ -117,64 +121,62 @@ internal static partial class SpillCodec
         IPAddress ip => ("ip", ip.ToString()),
         PhysicalAddress mac => ("mac", mac.ToString()),
         BitArray bits => ("bits", EncodeBits(bits)),
+        // CLR array variance lets an sbyte[] match this pattern, so the arm checks the exact runtime type.
+        byte[] bytes when bytes.GetType() == typeof(byte[]) => ("bytes", Convert.ToBase64String(bytes)),
+        _ => EncodeJson(value),
+    };
+
+    // Arrays of tagged scalars carry "a:<element-tag>" with one text per element; Nullable<T>[] arrays (how a
+    // NULL element decodes under PerInstance array nullability) carry "an:<element-tag>" so null elements
+    // survive the round-trip. Null for an array with no tagged element type (byte[] is a scalar, base64).
+    private static string? ArrayTag(Array value) => value switch
+    {
         // CLR array variance lets an unsigned (or enum) array match its signed pattern, so the
         // integral array arms dispatch on the exact runtime type; anything else falls to the fallback.
-        byte[] bytes when bytes.GetType() == typeof(byte[]) => ("bytes", Convert.ToBase64String(bytes)),
-        string[] a => EncodeArray("a:s", a),
-        bool[] a => EncodeArray("a:b", a),
-        short[] a when a.GetType() == typeof(short[]) => EncodeArray("a:i16", a),
-        int[] a when a.GetType() == typeof(int[]) => EncodeArray("a:i32", a),
-        long[] a when a.GetType() == typeof(long[]) => EncodeArray("a:i64", a),
-        uint[] a when a.GetType() == typeof(uint[]) => EncodeArray("a:u32", a),
-        decimal[] a => EncodeArray("a:dec", a),
-        double[] a => EncodeArray("a:f64", a),
-        float[] a => EncodeArray("a:f32", a),
-        Guid[] a => EncodeArray("a:g", a),
-        DateTime[] a => EncodeArray("a:dt", a),
-        DateTimeOffset[] a => EncodeArray("a:dto", a),
-        DateOnly[] a => EncodeArray("a:d", a),
-        TimeOnly[] a => EncodeArray("a:t", a),
-        TimeSpan[] a => EncodeArray("a:ts", a),
-        IPAddress?[] a => EncodeArray("a:ip", a),
-        bool?[] a => EncodeArray("an:b", a),
-        short?[] a => EncodeArray("an:i16", a),
-        int?[] a => EncodeArray("an:i32", a),
-        long?[] a => EncodeArray("an:i64", a),
-        uint?[] a => EncodeArray("an:u32", a),
-        decimal?[] a => EncodeArray("an:dec", a),
-        double?[] a => EncodeArray("an:f64", a),
-        float?[] a => EncodeArray("an:f32", a),
-        Guid?[] a => EncodeArray("an:g", a),
-        DateTime?[] a => EncodeArray("an:dt", a),
-        DateTimeOffset?[] a => EncodeArray("an:dto", a),
-        DateOnly?[] a => EncodeArray("an:d", a),
-        TimeOnly?[] a => EncodeArray("an:t", a),
-        TimeSpan?[] a => EncodeArray("an:ts", a),
-        _ => EncodeJson(value),
+        string[] => "a:s",
+        bool[] => "a:b",
+        short[] when value.GetType() == typeof(short[]) => "a:i16",
+        int[] when value.GetType() == typeof(int[]) => "a:i32",
+        long[] when value.GetType() == typeof(long[]) => "a:i64",
+        uint[] when value.GetType() == typeof(uint[]) => "a:u32",
+        decimal[] => "a:dec",
+        double[] => "a:f64",
+        float[] => "a:f32",
+        Guid[] => "a:g",
+        DateTime[] => "a:dt",
+        DateTimeOffset[] => "a:dto",
+        DateOnly[] => "a:d",
+        TimeOnly[] => "a:t",
+        TimeSpan[] => "a:ts",
+        IPAddress?[] => "a:ip",
+        bool?[] => "an:b",
+        short?[] => "an:i16",
+        int?[] => "an:i32",
+        long?[] => "an:i64",
+        uint?[] => "an:u32",
+        decimal?[] => "an:dec",
+        double?[] => "an:f64",
+        float?[] => "an:f32",
+        Guid?[] => "an:g",
+        DateTime?[] => "an:dt",
+        DateTimeOffset?[] => "an:dto",
+        DateOnly?[] => "an:d",
+        TimeOnly?[] => "an:t",
+        TimeSpan?[] => "an:ts",
+        _ => null,
     };
 
     // Non-generic on purpose: boxing a null Nullable<T> yields a null reference, so one enumeration
     // handles T[], T?[], and reference-element arrays alike.
-    private static (string Tag, string Text) EncodeArray(string tag, IEnumerable items)
+    private static string?[] EncodeArray(Array items)
     {
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
+        var result = new string?[items.Length];
+        var i = 0;
+        foreach (var item in items)
         {
-            writer.WriteStartArray();
-            foreach (var item in items)
-            {
-                if (item is null)
-                {
-                    writer.WriteNullValue();
-                }
-                else
-                {
-                    writer.WriteStringValue(EncodeValue(item).Text);
-                }
-            }
-            writer.WriteEndArray();
+            result[i++] = item is null ? null : EncodeValue(item).Text;
         }
-        return (tag, Encoding.UTF8.GetString(buffer.WrittenSpan));
+        return result;
     }
 
     private static string EncodeBits(BitArray bits) => string.Create(bits.Length, bits, static (span, b) =>
@@ -226,83 +228,77 @@ internal static partial class SpillCodec
         "mac" => PhysicalAddress.Parse(text!),
         "bits" => DecodeBits(text!),
         "bytes" => Convert.FromBase64String(text!),
-        _ when tag.StartsWith("an:", StringComparison.Ordinal) => DecodeNullableArray(tag[3..], text!),
-        _ when tag.StartsWith("a:", StringComparison.Ordinal) => DecodeArray(tag[2..], text!),
+
         _ when tag.StartsWith("j:", StringComparison.Ordinal) => DecodeJson(tag, text!),
         _ => throw new InvalidOperationException($"Unknown spilled value tag '{tag}'."),
     };
 
-    private static object DecodeArray(string elementTag, string text)
+    private static object DecodeTaggedArray(string tag, string?[] items)
+        => tag.StartsWith("an:", StringComparison.Ordinal)
+            ? DecodeNullableArray(tag[3..], items)
+            : DecodeArray(tag[2..], items);
+
+    private static object DecodeArray(string elementTag, string?[] items)
     {
-        using var doc = JsonDocument.Parse(text);
-        var root = doc.RootElement;
         return elementTag switch
         {
-            "s" => ToArray<string?>(root, elementTag),
-            "b" => ToArray<bool>(root, elementTag),
-            "i16" => ToArray<short>(root, elementTag),
-            "i32" => ToArray<int>(root, elementTag),
-            "i64" => ToArray<long>(root, elementTag),
-            "u32" => ToArray<uint>(root, elementTag),
-            "dec" => ToArray<decimal>(root, elementTag),
-            "f64" => ToArray<double>(root, elementTag),
-            "f32" => ToArray<float>(root, elementTag),
-            "g" => ToArray<Guid>(root, elementTag),
-            "dt" => ToArray<DateTime>(root, elementTag),
-            "dto" => ToArray<DateTimeOffset>(root, elementTag),
-            "d" => ToArray<DateOnly>(root, elementTag),
-            "t" => ToArray<TimeOnly>(root, elementTag),
-            "ts" => ToArray<TimeSpan>(root, elementTag),
-            "ip" => ToArray<IPAddress?>(root, elementTag),
+            "s" => ToArray<string?>(items, elementTag),
+            "b" => ToArray<bool>(items, elementTag),
+            "i16" => ToArray<short>(items, elementTag),
+            "i32" => ToArray<int>(items, elementTag),
+            "i64" => ToArray<long>(items, elementTag),
+            "u32" => ToArray<uint>(items, elementTag),
+            "dec" => ToArray<decimal>(items, elementTag),
+            "f64" => ToArray<double>(items, elementTag),
+            "f32" => ToArray<float>(items, elementTag),
+            "g" => ToArray<Guid>(items, elementTag),
+            "dt" => ToArray<DateTime>(items, elementTag),
+            "dto" => ToArray<DateTimeOffset>(items, elementTag),
+            "d" => ToArray<DateOnly>(items, elementTag),
+            "t" => ToArray<TimeOnly>(items, elementTag),
+            "ts" => ToArray<TimeSpan>(items, elementTag),
+            "ip" => ToArray<IPAddress?>(items, elementTag),
             _ => throw new InvalidOperationException($"Unknown spilled array element tag '{elementTag}'."),
         };
 
-        static T[] ToArray<T>(JsonElement root, string elementTag)
+        static T[] ToArray<T>(string?[] items, string elementTag)
         {
-            var result = new T[root.GetArrayLength()];
-            var i = 0;
-            foreach (var element in root.EnumerateArray())
+            var result = new T[items.Length];
+            for (var i = 0; i < items.Length; i++)
             {
-                result[i++] = element.ValueKind == JsonValueKind.Null
-                    ? default!
-                    : (T)DecodeValue(elementTag, element.GetString())!;
+                result[i] = items[i] is null ? default! : (T)DecodeValue(elementTag, items[i])!;
             }
             return result;
         }
     }
 
-    private static object DecodeNullableArray(string elementTag, string text)
+    private static object DecodeNullableArray(string elementTag, string?[] items)
     {
-        using var doc = JsonDocument.Parse(text);
-        var root = doc.RootElement;
         return elementTag switch
         {
-            "b" => ToNullableArray<bool>(root, elementTag),
-            "i16" => ToNullableArray<short>(root, elementTag),
-            "i32" => ToNullableArray<int>(root, elementTag),
-            "i64" => ToNullableArray<long>(root, elementTag),
-            "u32" => ToNullableArray<uint>(root, elementTag),
-            "dec" => ToNullableArray<decimal>(root, elementTag),
-            "f64" => ToNullableArray<double>(root, elementTag),
-            "f32" => ToNullableArray<float>(root, elementTag),
-            "g" => ToNullableArray<Guid>(root, elementTag),
-            "dt" => ToNullableArray<DateTime>(root, elementTag),
-            "dto" => ToNullableArray<DateTimeOffset>(root, elementTag),
-            "d" => ToNullableArray<DateOnly>(root, elementTag),
-            "t" => ToNullableArray<TimeOnly>(root, elementTag),
-            "ts" => ToNullableArray<TimeSpan>(root, elementTag),
+            "b" => ToNullableArray<bool>(items, elementTag),
+            "i16" => ToNullableArray<short>(items, elementTag),
+            "i32" => ToNullableArray<int>(items, elementTag),
+            "i64" => ToNullableArray<long>(items, elementTag),
+            "u32" => ToNullableArray<uint>(items, elementTag),
+            "dec" => ToNullableArray<decimal>(items, elementTag),
+            "f64" => ToNullableArray<double>(items, elementTag),
+            "f32" => ToNullableArray<float>(items, elementTag),
+            "g" => ToNullableArray<Guid>(items, elementTag),
+            "dt" => ToNullableArray<DateTime>(items, elementTag),
+            "dto" => ToNullableArray<DateTimeOffset>(items, elementTag),
+            "d" => ToNullableArray<DateOnly>(items, elementTag),
+            "t" => ToNullableArray<TimeOnly>(items, elementTag),
+            "ts" => ToNullableArray<TimeSpan>(items, elementTag),
             _ => throw new InvalidOperationException($"Unknown spilled nullable-array element tag '{elementTag}'."),
         };
 
-        static T?[] ToNullableArray<T>(JsonElement root, string elementTag) where T : struct
+        static T?[] ToNullableArray<T>(string?[] items, string elementTag) where T : struct
         {
-            var result = new T?[root.GetArrayLength()];
-            var i = 0;
-            foreach (var element in root.EnumerateArray())
+            var result = new T?[items.Length];
+            for (var i = 0; i < items.Length; i++)
             {
-                result[i++] = element.ValueKind == JsonValueKind.Null
-                    ? null
-                    : (T)DecodeValue(elementTag, element.GetString())!;
+                result[i] = items[i] is null ? null : (T)DecodeValue(elementTag, items[i])!;
             }
             return result;
         }
@@ -336,10 +332,11 @@ internal static partial class SpillCodec
             "(trimmed/NativeAOT host).");
     }
 
-    private sealed record SpillColumn(string Name, bool Toast, string? Tag, string? Text);
+    private sealed record SpillColumn(string Name, bool Toast, string? Tag, string? Text, string?[]? Items);
 
     private sealed record SpillRow(string Schema, string Table, uint RelationId, int Action, SpillColumn[] New, SpillColumn[]? Old);
 
     [JsonSerializable(typeof(SpillRow))]
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     private sealed partial class SpillJsonContext : JsonSerializerContext;
 }

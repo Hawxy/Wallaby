@@ -109,6 +109,32 @@ public class SpillCodecTests
     }
 
     [Test]
+    public void Round_trips_floating_point_and_temporal_arrays()
+    {
+        var embedding = Enumerable.Range(0, 1536).Select(i => MathF.Sin(i) * 1.1f).ToArray();
+        var stamps = new[] { DateTimeOffset.UtcNow, new DateTimeOffset(2026, 9, 16, 10, 30, 0, TimeSpan.FromHours(10)) };
+        var change = new RawChange
+        {
+            RelationId = 1,
+            Schema = "public",
+            TableName = "t",
+            Action = ChangeAction.Insert,
+            NewValues =
+            [
+                new RawColumn { ColumnName = "embedding", Value = embedding },
+                new RawColumn { ColumnName = "readings", Value = new double?[] { 0.1, null, double.MaxValue, -0.0 } },
+                new RawColumn { ColumnName = "stamps", Value = stamps },
+            ],
+        };
+
+        var r = RoundTrip(change).NewValues;
+
+        ((float[])r[0].Value!).ShouldBe(embedding);
+        ((double?[])r[1].Value!).ShouldBe(new double?[] { 0.1, null, double.MaxValue, -0.0 });
+        ((DateTimeOffset[])r[2].Value!).ShouldBe(stamps);
+    }
+
+    [Test]
     public void Round_trips_network_and_bit_types_with_fidelity()
     {
         var change = new RawChange
