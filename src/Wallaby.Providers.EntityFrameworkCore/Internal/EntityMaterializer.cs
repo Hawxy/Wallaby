@@ -140,16 +140,9 @@ internal sealed class EntityMaterializer : IRowMaterializer
     // exception lets the pipeline heal by reselect, or halts as a poison change when that is disabled.
     private static object ResolveUnchangedToast(RawChange change, string columnName)
     {
-        if (change.OldValues is { } oldValues)
+        if (change.OldValues?.Find(columnName) is { IsUnchangedToast: false, Value: { } value })
         {
-            for (var i = 0; i < oldValues.Count; i++)
-            {
-                var old = oldValues[i];
-                if (old.ColumnName == columnName && old is { IsUnchangedToast: false, Value: not null })
-                {
-                    return old.Value;
-                }
-            }
+            return value;
         }
 
         throw new UnavailableValueException(

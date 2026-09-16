@@ -48,7 +48,7 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
 
         // Insert/update/read. A row whose mt_deleted flag is set is not a live document: a backfill read
         // skips it (the sink doc should not exist), and a live change becomes a Delete event.
-        if (plan.SoftDeleted && Find(change.NewValues, plan.DeletedColumnName)?.Value is true)
+        if (plan.SoftDeleted && change.NewValues.Find(plan.DeletedColumnName)?.Value is true)
         {
             if (change.Action == ChangeAction.Read)
             {
@@ -125,7 +125,7 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
 
     private static object? ReadKeyValue(MartenTablePlan plan, IReadOnlyList<RawColumn> values, string column, Type clrType)
     {
-        var raw = Find(values, column)
+        var raw = values.Find(column)
             ?? throw new InvalidOperationException(
                 $"Column '{column}' was not present in the change for '{plan.Table.QualifiedName}'.");
         return ValueCoercion.ToClr(raw.Value, clrType);
@@ -138,13 +138,13 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
     /// </summary>
     private static object? TryReadData(MartenTablePlan plan, RawChange change)
     {
-        var column = Find(change.NewValues, "data");
+        var column = change.NewValues.Find("data");
         if (column is { IsUnchangedToast: false })
         {
             return AsJson(plan, column.Value);
         }
 
-        var old = change.OldValues is { } oldValues ? Find(oldValues, "data") : null;
+        var old = change.OldValues?.Find("data");
         return old is { IsUnchangedToast: false, Value: not null } ? AsJson(plan, old.Value) : null;
     }
 
@@ -206,17 +206,5 @@ internal sealed class MartenRowMaterializer : IRowMaterializer
     }
 
     private static bool WasDeleted(MartenTablePlan plan, IReadOnlyList<RawColumn> oldValues)
-        => plan.SoftDeleted && Find(oldValues, plan.DeletedColumnName)?.Value is true;
-
-    private static RawColumn? Find(IReadOnlyList<RawColumn> values, string columnName)
-    {
-        for (var i = 0; i < values.Count; i++)
-        {
-            if (values[i].ColumnName == columnName)
-            {
-                return values[i];
-            }
-        }
-        return null;
-    }
+        => plan.SoftDeleted && oldValues.Find(plan.DeletedColumnName)?.Value is true;
 }
