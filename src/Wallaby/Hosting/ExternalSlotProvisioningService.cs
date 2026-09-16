@@ -1,13 +1,11 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
-using Wallaby.Client.Internal;
 using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
 using Wallaby.Internal.Control;
 using Wallaby.Internal.SelfConfig;
-using Wallaby.Internal.State;
 using Wallaby.Providers;
 
 namespace Wallaby.Hosting;
@@ -53,16 +51,19 @@ internal sealed class ExternalSlotProvisioningService(
                 ? [.. config.Providers.Select(p => (p.Name, Provider: p.ModelProvider(services)))]
                 : [];
             var specs = ExternalSlotResolver.Resolve(config.ExternalSlots, modelProviders);
-            var control = new PostgresControlStore(dataSource, options, logger);
+            var gate = new ControlGate(
+                new PostgresControlStore(dataSource, options, logger), clusterLock, LockKey, options, status, logger);
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                var snapshot = await WaitOutSuspensionAsync(control, stoppingToken);
+                // A suspension drops the slots (honored via the gate, never undone by re-provisioning);
+                // with a deployed Suspend() flag the gate never opens and the node stays suspended.
+                var snapshot = await gate.WaitUntilRunningAsync(stoppingToken);
                 await ProvisionRoundAsync(specs, stoppingToken);
 
                 // Watching: alive so the next suspend/resume cycle re-provisions, holding no lock.
                 status.EnterStandby();
-                await WaitForControlChangeAsync(control, snapshot, stoppingToken);
+                await gate.WaitForChangeAsync(snapshot, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -103,121 +104,6 @@ internal sealed class ExternalSlotProvisioningService(
                 waitLogged = true;
             }
             await Task.Delay(options.Advanced.StandbyRetryInterval, ct);
-        }
-    }
-
-    /// <summary>
-    /// Block until the control row differs from <paramref name="snapshot"/> (taken before the
-    /// provisioning round), woken by NOTIFY with the poll interval as a safety net. Level-triggered on
-    /// the row rather than on observing the Suspended state: every transition stamps a timestamp, so a
-    /// suspend/resume cycle faster than any observation still leaves the row changed and triggers a
-    /// reconcile round for the slots its finalize dropped. Transient control-read failures are paced
-    /// here rather than faulting the host.
-    /// </summary>
-    private async Task WaitForControlChangeAsync(
-        PostgresControlStore control, ControlRow? snapshot, CancellationToken ct)
-    {
-        await using var subscription = control.Subscribe();
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                if (!Equals(await control.ReadAsync(ct), snapshot))
-                {
-                    return;
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.ControlReadFailed(ex);
-                await Task.Delay(options.Advanced.ControlPollInterval, ct);
-                continue;
-            }
-
-            await subscription.WaitAsync(options.Advanced.ControlPollInterval, ct);
-        }
-        ct.ThrowIfCancellationRequested();
-    }
-
-    /// <summary>
-    /// The suspension control gate: finalize a requested suspension (under the lock), and while suspended
-    /// idle on the control channel instead of provisioning. Returns the control row that allowed
-    /// provisioning (the change-detection snapshot for <see cref="WaitForControlChangeAsync"/>); with a
-    /// deployed Suspend() flag that never happens, and the node stays suspended until redeployed.
-    /// Transient control-read failures (expected while the database is offline for the upgrade itself)
-    /// are retried here rather than faulting the host.
-    /// </summary>
-    private async Task<ControlRow?> WaitOutSuspensionAsync(PostgresControlStore control, CancellationToken ct)
-    {
-        INotifySubscription? subscription = null;
-        var announced = false;
-        try
-        {
-            while (true)
-            {
-                ct.ThrowIfCancellationRequested();
-                ControlGateAction gate;
-                ControlRow? row;
-                try
-                {
-                    (gate, row) = await ControlGateEvaluator.EvaluateAsync(
-                        control, options.Suspended, options.SuspensionReason, logger, ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    logger.ControlReadFailed(ex);
-                    await Task.Delay(options.Advanced.ControlPollInterval, ct);
-                    continue;
-                }
-
-                switch (gate)
-                {
-                    case ControlGateAction.Proceed:
-                        return row;
-
-                    case ControlGateAction.Finalize:
-                    {
-                        await using var lease = await clusterLock.TryAcquireAsync(LockKey, ct);
-                        if (lease is not null)
-                        {
-                            logger.FinalizingSuspension(LockKey);
-                            await control.FinalizeSuspensionAsync(TimeSpan.FromSeconds(1), ct);
-                        }
-                        else
-                        {
-                            // Another node is finalizing; check back shortly.
-                            await Task.Delay(options.Advanced.StandbyRetryInterval, ct);
-                        }
-                        continue;
-                    }
-
-                    default: // Idle
-                        if (!announced)
-                        {
-                            status.EnterSuspended(row?.RequestedAt ?? row?.SuspendedAt, row?.Reason);
-                            logger.Suspended(LockKey);
-                            announced = true;
-                        }
-                        subscription ??= control.Subscribe();
-                        await subscription.WaitAsync(options.Advanced.ControlPollInterval, ct);
-                        continue;
-                }
-            }
-        }
-        finally
-        {
-            if (subscription is not null)
-            {
-                await subscription.DisposeAsync();
-            }
         }
     }
 }

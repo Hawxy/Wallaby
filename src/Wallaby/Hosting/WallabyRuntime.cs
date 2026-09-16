@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
-using Wallaby.Client.Internal;
 using Wallaby.DependencyInjection;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
@@ -26,7 +25,7 @@ internal sealed class WallabyRuntime
     private readonly WallabyInstrumentation _instrumentation;
     private readonly WallabyStatus _status;
     private readonly ILogger<WallabyRuntime> _logger;
-    private readonly PostgresControlStore _control;
+    private readonly ControlGate _gate;
 
     public WallabyRuntime(
         ResolvedProviderSet providers,
@@ -48,11 +47,9 @@ internal sealed class WallabyRuntime
         _instrumentation = instrumentation;
         _status = status;
         _logger = logger;
-        _control = new PostgresControlStore(dataSource, options, logger);
+        _gate = new ControlGate(
+            new PostgresControlStore(dataSource, options, logger), clusterLock, options.SlotName, options, status, logger);
     }
-
-    // How long to wait between drop attempts when a managed slot is still held by an active consumer.
-    private static readonly TimeSpan FinalizeBusyRetryDelay = TimeSpan.FromSeconds(1);
 
     // A leader session lasting at least this long before failing retries at the base delay (resets backoff);
     // a faster failure (e.g. self-config erroring) grows the backoff so it doesn't hot-loop.
@@ -76,29 +73,11 @@ internal sealed class WallabyRuntime
             // touching the cluster lock or slots.
             try
             {
-                var (gate, row) = await ControlGateEvaluator.EvaluateAsync(
-                    _control, _options.Suspended, _options.SuspensionReason, _logger, ct);
-                _status.SetPublicationsWidened(row?.PublicationsWidened ?? false, row?.WidenedAt);
-                if (gate == ControlGateAction.Finalize)
-                {
-                    await TryFinalizeSuspensionAsync(ct);
-                    continue;
-                }
-                if (gate == ControlGateAction.Idle)
-                {
-                    await IdleWhileSuspendedAsync(row, ct);
-                    continue;
-                }
+                await _gate.WaitUntilRunningAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
-            }
-            catch (Exception ex)
-            {
-                _logger.ControlGateFailed(ex);
-                await DelaySafeAsync(backoff.Next(), ct);
-                continue;
             }
 
             IClusterLockHandle? leadership = null;
@@ -141,8 +120,7 @@ internal sealed class WallabyRuntime
                         // The session released the slot and we still hold the cluster lock, so nothing
                         // else can be streaming it; drop the managed slots and mark the suspension
                         // finalized. The next loop iteration idles on the result.
-                        _logger.FinalizingSuspension(_options.SlotName);
-                        await _control.FinalizeSuspensionAsync(FinalizeBusyRetryDelay, ct);
+                        await _gate.FinalizeSuspensionAsync(ct);
                     }
                     else if (outcome == LeaderSessionOutcome.LeadershipLost)
                     {
@@ -173,80 +151,6 @@ internal sealed class WallabyRuntime
                     await DelaySafeAsync(backoff.Next(), ct);
                 }
             }
-        }
-    }
-
-    /// <summary>
-    /// A suspension was requested with no leader session of our own to wind down. Only the cluster-lock
-    /// holder may drop slots: if the lock is free, take it and finalize; if a live leader holds it, its
-    /// own control watcher is winding it down to finalize — check back shortly.
-    /// </summary>
-    private async Task TryFinalizeSuspensionAsync(CancellationToken ct)
-    {
-        var leadership = await _clusterLock.TryAcquireAsync(_options.SlotName, ct);
-        if (leadership is null)
-        {
-            await DelaySafeAsync(_options.Advanced.StandbyRetryInterval, ct);
-            return;
-        }
-
-        await using (leadership)
-        {
-            _logger.FinalizingSuspension(_options.SlotName);
-            await _control.FinalizeSuspensionAsync(FinalizeBusyRetryDelay, ct);
-        }
-    }
-
-    /// <summary>
-    /// Suspension idle: hold no lock (so any actor can finalize or resume) and re-run the control gate on
-    /// every pass, woken by NOTIFY with the poll interval as a safety net. Re-evaluating (rather than
-    /// only polling the state) is what keeps a flag-carrying node's assertion heartbeat fresh, and what
-    /// makes a flag-less node whose auto-resume was refused retry until the grace elapses. Exits on any
-    /// non-idle gate outcome or shutdown; the main loop re-evaluates and acts on it.
-    /// </summary>
-    private async Task IdleWhileSuspendedAsync(ControlRow? row, CancellationToken ct)
-    {
-        _status.EnterSuspended(row?.RequestedAt ?? row?.SuspendedAt, row?.Reason);
-        if (!_options.Suspended && row?.Origin == ControlContract.OriginConfiguration)
-        {
-            // Not "suspended until an explicit resume": this node will resume itself once the
-            // flag-carrying nodes' assertion heartbeat goes stale.
-            _logger.SuspendedAwaitingGrace(_options.SlotName);
-        }
-        else
-        {
-            _logger.Suspended(_options.SlotName);
-        }
-        await using var subscription = _control.Subscribe();
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                var (gate, _) = await ControlGateEvaluator.EvaluateAsync(
-                    _control, _options.Suspended, _options.SuspensionReason, _logger, ct);
-                if (gate != ControlGateAction.Idle)
-                {
-                    if (gate == ControlGateAction.Proceed)
-                    {
-                        _logger.SuspensionEnded(_options.SlotName);
-                    }
-                    return;
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                // Expected while the database is offline for the upgrade itself; pace the retries
-                // instead of hot-looping on the (equally unreachable) LISTEN connection.
-                _logger.ControlReadFailed(ex);
-                await DelaySafeAsync(_options.Advanced.ControlPollInterval, ct);
-                continue;
-            }
-
-            await subscription.WaitAsync(_options.Advanced.ControlPollInterval, ct);
         }
     }
 
@@ -284,21 +188,6 @@ internal static partial class WallabyRuntimeLog
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Wallaby leader session failed; will retry.")]
     internal static partial void LeaderSessionFailed(this ILogger logger, Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to evaluate the Wallaby suspension state; retrying.")]
-    internal static partial void ControlGateFailed(this ILogger logger, Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Finalizing Wallaby suspension for slot {Slot}: dropping every managed replication slot.")]
-    internal static partial void FinalizingSuspension(this ILogger logger, string slot);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot {Slot}): managed replication slots are dropped and streaming is stopped until an explicit resume.")]
-    internal static partial void Suspended(this ILogger logger, string slot);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Wallaby is suspended (slot {Slot}) by nodes still deployed with Suspend(); this flag-less node is waiting out the configuration-suspension grace and will auto-resume once their assertion goes stale.")]
-    internal static partial void SuspendedAwaitingGrace(this ILogger logger, string slot);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby suspension ended; re-entering leader election for slot {Slot}. Expect a full re-backfill of all mapped tables.")]
-    internal static partial void SuspensionEnded(this ILogger logger, string slot);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Publication widening flag changed; re-entering leader election for slot {Slot} to reconcile publication membership.")]
     internal static partial void ReconfiguringPublications(this ILogger logger, string slot);
