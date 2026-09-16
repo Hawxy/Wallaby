@@ -9,9 +9,9 @@ namespace Wallaby.Internal.Control;
 /// workload when a suspension is requested (so the session winds down cleanly and releases the slot for
 /// the runtime to drop) or when the publication-widening flag flips against the session's baseline, so
 /// the next term's bootstrap reconciles the publications to the new width (a plain session bounce: the
-/// slot is untouched and checkpoint continuity holds). A transient read failure is logged and retried; it
-/// must never fault a healthy streaming session, so unlike the backfill/fan-out tasks this one only ends
-/// on cancellation or an observed transition.
+/// slot is untouched and checkpoint continuity holds). A transient read failure is logged and retried so
+/// it never faults a healthy streaming session; the watcher ends on cancellation or an observed
+/// transition, and any other exit is supervised by the session as a fault.
 /// </summary>
 internal sealed class ControlStateWatcher(
     PostgresControlStore store, bool widenedBaseline, TimeSpan pollInterval, ILogger logger)
@@ -79,4 +79,7 @@ internal static partial class ControlStateWatcherLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to read the Wallaby control state; will retry.")]
     internal static partial void ControlReadFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The control state watcher stopped unexpectedly; bouncing the leader session.")]
+    internal static partial void ControlWatcherStopped(this ILogger logger, Exception ex);
 }

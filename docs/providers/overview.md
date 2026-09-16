@@ -55,5 +55,6 @@ mappings, an `IQuerySession` for Marten mappings. Tenant-scoped session leasing 
 provider - see multi-tenancy for [EF Core](/providers/entity-framework-core/multi-tenancy) and
 [Marten](/providers/marten/multi-tenancy).
 
-[External slots](/external-slots) are provider-independent and can be declared alongside any
-combination of the above, or on their own in provision-only mode.
+[External slots](/external-slots) can be declared alongside any combination of the above, or on their
+own in provision-only mode. `ForTable` is provider-independent; `ForEntity` and `ForAllEntities` resolve
+against the registered providers.

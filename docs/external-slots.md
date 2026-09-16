@@ -39,6 +39,32 @@ builder.Services.AddWallaby(cdc =>
 Point your external tool at the **slot name** (`elt`) and **publication name** (`elt_pub`) in its
 pgoutput configuration.
 
+For a large model, include everything the registered providers map and carve out the exceptions:
+
+```csharp
+cdc.AddExternalSlot("elt", s => s
+    .ForAllEntities()                    // every table in the EF Core / Marten model
+    .Except<AuditLog>()                  // by entity type
+    .Except("public", "outbox")          // or by name (schema defaults to "public")
+    .ForTable("legacy", "invoices"));    // explicit tables are added on top
+```
+
+`ForAllEntities()` is resolved at startup, so an entity added to the model joins the publication on the
+next start. What it includes:
+
+- **EF Core**: every table the relational model maps, including owned types with their own table, TPT/TPC
+  tables and many-to-many join tables. A join table has no CLR type, so exclude it by name. Same-table and
+  JSON-mapped owned types belong to their owner's table (naming one with `ForEntity`/`Except` fails); a TPH
+  hierarchy is one table, so excluding one member excludes the table.
+- **Marten**: the table of every document type registered up front (`StoreOptions.RegisterDocumentType` or
+  `Schema.For<T>()`), never the event store.
+- Tables without a primary key are skipped: a table with no replica identity inside a publication makes the
+  application's own `UPDATE`/`DELETE` statements fail. Add one via `ForTable` only if it has a replica identity.
+
+Names are case-sensitive. An `Except` that matches nothing, or that names a table the slot also declares
+explicitly, fails startup. Because every entity is included, a new entity whose migration has not run fails
+provisioning until the migration is applied.
+
 External publications always publish **whole tables**: the
 [`PublicationColumnLists`](/configuration#publication-column-lists) option only narrows Wallaby's own
 primary publication, never one consumed by a third-party tool.
@@ -51,6 +77,8 @@ primary publication, never one consumed by a third-party tool.
 | `WithPublication(name)` | Override the publication name (default `"{slot}_pub"`). |
 | `ForTable(table)` / `ForTable(schema, table)` | Add a table by name (schema defaults to `public`). |
 | `ForEntity<T>()` | Add the table mapped to `T`, resolved against the EF Core or Marten model. |
+| `ForAllEntities()` | Add every table the registered providers model (see above). |
+| `Except<T>()` / `Except(table)` / `Except(schema, table)` | Remove a table from the `ForAllEntities()` set. |
 
 At least one table is required (a pgoutput publication needs tables). Slot and publication names must be
 distinct from Wallaby's own slot/publication and from each other.
@@ -62,7 +90,8 @@ distinct from Wallaby's own slot/publication and from each other.
   re-applying a publication is safe to repeat.
 - **Reconciled**: On each startup Wallaby reconciles the external publication's table set to your declared
   list (`ALTER PUBLICATION ... ADD/DROP TABLE`). Wallaby **owns** the table set: a table added to the
-  publication out-of-band is dropped on the next run. Manage membership through `AddExternalSlot`.
+  publication out-of-band is dropped on the next run. Manage membership through `AddExternalSlot`;
+  with `ForAllEntities()` a new entity joins the publication on the next start.
 - **Pre-existing slots are adopted (and validated)**: If a slot with the declared name already exists,
   Wallaby reuses it rather than recreating it, and records it in `wallaby.slot_registry`. It **fails fast**
   if that slot isn't a pgoutput *logical* slot (e.g. a physical slot or one on a different output plugin),

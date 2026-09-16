@@ -55,6 +55,12 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
         return new QualifiedTable(mapping.TableName.Schema, mapping.TableName.Name);
     }
 
+    public IReadOnlyList<QualifiedTable> ResolveAllTables()
+        => KnownMappings()
+            .Select(m => new QualifiedTable(m.TableName.Schema, m.TableName.Name))
+            .Distinct()
+            .ToList();
+
     public bool Handles(Type entityClrType) => FindMapping(entityClrType) is not null;
 
     private IEnumerable<DocumentMapping> SelectMappings(CaptureSpec spec)

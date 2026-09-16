@@ -91,6 +91,21 @@ internal sealed class ExternalSlotRegistration
 
     /// <summary>Tables declared by entity CLR type, resolved against the storage provider's model at startup.</summary>
     public List<Type> EntityTypes { get; } = [];
+
+    /// <summary>True when the slot includes every table the registered providers model.</summary>
+    public bool AllEntities { get; set; }
+
+    /// <summary>Tables excluded by schema-qualified name from the <see cref="AllEntities"/> set.</summary>
+    public List<(string Schema, string Table)> ExcludedTableNames { get; } = [];
+
+    /// <summary>Tables excluded by entity CLR type from the <see cref="AllEntities"/> set.</summary>
+    public List<Type> ExcludedEntityTypes { get; } = [];
+
+    /// <summary>True when resolving the slot's tables needs the storage providers' models.</summary>
+    public bool NeedsModel => AllEntities || EntityTypes.Count > 0 || ExcludedEntityTypes.Count > 0;
+
+    /// <summary>True when any exclusion was declared.</summary>
+    public bool HasExclusions => ExcludedTableNames.Count > 0 || ExcludedEntityTypes.Count > 0;
 }
 
 /// <summary>The immutable result of the fluent builder, consumed by the runtime.</summary>

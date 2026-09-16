@@ -43,4 +43,42 @@ public sealed class ExternalSlotBuilder
         _registration.EntityTypes.Add(typeof(TEntity));
         return this;
     }
+
+    /// <summary>
+    /// Include every table the registered storage providers model (resolved at startup, so an entity added
+    /// to the model joins the publication on the next start). Tables without a primary key are skipped.
+    /// Narrow the set with <see cref="Except{TEntity}"/> / <see cref="Except(string,string)"/>; explicit
+    /// <see cref="ForTable(string,string)"/> / <see cref="ForEntity{TEntity}"/> declarations are added on top.
+    /// </summary>
+    public ExternalSlotBuilder ForAllEntities()
+    {
+        _registration.AllEntities = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Exclude the table mapped to <typeparamref name="TEntity"/> from a <see cref="ForAllEntities"/> set.
+    /// The table must be one the model maps; excluding a table the slot also declares explicitly fails startup.
+    /// </summary>
+    public ExternalSlotBuilder Except<TEntity>() where TEntity : class
+    {
+        _registration.ExcludedEntityTypes.Add(typeof(TEntity));
+        return this;
+    }
+
+    /// <summary>Exclude a table by name from a <see cref="ForAllEntities"/> set (schema defaults to <c>public</c>).</summary>
+    public ExternalSlotBuilder Except(string table) => Except("public", table);
+
+    /// <summary>
+    /// Exclude a schema-qualified table from a <see cref="ForAllEntities"/> set. Names are case-sensitive and
+    /// must match a table the model maps (a table with no entity type, such as a many-to-many join table, is
+    /// excluded this way).
+    /// </summary>
+    public ExternalSlotBuilder Except(string schema, string table)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        _registration.ExcludedTableNames.Add((schema, table));
+        return this;
+    }
 }

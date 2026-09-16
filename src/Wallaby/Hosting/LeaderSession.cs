@@ -161,11 +161,12 @@ internal sealed class LeaderSession(
 
         // Watches for a suspension request (LISTEN + fallback poll) and cancels the workload so the
         // session winds down and releases the slot; the caller then drops it. Its first read also closes
-        // the race where a suspension lands between this session's pre-check and slot creation. Never
-        // faults the session; transient read errors are retried inside.
+        // the race where a suspension lands between this session's pre-check and slot creation. Transient
+        // read errors are retried inside; an unexpected exit bounces the session, since a session nobody
+        // watches would ignore a suspension until the client drops the slot itself.
         var controlWatcher = new ControlStateWatcher(
             controlStore, widenPublications, options.Advanced.ControlPollInterval, _logger);
-        Background(token => controlWatcher.RunAsync(linked, token));
+        Background(token => controlWatcher.RunAsync(linked, token), _logger.ControlWatcherStopped);
 
         // Advances the slot while the mapped tables are idle. Never faults the session: the emitter
         // logs and swallows per-tick errors, so a transiently-down database just skips ticks.

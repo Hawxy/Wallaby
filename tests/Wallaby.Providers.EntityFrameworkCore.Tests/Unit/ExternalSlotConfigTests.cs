@@ -221,4 +221,125 @@ public class ExternalSlotConfigTests
         Should.Throw<WallabyConfigurationException>(
             () => ExternalSlotResolver.Resolve(new[] { registration }, modelProviders: []));
     }
+
+    [Test]
+    public void ForAllEntities_without_a_context_fails_fast()
+    {
+        var builder = ProvisionOnlyBuilder();
+        builder.AddExternalSlot("elt", s => s.ForAllEntities());
+
+        Should.Throw<WallabyConfigurationException>(() => builder.Build());
+    }
+
+    [Test]
+    public void Except_without_ForAllEntities_fails_fast()
+    {
+        var builder = MinimalBuilder();
+        builder.AddExternalSlot("elt", s => s.ForTable("orders").Except<Product>());
+
+        Should.Throw<WallabyConfigurationException>(() => builder.Build())
+            .Message.ShouldContain("ForAllEntities()");
+    }
+
+    [Test]
+    public void ForAllEntities_alone_satisfies_the_table_requirement()
+    {
+        var builder = MinimalBuilder();
+        builder.AddExternalSlot("elt", s => s.ForAllEntities().Except<Product>().Except("sales", "orders"));
+
+        var config = builder.Build();
+
+        config.ExternalSlots[0].AllEntities.ShouldBeTrue();
+        config.ExternalSlots[0].ExcludedEntityTypes.ShouldBe([typeof(Product)]);
+        config.ExternalSlots[0].ExcludedTableNames.ShouldBe([("sales", "orders")]);
+    }
+
+    private static IReadOnlyList<(string Name, IWallabyModelProvider Provider)> EfProvider(AppDbContext ctx)
+        => [("EntityFrameworkCore", new EfCoreModelProvider(ctx.Model))];
+
+    private static List<string> Names(ExternalSlotSpec spec) => spec.Tables.Select(t => $"{t.Schema}.{t.Table}").ToList();
+
+    [Test]
+    public async Task Resolver_expands_ForAllEntities_to_every_model_table()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+        registration.TableNames.Add(("legacy", "invoices"));
+
+        var specs = ExternalSlotResolver.Resolve([registration], EfProvider(ctx));
+
+        var names = Names(specs[0]);
+        names.Count.ShouldBe(11);
+        names.ShouldContain("public.products");
+        names.ShouldContain("sales.order_lines");
+        names.ShouldContain("public.product_labels");
+        names.Last().ShouldBe("legacy.invoices"); // explicit tables follow the model's
+    }
+
+    [Test]
+    public async Task Resolver_removes_excluded_entities_and_named_tables()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+        registration.ExcludedEntityTypes.Add(typeof(Order));
+        registration.ExcludedTableNames.Add(("public", "customers"));
+        registration.ExcludedTableNames.Add(("public", "product_labels")); // no CLR type: by name only
+
+        var specs = ExternalSlotResolver.Resolve([registration], EfProvider(ctx));
+
+        var names = Names(specs[0]);
+        names.Count.ShouldBe(7);
+        names.ShouldNotContain("sales.orders");
+        names.ShouldNotContain("public.customers");
+        names.ShouldNotContain("public.product_labels");
+        names.ShouldContain("sales.order_lines");
+    }
+
+    [Test]
+    public async Task Resolver_throws_for_an_exclusion_the_model_does_not_contain()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+        registration.ExcludedTableNames.Add(("public", "orders")); // lives in the sales schema
+
+        var ex = Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve([registration], EfProvider(ctx)));
+
+        ex.Message.ShouldContain("'public.orders'");
+        ex.Message.ShouldContain("Did you mean 'sales.orders'?");
+    }
+
+    [Test]
+    public async Task Resolver_throws_for_an_exclusion_that_is_also_declared_explicitly()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+        registration.EntityTypes.Add(typeof(Product));
+        registration.ExcludedTableNames.Add(("public", "products"));
+
+        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve([registration], EfProvider(ctx)))
+            .Message.ShouldContain("also declares");
+    }
+
+    [Test]
+    public async Task Resolver_throws_when_exclusions_remove_every_table()
+    {
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+        foreach (var table in new EfCoreModelProvider(ctx.Model).ResolveAllTables())
+        {
+            registration.ExcludedTableNames.Add((table.Schema, table.Table));
+        }
+
+        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve([registration], EfProvider(ctx)))
+            .Message.ShouldContain("no tables");
+    }
+
+    [Test]
+    public void Resolver_throws_for_ForAllEntities_without_a_model()
+    {
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+
+        Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve([registration], modelProviders: []))
+            .Message.ShouldContain("ForAllEntities()");
+    }
 }

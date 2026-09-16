@@ -45,8 +45,8 @@ internal sealed class ExternalSlotProvisioningService(
                 return;
             }
 
-            // ForEntity<T>() needs the providers' models; only build them when a slot actually uses an entity type.
-            var needsModel = config.ExternalSlots.Exists(s => s.EntityTypes.Count > 0);
+            // ForEntity<T>(), ForAllEntities() and Except<T>() need the providers' models; only build them when a slot uses one.
+            var needsModel = config.ExternalSlots.Exists(s => s.NeedsModel);
             IReadOnlyList<(string Name, IWallabyModelProvider Provider)> modelProviders = needsModel
                 ? [.. config.Providers.Select(p => (p.Name, Provider: p.ModelProvider(services)))]
                 : [];
