@@ -41,7 +41,6 @@ public class EfCoreCaptureModelBuilderTests
 
         product.PrimaryKey.Count.ShouldBe(1);
         product.PrimaryKey[0].PropertyName.ShouldBe(nameof(Product.Id));
-        product.PrimaryKey[0].IsPrimaryKey.ShouldBeTrue();
     }
 
     [Test]

@@ -207,7 +207,7 @@ public class FanoutQueueWorkerTests
     {
         var id = new CapturedColumn
         {
-            PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true,
+            PropertyName = "Id", ColumnName = "id", ClrType = typeof(int),
         };
         return new CapturedTable
         {
@@ -219,7 +219,7 @@ public class FanoutQueueWorkerTests
                 id,
                 new CapturedColumn
                 {
-                    PropertyName = "Col", ColumnName = "col", ClrType = typeof(int), IsPrimaryKey = false,
+                    PropertyName = "Col", ColumnName = "col", ClrType = typeof(int),
                 },
             ],
             PrimaryKey = [id],

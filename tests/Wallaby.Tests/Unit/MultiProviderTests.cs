@@ -71,7 +71,7 @@ public class MultiProviderTests
 
         private static CapturedTable Table(Type type, string table)
         {
-            var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true };
+            var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int) };
             return new CapturedTable
             {
                 EntityClrType = type, Schema = "public", TableName = table, Columns = [id], PrimaryKey = [id],

@@ -68,7 +68,7 @@ public class OwnedTypeTests
         supplier.Columns.Count.ShouldBe(12); // Id, Name + 2×(street, city, lat, lon) + email, phone
 
         // The owned types' shadow PKs map to the owner's PK column, which is captured exactly once.
-        supplier.Columns.Count(c => c.IsPrimaryKey).ShouldBe(1);
+        supplier.Columns.Count(c => c.ColumnName == supplier.PrimaryKey[0].ColumnName).ShouldBe(1);
 
         // Members whose data is not on suppliers rows are not captured.
         supplier.Columns.ShouldNotContain(c => c.PropertyName.StartsWith("Notes"));

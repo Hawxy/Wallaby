@@ -12,9 +12,6 @@ public sealed class CapturedColumn
     /// <summary>The CLR type of the property.</summary>
     public required Type ClrType { get; init; }
 
-    /// <summary>True when the column participates in the primary key.</summary>
-    public required bool IsPrimaryKey { get; init; }
-
     /// <summary>How to read this column's wire value; see <see cref="ColumnReadMode"/>.</summary>
     public ColumnReadMode ReadMode { get; init; }
 }

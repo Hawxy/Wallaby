@@ -82,7 +82,7 @@ public class KeysetPagerIntegrationTests(PostgresFixture pg)
             """,
             CancellationToken.None);
 
-        var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true };
+        var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int) };
         var table = new CapturedTable
         {
             EntityClrType = typeof(object),
@@ -93,10 +93,10 @@ public class KeysetPagerIntegrationTests(PostgresFixture pg)
                 id,
                 new CapturedColumn
                 {
-                    PropertyName = "Body", ColumnName = "body", ClrType = typeof(string), IsPrimaryKey = false,
+                    PropertyName = "Body", ColumnName = "body", ClrType = typeof(string),
                     ReadMode = ColumnReadMode.Utf8JsonBytes,
                 },
-                new CapturedColumn { PropertyName = "Note", ColumnName = "note", ClrType = typeof(string), IsPrimaryKey = false },
+                new CapturedColumn { PropertyName = "Note", ColumnName = "note", ClrType = typeof(string) },
             ],
             PrimaryKey = [id],
         };
@@ -143,14 +143,13 @@ public class KeysetPagerIntegrationTests(PostgresFixture pg)
 
     private static CapturedTable Table(string name, params (string Column, Type ClrType)[] extraColumns)
     {
-        var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true };
+        var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int) };
         var columns = new List<CapturedColumn> { id };
         columns.AddRange(extraColumns.Select(c => new CapturedColumn
         {
             PropertyName = c.Column,
             ColumnName = c.Column,
             ClrType = c.ClrType,
-            IsPrimaryKey = false,
         }));
 
         return new CapturedTable

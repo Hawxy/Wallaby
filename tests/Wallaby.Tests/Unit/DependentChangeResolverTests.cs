@@ -232,7 +232,6 @@ public class DependentChangeResolverTests
                 PropertyName = c,
                 ColumnName = c,
                 ClrType = typeof(int),
-                IsPrimaryKey = i == 0,
             })
             .ToList();
         return new CapturedTable
