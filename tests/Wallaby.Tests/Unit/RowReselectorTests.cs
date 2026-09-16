@@ -15,11 +15,11 @@ public class RowReselectorTests
     {
         var id = new CapturedColumn
         {
-            PropertyName = "Id", ColumnName = "Id", ClrType = typeof(int), IsPrimaryKey = true,
+            PropertyName = "Id", ColumnName = "Id", ClrType = typeof(int),
         };
         var description = new CapturedColumn
         {
-            PropertyName = "Description", ColumnName = "Description", ClrType = typeof(string), IsPrimaryKey = false,
+            PropertyName = "Description", ColumnName = "Description", ClrType = typeof(string),
         };
         return new WallabyModel([
             new CapturedTable

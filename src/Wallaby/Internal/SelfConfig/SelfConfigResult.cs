@@ -1,5 +1,3 @@
-using Wallaby.Model;
-
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>The outcome of a self-configuration run.</summary>
@@ -23,18 +21,3 @@ internal sealed record SelfConfigResult(
     bool SlotRecreated,
     IReadOnlyList<string> Warnings,
     IReadOnlyList<ExternalSlotResult> ExternalSlots);
-
-/// <summary>
-/// Brings the source Postgres database into a state where Wallaby can run: validates server settings,
-/// ensures the <c>wallaby</c> state schema, and creates/reconciles the publication and replication slot.
-/// </summary>
-internal interface ISelfConfigurator
-{
-    /// <summary>
-    /// With <paramref name="widenPublications"/> every managed publication reconciles to plain
-    /// whole-table membership (no column lists), so schema migrations blocked by publication column
-    /// lists can run; the next reconcile without the flag restores the narrow lists.
-    /// </summary>
-    Task<SelfConfigResult> EnsureConfiguredAsync(
-        WallabyModel model, CancellationToken ct, bool widenPublications = false);
-}

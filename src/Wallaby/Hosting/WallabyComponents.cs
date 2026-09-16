@@ -28,7 +28,7 @@ internal sealed class WallabyComponents : IAsyncDisposable
     public required SinkDispatcher Dispatcher { get; init; }
     public required IReadOnlyDictionary<string, ISink> Sinks { get; init; }
     public required WatermarkBackfillCoordinator Coordinator { get; init; }
-    public required ISelfConfigurator SelfConfigurator { get; init; }
+    public required PostgresSelfConfigurator SelfConfigurator { get; init; }
 
     /// <summary>The checkpoint store the pipeline writes through (throttled when configured).</summary>
     public required ICheckpointStore Checkpoints { get; init; }

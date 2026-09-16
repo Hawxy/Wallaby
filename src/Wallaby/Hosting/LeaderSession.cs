@@ -139,71 +139,62 @@ internal sealed class LeaderSession(
         // The scheduler and fan-out worker handle their own failures internally (per-table/per-job backoff,
         // pass-level retry), so their catches here are backstops.
         Exception? backgroundFault = null;
+        var background = new List<Task>(5);
 
-        var backfillTask = Task.Run(async () =>
-        {
-            try { await scheduler.RunAsync(options.Advanced.BackfillPollInterval, linked.Token); }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-            catch (Exception ex)
+        // Supervise one background task: cancellation while the workload is being cancelled is normal;
+        // any other exception is logged via onFault and, when the task is session-critical, recorded as
+        // the session fault and cancels the workload. The task itself never faults.
+        void Background(Func<CancellationToken, Task> run, Action<Exception>? onFault = null)
+            => background.Add(Task.Run(async () =>
             {
-                _logger.BackfillSchedulerFailed(ex);
-                Interlocked.CompareExchange(ref backgroundFault, ex, null);
-                await linked.CancelAsync();
-            }
-        });
-
-        // Watches for a suspension request (LISTEN + fallback poll) and cancels the workload so the
-        // session winds down and releases the slot; the caller then drops it. Its first read also closes
-        // the race where a suspension lands between this session's pre-check and slot creation. Never
-        // faults the session; transient read errors are retried inside.
-        var controlWatcher = new ControlStateWatcher(
-            controlStore, widenPublications, options.Advanced.ControlPollInterval, _logger);
-        var controlTask = Task.Run(async () =>
-        {
-            try { await controlWatcher.RunAsync(linked, linked.Token); }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-        });
-
-        // Advances the slot while the mapped tables are idle. Never faults the session: the emitter
-        // logs and swallows per-tick errors, so a transiently-down database just skips ticks.
-        var heartbeatTask = options.Advanced.HeartbeatInterval > TimeSpan.Zero
-            ? Task.Run(async () =>
-            {
-                var emitter = new HeartbeatEmitter(
-                    dataSource.Source, () => pipeline.LastAcknowledgedLsn,
-                    options.Advanced.HeartbeatInterval, _logger);
-                try { await emitter.RunAsync(linked.Token); }
+                try { await run(linked.Token); }
                 catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-            })
-            : Task.CompletedTask;
-
-        // Publishes the retained-WAL gauge while leading. Never faults the session: the sampler logs
-        // and swallows per-tick errors.
-        var slotLagTask = options.Advanced.SlotLagSampleInterval > TimeSpan.Zero
-            ? Task.Run(async () =>
-            {
-                var sampler = new SlotLagSampler(
-                    dataSource.Source, options.SlotName, options.Advanced.SlotLagSampleInterval,
-                    instrumentation, _logger);
-                try { await sampler.RunAsync(linked.Token); }
-                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-            })
-            : Task.CompletedTask;
-
-        // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
-        var fanoutTask = components.FanoutQueue is not null
-            ? Task.Run(async () =>
-            {
-                try { await new FanoutQueueWorker(components.FanoutQueue, components.Coordinator, components.Model, _logger, options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(linked.Token); }
-                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-                catch (Exception ex)
+                catch (Exception ex) when (onFault is not null)
                 {
-                    _logger.FanoutWorkerFailed(ex);
+                    onFault(ex);
                     Interlocked.CompareExchange(ref backgroundFault, ex, null);
                     await linked.CancelAsync();
                 }
-            })
-            : Task.CompletedTask;
+            }));
+
+        Background(token => scheduler.RunAsync(options.Advanced.BackfillPollInterval, token), _logger.BackfillSchedulerFailed);
+
+        // Watches for a suspension request (LISTEN + fallback poll) and cancels the workload so the
+        // session winds down and releases the slot; the caller then drops it. Its first read also closes
+        // the race where a suspension lands between this session's pre-check and slot creation. Transient
+        // read errors are retried inside; an unexpected exit bounces the session, since a session nobody
+        // watches would ignore a suspension until the client drops the slot itself.
+        var controlWatcher = new ControlStateWatcher(
+            controlStore, widenPublications, options.Advanced.ControlPollInterval, _logger);
+        Background(token => controlWatcher.RunAsync(linked, token), _logger.ControlWatcherStopped);
+
+        // Advances the slot while the mapped tables are idle. Never faults the session: the emitter
+        // logs and swallows per-tick errors, so a transiently-down database just skips ticks.
+        if (options.Advanced.HeartbeatInterval > TimeSpan.Zero)
+        {
+            Background(token => new HeartbeatEmitter(
+                dataSource.Source, () => pipeline.LastAcknowledgedLsn,
+                options.Advanced.HeartbeatInterval, _logger).RunAsync(token));
+        }
+
+        // Publishes the retained-WAL gauge while leading. Never faults the session: the sampler logs
+        // and swallows per-tick errors.
+        if (options.Advanced.SlotLagSampleInterval > TimeSpan.Zero)
+        {
+            Background(token => new SlotLagSampler(
+                dataSource.Source, options.SlotName, options.Advanced.SlotLagSampleInterval,
+                instrumentation, _logger).RunAsync(token));
+        }
+
+        // The fan-out worker drains offloaded scoped re-snapshots for the lifetime of leadership.
+        if (components.FanoutQueue is not null)
+        {
+            Background(
+                token => new FanoutQueueWorker(
+                    components.FanoutQueue, components.Coordinator, components.Model, _logger,
+                    options.Advanced.FanoutPollInterval, status, instrumentation).RunAsync(token),
+                _logger.FanoutWorkerFailed);
+        }
 
         try
         {
@@ -218,23 +209,16 @@ internal sealed class LeaderSession(
         finally
         {
             await linked.CancelAsync();
-            await backfillTask; // never faults: the body records + swallows
-            await fanoutTask;
-            await controlTask;
-            await heartbeatTask;
-            await slotLagTask;
+            await Task.WhenAll(background); // never faults: each body records + swallows
         }
 
         ct.ThrowIfCancellationRequested();        // a real shutdown re-throws so the caller's loop breaks
-        if (controlWatcher.SuspendObserved)
+        if (controlWatcher.Observed is { } observed)
         {
-            // The stream's await using scope disposes on method exit, so by the time the caller sees this
-            // outcome the slot is released and free to drop while the cluster lock is still held.
-            return LeaderSessionOutcome.SuspendRequested;
-        }
-        if (controlWatcher.ReconfigureObserved)
-        {
-            return LeaderSessionOutcome.Reconfigure;
+            // For a suspension: the stream's await using scope disposes on method exit, so by the time
+            // the caller sees this outcome the slot is released and free to drop while the cluster lock
+            // is still held.
+            return observed;
         }
         if (backgroundFault is not null)
         {

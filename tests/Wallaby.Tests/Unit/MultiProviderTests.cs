@@ -4,6 +4,7 @@ using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 using Wallaby.Internal;
 using Wallaby.Internal.Pipeline;
+using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
 using Wallaby.Providers;
 
@@ -67,11 +68,14 @@ public class MultiProviderTests
                 : new QualifiedTable("public", entity.Table);
         }
 
+        public IReadOnlyList<QualifiedTable> ResolveAllTables()
+            => entities.Select(e => new QualifiedTable("public", e.Table)).Distinct().ToList();
+
         public bool Handles(Type entityClrType) => entities.Any(e => e.Type == entityClrType);
 
         private static CapturedTable Table(Type type, string table)
         {
-            var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true };
+            var id = new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int) };
             return new CapturedTable
             {
                 EntityClrType = type, Schema = "public", TableName = table, Columns = [id], PrimaryKey = [id],
@@ -516,5 +520,20 @@ public class MultiProviderTests
 
         sessions.Leases.ShouldBe(1);
         sessions.Disposals.ShouldBe(1);
+    }
+
+    [Test]
+    public void ForAllEntities_unions_every_providers_tables_and_Except_resolves_through_the_claimant()
+    {
+        var registration = new ExternalSlotRegistration { SlotName = "elt", AllEntities = true };
+        registration.ExcludedEntityTypes.Add(typeof(Beta));
+
+        var specs = ExternalSlotResolver.Resolve([registration],
+        [
+            ("A", new FakeModelProvider("A", (typeof(Alpha), "alpha"), (typeof(Shared), "shared"))),
+            ("B", new FakeModelProvider("B", (typeof(Beta), "beta"), (typeof(Shared), "shared"))),
+        ]);
+
+        specs[0].Tables.Select(t => t.Table).ShouldBe(["alpha", "shared"]);
     }
 }

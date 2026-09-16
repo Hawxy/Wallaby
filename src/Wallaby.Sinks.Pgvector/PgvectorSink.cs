@@ -66,10 +66,6 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
             }
             return DeliveryResult.Success;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch (PermanentDeliveryException ex)
         {
             return DeliveryResult.Permanent(ex.Message, ex.InnerException);
@@ -81,7 +77,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
                 ? DeliveryResult.Retry(reason, ex.InnerException)
                 : DeliveryResult.Permanent(reason, ex.InnerException);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not WallabyConfigurationException)
         {
             return Classify(ex);
         }
@@ -90,10 +86,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
     /// <inheritdoc />
     public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
     {
-        var table = request.Destination ?? _options.DefaultTable
-            ?? throw new WallabyConfigurationException(
-                $"Pgvector sink '{Name}' cannot purge for '{request.QualifiedTableName}': the mapping has no " +
-                "destination and the sink has no DefaultTable.");
+        var table = SinkDestination.Resolve(request, _options.DefaultTable, Name, nameof(_options.DefaultTable));
         _tables.RequireValidTable(table);
         await _tables.PurgeAsync(table, ct);
     }
@@ -134,10 +127,7 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
         var byTable = new Dictionary<string, Dictionary<string, SinkRecord>>(StringComparer.Ordinal);
         foreach (var record in records)
         {
-            var table = record.Destination ?? _options.DefaultTable
-                ?? throw new PermanentDeliveryException(
-                    $"A record for sink '{Name}' has no destination and the sink declares no DefaultTable. " +
-                    "Set ToDestination(...) on the mapping or DefaultTable on the sink.");
+            var table = SinkDestination.Resolve(record, _options.DefaultTable, Name, nameof(_options.DefaultTable));
             if (!byTable.TryGetValue(table, out var byId))
             {
                 byTable[table] = byId = new Dictionary<string, SinkRecord>(StringComparer.Ordinal);
@@ -153,6 +143,10 @@ public sealed class PgvectorSink : ISink, ISinkInitializer, ISinkPurger, IAsyncD
             DeliveryResult.Permanent($"Postgres rejected the delivery for sink '{Name}': {pg.MessageText}", pg),
         NpgsqlException or TimeoutException or System.IO.IOException or System.Net.Sockets.SocketException =>
             DeliveryResult.Retry($"Transient database failure for sink '{Name}': {ex.Message}", ex),
+        // An internal timeout (e.g. inside the embedding generator's HTTP client); the caller's own
+        // cancellation is surfaced by the dispatcher from this retryable result.
+        OperationCanceledException =>
+            DeliveryResult.Retry($"Delivery timed out for sink '{Name}': {ex.Message}", ex),
         _ => DeliveryResult.Permanent($"Delivery failed for sink '{Name}': {ex.Message}", ex),
     };
 }

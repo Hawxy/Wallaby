@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Wallaby.Client.Internal;
+using Wallaby.Hosting;
 
 namespace Wallaby.Internal.Control;
 
@@ -8,24 +9,23 @@ namespace Wallaby.Internal.Control;
 /// workload when a suspension is requested (so the session winds down cleanly and releases the slot for
 /// the runtime to drop) or when the publication-widening flag flips against the session's baseline, so
 /// the next term's bootstrap reconciles the publications to the new width (a plain session bounce: the
-/// slot is untouched and checkpoint continuity holds). A transient read failure is logged and retried; it
-/// must never fault a healthy streaming session, so unlike the backfill/fan-out tasks this one only ends
-/// on cancellation or an observed transition.
+/// slot is untouched and checkpoint continuity holds). A transient read failure is logged and retried so
+/// it never faults a healthy streaming session; the watcher ends on cancellation or an observed
+/// transition, and any other exit is supervised by the session as a fault.
 /// </summary>
 internal sealed class ControlStateWatcher(
     PostgresControlStore store, bool widenedBaseline, TimeSpan pollInterval, ILogger logger)
 {
-    private volatile bool _suspendObserved;
-    private volatile bool _reconfigureObserved;
-
-    /// <summary>True when the session was cancelled because a suspension was observed.</summary>
-    public bool SuspendObserved => _suspendObserved;
+    // Written before the session cancellation that the reader awaits, so no volatile is needed.
+    private LeaderSessionOutcome? _observed;
 
     /// <summary>
-    /// True when the session was cancelled because the publication-widening flag changed; the next
-    /// leader term applies the new publication width via its normal reconcile.
+    /// Why the session was cancelled: <see cref="LeaderSessionOutcome.SuspendRequested"/> when a
+    /// suspension was observed, <see cref="LeaderSessionOutcome.Reconfigure"/> when the
+    /// publication-widening flag changed (the next leader term applies the new width via its normal
+    /// reconcile), null while neither has been seen.
     /// </summary>
-    public bool ReconfigureObserved => _reconfigureObserved;
+    public LeaderSessionOutcome? Observed => _observed;
 
     public async Task RunAsync(CancellationTokenSource sessionCts, CancellationToken ct)
     {
@@ -37,14 +37,14 @@ internal sealed class ControlStateWatcher(
                 var row = await store.ReadAsync(ct);
                 if (row is not null && row.State != ControlContract.StateRunning)
                 {
-                    _suspendObserved = true;
+                    _observed = LeaderSessionOutcome.SuspendRequested;
                     logger.SuspendObserved();
                     await sessionCts.CancelAsync();
                     return;
                 }
                 if ((row?.PublicationsWidened ?? false) != widenedBaseline)
                 {
-                    _reconfigureObserved = true;
+                    _observed = LeaderSessionOutcome.Reconfigure;
                     logger.WideningChangeObserved(row?.PublicationsWidened ?? false);
                     await sessionCts.CancelAsync();
                     return;
@@ -79,4 +79,7 @@ internal static partial class ControlStateWatcherLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to read the Wallaby control state; will retry.")]
     internal static partial void ControlReadFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The control state watcher stopped unexpectedly; bouncing the leader session.")]
+    internal static partial void ControlWatcherStopped(this ILogger logger, Exception ex);
 }

@@ -30,6 +30,9 @@ internal sealed class MartenTablePlan
     /// <summary>The tenant-id column name for conjoined tenancy, else null.</summary>
     public required string? TenantColumnName { get; init; }
 
+    /// <summary>The record key carrying the tenant id for conjoined documents (read by <c>ScopedByTenant</c>).</summary>
+    public const string TenantIdPropertyName = "TenantId";
+
     /// <summary>The soft-delete flag column name, else null.</summary>
     public required string? DeletedColumnName { get; init; }
 }

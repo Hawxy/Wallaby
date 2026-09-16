@@ -119,15 +119,15 @@ public class ClassificationTests
     }
 
     [Test]
-    public async Task Record_without_destination_or_default_index_fails_permanently()
+    public async Task Record_without_destination_or_default_index_is_a_configuration_error()
     {
         var stub = new StubHandler();
         var sink = Sink(stub); // no DefaultIndex configured
 
-        var result = await sink.DeliverAsync(Batch(Upsert("1", destination: null)), CancellationToken.None);
+        var ex = await Should.ThrowAsync<WallabyConfigurationException>(
+            () => sink.DeliverAsync(Batch(Upsert("1", destination: null)), CancellationToken.None));
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
-        result.Error!.ShouldContain("DefaultIndex");
+        ex.Message.ShouldContain("DefaultIndex");
         stub.Requests.ShouldBeEmpty(); // fails before any network call
     }
 
@@ -147,13 +147,15 @@ public class ClassificationTests
     }
 
     [Test]
-    public async Task Cancellation_is_rethrown_not_classified()
+    public async Task Cancellation_classifies_as_retryable_for_the_dispatcher_to_surface()
     {
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
         var sink = Sink(new StubHandler());
 
-        await Should.ThrowAsync<OperationCanceledException>(
-            () => sink.DeliverAsync(Batch(Upsert("1")), cts.Token));
+        // The dispatcher turns a retryable result under a cancelled token into cancellation.
+        var result = await sink.DeliverAsync(Batch(Upsert("1")), cts.Token);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
     }
 }

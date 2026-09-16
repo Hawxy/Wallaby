@@ -195,19 +195,15 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         for (var i = 0; i < records.Count; i++)
         {
             var record = records[i];
-            var topic = record.Destination ?? _options.DefaultTopic;
-            if (topic is null)
-            {
-                return DeliveryResult.Permanent(
-                    $"Record {record.DocumentId} has no destination and no DefaultTopic is configured for sink '{Name}'.");
-            }
+            var topic = SinkDestination.Resolve(record, _options.DefaultTopic, Name, nameof(_options.DefaultTopic));
 
+            var idempotencyKey = KafkaMessageWriter.IdempotencyKey(record);
             byte[]? value;
             try
             {
                 value = record.IsDeletion
                     ? null // Tombstone: compaction removes the document; headers still carry its context.
-                    : KafkaMessageWriter.WriteValue(record, _options.Annotations, _options.SerializerOptions);
+                    : KafkaMessageWriter.WriteValue(record, idempotencyKey, _options.Annotations, _options.SerializerOptions);
             }
             catch (Exception ex)
             {
@@ -221,7 +217,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
                 Topic = topic,
                 Key = record.DocumentId,
                 Value = value!, // null-forgiving: a tombstone genuinely carries a null value
-                Headers = KafkaMessageWriter.BuildHeaders(record),
+                Headers = KafkaMessageWriter.BuildHeaders(record, idempotencyKey),
             };
         }
 
@@ -244,10 +240,6 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
             // once the brokers have actually accepted all of it.
             await Task.WhenAll(reports);
             return DeliveryResult.Success;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
         }
         catch (KafkaException ex)
         {

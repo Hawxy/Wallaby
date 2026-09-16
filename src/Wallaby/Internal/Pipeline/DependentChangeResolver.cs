@@ -251,7 +251,7 @@ internal sealed class DependentChangeResolver(
 
     private void LogOldLookupUnavailable(RawChange change)
     {
-        if (_oldLookupLogged.Add($"{change.Schema}.{change.TableName}"))
+        if (_oldLookupLogged.Add(change.QualifiedName))
         {
             _logger.DependentOldLookupUnavailable(change.Schema, change.TableName);
         }

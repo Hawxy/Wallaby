@@ -62,7 +62,7 @@ public class BulkPayloadTests
     [Test]
     public void Record_without_destination_or_default_index_throws()
     {
-        var ex = Should.Throw<InvalidOperationException>(
+        var ex = Should.Throw<WallabyConfigurationException>(
             () => Write([Upsert("1", new Dictionary<string, object?>(), destination: null)]));
         ex.Message.ShouldContain(SinkName);
         ex.Message.ShouldContain("DefaultIndex");

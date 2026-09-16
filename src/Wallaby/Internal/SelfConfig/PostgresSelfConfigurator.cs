@@ -8,7 +8,7 @@ using Wallaby.Model;
 namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
-/// Default <see cref="ISelfConfigurator"/>: validates the server, ensures the <c>wallaby</c> state
+/// Brings the source database into a state where Wallaby can run: validates the server, ensures the <c>wallaby</c> state
 /// schema, and delegates publication and slot provisioning to <see cref="PublicationReconciler"/> and
 /// <see cref="SlotProvisioner"/> for the primary and every declared external slot. Uses a normal
 /// (non-replication) connection.
@@ -17,7 +17,7 @@ internal sealed class PostgresSelfConfigurator(
     NpgsqlDataSource dataSource,
     SelfConfigOptions options,
     ILogger logger,
-    WallabyInstrumentation? instrumentation = null) : ISelfConfigurator
+    WallabyInstrumentation? instrumentation = null)
 {
     private readonly ServerValidator _validator = new(logger);
     private readonly StateSchemaBootstrapper _stateSchema = new(logger);
@@ -25,6 +25,13 @@ internal sealed class PostgresSelfConfigurator(
     private readonly SlotProvisioner _slots = new(logger);
     private readonly WallabyInstrumentation _instr = instrumentation ?? WallabyInstrumentation.NoOp;
 
+    /// <summary>
+    /// Validate server settings, ensure the <c>wallaby</c> state schema, and create/reconcile the
+    /// publication and replication slot. With <paramref name="widenPublications"/> every managed
+    /// publication reconciles to plain whole-table membership (no column lists), so schema migrations
+    /// blocked by publication column lists can run; the next reconcile without the flag restores the
+    /// narrow lists.
+    /// </summary>
     public async Task<SelfConfigResult> EnsureConfiguredAsync(
         WallabyModel model, CancellationToken ct, bool widenPublications = false)
     {

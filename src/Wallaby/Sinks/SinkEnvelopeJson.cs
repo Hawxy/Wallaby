@@ -67,13 +67,44 @@ public static class SinkEnvelopeJson
         writer.WriteEndObject();
     }
 
+    /// <summary>
+    /// Writes an <c>"annotations"</c> object property carrying the sink's static key/values; nothing is
+    /// written when <paramref name="annotations"/> is null or empty.
+    /// </summary>
+    public static void WriteAnnotations(Utf8JsonWriter writer, IReadOnlyDictionary<string, string>? annotations)
+    {
+        if (annotations is not { Count: > 0 })
+        {
+            return;
+        }
+
+        writer.WriteStartObject("annotations");
+        foreach (var annotation in annotations)
+        {
+            writer.WriteString(annotation.Key, annotation.Value);
+        }
+        writer.WriteEndObject();
+    }
+
     /// <summary>Writes the document's field bag as a JSON object at the writer's current position.</summary>
     public static void WriteDocument(Utf8JsonWriter writer, IReadOnlyDictionary<string, object?> document,
         string documentId, JsonSerializerOptions? serializerOptions)
+        => WriteDocument(writer, document, documentId, serializerOptions, skipField: null);
+
+    /// <summary>
+    /// Writes the document's field bag as a JSON object, omitting the field named
+    /// <paramref name="skipField"/> (for a value the sink stores outside the document).
+    /// </summary>
+    public static void WriteDocument(Utf8JsonWriter writer, IReadOnlyDictionary<string, object?> document,
+        string documentId, JsonSerializerOptions? serializerOptions, string? skipField)
     {
         writer.WriteStartObject();
         foreach (var field in document)
         {
+            if (field.Key == skipField)
+            {
+                continue;
+            }
             writer.WritePropertyName(field.Key);
             WriteValue(writer, field.Value, field.Key, documentId, serializerOptions);
         }

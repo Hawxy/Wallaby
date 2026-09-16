@@ -30,15 +30,7 @@ internal static class EnvelopeWriter
         writer.WriteString("type", "wallaby.changes");
         writer.WriteString("sink", sinkName);
         writer.WriteString("sentAt", DateTimeOffset.UtcNow);
-        if (annotations is { Count: > 0 })
-        {
-            writer.WriteStartObject("annotations");
-            foreach (var annotation in annotations)
-            {
-                writer.WriteString(annotation.Key, annotation.Value);
-            }
-            writer.WriteEndObject();
-        }
+        SinkEnvelopeJson.WriteAnnotations(writer, annotations);
         writer.WriteStartArray("records");
         for (var i = offset; i < offset + count; i++)
         {

@@ -189,11 +189,7 @@ public sealed class HttpSink : ISink
                 ? DeliveryResult.Retry($"HTTP sink received {status} from {_endpoint}.")
                 : DeliveryResult.Permanent($"HTTP sink request was rejected with {status} by {_endpoint}.");
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // The linked per-request timeout fired (also surfaces as TaskCanceledException from HttpClient).
             return DeliveryResult.Retry($"HTTP sink request to {_endpoint} timed out after {_options.TimeoutMs}ms.");

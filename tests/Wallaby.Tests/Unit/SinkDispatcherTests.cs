@@ -70,6 +70,62 @@ public class SinkDispatcherTests
     }
 
     [Test]
+    public async Task A_thrown_exception_is_a_permanent_failure_naming_the_sink_and_the_batch_tables()
+    {
+        var attempts = 0;
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) =>
+            {
+                Interlocked.Increment(ref attempts);
+                throw new InvalidOperationException("kaboom");
+            }),
+        };
+
+        var ex = await Should.ThrowAsync<SinkDeliveryException>(
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(OneRecord(), CancellationToken.None));
+
+        attempts.ShouldBe(1);
+        ex.SinkName.ShouldBe("sink");
+        ex.Message.ShouldContain("InvalidOperationException: kaboom");
+        ex.Message.ShouldContain("public.products");
+        ex.InnerException.ShouldBeOfType<InvalidOperationException>();
+    }
+
+    [Test]
+    public async Task A_thrown_configuration_exception_keeps_its_message()
+    {
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", (_, _) => throw new WallabyConfigurationException("no DefaultIndex")),
+        };
+
+        var ex = await Should.ThrowAsync<SinkDeliveryException>(
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(OneRecord(), CancellationToken.None));
+
+        ex.Message.ShouldContain("no DefaultIndex");
+        ex.Message.ShouldNotContain(nameof(WallabyConfigurationException));
+        ex.InnerException.ShouldBeOfType<WallabyConfigurationException>();
+    }
+
+    [Test]
+    public async Task A_retryable_result_under_a_cancelled_token_surfaces_as_cancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        var sinks = new Dictionary<string, ISink>
+        {
+            ["sink"] = new DelegateSink("sink", async (_, _) =>
+            {
+                await cts.CancelAsync();
+                return DeliveryResult.Retry("request aborted");
+            }),
+        };
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            async () => await new SinkDispatcher(sinks, NullLogger.Instance).DispatchAsync(OneRecord(), cts.Token));
+    }
+
+    [Test]
     public async Task Retryable_failures_honor_the_configured_attempt_limit()
     {
         var attempts = 0;

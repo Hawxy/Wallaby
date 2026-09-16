@@ -1,4 +1,5 @@
 using System.Data.Common;
+using Wallaby.Internal;
 using Weasel.Core;
 using Weasel.Postgresql;
 using DbCommandBuilder = Weasel.Core.DbCommandBuilder;
@@ -27,9 +28,7 @@ internal sealed class TableReplicaIdentity(string schema, string table) : ISchem
     public void WriteDropStatement(Migrator rules, TextWriter writer)
         => writer.WriteLine($"ALTER TABLE {QuotedTable()} REPLICA IDENTITY DEFAULT;");
 
-    private string QuotedTable() => $"{Quote(Schema)}.{Quote(Table)}";
-
-    private static string Quote(string identifier) => "\"" + identifier.Replace("\"", "\"\"") + "\"";
+    private string QuotedTable() => PgExec.QuoteTable(Schema, Table);
 
     public void ConfigureQueryCommand(DbCommandBuilder builder)
     {

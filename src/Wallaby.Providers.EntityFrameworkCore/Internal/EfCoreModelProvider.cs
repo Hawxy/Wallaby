@@ -35,8 +35,29 @@ internal sealed class EfCoreModelProvider(IModel model) : IWallabyModelProvider
         var tableName = entityType.GetTableName()
             ?? throw new WallabyConfigurationException(
                 $"'{entityClrType.FullName}' is not mapped to a table.");
-        return new QualifiedTable(entityType.GetSchema() ?? "public", tableName);
+        var table = new QualifiedTable(entityType.GetSchema() ?? "public", tableName);
+
+        // An owned type stored in its owner's table (same-table or JSON) has no table of its own; naming it
+        // would silently target the owner's table.
+        if (entityType.FindOwnership()?.PrincipalEntityType is { } owner
+            && owner.GetTableName() == tableName && (owner.GetSchema() ?? "public") == table.Schema)
+        {
+            throw new WallabyConfigurationException(
+                $"'{entityClrType.FullName}' is stored in its owner's table '{table.Schema}.{table.Table}'; name the owner instead.");
+        }
+
+        return table;
     }
+
+    // The relational model is EF's own physical-table view: TPH, same-table owned and JSON-mapped types
+    // collapse onto one table, while TPT/TPC, split and separate-table owned types and many-to-many join
+    // tables each appear. Views live separately, and keyless tables carry no primary key.
+    public IReadOnlyList<QualifiedTable> ResolveAllTables()
+        => model.GetRelationalModel().Tables
+            .Where(t => t.PrimaryKey is not null)
+            .Select(t => new QualifiedTable(t.Schema ?? "public", t.Name))
+            .Distinct()
+            .ToList();
 
     public bool Handles(Type entityClrType)
         => model.FindEntityType(entityClrType)?.GetTableName() is not null;

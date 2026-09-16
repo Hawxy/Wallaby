@@ -36,7 +36,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
         Dictionary<(IEnrichmentSessionProvider, object), IEnrichmentSession>? sessions = null;
         try
         {
-            foreach (var (type, group) in GroupByTypePreservingOrder(changes))
+            foreach (var (type, group) in OrderedGrouping.GroupPreservingOrder(changes, c => c.EntityClrType))
             {
                 if (!_mappings.TryGetValue(type, out var typeMappings))
                 {
@@ -156,27 +156,6 @@ internal sealed class MappingChangeRouter : IChangeRouter
         }
 
         return routed;
-    }
-
-    /// <summary>Groups changes by entity type in first-occurrence order, each group in source order.</summary>
-    private static List<(Type Type, List<ChangeEvent> Changes)> GroupByTypePreservingOrder(
-        IReadOnlyList<ChangeEvent> changes)
-    {
-        var byType = new Dictionary<Type, List<ChangeEvent>>();
-        var groups = new List<(Type, List<ChangeEvent>)>();
-
-        foreach (var change in changes)
-        {
-            if (!byType.TryGetValue(change.EntityClrType, out var group))
-            {
-                group = [];
-                byType[change.EntityClrType] = group;
-                groups.Add((change.EntityClrType, group));
-            }
-            group.Add(change);
-        }
-
-        return groups;
     }
 
     /// <summary>

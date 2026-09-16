@@ -305,13 +305,12 @@ public sealed class WallabyBuilder
             }
         }
 
-        // ForEntity<T>() resolves against a provider's model, so it needs a declared provider. ForTable(...) does not.
-        if (_configuration.Providers.Count == 0 &&
-            _configuration.ExternalSlots.Any(e => e.EntityTypes.Count > 0))
+        // Entity-typed declarations resolve against a provider's model, so they need a declared provider. ForTable(...) does not.
+        if (_configuration.Providers.Count == 0 && _configuration.ExternalSlots.Any(e => e.NeedsModel))
         {
             throw new WallabyConfigurationException(
-                "AddExternalSlot(...).ForEntity<T>() requires a storage provider to resolve the table. " +
-                "Register one with UseEntityFrameworkCore<TContext>() or declare the table by name via ForTable(...).");
+                "AddExternalSlot(...).ForEntity<T>(), ForAllEntities() and Except<T>() require a storage provider. " +
+                "Register one with UseEntityFrameworkCore<TContext>() or declare the tables by name via ForTable(...).");
         }
 
         // External slots: names must be distinct from each other, and each must declare at least one table
@@ -322,10 +321,15 @@ public sealed class WallabyBuilder
         var publicationNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var external in _configuration.ExternalSlots)
         {
-            if (external.TableNames.Count == 0 && external.EntityTypes.Count == 0)
+            if (!external.AllEntities && external.TableNames.Count == 0 && external.EntityTypes.Count == 0)
             {
                 throw new WallabyConfigurationException(
-                    $"AddExternalSlot(\"{external.SlotName}\") declares no tables. Add at least one via ForTable(...) or ForEntity<T>().");
+                    $"AddExternalSlot(\"{external.SlotName}\") declares no tables. Add at least one via ForTable(...) or ForEntity<T>(), or use ForAllEntities().");
+            }
+            if (external.HasExclusions && !external.AllEntities)
+            {
+                throw new WallabyConfigurationException(
+                    $"AddExternalSlot(\"{external.SlotName}\").Except(...) requires ForAllEntities(); without it, declare only the tables you want via ForTable(...) or ForEntity<T>().");
             }
             if (!slotNames.Add(external.SlotName))
             {

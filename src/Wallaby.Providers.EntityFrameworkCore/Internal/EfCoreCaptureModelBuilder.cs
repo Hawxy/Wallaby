@@ -54,12 +54,6 @@ internal static class EfCoreCaptureModelBuilder
                     $"Entity '{clrType.FullName}' is not mapped to a table (it may be a view or keyless type) and cannot be captured.");
             }
 
-            if (entityType.FindPrimaryKey() is null)
-            {
-                throw new WallabyConfigurationException(
-                    $"Entity '{clrType.FullName}' has no primary key. pgoutput logical replication requires a primary key to capture changes.");
-            }
-
             // A discriminator property exists exactly for TPH hierarchy members; TPT/TPC don't share tables.
             if (entityType.FindDiscriminatorProperty() is not null
                 && (entityType.BaseType is not null || entityType.GetDirectlyDerivedTypes().Any()))
@@ -230,8 +224,7 @@ internal static class EfCoreCaptureModelBuilder
 
         var primaryKey = entityType.FindPrimaryKey()
             ?? throw new WallabyConfigurationException(
-                $"Entity '{entityType.ClrType.FullName}' has no primary key. pgoutput logical replication requires a primary key.");
-        var pkPropertyNames = primaryKey.Properties.Select(p => p.Name).ToHashSet();
+                $"Entity '{entityType.ClrType.FullName}' has no primary key. pgoutput logical replication requires a primary key to capture changes.");
 
         var columnsByProperty = new Dictionary<string, CapturedColumn>();
         var columns = new List<CapturedColumn>();
@@ -250,7 +243,6 @@ internal static class EfCoreCaptureModelBuilder
                 PropertyName = leaf.Path,
                 ColumnName = columnName,
                 ClrType = leaf.Property.ClrType,
-                IsPrimaryKey = pkPropertyNames.Contains(leaf.Path),
             };
             columns.Add(column);
             columnsByProperty[leaf.Path] = column;

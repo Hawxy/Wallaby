@@ -64,10 +64,9 @@ public sealed class OpenSearchSink : ISink, IDisposable
             {
                 payload = BulkJson.Write(Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not WallabyConfigurationException)
             {
-                // A document value the bulk body can't encode (or a record with no resolvable index) is a
-                // transform/configuration bug; retrying would never succeed.
+                // A document value the bulk body can't encode is a transform bug; retrying would never succeed.
                 return DeliveryResult.Permanent($"OpenSearch bulk serialization failed: {ex.Message}", ex);
             }
 
@@ -101,18 +100,10 @@ public sealed class OpenSearchSink : ISink, IDisposable
         {
             response = await _client.LowLevel.BulkAsync<StringResponse>(PostData.Bytes(payload), parameters, ct);
         }
-        catch (Exception ex) when (ct.IsCancellationRequested)
-        {
-            // The transport wraps cancellation (UnexpectedOpenSearchClientException); honor the caller's token.
-            throw new OperationCanceledException("OpenSearch bulk request was canceled.", ex, ct);
-        }
         catch (OpenSearchClientException ex)
         {
             return DeliveryResult.Retry($"OpenSearch bulk request failed: {ex.Message}", ex);
         }
-
-        // Cancellation can also surface as a failed response rather than a throw.
-        ct.ThrowIfCancellationRequested();
 
         var status = response.HttpStatusCode;
         if (status is null)

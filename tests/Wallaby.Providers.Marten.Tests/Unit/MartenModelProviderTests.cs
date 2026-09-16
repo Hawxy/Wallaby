@@ -172,4 +172,15 @@ public class MartenModelProviderTests
         table.Schema.ShouldBe("docs");
         table.Table.ShouldBe("mt_doc_tenantdoc");
     }
+
+    [Test]
+    public void ResolveAllTables_lists_each_document_table_once()
+    {
+        var provider = Provider(o => o.Schema.For<BaseDoc>().AddSubClass<SubDoc>());
+
+        var tables = provider.ResolveAllTables().Select(t => $"{t.Schema}.{t.Table}").ToList();
+
+        // A hierarchy is one table, carried by its root.
+        tables.ShouldBe(["docs.mt_doc_plaindoc", "docs.mt_doc_softdoc", "docs.mt_doc_tenantdoc", "docs.mt_doc_basedoc"], ignoreOrder: true);
+    }
 }

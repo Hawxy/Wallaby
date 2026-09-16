@@ -189,16 +189,15 @@ public class DeliveryTests
     }
 
     [Test]
-    public async Task Record_without_a_resolvable_index_fails_permanently_before_any_request()
+    public async Task Record_without_a_resolvable_index_is_a_configuration_error_before_any_request()
     {
         var invoker = new CapturingInvoker(AllOk);
         using var sink = Sink(invoker);
 
-        var result = await sink.DeliverAsync(
-            Batch(Upsert("1", new Dictionary<string, object?>(), destination: null)), CancellationToken.None);
+        var ex = await Should.ThrowAsync<WallabyConfigurationException>(() => sink.DeliverAsync(
+            Batch(Upsert("1", new Dictionary<string, object?>(), destination: null)), CancellationToken.None));
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
-        result.Error!.ShouldContain("DefaultIndex");
+        ex.Message.ShouldContain("DefaultIndex");
         invoker.Payloads.ShouldBeEmpty();
     }
 }

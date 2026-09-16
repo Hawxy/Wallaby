@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Wallaby.DependencyInjection;
 using Wallaby.Providers.EntityFrameworkCore.Internal;
 using Wallaby.Internal;
 using Wallaby.Internal.SelfConfig;
@@ -195,6 +196,48 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         var second = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
         second[0].SlotCreated.ShouldBeFalse();
         second[0].PublicationCreated.ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task ForAllEntities_provisions_every_model_table_except_the_excluded_ones()
+    {
+        await using var names = ReplicationScope.Unique(pg.ConnectionString);
+        var extSlot = names.Named("elt_slot");
+        var extPub = names.Named("elt_pub");
+        names.TrackExternal(extSlot, extPub);
+
+        await using var ctx = TestModelFactory.CreateModelOnlyContext();
+        var registration = new ExternalSlotRegistration { SlotName = extSlot, PublicationName = extPub, AllEntities = true };
+        registration.ExcludedEntityTypes.Add(typeof(Supplier));
+        var specs = ExternalSlotResolver.Resolve([registration], [("EntityFrameworkCore", new EfCoreModelProvider(ctx.Model))]);
+
+        var configurator = new PostgresSelfConfigurator(
+            pg.DataSource,
+            new SelfConfigOptions { SlotName = names.Slot, PublicationName = names.Publication, ExternalSlots = specs },
+            NullLogger.Instance);
+        var result = await configurator.EnsureExternalSlotsOnlyAsync(CancellationToken.None);
+        result[0].PublicationCreated.ShouldBeTrue();
+
+        // Every resolved table exists physically, and the publication holds exactly that set.
+        await using var conn = new NpgsqlConnection(pg.ConnectionString);
+        await conn.OpenAsync();
+        var published = new List<string>();
+        await using (var cmd = new NpgsqlCommand(
+            "SELECT schemaname || '.' || tablename FROM pg_publication_tables WHERE pubname = @p", conn))
+        {
+            cmd.Parameters.AddWithValue("p", extPub);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                published.Add(reader.GetString(0));
+            }
+        }
+
+        published.ShouldBe(
+        [
+            "public.categories", "public.products", "public.labels", "public.product_labels", "public.customers",
+            "public.supplier_notes", "public.supplier_legal", "sales.orders", "sales.order_lines",
+        ], ignoreOrder: true);
     }
 
     [Test]

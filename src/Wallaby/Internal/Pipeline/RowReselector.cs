@@ -29,7 +29,7 @@ internal sealed class RowReselector(NpgsqlDataSource dataSource, WallabyModel mo
         for (var i = 0; i < table.PrimaryKey.Count; i++)
         {
             var columnName = table.PrimaryKey[i].ColumnName;
-            var column = FindColumn(change.NewValues, columnName);
+            var column = change.NewValues.Find(columnName);
             if (column is null or { IsUnchangedToast: true } or { Value: null })
             {
                 throw new InvalidOperationException(
@@ -66,17 +66,5 @@ internal sealed class RowReselector(NpgsqlDataSource dataSource, WallabyModel mo
             CommitTimestamp = change.CommitTimestamp,
             CommitIdx = change.CommitIdx,
         };
-    }
-
-    private static RawColumn? FindColumn(IReadOnlyList<RawColumn> values, string columnName)
-    {
-        for (var i = 0; i < values.Count; i++)
-        {
-            if (values[i].ColumnName == columnName)
-            {
-                return values[i];
-            }
-        }
-        return null;
     }
 }

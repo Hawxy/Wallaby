@@ -107,6 +107,9 @@ public class BackfillSchedulerTests
 
     // ---- per-table failure isolation ----
 
+    // The two tables SchedulerFor maps; ListAsync answers for exactly these.
+    private static readonly string[] MappedTables = ["public.products", "public.orders"];
+
     private sealed class RecordingStore(Func<string, BackfillState?> stateFor) : IBackfillStateStore
     {
         public List<string> Saved { get; } = [];
@@ -134,7 +137,8 @@ public class BackfillSchedulerTests
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<BackfillState>>([]);
+            => Task.FromResult<IReadOnlyList<BackfillState>>(
+                MappedTables.Select(stateFor).OfType<BackfillState>().ToList());
         public INotifySubscription Subscribe() => new WaitSignal([], () => { });
     }
 
@@ -204,11 +208,10 @@ public class BackfillSchedulerTests
         public List<string> Events { get; } = [];
 
         public Task<BackfillState?> GetAsync(string t, CancellationToken ct)
-        {
-            Events.Add("pass");
-            return Task.FromResult<BackfillState?>(
-                new BackfillState(t, BackfillStatus.Completed, "v1", null, 0, DateTimeOffset.UtcNow));
-        }
+            => Task.FromResult<BackfillState?>(Completed(t));
+
+        private static BackfillState Completed(string t)
+            => new(t, BackfillStatus.Completed, "v1", null, 0, DateTimeOffset.UtcNow);
 
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
         {
@@ -230,7 +233,10 @@ public class BackfillSchedulerTests
         public Task ClearFailureAsync(string t, CancellationToken ct) => Task.CompletedTask;
         public Task<int> MaxAttemptsAsync(CancellationToken ct) => Task.FromResult(0);
         public Task<IReadOnlyList<BackfillState>> ListAsync(CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<BackfillState>>([]);
+        {
+            Events.Add("pass");
+            return Task.FromResult<IReadOnlyList<BackfillState>>([Completed("public.products")]);
+        }
     }
 
     private sealed class WaitSignal(List<string> events, Action onWait) : INotifySubscription

@@ -144,14 +144,9 @@ internal sealed class PgvectorRowBuilder(PgvectorSinkOptions options, PgvectorTa
     // Callers own buffer and writer so one pair serves a whole batch; both are reset per document.
     private string BuildDocumentJson(SinkRecord record, string? excludeField, MemoryStream buffer, Utf8JsonWriter writer)
     {
-        var document = record.Document!;
-        if (excludeField is not null && document.ContainsKey(excludeField))
-        {
-            document = document.Where(f => f.Key != excludeField).ToDictionary(f => f.Key, f => f.Value);
-        }
         buffer.SetLength(0);
         writer.Reset();
-        SinkEnvelopeJson.WriteDocument(writer, document, record.DocumentId, options.SerializerOptions);
+        SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, options.SerializerOptions, excludeField);
         writer.Flush();
         return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }

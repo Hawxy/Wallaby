@@ -95,6 +95,55 @@ public class ProvisionOnlySuspensionTests(PostgresFixture pg)
         }
     }
 
+    [Test]
+    public async Task Provision_only_host_finalizes_a_requested_suspension_and_re_provisions_on_resume()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var table = $"ext_target_{suffix}";
+        var slot = $"elt_slot_{suffix}";
+        var publication = $"elt_pub_{suffix}";
+        await ExecAsync($"CREATE TABLE {table} (id int PRIMARY KEY)");
+
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddWallaby(cdc => cdc
+                .UseConnectionString(pg.ConnectionString)
+                .AddExternalSlot(slot, e => e.WithPublication(publication).ForTable("public", table)));
+            services.ConfigureWallabyOptions(o => o.Advanced.ControlPollInterval = TimeSpan.FromMilliseconds(500));
+
+            await using var node = await WallabyTestNode.StartAsync(services);
+            var status = node.Services.GetRequiredService<IWallabyStatus>();
+            await PollUntilAsync(() => SlotExistsAsync(slot), "external slot to be provisioned");
+
+            // A grace longer than the timeout: only the host finalizing (dropping the slot under the
+            // lock) can complete the suspension in time.
+            var suspended = await client.SuspendAsync(new WallabySuspendOptions
+            {
+                HostGracePeriod = TimeSpan.FromMinutes(1),
+                Timeout = TimeSpan.FromSeconds(30),
+            });
+            suspended.State.ShouldBe(WallabySuspensionState.Suspended);
+            (await SlotExistsAsync(slot)).ShouldBeFalse();
+            await PollUntilAsync(
+                () => Task.FromResult(status.Current.Role == WallabyNodeRole.Suspended),
+                "provision-only node to report Suspended");
+
+            await client.ResumeAsync();
+
+            await PollUntilAsync(() => SlotExistsAsync(slot), "external slot to be re-provisioned after resume");
+            status.Current.Faulted.ShouldBeFalse();
+        }
+        finally
+        {
+            await ResetControlAsync();
+            await PostgresReplicationCleanup.DropAsync(
+                pg.ConnectionString, new WallabyNames(suffix, slot, publication));
+        }
+    }
+
     private async Task ExecAsync(string sql)
     {
         await using var cmd = pg.DataSource.CreateCommand(sql);

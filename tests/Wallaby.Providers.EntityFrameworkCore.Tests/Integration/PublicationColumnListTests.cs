@@ -352,9 +352,9 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
             TableName = "gen_test",
             Columns =
             [
-                new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int), IsPrimaryKey = true },
-                new CapturedColumn { PropertyName = "Name", ColumnName = "name", ClrType = typeof(string), IsPrimaryKey = false },
-                new CapturedColumn { PropertyName = "UpperName", ColumnName = "upper_name", ClrType = typeof(string), IsPrimaryKey = false },
+                new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int) },
+                new CapturedColumn { PropertyName = "Name", ColumnName = "name", ClrType = typeof(string) },
+                new CapturedColumn { PropertyName = "UpperName", ColumnName = "upper_name", ClrType = typeof(string) },
             ],
             PrimaryKey = [],
             ColumnsNarrowed = true,

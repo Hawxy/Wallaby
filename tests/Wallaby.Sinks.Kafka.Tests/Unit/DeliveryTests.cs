@@ -65,15 +65,14 @@ public class DeliveryTests
     }
 
     [Test]
-    public async Task A_record_with_no_topic_fails_permanently()
+    public async Task A_record_with_no_topic_is_a_configuration_error()
     {
         var (sink, produced) = CreateSink();
 
-        var result = await sink.DeliverAsync(
-            Batch(Upsert("1", new Dictionary<string, object?>(), destination: null)), CancellationToken.None);
+        var ex = await Should.ThrowAsync<WallabyConfigurationException>(() => sink.DeliverAsync(
+            Batch(Upsert("1", new Dictionary<string, object?>(), destination: null)), CancellationToken.None));
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
-        result.Error.ShouldNotBeNull().ShouldContain("DefaultTopic");
+        ex.Message.ShouldContain("DefaultTopic");
         produced.ShouldBeEmpty();
     }
 
@@ -179,13 +178,12 @@ public class DeliveryTests
     {
         var (sink, produced) = CreateSink();
 
-        var result = await sink.DeliverAsync(
+        await Should.ThrowAsync<WallabyConfigurationException>(() => sink.DeliverAsync(
             Batch(
                 Upsert("1", new Dictionary<string, object?>()),
                 Upsert("2", new Dictionary<string, object?>(), destination: null)),
-            CancellationToken.None);
+            CancellationToken.None));
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
         produced.ShouldBeEmpty(); // the routable first record was not produced either
     }
 

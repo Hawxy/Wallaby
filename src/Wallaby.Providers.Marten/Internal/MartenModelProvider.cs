@@ -55,6 +55,12 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
         return new QualifiedTable(mapping.TableName.Schema, mapping.TableName.Name);
     }
 
+    public IReadOnlyList<QualifiedTable> ResolveAllTables()
+        => KnownMappings()
+            .Select(m => new QualifiedTable(m.TableName.Schema, m.TableName.Name))
+            .Distinct()
+            .ToList();
+
     public bool Handles(Type entityClrType) => FindMapping(entityClrType) is not null;
 
     private IEnumerable<DocumentMapping> SelectMappings(CaptureSpec spec)
@@ -85,15 +91,13 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
             PropertyName = mapping.IdMember.Name,
             ColumnName = IdColumn,
             ClrType = mapping.IdType,
-            IsPrimaryKey = true,
         };
         var tenant = conjoined
             ? new CapturedColumn
             {
-                PropertyName = "TenantId",
+                PropertyName = MartenTablePlan.TenantIdPropertyName,
                 ColumnName = mapping.Metadata.TenantId.Name,
                 ClrType = typeof(string),
-                IsPrimaryKey = true,
             }
             : null;
 
@@ -114,7 +118,7 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
         {
             // The document body streams as raw UTF-8 bytes so the materializer feeds the serializer's
             // Stream path directly, with no UTF-16 round trip.
-            PropertyName = "Data", ColumnName = DataColumn, ClrType = typeof(string), IsPrimaryKey = false,
+            PropertyName = "Data", ColumnName = DataColumn, ClrType = typeof(string),
             ReadMode = ColumnReadMode.Utf8JsonBytes,
         });
         if (softDeleted)
@@ -124,14 +128,12 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
                 PropertyName = "Deleted",
                 ColumnName = mapping.Metadata.IsSoftDeleted.Name,
                 ClrType = typeof(bool),
-                IsPrimaryKey = false,
             });
             columns.Add(new CapturedColumn
             {
                 PropertyName = "DeletedAt",
                 ColumnName = mapping.Metadata.SoftDeletedAt.Name,
                 ClrType = typeof(DateTimeOffset?),
-                IsPrimaryKey = false,
             });
         }
 

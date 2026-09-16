@@ -13,6 +13,14 @@ namespace Wallaby.Client;
 /// and persists across restarts until <see cref="ResumeAsync(CancellationToken)"/>; on resume, Wallaby recreates its slots
 /// and re-backfills every mapped table to converge sinks. Backfills can also be requested directly via
 /// <see cref="RequestBackfillAsync(string, CancellationToken)"/>, addressed by schema-qualified table name.
+/// <para>
+/// The client performs no DDL; the Wallaby host creates and migrates the <c>wallaby</c> schema at startup.
+/// Against a database no host has run on, reads (<see cref="GetStateAsync"/>,
+/// <see cref="GetBackfillStatusAsync"/>) report Running and empty, revocations
+/// (<see cref="ResumeAsync(CancellationToken)"/>, <see cref="CancelBackfillAsync"/>) return false as there is
+/// nothing to undo, and requests (suspend, backfill, widen, restore) throw
+/// <see cref="InvalidOperationException"/> because they need a current host to act on them.
+/// </para>
 /// </summary>
 public sealed class WallabyControlClient : IAsyncDisposable
 {
@@ -30,9 +38,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     public WallabyControlClient(NpgsqlDataSource dataSource, ILogger<WallabyControlClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
-        _dataSource = dataSource is NpgsqlMultiHostDataSource multiHost
-            ? multiHost.WithTargetSession(TargetSessionAttributes.Primary)
-            : dataSource;
+        _dataSource = TargetPrimary(dataSource);
         _logger = logger ?? NullLogger<WallabyControlClient>.Instance;
     }
 
@@ -44,19 +50,22 @@ public sealed class WallabyControlClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _ownedDataSource = NpgsqlDataSource.Create(connectionString);
-        _dataSource = _ownedDataSource is NpgsqlMultiHostDataSource multiHost
-            ? multiHost.WithTargetSession(TargetSessionAttributes.Primary)
-            : _ownedDataSource;
+        _dataSource = TargetPrimary(_ownedDataSource);
         _logger = logger ?? NullLogger<WallabyControlClient>.Instance;
     }
+
+    // Every control operation writes, so a multi-host data source is pinned to the primary.
+    private static NpgsqlDataSource TargetPrimary(NpgsqlDataSource dataSource)
+        => dataSource is NpgsqlMultiHostDataSource multiHost
+            ? multiHost.WithTargetSession(TargetSessionAttributes.Primary)
+            : dataSource;
 
     /// <summary>
     /// Suspend the Wallaby installation: persist the request, signal any running host, and (by default)
     /// wait until every managed replication slot is verified dropped. If no host acts within
     /// <see cref="WallabySuspendOptions.HostGracePeriod"/>, this client drops the slots itself. The
     /// suspension survives restarts and the database outage during an engine upgrade; it ends only with
-    /// <see cref="ResumeAsync(CancellationToken)"/>. The client performs no DDL: the <c>wallaby.control</c> table is created
-    /// by the Wallaby host, so a suspension-aware host must have run against the database at least once.
+    /// <see cref="ResumeAsync(CancellationToken)"/>.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
@@ -159,8 +168,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// The single schema gate for state-changing operations: refuse with the found version, so every
-    /// operation behaves uniformly against an older database.
+    /// The single schema gate for requests (suspend, backfill, widen, restore): refuse with the found
+    /// version, so every request behaves uniformly against an older or never-initialized database.
     /// </summary>
     private async Task RequireCurrentSchemaAsync(CancellationToken ct)
     {
@@ -282,7 +291,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// capture stays <see cref="WallabyBackfillStatus.Requested"/> until a mapping for it deploys.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The database has no <c>wallaby.backfill_state</c> table — no Wallaby host has run against it.
+    /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
+    /// run against it): deploy a newer host first; it migrates the schema at startup.
     /// </exception>
     public Task RequestBackfillAsync(string tableQualifiedName, CancellationToken ct = default)
         => RequestBackfillAsync(tableQualifiedName, purge: false, ct);
@@ -294,21 +304,14 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// for the request semantics).
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The database has no <c>wallaby.backfill_state</c> table — no Wallaby host has run against it.
+    /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
+    /// run against it): deploy a newer host first; it migrates the schema at startup.
     /// </exception>
     public async Task RequestBackfillAsync(string tableQualifiedName, bool purge, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableQualifiedName);
-        try
-        {
-            await BackfillOperations.RequestAsync(_dataSource, tableQualifiedName, purge, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
-        {
-            throw new InvalidOperationException(
-                "This database has no wallaby.backfill_state table: no Wallaby host has run against it. " +
-                "The host creates it at startup.", ex);
-        }
+        await RequireCurrentSchemaAsync(ct);
+        await BackfillOperations.RequestAsync(_dataSource, tableQualifiedName, purge, ct);
         _logger.BackfillRequested(tableQualifiedName, purge);
     }
 
@@ -358,7 +361,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
         var start = Stopwatch.GetTimestamp();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
-        var state = await GetStateAsync(ct);
+        WallabyControlState? state = null;
         try
         {
             while (true)
@@ -381,6 +384,8 @@ public sealed class WallabyControlClient : IAsyncDisposable
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
         {
+            // A timeout before the first poll completed still reports a state (read outside the deadline).
+            state ??= await GetStateAsync(ct);
             throw new WallabyControlTimeoutException(timeoutMessage(state), state);
         }
     }

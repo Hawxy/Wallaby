@@ -30,11 +30,15 @@ internal static class KafkaMessageWriter
     private static readonly byte[] DeleteOperation = "delete"u8.ToArray();
     private static readonly byte[] UpsertOperation = "upsert"u8.ToArray();
 
-    /// <summary>Headers for any record; present on tombstones too, where they are the only metadata.</summary>
-    public static Headers BuildHeaders(SinkRecord record) => new()
+    /// <summary>
+    /// Headers for any record; present on tombstones too, where they are the only metadata.
+    /// <paramref name="idempotencyKey"/> is the record's <see cref="IdempotencyKey"/>, computed once by
+    /// the caller and shared with <see cref="WriteValue"/>.
+    /// </summary>
+    public static Headers BuildHeaders(SinkRecord record, string idempotencyKey) => new()
     {
         { OperationHeader, record.IsDeletion ? DeleteOperation : UpsertOperation },
-        { IdempotencyKeyHeader, Encoding.UTF8.GetBytes(IdempotencyKey(record)) },
+        { IdempotencyKeyHeader, Encoding.UTF8.GetBytes(idempotencyKey) },
         { TableHeader, Encoding.UTF8.GetBytes(record.Metadata.QualifiedTableName) },
         { CommitLsnHeader, Encoding.UTF8.GetBytes(record.Metadata.CommitLsn.ToString(CultureInfo.InvariantCulture)) },
     };
@@ -42,6 +46,7 @@ internal static class KafkaMessageWriter
     /// <summary>Write an upsert's message value.</summary>
     public static byte[] WriteValue(
         SinkRecord record,
+        string idempotencyKey,
         IReadOnlyDictionary<string, string>? annotations,
         JsonSerializerOptions? serializerOptions)
     {
@@ -51,16 +56,8 @@ internal static class KafkaMessageWriter
         writer.WriteStartObject();
         writer.WriteString("operation", "upsert");
         writer.WriteString("id", record.DocumentId);
-        writer.WriteString("idempotencyKey", IdempotencyKey(record));
-        if (annotations is { Count: > 0 })
-        {
-            writer.WriteStartObject("annotations");
-            foreach (var annotation in annotations)
-            {
-                writer.WriteString(annotation.Key, annotation.Value);
-            }
-            writer.WriteEndObject();
-        }
+        writer.WriteString("idempotencyKey", idempotencyKey);
+        SinkEnvelopeJson.WriteAnnotations(writer, annotations);
 
         writer.WritePropertyName("document");
         SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions);

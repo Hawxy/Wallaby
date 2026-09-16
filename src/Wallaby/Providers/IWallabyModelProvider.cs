@@ -18,6 +18,13 @@ public interface IWallabyModelProvider
     QualifiedTable ResolveTable(Type entityClrType);
 
     /// <summary>
+    /// Every table the model maps, for <c>AddExternalSlot(...).ForAllEntities()</c>. Tables without a primary
+    /// key are omitted: a table with no replica identity inside a publication makes the application's own
+    /// UPDATE and DELETE statements fail.
+    /// </summary>
+    IReadOnlyList<QualifiedTable> ResolveAllTables();
+
+    /// <summary>
     /// True when this provider's model maps <paramref name="entityClrType"/> to a capturable table.
     /// With multiple registered providers, each mapping is assigned to the provider that claims its
     /// type here (ambiguity or no claimant fails startup).

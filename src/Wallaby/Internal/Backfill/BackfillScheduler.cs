@@ -137,10 +137,17 @@ internal sealed class BackfillScheduler(
         void TrackRetry(DateTimeOffset at)
             => nextRetryAt = nextRetryAt is { } current && current <= at ? current : at;
 
+        // One read for every table's state instead of one round-trip per mapped table.
+        var states = new Dictionary<string, BackfillState>();
+        foreach (var row in await store.ListAsync(ct))
+        {
+            states[row.TableQualifiedName] = row;
+        }
+
         foreach (var table in tables)
         {
             var qualifiedName = table.Table.QualifiedName;
-            var state = await store.GetAsync(qualifiedName, ct);
+            var state = states.GetValueOrDefault(qualifiedName);
             var decision = Decide(state, table.TransformVersion, table.PurgeOnVersionChange, options);
             if (decision.Action == BackfillAction.Skip)
             {

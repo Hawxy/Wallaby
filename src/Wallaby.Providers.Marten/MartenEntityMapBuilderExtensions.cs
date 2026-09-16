@@ -52,6 +52,6 @@ public static class MartenEntityMapBuilderExtensions
         where TEntity : class
     {
         ArgumentNullException.ThrowIfNull(map);
-        return map.ScopedBy((ChangeEvent change) => change.Record.GetValueOrDefault("TenantId"));
+        return map.ScopedBy((ChangeEvent change) => change.Record.GetValueOrDefault(MartenTablePlan.TenantIdPropertyName));
     }
 }

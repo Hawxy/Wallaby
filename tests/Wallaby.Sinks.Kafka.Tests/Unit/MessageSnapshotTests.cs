@@ -21,7 +21,7 @@ public class MessageSnapshotTests
         }, metadata: Meta(commitIdx: 0, timestamp: timestamp, lsn: 27271208));
 
         var value = KafkaMessageWriter.WriteValue(
-            record, annotations: new Dictionary<string, string> { ["env"] = "test" }, serializerOptions: null);
+            record, KafkaMessageWriter.IdempotencyKey(record), annotations: new Dictionary<string, string> { ["env"] = "test" }, serializerOptions: null);
 
         // Indented via System.Text.Json (not Verify's relaxed JSON) so quoting and value types are
         // pinned exactly as they appear on the wire.
@@ -34,8 +34,8 @@ public class MessageSnapshotTests
     [Test]
     public async Task Tombstone_headers_match_the_approved_set()
     {
-        var headers = KafkaMessageWriter.BuildHeaders(
-            Delete("43", metadata: Meta(commitIdx: 1, lsn: 27271208, action: ChangeAction.Delete)));
+        var tombstone = Delete("43", metadata: Meta(commitIdx: 1, lsn: 27271208, action: ChangeAction.Delete));
+        var headers = KafkaMessageWriter.BuildHeaders(tombstone, KafkaMessageWriter.IdempotencyKey(tombstone));
 
         var lines = string.Join(Environment.NewLine,
             headers.Select(h => $"{h.Key}={h.GetValueAsString()}"));

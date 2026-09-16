@@ -294,8 +294,14 @@ internal sealed class WatermarkBackfillCoordinator(
 
         // Drop windows abandoned by a faulted/cancelled backfill (evicted from _byToken but never taken by a
         // high watermark) so a dead window neither forces key materialization nor grows its SeenKeys for the
-        // rest of the session.
-        list.RemoveAll(w => !_byToken.ContainsKey(w.Token));
+        // rest of the session. A plain loop: this runs once per live change while any window is open.
+        for (var i = list.Count - 1; i >= 0; i--)
+        {
+            if (!_byToken.ContainsKey(list[i].Token))
+            {
+                list.RemoveAt(i);
+            }
+        }
         return list.Count > 0;
     }
 
