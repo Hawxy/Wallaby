@@ -30,11 +30,6 @@ internal sealed record ManagedSlotRow(
 /// </summary>
 internal static class ControlOperations
 {
-    private const string ObjectInUse = "55006";
-    private const string UndefinedObject = "42704";
-    private const string UndefinedTable = "42P01";
-    private const string InvalidSchemaName = "3F000";
-
     private const string Notify = $"SELECT pg_notify('{ControlContract.NotifyChannel}', '');";
 
     /// <summary>
@@ -52,7 +47,7 @@ internal static class ControlOperations
                 $"SELECT coalesce(max(version), 0) FROM {ControlContract.SchemaVersionLedger}");
             return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
         }
-        catch (PostgresException ex) when (ex.SqlState is UndefinedTable or InvalidSchemaName)
+        catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.InvalidSchemaName)
         {
             return 0;
         }
@@ -107,7 +102,7 @@ internal static class ControlOperations
                 reader.IsDBNull(9) ? null : reader.GetString(9),
                 PurgeOnResume: reader.GetBoolean(10));
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             return null;
         }
@@ -214,7 +209,7 @@ internal static class ControlOperations
             }
             return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) > 0;
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             return false;
         }
@@ -299,7 +294,7 @@ internal static class ControlOperations
             }
             return slots;
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             return [];
         }
@@ -464,11 +459,11 @@ internal static class ControlOperations
                     await cmd.ExecuteNonQueryAsync(ct);
                     logger.ManagedSlotDropped(slot.SlotName, slot.Kind);
                 }
-                catch (PostgresException ex) when (ex.SqlState == UndefinedObject)
+                catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedObject)
                 {
                     // Another finalizer dropped it between the list and the drop.
                 }
-                catch (PostgresException ex) when (ex.SqlState == ObjectInUse)
+                catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ObjectInUse)
                 {
                     anyBusy = true;
                     logger.ManagedSlotBusy(slot.SlotName);

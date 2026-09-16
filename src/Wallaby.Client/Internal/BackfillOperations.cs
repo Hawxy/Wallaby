@@ -14,7 +14,6 @@ internal sealed record BackfillStateRow(
 /// </summary>
 internal static class BackfillOperations
 {
-    private const string UndefinedTable = "42P01";
 
     /// <summary>
     /// The single request write path: manual requests, the remote client, the slot-gap repair, and the
@@ -60,7 +59,7 @@ internal static class BackfillOperations
             cmd.Parameters.AddWithValue("t", tableQualifiedName);
             return await cmd.ExecuteNonQueryAsync(ct) > 0;
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             return false;
         }
@@ -87,7 +86,7 @@ internal static class BackfillOperations
             }
             return states;
         }
-        catch (PostgresException ex) when (ex.SqlState == UndefinedTable)
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             return [];
         }
