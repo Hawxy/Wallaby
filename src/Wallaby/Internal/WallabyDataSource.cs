@@ -15,17 +15,21 @@ internal sealed class WallabyDataSource : IAsyncDisposable
     public static readonly TimeSpan DefaultPasswordRefreshInterval = TimeSpan.FromMinutes(5);
 
     private static readonly TimeSpan PasswordFailureRefreshInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DefaultPasswordFetchTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Func<CancellationToken, ValueTask<string>>? _passwordProvider;
+    private readonly TimeSpan _passwordFetchTimeout;
 
     public WallabyDataSource(
         string connectionString,
         Func<CancellationToken, ValueTask<string>>? passwordProvider = null,
         TimeSpan? passwordRefreshInterval = null,
-        Action<NpgsqlDataSourceBuilder>? configureDataSource = null)
+        Action<NpgsqlDataSourceBuilder>? configureDataSource = null,
+        TimeSpan? passwordFetchTimeout = null)
     {
         ConnectionString = connectionString;
         _passwordProvider = passwordProvider;
+        _passwordFetchTimeout = passwordFetchTimeout ?? DefaultPasswordFetchTimeout;
 
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
         if (passwordProvider is not null && (builder.Password is not null || builder.Passfile is not null))
@@ -78,7 +82,8 @@ internal sealed class WallabyDataSource : IAsyncDisposable
     /// <summary>
     /// <see cref="ConnectionString"/> with the password provider's current token embedded, or the original
     /// string when no provider is set. Consulted once per leader term for the replication connection and
-    /// the primary probes.
+    /// the primary probes. The fetch is bounded to 30 seconds so a hung token service fails the term
+    /// (and retries with the leader backoff) instead of stalling it.
     /// </summary>
     public async ValueTask<string> ConnectionStringWithPasswordAsync(CancellationToken ct)
     {
@@ -86,7 +91,22 @@ internal sealed class WallabyDataSource : IAsyncDisposable
         {
             return ConnectionString;
         }
-        var password = await _passwordProvider(ct);
+
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bounded.CancelAfter(_passwordFetchTimeout);
+        string password;
+        try
+        {
+            password = await _passwordProvider(bounded.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The password provider did not return a password within {_passwordFetchTimeout}.");
+        }
+        if (string.IsNullOrEmpty(password))
+        {
+            throw new InvalidOperationException("The password provider returned no password.");
+        }
         return new NpgsqlConnectionStringBuilder(ConnectionString) { Password = password }.ConnectionString;
     }
 

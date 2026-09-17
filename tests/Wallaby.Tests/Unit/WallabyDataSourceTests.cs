@@ -77,6 +77,41 @@ public class WallabyDataSourceTests
     }
 
     [Test]
+    public async Task An_empty_provided_password_is_rejected()
+    {
+        await using var ds = new WallabyDataSource("Host=localhost;Username=u", passwordProvider: _ => new ValueTask<string>(""));
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await ds.ConnectionStringWithPasswordAsync(CancellationToken.None));
+        ex.Message.ShouldContain("no password");
+    }
+
+    [Test]
+    public async Task A_hung_provider_times_out_on_the_replication_path()
+    {
+        await using var ds = new WallabyDataSource(
+            "Host=localhost;Username=u",
+            passwordProvider: async ct => { await Task.Delay(Timeout.InfiniteTimeSpan, ct); return "never"; },
+            passwordFetchTimeout: TimeSpan.FromMilliseconds(100));
+
+        var ex = await Should.ThrowAsync<TimeoutException>(
+            async () => await ds.ConnectionStringWithPasswordAsync(CancellationToken.None));
+        ex.Message.ShouldContain("password provider");
+    }
+
+    [Test]
+    public async Task A_cancelled_caller_is_not_reported_as_a_timeout()
+    {
+        await using var ds = new WallabyDataSource(
+            "Host=localhost;Username=u",
+            passwordProvider: async ct => { await Task.Delay(Timeout.InfiniteTimeSpan, ct); return "never"; });
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            async () => await ds.ConnectionStringWithPasswordAsync(cts.Token));
+    }
+
+    [Test]
     public async Task Configure_data_source_runs_after_wallaby_settings()
     {
         await using var ds = new WallabyDataSource(

@@ -108,9 +108,10 @@ The provider feeds every connection Wallaby opens. The pooled connections (state
 cache the token and refresh it on a timer every `refreshInterval` (the optional second argument, default
 5 minutes, inside the 15-minute RDS lifetime with room for clock skew). The replication connection fetches
 a fresh token when a leader term starts. Postgres authenticates only at connect time, so an open
-connection outlives its token. A provider failure surfaces as the next connection open failing, which
-the leader loop retries with its usual backoff. Setting `Password` or `Passfile` alongside a provider is
-rejected at startup.
+connection outlives its token. A provider failure, an empty result, or a fetch slower than 30 seconds on
+the leader path fails that term, which the leader loop retries with its usual backoff. The pool's
+timer-driven fetch is not bounded by Wallaby, so apply a timeout inside the delegate. Setting `Password`
+or `Passfile` alongside a provider is rejected at startup.
 
 The `IServiceProvider`-taking overload resolves the credential source from the container on every call.
 Platform snippets (check each against the SDK you install):

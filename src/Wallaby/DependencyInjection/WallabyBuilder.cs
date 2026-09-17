@@ -84,9 +84,10 @@ public sealed class WallabyBuilder
     /// Supply the password for every connection Wallaby opens, for platforms that authenticate with a
     /// short-lived token (RDS IAM, Azure Entra ID, Cloud SQL IAM). The pooled connections cache the value
     /// and call <paramref name="provider"/> again every <paramref name="refreshInterval"/> (default 5
-    /// minutes); the replication connection calls it when a leader term starts. Postgres authenticates
-    /// only at connect time, so an open connection outlives its token. The connection string must not
-    /// set <c>Password</c> or <c>Passfile</c>.
+    /// minutes); the replication connection calls it when a leader term starts, bounded to 30 seconds.
+    /// The pool's timer-driven call is not bounded, so apply a timeout inside the delegate. Postgres
+    /// authenticates only at connect time, so an open connection outlives its token. The connection
+    /// string must not set <c>Password</c> or <c>Passfile</c>.
     /// </summary>
     public WallabyBuilder UsePasswordProvider(Func<CancellationToken, ValueTask<string>> provider, TimeSpan? refreshInterval = null)
     {
