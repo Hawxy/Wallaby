@@ -44,14 +44,32 @@ internal sealed class PostgresSelfConfigurator(
             // Validate headroom for every slot we intend to create (primary + external).
             var intendedSlots = new List<string>(1 + options.ExternalSlots.Count) { options.SlotName };
             intendedSlots.AddRange(options.ExternalSlots.Select(s => s.SlotName));
-            await _validator.ValidateAsync(connection, intendedSlots, ct);
+            var serverVersion = await _validator.ValidateAsync(connection, intendedSlots, ct);
 
             await _stateSchema.EnsureAsync(connection, ct);
+
+            // Stored generated columns are publishable from PG18 (publish_generated_columns, or listed
+            // explicitly in a column list); older servers never send them and virtual ones never publish.
+            var publishGeneratedColumns = serverVersion >= 180000;
+            var generatedColumns = await ValidateGeneratedColumnsAsync(connection, model, publishGeneratedColumns, ct);
 
             var warnings = new List<string>();
             var publication = await _publications.EnsureAsync(
                 connection, options.PublicationName, DesiredTables(model, widenPublications).ToList(),
-                options.ManagePublicationTables, warnings, ct);
+                options.ManagePublicationTables, publishGeneratedColumns && options.ManagePublicationTables,
+                warnings, ct);
+            if (generatedColumns.Count > 0 && !publication.PublishesGeneratedColumns)
+            {
+                // Only reachable for an unmanaged publication: Wallaby cannot set the option itself.
+                var warning =
+                    $"Publication '{options.PublicationName}' does not publish generated columns, but the captured " +
+                    $"model reads stored generated column(s) {string.Join(", ", generatedColumns)}. Live changes " +
+                    "will carry default values for them while backfill carries the real ones. Run: ALTER PUBLICATION " +
+                    $"{PgExec.QuoteIdentifier(options.PublicationName)} SET (publish_generated_columns = stored); " +
+                    "or set ManagePublicationTables=true to let Wallaby manage it.";
+                warnings.Add(warning);
+                logger.ConfigurationWarning(warning);
+            }
             foreach (var narrowedTable in publication.NarrowedTables)
             {
                 var entity = model.Tables.FirstOrDefault(
@@ -127,7 +145,8 @@ internal sealed class PostgresSelfConfigurator(
                 .Select(t => PublicationTableSpec.WholeTable(t.Schema, t.Table))
                 .ToList();
             var publication = await _publications.EnsureAsync(
-                connection, spec.PublicationName, tables, reconcile: true, warnings: null, ct);
+                connection, spec.PublicationName, tables, reconcile: true, publishGeneratedColumns: false,
+                warnings: null, ct);
             // External publications are always Wallaby-created from the declaration, so always managed.
             var (slotCreated, _, _) = await _slots.EnsureAsync(
                 connection, spec.SlotName, spec.PublicationName, kind: "external", publicationManaged: true, ct);
@@ -155,6 +174,68 @@ internal sealed class PostgresSelfConfigurator(
                     table.Schema, table.TableName, [.. table.Columns.Select(c => c.ColumnName)])
                 : PublicationTableSpec.WholeTable(table.Schema, table.TableName);
         }
+    }
+
+    /// <summary>
+    /// Captured generated columns the server cannot stream would silently materialize as default values
+    /// on live changes while backfill reads the real ones, so they fail fast: every generated column
+    /// before PG18, and virtual generated columns on any version. Returns the captured stored generated
+    /// columns (qualified names) that PG18+ publishes.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ValidateGeneratedColumnsAsync(
+        NpgsqlConnection connection, WallabyModel model, bool storedPublishable, CancellationToken ct)
+    {
+        var captured = model.Tables.ToDictionary(
+            t => (t.Schema, t.TableName),
+            t => t.Columns.Select(c => c.ColumnName).ToHashSet(StringComparer.Ordinal));
+
+        var stored = new List<string>();
+        var unpublishable = new List<string>();
+        await using (var cmd = new NpgsqlCommand(
+            """
+            SELECT n.nspname, c.relname, a.attname, a.attgenerated::text
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN unnest(@schemas, @tables) AS d(s, t) ON n.nspname = d.s AND c.relname = d.t
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+            WHERE a.attgenerated <> ''
+            """,
+            connection))
+        {
+            cmd.Parameters.AddWithValue("schemas", model.Tables.Select(t => t.Schema).ToArray());
+            cmd.Parameters.AddWithValue("tables", model.Tables.Select(t => t.TableName).ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var key = (reader.GetString(0), reader.GetString(1));
+                var column = reader.GetString(2);
+                if (!captured[key].Contains(column))
+                {
+                    continue;
+                }
+                var qualified = $"{key.Item1}.{key.Item2}.{column}";
+                // 's' stored, 'v' virtual (PG18+).
+                if (reader.GetString(3) == "s" && storedPublishable)
+                {
+                    stored.Add(qualified);
+                }
+                else
+                {
+                    unpublishable.Add(qualified);
+                }
+            }
+        }
+
+        if (unpublishable.Count > 0)
+        {
+            throw new WallabyConfigurationException(
+                $"Captured column(s) {string.Join(", ", unpublishable)} are generated columns that this server cannot " +
+                "stream through logical replication (stored generated columns need PostgreSQL 18 or later; virtual " +
+                "generated columns are never published). Live changes would carry default values while backfill " +
+                "carries the real ones. Exclude them from capture (EF Core: ConsumesAllExcept(x => x.Property) on " +
+                "every mapping of the entity), or upgrade the server for stored columns.");
+        }
+        return stored;
     }
 
     /// <summary>

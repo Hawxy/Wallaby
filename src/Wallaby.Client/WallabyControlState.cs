@@ -46,9 +46,16 @@ public enum WallabySuspensionOrigin
 /// <see cref="WallabyControlClient.WidenPublicationsAsync"/>: widening completes when no managed
 /// publication is narrowed.
 /// </param>
+/// <param name="InvalidationReason">
+/// Why the server invalidated the slot (<c>wal_removed</c> past <c>max_slot_wal_keep_size</c>,
+/// <c>idle_timeout</c> past <c>idle_replication_slot_timeout</c> on PostgreSQL 18+, ...). An invalidated
+/// slot can never resume streaming; the next Wallaby leader drops and recreates it and repairs the gap by
+/// re-backfill. <c>null</c> when the slot is healthy, absent, or the server predates PostgreSQL 17.
+/// </param>
 public sealed record WallabyManagedSlot(
     string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active,
-    long? RetainedWalBytes = null, bool PublicationManaged = false, bool PublicationNarrowed = false);
+    long? RetainedWalBytes = null, bool PublicationManaged = false, bool PublicationNarrowed = false,
+    string? InvalidationReason = null);
 
 /// <summary>A point-in-time view of the Wallaby control plane, read from the shared Postgres database.</summary>
 /// <param name="State">The installation-wide suspension state.</param>

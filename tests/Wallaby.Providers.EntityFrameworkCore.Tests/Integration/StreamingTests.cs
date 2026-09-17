@@ -21,7 +21,7 @@ public class StreamingTests
     [Test]
     public async Task Large_transaction_is_streamed_assembled_and_delivered()
     {
-        await using var container = new PostgreSqlBuilder("postgres:17")
+        await using var container = new PostgreSqlBuilder(PostgresImages.Default)
             .WithCommand(
                 "-c", "wal_level=logical",
                 "-c", "logical_decoding_work_mem=64kB",
@@ -76,7 +76,7 @@ public class StreamingTests
     [Test]
     public async Task Streamed_transaction_with_a_dependent_change_still_fans_out()
     {
-        await using var container = new PostgreSqlBuilder("postgres:17")
+        await using var container = new PostgreSqlBuilder(PostgresImages.Default)
             .WithCommand(
                 "-c", "wal_level=logical",
                 "-c", "logical_decoding_work_mem=64kB",
@@ -133,7 +133,7 @@ public class StreamingTests
     [Test]
     public async Task Savepoint_rollback_inside_streamed_transaction_loses_only_the_rolled_back_changes()
     {
-        await using var container = new PostgreSqlBuilder("postgres:17")
+        await using var container = new PostgreSqlBuilder(PostgresImages.Default)
             .WithCommand(
                 "-c", "wal_level=logical",
                 "-c", "logical_decoding_work_mem=64kB",

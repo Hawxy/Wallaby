@@ -24,6 +24,9 @@ diagram full screen:
 The replication slot is the only source of live changes, and a slot can be destroyed for a number of reasons: 
 
 - The server invalidates it when it retains more WAL than `max_slot_wal_keep_size`.
+- The server invalidates it when no consumer has streamed from it for longer than
+  `idle_replication_slot_timeout` (PostgreSQL 18+, off by default). Keep that above any planned Wallaby
+  downtime, or [suspend](/operations/major-version-upgrades) for maintenance windows instead of relying on it.
 - A failover to a promoted replica loses it (before Postgres 17 slot sync, or on providers that don't sync slots).
 - It's accidentally dropped by someone.
 - Wallaby itself dropped it for a [suspension](/operations/major-version-upgrades) (e.g. an RDS/Aurora

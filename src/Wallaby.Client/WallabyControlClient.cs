@@ -396,7 +396,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
             ? []
             : slots.Select(s => new WallabyManagedSlot(
                     s.SlotName, s.Publication, s.Kind, s.ExistsOnServer, s.Active, s.RetainedWalBytes,
-                    s.PublicationManaged, s.PublicationNarrowed))
+                    s.PublicationManaged, s.PublicationNarrowed, s.InvalidationReason))
                 .ToList() as IReadOnlyList<WallabyManagedSlot>;
         if (row is null)
         {

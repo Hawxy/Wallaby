@@ -166,6 +166,21 @@ expressing intent either way:
   member itself is still not populated; read it in the transform via the `DbContext`).
 - `ConsumesAllExcept(e => e.Lines)` - acknowledges the member is not consumed.
 
+### Computed columns
+
+A property mapped with `HasComputedColumnSql(..., stored: true)` is a Postgres stored generated column.
+Logical replication publishes those only from **PostgreSQL 18** with older servers never putting them on the
+wire. Virtual generated columns (the PostgreSQL 18 default for `GENERATED ALWAYS AS`) are never
+published on any version. Because a backfill reads the real value while a live change would carry the
+property's default, Wallaby refuses to start when a captured column falls in either category and
+names the columns. Either exclude the property from every mapping of the entity with
+`ConsumesAllExcept(e => e.Computed)`, or (for stored columns) upgrade to PostgreSQL 18+.
+
+On PostgreSQL 18+ a managed publication is created with `publish_generated_columns = stored`, so
+stored computed columns arrive on live changes like any other column. An unmanaged publication
+(`ManagePublicationTables = false`) must set that option itself, with Wallaby warning at startup when it
+doesn't.
+
 ## Transforms
 
 ### Enrichment via the DbContext

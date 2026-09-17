@@ -18,6 +18,12 @@ using static Nuke.Common.Tools.DotNet.DotNetTasks;
     OnPullRequestBranches = ["main"],
     InvokedTargets = [nameof(Test), nameof(AotSmoke)])]
 [GitHubActions(
+    "Postgres Matrix",
+    GitHubActionsImage.UbuntuLatest,
+    OnPushBranches = ["main"],
+    OnCronSchedule = "0 3 * * 1",
+    InvokedTargets = [nameof(TestPostgresMatrix)])]
+[GitHubActions(
     "Manual Nuget Push",
     GitHubActionsImage.UbuntuLatest,
     On = [GitHubActionsTrigger.WorkflowDispatch],
@@ -57,28 +63,55 @@ class Build : NukeBuild
         });
     
     
+    [Parameter("Postgres Docker image for the integration suites (sets WALLABY_TEST_PG_IMAGE; default postgres:17)")]
+    readonly string PostgresImage;
+
+    /// <summary>
+    /// The oldest supported major and the newest, run beside the default 17 by the matrix workflow.
+    /// Docker Hub has no postgres:19 tag until GA; switch to it then.
+    /// </summary>
+    static readonly string[] PostgresMatrixImages = ["postgres:15", "postgres:19beta3"];
+
     Target Test => _ => _
+        .DependsOn(Compile)
+        .Executes(() => RunTests(PostgresImage));
+
+    Target TestPostgresMatrix => _ => _
         .DependsOn(Compile)
         .Executes(() =>
         {
-            DotNetTest(s =>
+            foreach (var image in PostgresMatrixImages)
             {
-                // Release, matching Compile: reuses its output instead of a second Debug build, and
-                // tests the configuration that ships.
-                var config = s
-                    .AddProcessAdditionalArguments("--project", Solution)
-                    .AddProcessAdditionalArguments("--configuration", "Release");
-
-                if (IsServerBuild)
-                {
-                    // CI runners have 2 vCPUs; running the Testcontainers-backed suites in parallel
-                    // oversubscribes them and starves timing-sensitive e2e tests.
-                    config = config.AddProcessAdditionalArguments("--max-parallel-test-modules", "1");
-                }
-
-                return config;
-            });
+                Log.Information("Running the test suite against {Image}", image);
+                RunTests(image);
+            }
         });
+
+    void RunTests(string postgresImage)
+    {
+        DotNetTest(s =>
+        {
+            // Release, matching Compile: reuses its output instead of a second Debug build, and
+            // tests the configuration that ships.
+            var config = s
+                .AddProcessAdditionalArguments("--project", Solution)
+                .AddProcessAdditionalArguments("--configuration", "Release");
+
+            if (postgresImage is not null)
+            {
+                config = config.SetProcessEnvironmentVariable("WALLABY_TEST_PG_IMAGE", postgresImage);
+            }
+
+            if (IsServerBuild)
+            {
+                // CI runners have 2 vCPUs; running the Testcontainers-backed suites in parallel
+                // oversubscribes them and starves timing-sensitive e2e tests.
+                config = config.AddProcessAdditionalArguments("--max-parallel-test-modules", "1");
+            }
+
+            return config;
+        });
+    }
     
     Target AotSmoke => _ => _
         .Executes(() =>

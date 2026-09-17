@@ -46,7 +46,8 @@ var state = await control.GetStateAsync();
 // state.Origin         who initiated a suspension: Client | Configuration
 // state.Reason / RequestedBy / RequestedAt / SuspendedAt / ResumedAt
 // state.Slots          every managed slot: name, publication, kind, exists-on-server, active,
-//                      retained-WAL bytes (null when the slot is gone or read from a standby)
+//                      retained-WAL bytes (null when the slot is gone or read from a standby),
+//                      invalidation reason (null unless the server invalidated the slot)
 ```
 
 A slot's `RetainedWalBytes` is how much WAL the server must keep for it. Watch it especially for

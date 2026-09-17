@@ -100,6 +100,7 @@ public class ControlClientTests(PostgresFixture pg)
             // A slot on the server retains WAL from its restart_lsn; a slot missing from it reads null.
             state.Slots.Single(s => s.SlotName == live).RetainedWalBytes
                 .ShouldNotBeNull().ShouldBeGreaterThanOrEqualTo(0L);
+            state.Slots.Single(s => s.SlotName == live).InvalidationReason.ShouldBeNull();
             state.Slots.Single(s => s.SlotName == gone).RetainedWalBytes.ShouldBeNull();
         }
         finally
