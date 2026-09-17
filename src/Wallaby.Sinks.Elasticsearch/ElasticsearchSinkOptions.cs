@@ -52,10 +52,8 @@ public sealed class ElasticsearchSinkOptions
     public bool Refresh { get; set; }
 
     /// <summary>
-    /// Serializer for document values beyond the natively written scalar types. On NativeAOT hosts,
-    /// point <see cref="JsonSerializerOptions.TypeInfoResolver"/> at a source-generated
-    /// <see cref="System.Text.Json.Serialization.JsonSerializerContext"/> covering the value types your
-    /// transforms emit; without it, non-scalar values fail delivery permanently on AOT.
+    /// Serializer for document values beyond the natively written scalar types (numbers, strings, dates,
+    /// <c>byte[]</c> as base64, vectors as number arrays). Null uses the default reflection-based options.
     /// </summary>
     public JsonSerializerOptions? SerializerOptions { get; set; }
 }

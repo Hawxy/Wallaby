@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Nuke.Common;
 using Nuke.Common.CI;
@@ -23,6 +24,12 @@ using static Nuke.Common.Tools.DotNet.DotNetTasks;
     OnPushBranches = ["main"],
     OnCronSchedule = "0 3 * * 1",
     InvokedTargets = [nameof(TestPostgresMatrix)])]
+[GitHubActions(
+    "Release",
+    GitHubActionsImage.UbuntuLatest,
+    OnPushTags = ["v*"],
+    InvokedTargets = [nameof(Test), nameof(AotSmoke), nameof(NugetPush)],
+    ImportSecrets = [nameof(NugetApiKey)])]
 [GitHubActions(
     "Manual Nuget Push",
     GitHubActionsImage.UbuntuLatest,
@@ -127,26 +134,17 @@ class Build : NukeBuild
             ProcessTasks.StartProcess(exe, workingDirectory: output).AssertZeroExitCode();
         });
 
-    static readonly string[] PackableProjects =
-    [
-        "Wallaby",
-        "Wallaby.Providers.EntityFrameworkCore",
-        "Wallaby.Providers.Marten",
-        "Wallaby.Sinks.Http",
-        "Wallaby.Sinks.Kafka",
-        "Wallaby.Sinks.Meilisearch",
-        "Wallaby.AspNetCore.HealthChecks",
-        "Wallaby.Client",
-        "Wallaby.Testing",
-    ];
+    // Every project under src/ ships as a package; tests/ and samples/ never do.
+    IEnumerable<Project> PackableProjects => Solution.AllProjects
+        .Where(x => x.Directory.Parent == RootDirectory / "src")
+        .OrderBy(x => x.Name);
 
     Target NugetPack => _ => _
         .DependsOn(Compile)
         .Executes(() =>
         {
-            foreach (var name in PackableProjects)
+            foreach (var project in PackableProjects)
             {
-                var project = Solution.AllProjects.Single(x => x.Name == name);
                 DotNetPack(_ => _
                     .SetProject(project)
                     .SetConfiguration("Release")
@@ -162,6 +160,10 @@ class Build : NukeBuild
         .Requires(() => !string.IsNullOrEmpty(NugetApiKey))
         .Executes(() =>
         {
+            AssertReleaseTagMatchesPackageVersion();
+
+            // PDBs are embedded in the assemblies (DotNet.ReproducibleBuilds), so there is no symbols
+            // package to push.
             DotNetNuGetPush(_ => _
                 .SetSource("https://api.nuget.org/v3/index.json")
                 .SetTargetPath(ArtifactsDirectory / "*.nupkg")
@@ -169,5 +171,20 @@ class Build : NukeBuild
                 .EnableNoSymbols()
                 .SetApiKey(NugetApiKey));
         });
+
+    // A release tag must name the version in Package.Build.props: with skip-duplicate on, a mismatch
+    // would otherwise push nothing and still report success.
+    void AssertReleaseTagMatchesPackageVersion()
+    {
+        var reference = GitHubActions.Instance?.Ref;
+        if (reference is null || !reference.StartsWith("refs/tags/v"))
+        {
+            return;
+        }
+
+        var version = XmlTasks.XmlPeekSingle(RootDirectory / "Package.Build.props", "/Project/PropertyGroup/Version");
+        Assert.True(reference == $"refs/tags/v{version}",
+            $"Release tag '{reference}' does not match the package version {version} in Package.Build.props.");
+    }
 
 }

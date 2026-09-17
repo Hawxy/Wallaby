@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Sinks.Http.Tests" />
+    <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
   </ItemGroup>
 
   <ItemGroup>

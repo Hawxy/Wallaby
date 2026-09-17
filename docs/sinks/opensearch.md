@@ -49,7 +49,7 @@ cdc.AddOpenSearchSink("search", s => { /* ... */ })
 | `MaxRecordsPerRequest` | `500` | Records per `_bulk` request; larger batches are split into sequential requests, preserving commit order. |
 | `Timeout` | `30s` | Per-request timeout. |
 | `Refresh` | `false` | When true, bulk requests use `refresh=wait_for` so documents are searchable before the batch is acknowledged. |
-| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (required for such values on NativeAOT hosts). |
+| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (numbers, strings, dates, `byte[]`, vectors). |
 
 ## Indexes
 

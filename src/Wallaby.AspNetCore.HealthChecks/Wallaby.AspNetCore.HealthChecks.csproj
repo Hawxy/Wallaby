@@ -4,7 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.AspNetCore.HealthChecks</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>ASP.NET Core health checks for Wallaby: role-aware liveness and replication readiness probes for Postgres CDC.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>ASP.NET Core liveness health check for Wallaby: flags a terminated or crash-looping CDC service on leader and standby nodes, and grades a suspended installation or failing fan-out and backfill as degraded.</Description>
     <PackageTags>aspnetcore;healthchecks</PackageTags>
   </PropertyGroup>
 
