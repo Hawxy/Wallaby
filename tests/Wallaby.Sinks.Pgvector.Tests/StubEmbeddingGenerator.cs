@@ -16,9 +16,16 @@ internal sealed class StubEmbeddingGenerator : IEmbeddingGenerator<string, Embed
     public Queue<Exception> Failures { get; } = new();
     public Func<string, float[]> VectorFor { get; set; } = text => [text.Length, 1f];
 
-    public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+    /// <summary>Time each call waits (honouring cancellation) before answering; simulates a slow provider.</summary>
+    public TimeSpan Delay { get; set; }
+
+    public async Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
         IEnumerable<string> values, EmbeddingGenerationOptions? options = null, CancellationToken cancellationToken = default)
     {
+        if (Delay > TimeSpan.Zero)
+        {
+            await Task.Delay(Delay, cancellationToken);
+        }
         var texts = values.ToArray();
         lock (_lock)
         {
@@ -29,8 +36,7 @@ internal sealed class StubEmbeddingGenerator : IEmbeddingGenerator<string, Embed
             }
             Batches.Add(texts);
         }
-        return Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-            texts.Select(t => new Embedding<float>(VectorFor(t)))));
+        return new GeneratedEmbeddings<Embedding<float>>(texts.Select(t => new Embedding<float>(VectorFor(t))));
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null) => null;

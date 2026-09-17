@@ -105,11 +105,23 @@ internal sealed class PgvectorRowBuilder(PgvectorSinkOptions options, PgvectorTa
             new ParallelOptions { MaxDegreeOfParallelism = options.MaxEmbeddingConcurrency, CancellationToken = ct },
             async (subBatch, token) =>
             {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                if (options.EmbeddingTimeout is { } limit)
+                {
+                    timeout.CancelAfter(limit);
+                }
+
                 GeneratedEmbeddings<Embedding<float>> embeddings;
                 try
                 {
                     embeddings = await options.EmbeddingGenerator!.GenerateAsync(
-                        texts.GetRange(subBatch.Offset, subBatch.Count), options: null, token);
+                        texts.GetRange(subBatch.Offset, subBatch.Count), options: null, timeout.Token);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    // Only the per-call ceiling fired: a hung or slow provider, worth retrying with backoff.
+                    throw new EmbeddingException(transient: true, new TimeoutException(
+                        $"Embedding {subBatch.Count} text(s) exceeded EmbeddingTimeout ({options.EmbeddingTimeout})."));
                 }
                 catch (OperationCanceledException)
                 {

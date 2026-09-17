@@ -86,4 +86,17 @@ public class RegistrationTests
         Should.Throw<WallabyConfigurationException>(
             () => new ElasticsearchSink("search", new ElasticsearchSinkOptions { Endpoint = "elasticsearch/relative" }));
     }
+
+    [Test]
+    public void Configure_connection_rejects_the_built_in_credentials()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
+        {
+            o.Endpoint = "http://elasticsearch.local:9200";
+            o.ConfigureConnection = uri => new global::Elastic.Clients.Elasticsearch.ElasticsearchClientSettings(uri);
+            o.ApiKey = "key";
+        })).Message.ShouldContain("ConfigureConnection");
+    }
 }

@@ -75,6 +75,10 @@ public static class PgvectorBuilderExtensions
         {
             throw new WallabyConfigurationException("PgvectorSinkOptions.MaxEmbeddingConcurrency must be positive.");
         }
+        if (options.EmbeddingTimeout <= TimeSpan.Zero)
+        {
+            throw new WallabyConfigurationException("PgvectorSinkOptions.EmbeddingTimeout must be positive (or null to disable).");
+        }
 
         var embedParts = (options.EmbeddingGenerator is not null, options.EmbedText is not null,
             !string.IsNullOrWhiteSpace(options.EmbeddingVersion));

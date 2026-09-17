@@ -58,4 +58,11 @@ public class RegistrationTests
         Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(
             Valid(o => { o.EmbedText = d => "x"; o.EmbeddingVersion = "m/1"; })));
     }
+
+    [Test]
+    public void Embedding_timeout_must_be_positive_when_set()
+    {
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.EmbeddingTimeout = TimeSpan.Zero)));
+        PgvectorBuilderExtensions.Validate(Valid(o => o.EmbeddingTimeout = null));
+    }
 }

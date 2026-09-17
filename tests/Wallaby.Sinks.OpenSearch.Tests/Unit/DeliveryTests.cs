@@ -199,4 +199,46 @@ public class DeliveryTests
         ex.Message.ShouldContain("DefaultIndex");
         connection.Payloads.ShouldBeEmpty();
     }
+
+    [Test]
+    public async Task Purge_deletes_every_document_in_the_index_by_query()
+    {
+        var connection = new CapturingConnection("""{"took":3,"deleted":42,"failures":[]}""");
+        using var sink = Sink(connection);
+
+        await sink.PurgeAsync(new SinkPurgeRequest("public", "products", "products"), CancellationToken.None);
+
+        connection.Urls.Single().ShouldStartWith("/products/_delete_by_query");
+        connection.Urls.Single().ShouldContain("conflicts=proceed");
+        connection.Payloads.Single().ShouldContain("match_all");
+    }
+
+    [Test]
+    public async Task Purge_of_an_absent_index_is_a_no_op()
+    {
+        using var sink = Sink(new CapturingConnection("""{"error":{"type":"index_not_found_exception"}}""", 404));
+
+        await sink.PurgeAsync(new SinkPurgeRequest("public", "products", "products"), CancellationToken.None);
+    }
+
+    [Test]
+    public async Task Purge_with_shard_failures_throws_so_the_backfill_run_retries()
+    {
+        const string body = """{"took":3,"deleted":1,"failures":[{"index":"products","status":500,"cause":{"type":"node_disconnected"}}]}""";
+        using var sink = Sink(new CapturingConnection(body));
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            () => sink.PurgeAsync(new SinkPurgeRequest("public", "products", "products"), CancellationToken.None));
+
+        ex.Message.ShouldContain("node_disconnected");
+    }
+
+    [Test]
+    public async Task Purge_request_rejection_throws()
+    {
+        using var sink = Sink(new CapturingConnection("""{"error":"forbidden"}""", 403));
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => sink.PurgeAsync(new SinkPurgeRequest("public", "products", "products"), CancellationToken.None));
+    }
 }

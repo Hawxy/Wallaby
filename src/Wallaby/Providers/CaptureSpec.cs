@@ -24,6 +24,13 @@ public sealed class CaptureSpec
     public IReadOnlySet<Type> RequiresMaterializedEntity { get; init; } = new HashSet<Type>();
 
     /// <summary>
+    /// Entity types whose mappings scope by the row's tenant id (Marten's <c>ScopedByTenant()</c>). A
+    /// provider whose model carries no tenant column for the type fails startup rather than scoping
+    /// every row to the default tenant.
+    /// </summary>
+    public IReadOnlySet<Type> RequiresTenantColumn { get; init; } = new HashSet<Type>();
+
+    /// <summary>
     /// Per-primary-entity navigation expressions declared via <c>DependsOn(...)</c>. Each entry's key
     /// is the primary CLR type; the values are <c>Expression&lt;Func&lt;TEntity, TNav&gt;&gt;</c> lambdas
     /// the storage provider resolves against its model at startup to produce dependent-table captures

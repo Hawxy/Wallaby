@@ -10,10 +10,10 @@ namespace Wallaby.Sinks.OpenSearch;
 /// Upserts are indexed with <c>_id</c> set to the record's document id (so updates are idempotent), and
 /// deletions remove by that same id. Records are routed to the index named by
 /// <see cref="SinkRecord.Destination"/> (falling back to <see cref="OpenSearchSinkOptions.DefaultIndex"/>);
-/// indexes are not created or configured by the sink — they auto-create on first write unless pre-created
-/// with explicit settings/mappings.
+/// indexes are not created or configured by the sink: they auto-create on first write unless pre-created
+/// with explicit settings/mappings. A purge empties an index with <c>_delete_by_query</c>.
 /// </summary>
-public sealed class OpenSearchSink : ISink, IDisposable
+public sealed class OpenSearchSink : ISink, ISinkPurger, IDisposable
 {
     private readonly OpenSearchSinkOptions _options;
     private readonly ConnectionSettings _settings;
@@ -87,16 +87,44 @@ public sealed class OpenSearchSink : ISink, IDisposable
         return DeliveryResult.Success;
     }
 
+    /// <inheritdoc />
+    public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
+    {
+        var index = SinkDestination.Resolve(request, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
+        var parameters = new DeleteByQueryRequestParameters
+        {
+            Conflicts = Conflicts.Proceed,
+            Refresh = Refresh.True,
+            RequestConfiguration = RequestConfig(),
+        };
+
+        var response = await _client.LowLevel.DeleteByQueryAsync<BytesResponse>(
+            index, PostData.ReadOnlyMemory(BulkJson.MatchAllQuery), parameters, ct);
+
+        var status = response.HttpStatusCode;
+        if (status == 404)
+        {
+            return; // The index was never written: nothing to purge.
+        }
+        if (status is null or < 200 or >= 300 || response.OriginalException is not null)
+        {
+            throw new InvalidOperationException(
+                $"OpenSearch purge of index '{index}' failed: " +
+                (response.OriginalException?.Message ?? $"status {status}"),
+                response.OriginalException);
+        }
+        if (BulkJson.DescribeDeleteByQueryFailure(response.Body) is { } failure)
+        {
+            throw new InvalidOperationException($"OpenSearch purge of index '{index}' failed: {failure}");
+        }
+    }
+
+    private RequestConfiguration RequestConfig() => new() { RequestTimeout = _options.Timeout };
+
     /// <summary>Send one bulk body; null on success, otherwise the classified failure.</summary>
     private async Task<DeliveryResult?> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
-        var parameters = new BulkRequestParameters
-        {
-            RequestConfiguration = new RequestConfiguration
-            {
-                RequestTimeout = _options.Timeout,
-            },
-        };
+        var parameters = new BulkRequestParameters { RequestConfiguration = RequestConfig() };
         if (_options.Refresh)
         {
             parameters.Refresh = Refresh.WaitFor;

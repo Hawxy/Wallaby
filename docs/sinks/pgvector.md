@@ -85,6 +85,7 @@ Query it like any pgvector table (`ORDER BY embedding <=> $1 LIMIT 10`), joining
 | `EmbedText` | `null` | Selects the text to embed from a document's field bag; null/empty stores a null vector. |
 | `EmbeddingVersion` | `null` | Model/prompt identity folded into `text_hash`; change it (and bump the mapping's backfill version) to re-embed. |
 | `MaxEmbeddingBatchSize` | `96` | Texts per embedding call. |
+| `EmbeddingTimeout` | `60s` | Ceiling on one embedding call; exceeding it fails the delivery as retryable instead of stalling on a hung provider. `null` disables it. |
 | `MaxEmbeddingConcurrency` | `1` | Embedding calls in flight at once; raise it to overlap calls on large backfills when the provider's rate limits allow. |
 | `IsTransientEmbeddingError` | `null` | Classifies embedding exceptions retryable vs permanent; the default retries everything except `ArgumentException`/`NotSupportedException`. |
 | `VectorField` | `embedding` | Without a generator: the document field carrying the transform-supplied vector. |

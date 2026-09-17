@@ -165,6 +165,10 @@ The response status classifies the outcome:
 Batches larger than `MaxRecordsPerRequest` are split into sequential requests in commit order; a failing
 chunk stops the delivery and the whole batch is redelivered after backoff.
 
+The sink cannot purge: a receiver has no "delete everything" contract, so a
+[purge-then-backfill](/backfill#purging-before-a-backfill) skips it with a warning and documents whose
+source rows disappeared without a delivered delete stay on the receiver.
+
 ## Compression
 
 The JSON envelope compresses well (typically 80–90% smaller), which matters most during backfill bursts.

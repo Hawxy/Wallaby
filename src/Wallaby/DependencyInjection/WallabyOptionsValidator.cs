@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Wallaby.Internal;
 
 namespace Wallaby.DependencyInjection;
 
@@ -25,9 +26,13 @@ internal sealed class WallabyOptionsValidator(WallabyConfiguration configuration
                 "A connection string must be supplied: via UseConnectionString(...), " +
                 "Configure<WallabyOptions>, or configuration binding.");
         }
-        if (string.IsNullOrWhiteSpace(options.SlotName) || string.IsNullOrWhiteSpace(options.PublicationName))
+        if (!PgNames.IsValidSlotName(options.SlotName ?? ""))
         {
-            failures.Add("SlotName and PublicationName must be non-empty.");
+            failures.Add($"SlotName '{options.SlotName}' is not a valid replication slot name: use {PgNames.SlotNameRule}.");
+        }
+        if (!PgNames.IsValidPublicationName(options.PublicationName ?? ""))
+        {
+            failures.Add($"PublicationName '{options.PublicationName}' is not a valid publication name: it must be {PgNames.PublicationNameRule}.");
         }
         // Chunk rows and batches are fully materialized in memory, so both are capped.
         if (options.ChunkSize is <= 0 or > 100_000)

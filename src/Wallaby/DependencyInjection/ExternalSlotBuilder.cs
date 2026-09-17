@@ -35,7 +35,7 @@ public sealed class ExternalSlotBuilder
     }
 
     /// <summary>
-    /// Include the table mapped to <typeparamref name="TEntity"/>, resolved against the EF Core model
+    /// Include the table mapped to <typeparamref name="TEntity"/>, resolved against the storage provider's model
     /// at startup. Use <see cref="ForTable(string,string)"/> for tables that are not in the EF model.
     /// </summary>
     public ExternalSlotBuilder ForEntity<TEntity>() where TEntity : class

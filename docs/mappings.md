@@ -84,7 +84,9 @@ For a mapping that needs constructor arguments, pass an instance directly:
 
 Transforms are **batch-invoked**: you receive all the insert/update/read changes for the entity in a commit (or a
 backfill chunk) and return one document per source key. This lets you resolve many keys in a single
-round-trip. Return a `null` document (or simply omit a key) to **delete** that key from the sink.
+round-trip. Return a `null` document **or omit the key** to **delete** that key's document from the
+sink: an omitted key is a delete, never a skip, so a transform must return an entry for every change
+it wants to keep.
 
 ::: tip
 Deletes never reach a transform as the row is already gone. The engine deletes by key directly, using

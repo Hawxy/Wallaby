@@ -57,6 +57,12 @@ internal sealed class MappingRegistration
     public bool HasEntityScopedKey { get; set; }
 
     /// <summary>
+    /// Set by a provider's tenant-scoping extension (Marten's <c>ScopedByTenant()</c>): the scope key is
+    /// the row's tenant id, so the provider's model must carry a tenant column for the entity.
+    /// </summary>
+    public bool ScopedByTenantId { get; set; }
+
+    /// <summary>
     /// Delete-time identity or routing is computed from the materialized entity, so a delete without one
     /// targets the wrong document/destination. Escalates the table's replica-identity check to an error.
     /// </summary>
@@ -162,6 +168,7 @@ internal sealed class WallabyConfiguration
         var declaredEntities = new List<Type>();
         var requiresFullReplicaIdentity = new HashSet<Type>();
         var requiresMaterializedEntity = new HashSet<Type>();
+        var requiresTenantColumn = new HashSet<Type>();
         var declaredDependencies = new Dictionary<Type, List<LambdaExpression>>();
         var columnSelections = new Dictionary<Type, List<ColumnSelection>>();
         var consumesAll = new HashSet<Type>();
@@ -185,6 +192,10 @@ internal sealed class WallabyConfiguration
             if (mapping.RequiresMaterializedEntity)
             {
                 requiresMaterializedEntity.Add(mapping.EntityClrType);
+            }
+            if (mapping.ScopedByTenantId)
+            {
+                requiresTenantColumn.Add(mapping.EntityClrType);
             }
             if (mapping.DeclaredDependencies.Count > 0)
             {
@@ -213,6 +224,7 @@ internal sealed class WallabyConfiguration
             DeclaredEntities = declaredEntities,
             RequiresFullReplicaIdentity = requiresFullReplicaIdentity,
             RequiresMaterializedEntity = requiresMaterializedEntity,
+            RequiresTenantColumn = requiresTenantColumn,
             DeclaredDependencies = declaredDependencies.ToDictionary(
                 d => d.Key, d => (IReadOnlyList<LambdaExpression>)d.Value),
             // A mapping without a selection needs every column, so one such mapping keeps its entity at

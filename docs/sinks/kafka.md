@@ -138,6 +138,10 @@ Failures are classified for the dispatcher:
 | Retriable broker errors, delivery timeouts, connection failures | **Retryable** - the producer retries internally until `MessageTimeout`, then the dispatcher retries with backoff. |
 | Non-retriable broker errors (message too large, authorization failures, fenced producer) | **Permanent** - the pipeline halts. |
 
+The sink cannot purge: a topic cannot be emptied per document, so a
+[purge-then-backfill](/backfill#purging-before-a-backfill) skips it with a warning. On a compacted topic
+a document whose source row disappeared without a delivered delete keeps its last message.
+
 ## Topic creation
 
 Add entries to `Topics` and the sink creates them on the leader before streaming begins (and again,

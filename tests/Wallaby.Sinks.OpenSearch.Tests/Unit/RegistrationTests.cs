@@ -61,4 +61,18 @@ public class RegistrationTests
         Should.Throw<WallabyConfigurationException>(
             () => new OpenSearchSink("search", new OpenSearchSinkOptions { Endpoint = "opensearch/relative" }));
     }
+
+    [Test]
+    public void Configure_connection_rejects_the_built_in_credentials()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<WallabyConfigurationException>(() => builder.AddOpenSearchSink("search", o =>
+        {
+            o.Endpoint = "http://opensearch.local:9200";
+            o.ConfigureConnection = uri => new global::OpenSearch.Client.ConnectionSettings(uri);
+            o.Username = "admin";
+            o.Password = "secret";
+        })).Message.ShouldContain("ConfigureConnection");
+    }
 }

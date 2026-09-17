@@ -58,6 +58,12 @@ public static class OpenSearchBuilderExtensions
         {
             throw new WallabyConfigurationException("OpenSearchSinkOptions.Timeout must be positive.");
         }
+        if (options.ConfigureConnection is not null && (options.Username is not null || options.Password is not null))
+        {
+            throw new WallabyConfigurationException(
+                "OpenSearchSinkOptions.ConfigureConnection replaces the built-in authentication: leave Username and " +
+                "Password unset and configure authentication on the returned settings.");
+        }
         if (options.Password is not null && options.Username is null)
         {
             throw new WallabyConfigurationException("OpenSearchSinkOptions.Password requires Username.");

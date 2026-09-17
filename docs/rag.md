@@ -82,6 +82,9 @@ The sink embeds at delivery time and stores a content hash next to each vector, 
 failovers, and re-backfills, with the destination table itself as the durable cache. Embedding-API
 throttling surfaces as a retryable delivery, which the dispatcher retries with its normal backoff.
 
+One row produces one document and one vector. Splitting a long text into several chunks, each with
+its own vector, is not supported yet: chunk on the query side, or keep the embedded text short.
+
 ## Embedding in a transform
 
 For destinations that can't embed and can't be read back - Kafka topics, HTTP receivers, or a

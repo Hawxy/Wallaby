@@ -16,6 +16,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     internal EntityMapBuilder(MappingRegistration registration) => _registration = registration;
 
+    internal MappingRegistration Registration => _registration;
+
     /// <summary>
     /// Route this entity's documents to a destination within the sink (e.g. an index or topic). When
     /// omitted, the sink's default destination applies.

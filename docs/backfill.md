@@ -110,10 +110,10 @@ A purge runs before a fresh backfill when:
   (`WithBackfillVersion("v4", purgeOnChange: true)`), so documents whose ids or shape changed don't
   remain under old keys.
 
-Purging is an optional sink capability (`ISinkPurger`). The Meilisearch sink is the only sink that implements it right now.
-A sink without the capability, such as the Kafka
-and HTTP sinks, or a custom sink that doesn't opt in, is skipped with a warning and its destinations
-keep any stale documents.
+Purging is an optional sink capability (`ISinkPurger`), implemented by the Meilisearch, Elasticsearch,
+OpenSearch and pgvector sinks. A sink without the capability, such as the Kafka and HTTP sinks, or a
+custom sink that doesn't opt in, is skipped with a warning and its destinations keep any stale
+documents.
 
 Two caveats:
 

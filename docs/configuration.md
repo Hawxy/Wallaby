@@ -137,7 +137,9 @@ public readonly record struct SpillContext(
 
 Changes are appended per transaction (`xid`) as they stream and read back **in append order** at
 the commit. An implementation owns its own serialization of `RawChange`; the abstraction deals
-purely in changes.
+purely in changes. A round-trip must preserve every field: `RelationId`, `Schema`, `TableName`,
+`Action`, `NewValues` and `OldValues` (each `RawColumn` with its name, type and value, including the
+"unchanged TOAST" marker), `CommitLsn`, `CommitTimestamp`, `CommitIdx` and `BackfillRunId`.
 
 ### Implementation Guidance
 

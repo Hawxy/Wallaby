@@ -106,8 +106,15 @@ cdc.AddElasticsearchSink("search", s =>
 s.ConfigureConnection = _ => new ElasticsearchClientSettings(cloudId, new ApiKey(apiKey));
 ```
 
-When `ConfigureConnection` is set, `ApiKey`/`Username`/`Password` and `Timeout` are ignored —
-configure authentication and timeouts on the returned settings.
+When `ConfigureConnection` is set, leave `ApiKey`/`Username`/`Password` unset (registration fails
+otherwise) and configure authentication on the returned settings; `Timeout` still applies per request.
+
+## Purging
+
+The sink implements [purge-then-backfill](/backfill#purging-before-a-backfill): a purge runs
+`_delete_by_query` with `match_all` against the mapping's index (`conflicts=proceed`, `refresh=true`),
+synchronously and under the per-request `Timeout`, so a very large index may need a longer timeout.
+An index that does not exist yet is nothing to purge.
 
 ## Delivery semantics
 

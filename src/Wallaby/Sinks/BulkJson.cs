@@ -14,6 +14,9 @@ public static class BulkJson
 {
     private static readonly byte[] NewLine = "\n"u8.ToArray();
 
+    /// <summary>The <c>_delete_by_query</c> body matching every document in an index, used by purges.</summary>
+    public static ReadOnlyMemory<byte> MatchAllQuery { get; } = """{"query":{"match_all":{}}}"""u8.ToArray();
+
     /// <summary>
     /// Write records <paramref name="offset"/>..<paramref name="offset"/>+<paramref name="count"/> as one
     /// bulk body into <paramref name="destination"/>. Each record's index is
@@ -123,6 +126,39 @@ public static class BulkJson
             : retryable > 0
                 ? DeliveryResult.Retry($"{sinkDisplayName} reported {retryable} retryable bulk action failure(s).")
                 : null;
+    }
+
+    /// <summary>
+    /// Inspect a 2xx <c>_delete_by_query</c> response: null when every matched document was deleted,
+    /// otherwise a description of the first entry in <c>failures</c> (with <c>conflicts=proceed</c>
+    /// version conflicts are not failures, so an entry is a shard or document error). An unparseable
+    /// body is reported as a failure too.
+    /// </summary>
+    public static string? DescribeDeleteByQueryFailure(ReadOnlyMemory<byte> body)
+    {
+        if (body.IsEmpty)
+        {
+            return "empty response body";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("failures", out var failures) || failures.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            foreach (var failure in failures.EnumerateArray())
+            {
+                return failure.GetRawText();
+            }
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            return $"unrecognized response: {ex.Message}";
+        }
     }
 
     private static string DescribeItem(JsonElement action, int status)

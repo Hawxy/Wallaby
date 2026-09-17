@@ -16,10 +16,10 @@ public sealed class OpenSearchSinkOptions
     public string? Password { get; set; }
 
     /// <summary>
-    /// Full override for building the client's connection settings from <see cref="Endpoint"/> — use it for
+    /// Full override for building the client's connection settings from <see cref="Endpoint"/>: use it for
     /// AWS SigV4 (the <c>OpenSearch.Net.Auth.AwsSigV4</c> connection), client certificates, connection pools,
-    /// or proxies. When set, <see cref="Username"/>/<see cref="Password"/> are ignored; configure all
-    /// authentication on the returned settings.
+    /// or proxies. When set, <see cref="Username"/>/<see cref="Password"/> must be left unset (configure
+    /// authentication on the returned settings); <see cref="Timeout"/> still applies per request.
     /// </summary>
     public Func<Uri, ConnectionSettings>? ConfigureConnection { get; set; }
 
@@ -32,7 +32,10 @@ public sealed class OpenSearchSinkOptions
     /// </summary>
     public int MaxRecordsPerRequest { get; set; } = 500;
 
-    /// <summary>Per-request timeout.</summary>
+    /// <summary>
+    /// Per-request timeout, applied to every <c>_bulk</c> request and to a purge's <c>_delete_by_query</c>
+    /// (which runs synchronously, so a very large index may need more than the default).
+    /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>

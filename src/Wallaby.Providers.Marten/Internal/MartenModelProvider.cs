@@ -85,6 +85,13 @@ internal sealed class MartenModelProvider(IReadOnlyStoreOptions options) : IWall
     {
         var conjoined = mapping.TenancyStyle == TenancyStyle.Conjoined;
         var softDeleted = mapping.DeleteStyle == DeleteStyle.SoftDelete;
+        if (!conjoined && spec.RequiresTenantColumn.Contains(mapping.DocumentType))
+        {
+            throw new WallabyConfigurationException(
+                $"Map<{mapping.DocumentType.Name}>().ScopedByTenant() requires a conjoined-tenancy document, but " +
+                $"'{mapping.DocumentType.FullName}' has no tenant column. Register it with " +
+                "Schema.For<T>().MultiTenanted() (or Policies.AllDocumentsAreMultiTenanted()), or drop ScopedByTenant().");
+        }
 
         var id = new CapturedColumn
         {

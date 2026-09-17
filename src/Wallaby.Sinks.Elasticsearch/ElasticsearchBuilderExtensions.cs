@@ -58,6 +58,13 @@ public static class ElasticsearchBuilderExtensions
         {
             throw new WallabyConfigurationException("ElasticsearchSinkOptions.Timeout must be positive.");
         }
+        if (options.ConfigureConnection is not null
+            && (options.ApiKey is not null || options.Username is not null || options.Password is not null))
+        {
+            throw new WallabyConfigurationException(
+                "ElasticsearchSinkOptions.ConfigureConnection replaces the built-in authentication: leave ApiKey, " +
+                "Username and Password unset and configure authentication on the returned settings.");
+        }
         if (options.ApiKey is not null && options.Username is not null)
         {
             throw new WallabyConfigurationException(

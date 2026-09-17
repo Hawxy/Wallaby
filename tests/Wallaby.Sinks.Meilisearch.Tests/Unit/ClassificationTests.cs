@@ -158,4 +158,37 @@ public class ClassificationTests
 
         result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
     }
+
+    [Test]
+    public async Task A_document_value_that_cannot_be_encoded_fails_permanently()
+    {
+        var stub = new StubHandler();
+        var sink = Sink(stub);
+        var record = new SinkRecord("products", "1", new WallabyDocument { ["type"] = typeof(int) }, IsDeletion: false, Meta());
+
+        var result = await sink.DeliverAsync(Batch(record), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
+        result.Error!.ShouldContain("serialization");
+        stub.Requests.ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task Documents_are_written_with_the_shared_value_encoding()
+    {
+        var stub = new StubHandler();
+        var sink = Sink(stub);
+        var record = new SinkRecord("products", "1", new WallabyDocument
+        {
+            ["day"] = new DateOnly(2026, 9, 17),
+            ["raw"] = new byte[] { 1, 2 },
+        }, IsDeletion: false, Meta());
+
+        await sink.DeliverAsync(Batch(record), CancellationToken.None);
+
+        var body = await stub.Requests.First(r => r.Method == HttpMethod.Post).Content!.ReadAsStringAsync();
+        body.ShouldContain("\"day\":\"2026-09-17\"");
+        body.ShouldContain("\"raw\":\"AQI=\"");
+        body.ShouldContain("\"id\":\"1\"");
+    }
 }

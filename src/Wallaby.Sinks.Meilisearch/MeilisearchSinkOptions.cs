@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Meilisearch;
 
 namespace Wallaby.Sinks.Meilisearch;
@@ -46,6 +47,12 @@ public sealed class MeilisearchSinkOptions
     /// cannot filter or sort on.
     /// </summary>
     public bool ValidateConfiguredAttributes { get; set; } = true;
+
+    /// <summary>
+    /// Serializer for document values beyond the natively written scalar types (see
+    /// <see cref="Wallaby.Sinks.SinkEnvelopeJson"/> for the built-in encodings).
+    /// </summary>
+    public JsonSerializerOptions? SerializerOptions { get; set; }
 
     /// <summary>
     /// Indexes to ensure exist and configure when the sink initializes (before streaming begins). Indexes

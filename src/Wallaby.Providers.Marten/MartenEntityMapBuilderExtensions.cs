@@ -46,12 +46,14 @@ public static class MartenEntityMapBuilderExtensions
     /// Scope this mapping by the row's tenant id (conjoined tenancy): the transform batch is sub-grouped
     /// per tenant, <c>UseTenantSessions()</c> leases a same-tenant session for each group, and
     /// <c>ScopedDestination(...)</c> can route per tenant. The tenant id is read from the captured
-    /// <c>tenant_id</c> column, so it is available on deletes too.
+    /// <c>tenant_id</c> column, so it is available on deletes too. A document that is not conjoined
+    /// (no tenant column) fails startup.
     /// </summary>
     public static EntityMapBuilder<TEntity> ScopedByTenant<TEntity>(this EntityMapBuilder<TEntity> map)
         where TEntity : class
     {
         ArgumentNullException.ThrowIfNull(map);
+        map.Registration.ScopedByTenantId = true;
         return map.ScopedBy((ChangeEvent change) => change.Record.GetValueOrDefault(MartenTablePlan.TenantIdPropertyName));
     }
 }

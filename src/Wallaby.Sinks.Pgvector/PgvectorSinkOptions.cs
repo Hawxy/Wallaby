@@ -65,6 +65,13 @@ public sealed class PgvectorSinkOptions
     public int MaxEmbeddingBatchSize { get; set; } = 96;
 
     /// <summary>
+    /// Ceiling on one embedding call. A call that exceeds it fails the delivery as retryable (the
+    /// dispatcher backs off and re-sends) instead of stalling the pipeline on a hung provider. Null
+    /// disables the ceiling.
+    /// </summary>
+    public TimeSpan? EmbeddingTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Max embedding calls in flight at once. The default (1) sends calls sequentially; raise it to
     /// overlap calls on large backfills when the provider's rate limits allow.
     /// </summary>

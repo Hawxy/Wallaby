@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
+using Wallaby.Internal;
 using Wallaby.Internal.Replication;
 using Wallaby.Providers;
 using Wallaby.Sinks;
@@ -331,6 +332,16 @@ public sealed class WallabyBuilder
             {
                 throw new WallabyConfigurationException(
                     $"AddExternalSlot(\"{external.SlotName}\").Except(...) requires ForAllEntities(); without it, declare only the tables you want via ForTable(...) or ForEntity<T>().");
+            }
+            if (!PgNames.IsValidSlotName(external.SlotName))
+            {
+                throw new WallabyConfigurationException(
+                    $"AddExternalSlot(\"{external.SlotName}\") is not a valid replication slot name: use {PgNames.SlotNameRule}.");
+            }
+            if (!PgNames.IsValidPublicationName(external.ResolvedPublicationName))
+            {
+                throw new WallabyConfigurationException(
+                    $"External publication name '{external.ResolvedPublicationName}' is not a valid publication name: it must be {PgNames.PublicationNameRule}.");
             }
             if (!slotNames.Add(external.SlotName))
             {

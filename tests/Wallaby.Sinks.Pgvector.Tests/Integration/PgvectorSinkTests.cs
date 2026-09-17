@@ -378,4 +378,21 @@ public class PgvectorSinkTests(PgvectorFixture pg)
         // A destination whose table was never created purges as a no-op.
         await sink.PurgeAsync(new SinkPurgeRequest("public", "products", $"never_{Guid.NewGuid():N}"), CancellationToken.None);
     }
+
+    [Test]
+    public async Task An_embedding_call_that_exceeds_the_timeout_is_retryable()
+    {
+        var table = UniqueTable();
+        var generator = new StubEmbeddingGenerator { Delay = TimeSpan.FromSeconds(30) };
+        var options = EmbedOptions(table, generator);
+        options.EmbeddingTimeout = TimeSpan.FromMilliseconds(200);
+        await using var sink = new PgvectorSink("pgv", options);
+        await sink.InitializeAsync(CancellationToken.None);
+
+        var result = await sink.DeliverAsync(
+            Batch(Upsert("1", new WallabyDocument { ["name"] = "ab" })), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
+        result.Error!.ShouldContain("EmbeddingTimeout");
+    }
 }
