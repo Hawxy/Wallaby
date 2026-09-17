@@ -338,7 +338,11 @@ public sealed class WallabyControlClient : IAsyncDisposable
         var rows = await BackfillOperations.ListStatesAsync(_dataSource, ct);
         return rows
             .Select(r => new WallabyBackfillState(
-                r.TableQualified, ParseBackfillStatus(r.Status), r.RowsCopied, r.UpdatedAt))
+                r.TableQualified, ParseBackfillStatus(r.Status), r.RowsCopied, r.UpdatedAt)
+            {
+                EstimatedRows = r.EstimatedRows,
+                StartedAt = r.StartedAt,
+            })
             .ToList();
     }
 

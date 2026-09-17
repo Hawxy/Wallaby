@@ -40,4 +40,50 @@ public class WallabyDataSourceTests
 
         ds.ConnectionString.ShouldBe(raw);
     }
+
+    [Test]
+    public void A_password_provider_rejects_a_password_in_the_connection_string()
+    {
+        var ex = Should.Throw<WallabyConfigurationException>(() => new WallabyDataSource(
+            "Host=localhost;Username=u;Password=p", passwordProvider: _ => new ValueTask<string>("token")));
+
+        ex.Message.ShouldContain("Password");
+        ex.Message.ShouldContain("UsePasswordProvider");
+    }
+
+    [Test]
+    public async Task Without_a_provider_the_replication_string_is_the_original()
+    {
+        var raw = "Host=localhost;Username=u;Password=p";
+        await using var ds = new WallabyDataSource(raw);
+
+        (await ds.ConnectionStringWithPasswordAsync(CancellationToken.None)).ShouldBeSameAs(raw);
+    }
+
+    [Test]
+    public async Task The_replication_string_embeds_the_provided_token_verbatim()
+    {
+        const string token = "us-east-1:X-Amz-Algorithm=AWS4;Expires=900&'quote' space";
+        var calls = 0;
+        await using var ds = new WallabyDataSource(
+            "Host=localhost;Username=u", passwordProvider: _ => { calls++; return new ValueTask<string>(token); });
+
+        var authenticated = await ds.ConnectionStringWithPasswordAsync(CancellationToken.None);
+
+        new NpgsqlConnectionStringBuilder(authenticated).Password.ShouldBe(token);
+        new NpgsqlConnectionStringBuilder(authenticated).Host.ShouldBe("localhost");
+        // One call for this string; the pool's periodic provider fetches on its own timer.
+        calls.ShouldBeGreaterThanOrEqualTo(1);
+    }
+
+    [Test]
+    public async Task Configure_data_source_runs_after_wallaby_settings()
+    {
+        await using var ds = new WallabyDataSource(
+            "Host=localhost;Username=u", configureDataSource: b => b.ConnectionStringBuilder.ApplicationName = "hook");
+
+        var builder = new NpgsqlConnectionStringBuilder(ds.Source.ConnectionString);
+        builder.ApplicationName.ShouldBe("hook");
+        builder.MaxAutoPrepare.ShouldBe(64);
+    }
 }

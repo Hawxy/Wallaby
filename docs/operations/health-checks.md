@@ -77,6 +77,7 @@ The check attaches a `data` dictionary for diagnostics. Keys with no value yet (
 | `consecutiveBackfillPassFailures` | The backfill worker's own loop failing outright rather than one table. |
 | `slotName` | The replication slot this node manages. |
 | `lastSinkDeliveryAt:<sink>` | When each sink last accepted a batch; one entry per sink that has delivered this session. |
+| `backfillTable`, `backfillRowsCopied`, `backfillStartedAt`, `backfillEstimatedRows` | The whole-table backfill this leader is running: its table, rows copied so far, fresh start time and, when the table has statistics, the planner's row estimate. Present only while one runs. |
 
 Each subsystem's Degraded grade fires on the worse of its job and pass counters against the same
 threshold. `consecutiveLeaderFailures` only resets on real progress or a clean step-down - not just

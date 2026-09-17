@@ -44,6 +44,8 @@ Durations are in **seconds** (OpenTelemetry convention);
 | `wallaby.backfill.rows` | Counter | `wallaby.table` | Rows copied during backfill. |
 | `wallaby.backfill.active` | UpDownCounter | - | Tables currently being backfilled. |
 | `wallaby.backfill.chunk.duration` | Histogram (s) | `wallaby.table` | Time to read and emit one backfill chunk. |
+| `wallaby.backfill.rows_copied` | ObservableGauge | `wallaby.table` | Rows the running whole-table backfill has copied so far, including rows a previous attempt persisted. Absent while no backfill runs. |
+| `wallaby.backfill.rows_estimated` | ObservableGauge | `wallaby.table` | The planner's row estimate for the running backfill, so `rows_copied / rows_estimated` is its progress. Absent while no backfill runs or the table has never been analysed. |
 
 The main questions you'll want to ask are:
 

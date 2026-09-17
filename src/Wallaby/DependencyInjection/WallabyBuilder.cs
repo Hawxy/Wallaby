@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
 using Wallaby.Internal;
@@ -76,6 +77,51 @@ public sealed class WallabyBuilder
     {
         ArgumentNullException.ThrowIfNull(connectionString);
         _configuration.OptionsActions.Add((sp, options) => options.ConnectionString = connectionString(sp));
+        return this;
+    }
+
+    /// <summary>
+    /// Supply the password for every connection Wallaby opens, for platforms that authenticate with a
+    /// short-lived token (RDS IAM, Azure Entra ID, Cloud SQL IAM). The pooled connections cache the value
+    /// and call <paramref name="provider"/> again every <paramref name="refreshInterval"/> (default 5
+    /// minutes); the replication connection calls it when a leader term starts. Postgres authenticates
+    /// only at connect time, so an open connection outlives its token. The connection string must not
+    /// set <c>Password</c> or <c>Passfile</c>.
+    /// </summary>
+    public WallabyBuilder UsePasswordProvider(Func<CancellationToken, ValueTask<string>> provider, TimeSpan? refreshInterval = null)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return UsePasswordProvider((_, ct) => provider(ct), refreshInterval);
+    }
+
+    /// <summary>
+    /// Provider-aware overload of <see cref="UsePasswordProvider(Func{CancellationToken, ValueTask{string}}, TimeSpan?)"/>:
+    /// the delegate receives the root provider on every call, so the credential source can come from the container.
+    /// </summary>
+    public WallabyBuilder UsePasswordProvider(
+        Func<IServiceProvider, CancellationToken, ValueTask<string>> provider, TimeSpan? refreshInterval = null)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (refreshInterval is { } interval && interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(refreshInterval), interval, "The refresh interval must be positive.");
+        }
+        _configuration.PasswordProvider = provider;
+        _configuration.PasswordRefreshInterval = refreshInterval ?? WallabyDataSource.DefaultPasswordRefreshInterval;
+        return this;
+    }
+
+    /// <summary>
+    /// Apply extra <see cref="NpgsqlDataSourceBuilder"/> configuration (TLS callbacks, logging, type plugins for
+    /// backfill reads) to the data source Wallaby builds for its pooled connections. Runs after Wallaby's own
+    /// settings. The replication connection is not built from the data source and is unaffected. Register the
+    /// password through <see cref="UsePasswordProvider(Func{CancellationToken, ValueTask{string}}, TimeSpan?)"/>,
+    /// not here, so the replication connection receives it too.
+    /// </summary>
+    public WallabyBuilder ConfigureDataSource(Action<NpgsqlDataSourceBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _configuration.ConfigureDataSource = configure;
         return this;
     }
 

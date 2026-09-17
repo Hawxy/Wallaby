@@ -1,5 +1,7 @@
 using System.Linq.Expressions;
+using Npgsql;
 using Wallaby.Abstractions;
+using Wallaby.Internal;
 using Wallaby.Providers;
 
 namespace Wallaby.DependencyInjection;
@@ -141,6 +143,19 @@ internal sealed class WallabyConfiguration
     /// default database-backed spill. Invoked once per leader session with the runtime's <see cref="SpillContext"/>.
     /// </summary>
     public Func<SpillContext, ITransactionSpill>? SpillFactory { get; set; }
+
+    /// <summary>
+    /// Supplies the password (typically a short-lived cloud token) for every connection Wallaby opens.
+    /// Set by <see cref="WallabyBuilder.UsePasswordProvider(Func{CancellationToken, ValueTask{string}}, TimeSpan?)"/>;
+    /// null uses the password in the connection string.
+    /// </summary>
+    public Func<IServiceProvider, CancellationToken, ValueTask<string>>? PasswordProvider { get; set; }
+
+    /// <summary>How long the pool caches a provided password before asking <see cref="PasswordProvider"/> again.</summary>
+    public TimeSpan PasswordRefreshInterval { get; set; } = WallabyDataSource.DefaultPasswordRefreshInterval;
+
+    /// <summary>Extra data-source configuration, applied after Wallaby's own settings.</summary>
+    public Action<NpgsqlDataSourceBuilder>? ConfigureDataSource { get; set; }
 
     /// <summary>
     /// The registered storage providers, in registration order. Empty when no provider is registered

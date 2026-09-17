@@ -277,6 +277,31 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
         (await store.GetAsync(table, CancellationToken.None))!.Status.ShouldBe(BackfillStatus.Requested);
     }
 
+    [Test]
+    public async Task A_fresh_run_records_its_estimate_and_start_and_progress_keeps_them()
+    {
+        await EnsureSchemaAsync();
+        var store = new PostgresBackfillStore(pg.DataSource);
+        var table = UniqueTable("estimated");
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+
+        await store.SaveAsync(State(table, BackfillStatus.InProgress) with { EstimatedRows = 1_000 }, CancellationToken.None);
+        await store.SaveProgressAsync(table, BackfillStatus.InProgress, """{"v":1}""", 250, CancellationToken.None);
+
+        var state = (await store.GetAsync(table, CancellationToken.None)).ShouldNotBeNull();
+        state.EstimatedRows.ShouldBe(1_000);
+        state.StartedAt.ShouldNotBeNull().ShouldBeGreaterThan(before);
+        state.RowsCopied.ShouldBe(250);
+        (await store.ListAsync(CancellationToken.None)).Single(s => s.TableQualifiedName == table).EstimatedRows.ShouldBe(1_000);
+
+        // A later fresh run replaces both.
+        await Task.Delay(20);
+        await store.SaveAsync(State(table, BackfillStatus.InProgress) with { EstimatedRows = null }, CancellationToken.None);
+        var restarted = (await store.GetAsync(table, CancellationToken.None)).ShouldNotBeNull();
+        restarted.EstimatedRows.ShouldBeNull();
+        restarted.StartedAt.ShouldNotBeNull().ShouldBeGreaterThan(state.StartedAt.Value);
+    }
+
     private async Task EnsureSchemaAsync()
     {
         await using var conn = await pg.DataSource.OpenConnectionAsync();

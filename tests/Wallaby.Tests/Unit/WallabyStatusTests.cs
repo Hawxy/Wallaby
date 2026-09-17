@@ -31,6 +31,29 @@ public class WallabyStatusTests
     }
 
     [Test]
+    public void An_active_backfill_is_tracked_until_it_ends_or_the_role_changes()
+    {
+        var status = new WallabyStatus();
+        status.EnterLeader(DateTimeOffset.UtcNow);
+        var started = DateTimeOffset.UtcNow;
+
+        status.BeginBackfill(new WallabyBackfillProgress("public.orders", 0, 1_000, started));
+        status.RecordBackfillProgress(new WallabyBackfillProgress("public.orders", 250, 1_000, started));
+
+        var active = status.Current.ActiveBackfill.ShouldNotBeNull();
+        active.RowsCopied.ShouldBe(250);
+        active.Fraction.ShouldBe(0.25);
+
+        status.EndBackfill();
+        status.Current.ActiveBackfill.ShouldBeNull();
+
+        status.BeginBackfill(new WallabyBackfillProgress("public.orders", 0, null, started));
+        status.Current.ActiveBackfill.ShouldNotBeNull().Fraction.ShouldBeNull();
+        status.EnterStandby();
+        status.Current.ActiveBackfill.ShouldBeNull();
+    }
+
+    [Test]
     public void RecordProgress_with_unknown_lag_keeps_the_previous_lag()
     {
         var status = new WallabyStatus();

@@ -30,4 +30,40 @@ public enum WallabyBackfillStatus
 /// <param name="RowsCopied">Number of rows snapshotted so far.</param>
 /// <param name="UpdatedAt">When the state last changed.</param>
 public sealed record WallabyBackfillState(
-    string Table, WallabyBackfillStatus Status, long RowsCopied, DateTimeOffset UpdatedAt);
+    string Table, WallabyBackfillStatus Status, long RowsCopied, DateTimeOffset UpdatedAt)
+{
+    /// <summary>
+    /// The planner's row estimate (partitions summed) captured when the run started fresh; null when
+    /// unknown or written by a host older than schema version 10.
+    /// </summary>
+    public long? EstimatedRows { get; init; }
+
+    /// <summary>When the run started fresh (a resumed run keeps it); null when written by a host older than schema version 10.</summary>
+    public DateTimeOffset? StartedAt { get; init; }
+
+    /// <summary>Fraction complete (0 to 1) when an estimate exists; null otherwise.</summary>
+    public double? Progress => EstimatedRows is > 0 ? Math.Min(1d, RowsCopied / (double)EstimatedRows.Value) : null;
+
+    /// <summary>
+    /// Time left at the average rate since <see cref="StartedAt"/>; null unless the run is
+    /// <see cref="WallabyBackfillStatus.InProgress"/> with an estimate and some progress. The rate is
+    /// averaged over wall-clock time, so a run resumed after downtime reads pessimistic.
+    /// </summary>
+    public TimeSpan? EstimatedRemaining
+    {
+        get
+        {
+            if (Status != WallabyBackfillStatus.InProgress || EstimatedRows is not > 0 || RowsCopied <= 0 || StartedAt is not { } started)
+            {
+                return null;
+            }
+            var elapsed = UpdatedAt - started;
+            if (elapsed <= TimeSpan.Zero)
+            {
+                return null;
+            }
+            var remaining = Math.Max(0, EstimatedRows.Value - RowsCopied);
+            return TimeSpan.FromSeconds(remaining * elapsed.TotalSeconds / RowsCopied);
+        }
+    }
+}

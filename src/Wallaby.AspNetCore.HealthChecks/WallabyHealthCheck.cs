@@ -90,6 +90,13 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
         {
             data[$"lastSinkDeliveryAt:{sink}"] = at;
         }
+        if (s.ActiveBackfill is { } backfill)
+        {
+            data["backfillTable"] = backfill.Table;
+            data["backfillRowsCopied"] = backfill.RowsCopied;
+            data["backfillStartedAt"] = backfill.StartedAt;
+            if (backfill.EstimatedRows is { } estimated) data["backfillEstimatedRows"] = estimated;
+        }
         return data;
     }
 }

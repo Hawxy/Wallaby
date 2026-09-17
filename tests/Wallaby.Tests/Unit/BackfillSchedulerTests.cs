@@ -110,9 +110,28 @@ public class BackfillSchedulerTests
     // The two tables SchedulerFor maps; ListAsync answers for exactly these.
     private static readonly string[] MappedTables = ["public.products", "public.orders"];
 
+    private sealed class StubEstimator(Func<CapturedTable, long?> estimate) : IBackfillRowEstimator
+    {
+        public Task<long?> EstimateAsync(CapturedTable table, CancellationToken ct) => Task.FromResult(estimate(table));
+    }
+
+    [Test]
+    public async Task A_fresh_run_saves_the_row_estimate()
+    {
+        var store = new RecordingStore(_ => null);
+        var scheduler = SchedulerFor(store, out var dataSource, new StubEstimator(t => t.TableName == "products" ? 42 : null));
+        await using var _ = dataSource;
+
+        await scheduler.RunDueBackfillsAsync(CancellationToken.None);
+
+        store.SavedStates.Single(s => s.TableQualifiedName == "public.products").EstimatedRows.ShouldBe(42);
+        store.SavedStates.Single(s => s.TableQualifiedName == "public.orders").EstimatedRows.ShouldBeNull();
+    }
+
     private sealed class RecordingStore(Func<string, BackfillState?> stateFor) : IBackfillStateStore
     {
         public List<string> Saved { get; } = [];
+        public List<BackfillState> SavedStates { get; } = [];
         public List<string> Failed { get; } = [];
         public DateTimeOffset NextAttempt { get; } = DateTimeOffset.UtcNow.AddSeconds(5);
 
@@ -120,6 +139,7 @@ public class BackfillSchedulerTests
         public Task SaveAsync(BackfillState state, CancellationToken ct)
         {
             Saved.Add(state.TableQualifiedName);
+            SavedStates.Add(state);
             return Task.CompletedTask;
         }
         public Task<DateTimeOffset> FailAsync(string t, string error, CancellationToken ct)
@@ -142,7 +162,8 @@ public class BackfillSchedulerTests
         public INotifySubscription Subscribe() => new WaitSignal([], () => { });
     }
 
-    private static BackfillScheduler SchedulerFor(RecordingStore store, out NpgsqlDataSource dataSource)
+    private static BackfillScheduler SchedulerFor(
+        RecordingStore store, out NpgsqlDataSource dataSource, IBackfillRowEstimator? estimator = null)
     {
         CapturedTable Table(string name) => new()
         {
@@ -163,7 +184,7 @@ public class BackfillSchedulerTests
             ],
             store, coordinator,
             new SinkPurgeRunner(new Dictionary<string, ISink>(), WallabyInstrumentation.NoOp, NullLogger.Instance),
-            new BackfillSchedulerOptions(), NullLogger.Instance);
+            new BackfillSchedulerOptions(), NullLogger.Instance, estimator: estimator);
     }
 
     [Test]

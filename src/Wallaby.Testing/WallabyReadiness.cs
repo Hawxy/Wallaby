@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
+using Wallaby.Internal;
 
 namespace Wallaby.Testing;
 
@@ -41,7 +42,8 @@ public static class WallabyReadiness
         }
 
         // Phase 2: the slot exists and a walsender is attached — changes from here on are captured.
-        await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
+        // Wallaby's own data source carries the password provider, when one is configured.
+        var dataSource = services.GetRequiredService<WallabyDataSource>().Source;
         while (true)
         {
             ThrowIfFaulted(status.Current);
@@ -87,7 +89,7 @@ public static class WallabyReadiness
         }
 
         // Every registry-tracked slot is verified gone — the state a platform's upgrade precheck sees.
-        await using var dataSource = NpgsqlDataSource.Create(options.ConnectionString);
+        var dataSource = services.GetRequiredService<WallabyDataSource>().Source;
         while (true)
         {
             ThrowIfFaulted(status.Current);

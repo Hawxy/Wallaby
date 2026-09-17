@@ -62,4 +62,14 @@ public sealed record BackfillState(
 {
     /// <summary>Serialized keyset cursor (last primary key) for resuming an in-progress backfill.</summary>
     internal string? CursorJson { get; init; }
+
+    /// <summary>
+    /// The planner's row estimate for the table (partitions summed) when the current run started fresh;
+    /// null when unknown (never analysed, or the row predates this column). Compare with
+    /// <see cref="RowsCopied"/> for progress; it is an estimate, so the final count may differ.
+    /// </summary>
+    public long? EstimatedRows { get; init; }
+
+    /// <summary>When the current run started fresh; a resumed run keeps it. Null when the row predates this column.</summary>
+    public DateTimeOffset? StartedAt { get; init; }
 }

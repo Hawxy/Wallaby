@@ -68,6 +68,7 @@ internal sealed class WallabyStatus : IWallabyStatus
                 LeaderSince = null,
                 SuspendedSince = null,
                 SuspensionReason = null,
+                ActiveBackfill = null,
             };
             return apply is null ? next : apply(next);
         });
@@ -149,6 +150,12 @@ internal sealed class WallabyStatus : IWallabyStatus
     /// </summary>
     internal void SetBackfillStreak(int attempts) =>
         Update(s => s with { ConsecutiveBackfillFailures = attempts, ConsecutiveBackfillPassFailures = 0 });
+
+    internal void BeginBackfill(WallabyBackfillProgress progress) => Update(s => s with { ActiveBackfill = progress });
+
+    internal void RecordBackfillProgress(WallabyBackfillProgress progress) => Update(s => s with { ActiveBackfill = progress });
+
+    internal void EndBackfill() => Update(s => s with { ActiveBackfill = null });
 
     internal void RecordProgress(ulong lsn, double lagSeconds, DateTimeOffset at) =>
         Update(s => s with
