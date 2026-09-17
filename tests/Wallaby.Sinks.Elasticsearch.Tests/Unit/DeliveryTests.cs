@@ -71,7 +71,7 @@ public class DeliveryTests
     public async Task Large_batches_are_split_into_sequential_requests()
     {
         var invoker = new CapturingInvoker(AllOk);
-        using var sink = Sink(invoker, o => o.MaxActionsPerRequest = 2);
+        using var sink = Sink(invoker, o => o.MaxRecordsPerRequest = 2);
 
         var result = await sink.DeliverAsync(Batch(
             Upsert("1", new Dictionary<string, object?>()),

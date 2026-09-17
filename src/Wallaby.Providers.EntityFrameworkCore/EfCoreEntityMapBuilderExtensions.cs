@@ -12,15 +12,13 @@ namespace Wallaby.Providers.EntityFrameworkCore;
 /// <summary>EF Core-typed entity-mapping extensions: transforms and dependent-table declarations.</summary>
 public static class EfCoreEntityMapBuilderExtensions
 {
-    private const string ProviderName = "EntityFrameworkCore";
-
     /// <summary>Use a transform instance.</summary>
     public static EntityMapBuilder<TEntity> UsingTransform<TEntity>(
         this EntityMapBuilder<TEntity> map, IWallabyEfTransform<TEntity> transform)
         where TEntity : class
     {
         ArgumentNullException.ThrowIfNull(transform);
-        return map.UsingTransformInvoker(_ => new EfCoreTransformInvoker<TEntity>(transform), ProviderName);
+        return map.UsingTransformInvoker(_ => new EfCoreTransformInvoker<TEntity>(transform), EfCoreWallabyBuilderExtensions.ProviderName);
     }
 
     /// <summary>Use a transform type resolved (or constructed) from the container.</summary>
@@ -30,7 +28,7 @@ public static class EfCoreEntityMapBuilderExtensions
         where TEntity : class
         where TTransform : class, IWallabyEfTransform<TEntity>
         => map.UsingTransformInvoker(sp =>
-            new EfCoreTransformInvoker<TEntity>(ActivatorUtilities.GetServiceOrCreateInstance<TTransform>(sp)), ProviderName);
+            new EfCoreTransformInvoker<TEntity>(ActivatorUtilities.GetServiceOrCreateInstance<TTransform>(sp)), EfCoreWallabyBuilderExtensions.ProviderName);
 
     /// <summary>Use an inline transform lambda (the trivial, no-class case).</summary>
     public static EntityMapBuilder<TEntity> UsingTransform<TEntity>(
@@ -40,7 +38,7 @@ public static class EfCoreEntityMapBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(handler);
         return map.UsingTransformInvoker(
-            _ => new EfCoreTransformInvoker<TEntity>(new DelegateTransform<TEntity>(handler)), ProviderName);
+            _ => new EfCoreTransformInvoker<TEntity>(new DelegateTransform<TEntity>(handler)), EfCoreWallabyBuilderExtensions.ProviderName);
     }
 
     /// <summary>

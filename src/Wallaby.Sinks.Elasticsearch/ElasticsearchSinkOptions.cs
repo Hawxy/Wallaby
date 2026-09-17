@@ -24,7 +24,7 @@ public sealed class ElasticsearchSinkOptions
     /// <summary>
     /// Full override for building the client's settings from <see cref="Endpoint"/>: use it for Elastic
     /// Cloud ids, certificate fingerprints, client certificates, connection pools, or proxies. When set,
-    /// <see cref="Username"/>/<see cref="Password"/>/<see cref="ApiKey"/> and <see cref="TimeoutMs"/> are
+    /// <see cref="Username"/>/<see cref="Password"/>/<see cref="ApiKey"/> and <see cref="Timeout"/> are
     /// ignored; configure authentication and timeouts on the returned settings.
     /// </summary>
     public Func<Uri, ElasticsearchClientSettings>? ConfigureConnection { get; set; }
@@ -33,13 +33,13 @@ public sealed class ElasticsearchSinkOptions
     public string? DefaultIndex { get; set; }
 
     /// <summary>
-    /// Maximum actions per <c>_bulk</c> request. Larger batches are split into sequential requests,
+    /// Maximum records per <c>_bulk</c> request. Larger batches are split into sequential requests,
     /// preserving commit order.
     /// </summary>
-    public int MaxActionsPerRequest { get; set; } = 500;
+    public int MaxRecordsPerRequest { get; set; } = 500;
 
-    /// <summary>Per-request timeout in milliseconds.</summary>
-    public int TimeoutMs { get; set; } = 30_000;
+    /// <summary>Per-request timeout.</summary>
+    public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// When true, bulk requests use <c>refresh=wait_for</c> so documents are searchable before the batch is

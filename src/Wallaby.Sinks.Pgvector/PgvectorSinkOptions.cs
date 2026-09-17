@@ -86,7 +86,7 @@ public sealed class PgvectorSinkOptions
     public string VectorField { get; set; } = "embedding";
 
     /// <summary>Rows per database round-trip; larger batches split into sequential command batches.</summary>
-    public int MaxRowsPerBatch { get; set; } = 500;
+    public int MaxRecordsPerRequest { get; set; } = 500;
 
     /// <summary>Serializer for document values beyond the natively written scalar types (required for such values on NativeAOT hosts).</summary>
     public JsonSerializerOptions? SerializerOptions { get; set; }

@@ -16,7 +16,7 @@ public class PostgresBackfillStoreTests(PostgresFixture pg)
     private static string UniqueTable(string hint) => $"public.{hint}_{Guid.NewGuid():N}";
 
     private static BackfillState State(string table, BackfillStatus status, string? cursorJson = null, long rows = 0)
-        => new(table, status, "v1", cursorJson, rows, DateTimeOffset.UtcNow);
+        => new(table, status, "v1", rows, DateTimeOffset.UtcNow) { CursorJson = cursorJson };
 
     [Test]
     public async Task Progress_saves_do_not_overwrite_a_concurrent_request()

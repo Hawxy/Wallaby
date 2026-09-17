@@ -27,13 +27,13 @@ public sealed class OpenSearchSinkOptions
     public string? DefaultIndex { get; set; }
 
     /// <summary>
-    /// Maximum actions per <c>_bulk</c> request. Larger batches are split into sequential requests,
+    /// Maximum records per <c>_bulk</c> request. Larger batches are split into sequential requests,
     /// preserving commit order.
     /// </summary>
-    public int MaxActionsPerRequest { get; set; } = 500;
+    public int MaxRecordsPerRequest { get; set; } = 500;
 
-    /// <summary>Per-request timeout in milliseconds.</summary>
-    public int TimeoutMs { get; set; } = 30_000;
+    /// <summary>Per-request timeout.</summary>
+    public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// When true, bulk requests use <c>refresh=wait_for</c> so documents are searchable before the batch is

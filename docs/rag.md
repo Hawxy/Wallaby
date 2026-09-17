@@ -25,7 +25,7 @@ Each search destination has a native way to embed the text Wallaby syncs:
 ```csharp
 cdc.AddMeilisearchSink("meili", m =>
 {
-    m.Host = "http://localhost:7700";
+    m.Endpoint = "http://localhost:7700";
     m.ConfigureIndex("products", s =>
     {
         s.SearchableAttributes = ["name", "description"];

@@ -100,7 +100,7 @@ internal static class MeilisearchTestHelpers
     /// <summary>A sink whose transport is <paramref name="stub"/> directly (no factory required).</summary>
     public static MeilisearchSink Sink(StubHandler stub, Action<MeilisearchSinkOptions>? configure = null)
     {
-        var options = new MeilisearchSinkOptions { Host = "http://meili.local" };
+        var options = new MeilisearchSinkOptions { Endpoint = "http://meili.local" };
         configure?.Invoke(options);
         return new MeilisearchSink("meili", options, () => stub);
     }

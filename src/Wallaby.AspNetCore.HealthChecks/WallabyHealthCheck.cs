@@ -85,7 +85,7 @@ public sealed class WallabyHealthCheck(IWallabyStatus status, WallabyHealthCheck
             if (s.PublicationsWidenedAt is { } widenedAt) data["publicationsWidenedAt"] = widenedAt;
         }
         if (s.LastProgressAt is { } progress) data["lastProgressAt"] = progress;
-        if (s.LastIngestionLagSeconds >= 0) data["lastIngestionLagSeconds"] = s.LastIngestionLagSeconds;
+        if (s.LastIngestionLag is { } lag) data["lastIngestionLagSeconds"] = lag.TotalSeconds;
         foreach (var (sink, at) in s.LastSinkDeliveryAt)
         {
             data[$"lastSinkDeliveryAt:{sink}"] = at;

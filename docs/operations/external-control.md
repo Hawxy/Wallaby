@@ -177,7 +177,9 @@ semantics). See [Backfill](/backfill) for how snapshots run and what
 ## Requirements and privileges
 
 - **The client never creates schema objects.** The `wallaby` schema is created and migrated by the
-  Wallaby host at startup, and the client checks its version ledger (`wallaby.schema_version`).
+  Wallaby host at startup, and the client checks its version ledger (`wallaby.schema_version`); an
+  operation the found version cannot serve throws `WallabySchemaVersionException`, which carries the
+  found and required versions.
   The only DDL it ever runs targets Wallaby-managed publications, and only in the
   no-host fallbacks: dropping them when it finalizes a suspension, and rewriting their membership when
   it applies a widening, in both cases objects the host recreates or re-narrows from configuration.

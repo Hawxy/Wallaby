@@ -156,7 +156,7 @@ internal sealed class WallabyStatus : IWallabyStatus
             LastAcknowledgedLsn = lsn,
             LastProgressAt = at,
             // Keep the previous known lag when this transaction had no commit timestamp.
-            LastIngestionLagSeconds = lagSeconds >= 0 ? lagSeconds : s.LastIngestionLagSeconds,
+            LastIngestionLag = lagSeconds >= 0 ? TimeSpan.FromSeconds(lagSeconds) : s.LastIngestionLag,
             // A fully delivered + acknowledged transaction proves the leader is healthy; a crash-looping
             // leader never gets here, so its failure count accumulates across sessions.
             ConsecutiveLeaderFailures = 0,

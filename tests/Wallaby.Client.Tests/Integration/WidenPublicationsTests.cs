@@ -186,9 +186,10 @@ public class WidenPublicationsTests(PostgresFixture pg)
         var builder = new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Database = "widen_virgin" };
         await using var client = new WallabyControlClient(builder.ConnectionString);
 
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => client.WidenPublicationsAsync());
+        var ex = await Should.ThrowAsync<WallabySchemaVersionException>(() => client.WidenPublicationsAsync());
 
         ex.Message.ShouldContain("Deploy a Wallaby host");
+        ex.FoundVersion.ShouldBe(0);
     }
 
     [Test]
@@ -240,8 +241,9 @@ public class WidenPublicationsTests(PostgresFixture pg)
         state.Slots.Single().PublicationManaged.ShouldBeTrue();
 
         // Writes the schema cannot serve are refused with the found version.
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => client.WidenPublicationsAsync());
+        var ex = await Should.ThrowAsync<WallabySchemaVersionException>(() => client.WidenPublicationsAsync());
         ex.Message.ShouldContain("version 5");
+        ex.FoundVersion.ShouldBe(5);
 
         // Resume stays version-tolerant: an old installation can always be unsuspended.
         (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);

@@ -6,7 +6,7 @@ namespace Wallaby.Sinks.Meilisearch;
 public sealed class MeilisearchSinkOptions
 {
     /// <summary>Meilisearch base URL, e.g. <c>http://localhost:7700</c>.</summary>
-    public required string Host { get; set; }
+    public required string Endpoint { get; set; }
 
     /// <summary>API key (master or a write key). Null for an unsecured instance.</summary>
     public string? ApiKey { get; set; }
@@ -21,17 +21,17 @@ public sealed class MeilisearchSinkOptions
     /// Maximum time to wait for an indexing task to complete. Every task is awaited to completion before
     /// the batch is considered delivered, keeping delivery honest for at-least-once semantics.
     /// </summary>
-    public double WaitTimeoutMs { get; set; } = 60_000;
+    public TimeSpan WaitTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>Polling interval while waiting for a task.</summary>
-    public int WaitIntervalMs { get; set; } = 50;
+    public TimeSpan WaitInterval { get; set; } = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
     /// Maximum records per indexing request. A larger batch is split into sequential requests, keeping
-    /// each payload safely under Meilisearch's request body limit (100 MB by default —
+    /// each payload safely under Meilisearch's request body limit (100 MB by default;
     /// <c>payload_too_large</c> fails delivery permanently).
     /// </summary>
-    public int MaxRecordsPerBatch { get; set; } = 500;
+    public int MaxRecordsPerRequest { get; set; } = 500;
 
     /// <summary>
     /// <see cref="IHttpMessageHandlerFactory"/> client name whose handler pipeline the sink sends

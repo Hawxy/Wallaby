@@ -88,7 +88,7 @@ Query it like any pgvector table (`ORDER BY embedding <=> $1 LIMIT 10`), joining
 | `MaxEmbeddingConcurrency` | `1` | Embedding calls in flight at once; raise it to overlap calls on large backfills when the provider's rate limits allow. |
 | `IsTransientEmbeddingError` | `null` | Classifies embedding exceptions retryable vs permanent; the default retries everything except `ArgumentException`/`NotSupportedException`. |
 | `VectorField` | `embedding` | Without a generator: the document field carrying the transform-supplied vector. |
-| `MaxRowsPerBatch` | `500` | Rows per database round-trip. |
+| `MaxRecordsPerRequest` | `500` | Rows per database round-trip. |
 | `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (required for such values on NativeAOT hosts). |
 
 ## How embedding is gated

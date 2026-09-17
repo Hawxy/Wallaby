@@ -1,4 +1,3 @@
-using Dekaf.Protocol.Records;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Wallaby.DependencyInjection;
@@ -42,57 +41,53 @@ public static class KafkaBuilderExtensions
         {
             var options = new KafkaSinkOptions { BootstrapServers = "" };
             configure(sp, options);
-            Validate(options);
             return new KafkaSink(name, options, producer: null, sp.GetService<ILoggerFactory>());
         });
     }
 
-    private static void Validate(KafkaSinkOptions options)
+    internal static void Validate(KafkaSinkOptions options)
     {
         if (string.IsNullOrWhiteSpace(options.BootstrapServers))
         {
-            throw new ArgumentException("KafkaSinkOptions.BootstrapServers is required.", nameof(options));
+            throw new WallabyConfigurationException("KafkaSinkOptions.BootstrapServers is required.");
         }
-        if (options.Compression == CompressionType.Brotli)
+        if (!Enum.IsDefined(options.Compression))
         {
-            throw new ArgumentException(
-                "KafkaSinkOptions.Compression does not support Brotli; reference Dekaf.Compression.Brotli and register it via ConfigureProducer instead.",
-                nameof(options));
+            throw new WallabyConfigurationException(
+                $"KafkaSinkOptions.Compression value {(int)options.Compression} is not a defined KafkaSinkCompression.");
         }
-        if (options.MessageTimeoutMs <= 0)
+        if (options.MessageTimeout <= TimeSpan.Zero)
         {
-            throw new ArgumentException("KafkaSinkOptions.MessageTimeoutMs must be positive.", nameof(options));
+            throw new WallabyConfigurationException("KafkaSinkOptions.MessageTimeout must be positive.");
         }
-        if (options.LingerMs < 0)
+        if (options.Linger < TimeSpan.Zero)
         {
-            throw new ArgumentException("KafkaSinkOptions.LingerMs cannot be negative.", nameof(options));
+            throw new WallabyConfigurationException("KafkaSinkOptions.Linger cannot be negative.");
         }
-        if (options.MessageTimeoutMs <= options.LingerMs)
+        if (options.MessageTimeout <= options.Linger)
         {
-            throw new ArgumentException(
-                "KafkaSinkOptions.MessageTimeoutMs must exceed LingerMs; the delivery ceiling covers the linger window plus at least one broker request.",
-                nameof(options));
+            throw new WallabyConfigurationException(
+                "KafkaSinkOptions.MessageTimeout must exceed Linger; the delivery ceiling covers the linger window plus at least one broker request.");
         }
-        if (options.AdminTimeoutMs <= 0)
+        if (options.AdminTimeout <= TimeSpan.Zero)
         {
-            throw new ArgumentException("KafkaSinkOptions.AdminTimeoutMs must be positive.", nameof(options));
+            throw new WallabyConfigurationException("KafkaSinkOptions.AdminTimeout must be positive.");
         }
         foreach (var topic in options.Topics)
         {
             if (string.IsNullOrWhiteSpace(topic.Name))
             {
-                throw new ArgumentException("KafkaTopicConfig.Name is required.", nameof(options));
+                throw new WallabyConfigurationException("KafkaTopicConfig.Name is required.");
             }
             if (topic.Partitions <= 0)
             {
-                throw new ArgumentException(
-                    $"KafkaTopicConfig.Partitions must be positive for topic '{topic.Name}'.", nameof(options));
+                throw new WallabyConfigurationException(
+                    $"KafkaTopicConfig.Partitions must be positive for topic '{topic.Name}'.");
             }
             if (topic.ReplicationFactor is not -1 and <= 0)
             {
-                throw new ArgumentException(
-                    $"KafkaTopicConfig.ReplicationFactor must be positive or -1 (broker default) for topic '{topic.Name}'.",
-                    nameof(options));
+                throw new WallabyConfigurationException(
+                    $"KafkaTopicConfig.ReplicationFactor must be positive or -1 (broker default) for topic '{topic.Name}'.");
             }
         }
     }

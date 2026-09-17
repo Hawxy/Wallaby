@@ -28,7 +28,7 @@ builder.Services.AddWallaby(cdc =>
        })
        .AddMeilisearchSink("meili", m =>
        {
-           m.Host = meiliHost;
+           m.Endpoint = meiliHost;
            m.ApiKey = meiliKey;
        })
        // Use Apply<T> to consolidate your mapping configuration (see ProductSearchMapping).

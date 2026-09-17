@@ -167,7 +167,7 @@ public class BackfillClientTests(PostgresFixture pg)
         await using var client = new WallabyControlClient(builder.ConnectionString);
 
         (await client.GetBackfillStatusAsync()).ShouldBeEmpty();
-        await Should.ThrowAsync<InvalidOperationException>(() => client.RequestBackfillAsync("public.orders"));
+        await Should.ThrowAsync<WallabySchemaVersionException>(() => client.RequestBackfillAsync("public.orders"));
         // Cancel has nothing to withdraw, so it reports false instead of throwing.
         (await client.CancelBackfillAsync("public.orders")).ShouldBeFalse();
     }

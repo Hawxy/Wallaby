@@ -57,11 +57,14 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
     internal MeilisearchSink(string name, MeilisearchSinkOptions options, Func<HttpMessageHandler> transport)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        MeilisearchBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         _transport = transport;
         // The base address must end with '/' for the client's relative request URIs to resolve under it.
-        _baseAddress = new Uri(options.Host.EndsWith('/') ? options.Host : options.Host + "/");
+        _baseAddress = new Uri(options.Endpoint.EndsWith('/') ? options.Endpoint : options.Endpoint + "/");
         _requiredAttributes = BuildRequiredAttributes(options);
     }
 
@@ -278,16 +281,16 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
         // Chunks keep each request payload well under Meilisearch's body limit; upserts complete before
         // deletions so a delete always wins over an earlier upsert of the same document in the batch.
-        for (var offset = 0; offset < group.Upserts.Count; offset += _options.MaxRecordsPerBatch)
+        for (var offset = 0; offset < group.Upserts.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxRecordsPerBatch, group.Upserts.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, group.Upserts.Count - offset);
             var info = await index.AddDocumentsAsync(group.Upserts.GetRange(offset, count), _options.PrimaryKey, ct);
             await WaitAsync(index, info, ct);
         }
 
-        for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerBatch)
+        for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxRecordsPerBatch, group.Deletions.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, group.Deletions.Count - offset);
             try
             {
                 var info = await index.DeleteDocumentsAsync(group.Deletions.GetRange(offset, count), ct);
@@ -307,7 +310,8 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
     {
         // Every task is awaited to completion, so a batch is only reported delivered (and the LSN acked)
         // once Meilisearch has actually applied it.
-        var result = await index.WaitForTaskAsync(info.TaskUid, _options.WaitTimeoutMs, _options.WaitIntervalMs, ct);
+        var result = await index.WaitForTaskAsync(
+            info.TaskUid, _options.WaitTimeout.TotalMilliseconds, (int)_options.WaitInterval.TotalMilliseconds, ct);
         if (result.Status is TaskInfoStatus.Failed or TaskInfoStatus.Canceled)
         {
             string? code = null;

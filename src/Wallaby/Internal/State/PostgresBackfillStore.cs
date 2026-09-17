@@ -179,8 +179,11 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
         var nextAttemptAt = reader.GetFieldValue<DateTime>(columnOffset + 7);
         var lastError = reader.IsDBNull(columnOffset + 8) ? null : reader.GetString(columnOffset + 8);
         return new BackfillState(
-            tableQualified, status, transformVersion, cursorJson, rowsCopied,
+            tableQualified, status, transformVersion, rowsCopied,
             new DateTimeOffset(DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)), purge,
-            attempts, new DateTimeOffset(DateTime.SpecifyKind(nextAttemptAt, DateTimeKind.Utc)), lastError);
+            attempts, new DateTimeOffset(DateTime.SpecifyKind(nextAttemptAt, DateTimeKind.Utc)), lastError)
+        {
+            CursorJson = cursorJson,
+        };
     }
 }

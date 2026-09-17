@@ -15,7 +15,7 @@ public class BackfillSchedulerTests
     private static readonly BackfillSchedulerOptions Defaults = new();
 
     private static BackfillState State(BackfillStatus status, string? version, bool purge = false) =>
-        new("public.products", status, version, CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow, purge);
+        new("public.products", status, version, RowsCopied: 0, DateTimeOffset.UtcNow, purge);
 
     private static BackfillDecision Decide(
         BackfillState? state, string? declaredVersion, BackfillSchedulerOptions? options = null,
@@ -186,7 +186,7 @@ public class BackfillSchedulerTests
     {
         var notBefore = DateTimeOffset.UtcNow.AddMinutes(5);
         var store = new RecordingStore(t => new BackfillState(
-            t, BackfillStatus.Requested, "v1", CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow,
+            t, BackfillStatus.Requested, "v1", RowsCopied: 0, DateTimeOffset.UtcNow,
             Purge: false, Attempts: 1, NextAttemptAt: notBefore, LastError: "boom"));
         var scheduler = SchedulerFor(store, out var dataSource);
         await using var _ = dataSource;
@@ -211,7 +211,7 @@ public class BackfillSchedulerTests
             => Task.FromResult<BackfillState?>(Completed(t));
 
         private static BackfillState Completed(string t)
-            => new(t, BackfillStatus.Completed, "v1", null, 0, DateTimeOffset.UtcNow);
+            => new(t, BackfillStatus.Completed, "v1", 0, DateTimeOffset.UtcNow);
 
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
         {

@@ -5,7 +5,7 @@ using Wallaby.DependencyInjection;
 namespace Wallaby.Sinks.Http;
 
 /// <summary>Fluent helpers for registering an HTTP sink on a <see cref="WallabyBuilder"/>.</summary>
-public static class HttpSinkBuilderExtensions
+public static class HttpBuilderExtensions
 {
     /// <summary>
     /// Register an HTTP sink under <paramref name="name"/>. Attach the entities it receives via
@@ -46,7 +46,6 @@ public static class HttpSinkBuilderExtensions
         {
             var options = new HttpSinkOptions { Endpoint = "" };
             configure(sp, options);
-            Validate(options);
             return CreateSink(name, options, sp);
         });
     }
@@ -71,19 +70,20 @@ public static class HttpSinkBuilderExtensions
                 }
             }));
 
-    private static void Validate(HttpSinkOptions options)
+    internal static void Validate(HttpSinkOptions options)
     {
-        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out _))
+        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var endpoint)
+            || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("HttpSinkOptions.Endpoint must be an absolute URL.", nameof(options));
+            throw new WallabyConfigurationException("HttpSinkOptions.Endpoint must be an absolute http(s) URL.");
         }
         if (options.MaxRecordsPerRequest <= 0)
         {
-            throw new ArgumentException("HttpSinkOptions.MaxRecordsPerRequest must be positive.", nameof(options));
+            throw new WallabyConfigurationException("HttpSinkOptions.MaxRecordsPerRequest must be positive.");
         }
-        if (options.TimeoutMs <= 0)
+        if (options.Timeout <= TimeSpan.Zero)
         {
-            throw new ArgumentException("HttpSinkOptions.TimeoutMs must be positive.", nameof(options));
+            throw new WallabyConfigurationException("HttpSinkOptions.Timeout must be positive.");
         }
     }
 

@@ -33,6 +33,11 @@ public sealed record SinkRecord(
 Records arrive in **commit order**. Each is either an upsert of `Document` under `DocumentId`, or a
 deletion of `DocumentId`.
 
+`SinkBatch`, `SinkRecord`, `SinkPurgeRequest`, `ChangeMetadata`, `ChangeEvent` and `BackfillState` are
+positional records you may construct yourself (tests, adapters). Their positional parameters are fixed
+for 1.x: anything Wallaby adds later arrives as an `init` property with a default, so existing
+constructor calls keep compiling and a sink that ignores a new property keeps working.
+
 ## Returning a result
 
 Classify the outcome so the dispatcher can react:

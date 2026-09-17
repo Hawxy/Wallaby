@@ -16,10 +16,12 @@ public static class BulkJson
 
     /// <summary>
     /// Write records <paramref name="offset"/>..<paramref name="offset"/>+<paramref name="count"/> as one
-    /// bulk body. Each record's index is <see cref="SinkRecord.Destination"/>, falling back to
-    /// <paramref name="defaultIndex"/> (see <see cref="SinkDestination"/>).
+    /// bulk body into <paramref name="destination"/>. Each record's index is
+    /// <see cref="SinkRecord.Destination"/>, falling back to <paramref name="defaultIndex"/> (see
+    /// <see cref="SinkDestination"/>).
     /// </summary>
-    public static byte[] Write(
+    public static void Write(
+        IBufferWriter<byte> destination,
         string sinkName,
         IReadOnlyList<SinkRecord> records,
         int offset,
@@ -27,26 +29,23 @@ public static class BulkJson
         string? defaultIndex,
         JsonSerializerOptions? serializerOptions)
     {
-        var buffer = new ArrayBufferWriter<byte>();
-        using var writer = new Utf8JsonWriter(buffer);
+        using var writer = new Utf8JsonWriter(destination);
 
         for (var i = offset; i < offset + count; i++)
         {
             var record = records[i];
             var index = SinkDestination.Resolve(record, defaultIndex, sinkName, "DefaultIndex");
 
-            WriteAction(writer, buffer, record, index);
+            WriteAction(writer, destination, record, index);
             if (!record.IsDeletion)
             {
                 SinkEnvelopeJson.WriteDocument(writer, record.Document!, record.DocumentId, serializerOptions);
-                EndLine(writer, buffer);
+                EndLine(writer, destination);
             }
         }
-
-        return buffer.WrittenSpan.ToArray();
     }
 
-    private static void WriteAction(Utf8JsonWriter writer, ArrayBufferWriter<byte> buffer, SinkRecord record, string index)
+    private static void WriteAction(Utf8JsonWriter writer, IBufferWriter<byte> destination, SinkRecord record, string index)
     {
         writer.WriteStartObject();
         writer.WriteStartObject(record.IsDeletion ? "delete" : "index");
@@ -54,14 +53,14 @@ public static class BulkJson
         writer.WriteString("_id", record.DocumentId);
         writer.WriteEndObject();
         writer.WriteEndObject();
-        EndLine(writer, buffer);
+        EndLine(writer, destination);
     }
 
     /// <summary>Commit the current JSON line, append the NDJSON newline, and reset for the next line.</summary>
-    private static void EndLine(Utf8JsonWriter writer, ArrayBufferWriter<byte> buffer)
+    private static void EndLine(Utf8JsonWriter writer, IBufferWriter<byte> destination)
     {
         writer.Flush();
-        buffer.Write(NewLine);
+        destination.Write(NewLine);
         writer.Reset();
     }
 
@@ -73,9 +72,9 @@ public static class BulkJson
     /// outweighs retryable ones. Null when every action applied; a missing or unparseable body is
     /// retryable. <paramref name="sinkDisplayName"/> names the destination system in failure messages.
     /// </summary>
-    public static DeliveryResult? ClassifyItems(string? body, string sinkDisplayName)
+    public static DeliveryResult? ClassifyItems(ReadOnlyMemory<byte> body, string sinkDisplayName)
     {
-        if (string.IsNullOrEmpty(body))
+        if (body.IsEmpty)
         {
             return DeliveryResult.Retry($"{sinkDisplayName} returned an empty bulk response body.");
         }

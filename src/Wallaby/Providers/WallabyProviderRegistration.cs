@@ -22,5 +22,5 @@ public sealed class WallabyProviderRegistration
     /// <see cref="EnrichmentSessions"/> for this provider's mappings when set. Set via
     /// <c>WallabyBuilder.UseScopedEnrichmentSessions(providerName, ...)</c> (e.g. by <c>UseScopedDbContext</c>).
     /// </summary>
-    public Func<IServiceProvider, IEnrichmentSessionProvider>? ScopedEnrichmentSessions { get; set; }
+    public Func<IServiceProvider, IEnrichmentSessionProvider>? ScopedEnrichmentSessions { get; internal set; }
 }

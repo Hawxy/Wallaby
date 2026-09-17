@@ -41,7 +41,7 @@ builder.Services.AddWallaby(cdc =>
     cdc.UseEntityFrameworkCore<AppDbContext>()
        .UseConnectionString(conn)
        .ConfigureOptions(o => { o.SlotName = "app_cdc"; o.PublicationName = "app_cdc_pub"; })
-       .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
+       .AddMeilisearchSink("meili", m => { m.Endpoint = "http://localhost:7700"; m.ApiKey = key; })
 
        // Mapping = routing only. The transform does the data shaping.
        .WithMappings(sink => sink

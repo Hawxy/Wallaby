@@ -46,8 +46,8 @@ public sealed record WallabyStatusSnapshot
     /// <summary>When the last transaction was acknowledged; null if none yet this session.</summary>
     public DateTimeOffset? LastProgressAt { get; init; }
 
-    /// <summary>The most recent ingestion lag (now − source commit timestamp) in seconds; <c>-1</c> if unknown.</summary>
-    public double LastIngestionLagSeconds { get; init; } = -1;
+    /// <summary>The most recent ingestion lag (now minus source commit timestamp); null until known.</summary>
+    public TimeSpan? LastIngestionLag { get; init; }
 
     /// <summary>
     /// Consecutive failed leader sessions. Reset when a transaction is fully delivered and acknowledged,

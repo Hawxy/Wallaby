@@ -39,7 +39,6 @@ public static class PgvectorBuilderExtensions
         {
             var options = new PgvectorSinkOptions { ConnectionString = "", Dimensions = 0 };
             configure(sp, options);
-            Validate(options);
             return new PgvectorSink(name, options);
         });
     }
@@ -48,48 +47,47 @@ public static class PgvectorBuilderExtensions
     {
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
-            throw new ArgumentException("PgvectorSinkOptions.ConnectionString is required.", nameof(options));
+            throw new WallabyConfigurationException("PgvectorSinkOptions.ConnectionString is required.");
         }
         if (options.Dimensions <= 0)
         {
-            throw new ArgumentException("PgvectorSinkOptions.Dimensions must be positive.", nameof(options));
+            throw new WallabyConfigurationException("PgvectorSinkOptions.Dimensions must be positive.");
         }
         if (!PgvectorTables.IsValidIdentifier(options.Schema))
         {
-            throw new ArgumentException(
-                "PgvectorSinkOptions.Schema must be 1-63 characters of [a-zA-Z0-9_].", nameof(options));
+            throw new WallabyConfigurationException(
+                "PgvectorSinkOptions.Schema must be 1-63 characters of [a-zA-Z0-9_].");
         }
         if (options.DefaultTable is { } table && !PgvectorTables.IsValidIdentifier(table))
         {
-            throw new ArgumentException(
-                "PgvectorSinkOptions.DefaultTable must be 1-63 characters of [a-zA-Z0-9_].", nameof(options));
+            throw new WallabyConfigurationException(
+                "PgvectorSinkOptions.DefaultTable must be 1-63 characters of [a-zA-Z0-9_].");
         }
-        if (options.MaxRowsPerBatch <= 0)
+        if (options.MaxRecordsPerRequest <= 0)
         {
-            throw new ArgumentException("PgvectorSinkOptions.MaxRowsPerBatch must be positive.", nameof(options));
+            throw new WallabyConfigurationException("PgvectorSinkOptions.MaxRecordsPerRequest must be positive.");
         }
         if (options.MaxEmbeddingBatchSize <= 0)
         {
-            throw new ArgumentException("PgvectorSinkOptions.MaxEmbeddingBatchSize must be positive.", nameof(options));
+            throw new WallabyConfigurationException("PgvectorSinkOptions.MaxEmbeddingBatchSize must be positive.");
         }
         if (options.MaxEmbeddingConcurrency <= 0)
         {
-            throw new ArgumentException("PgvectorSinkOptions.MaxEmbeddingConcurrency must be positive.", nameof(options));
+            throw new WallabyConfigurationException("PgvectorSinkOptions.MaxEmbeddingConcurrency must be positive.");
         }
 
         var embedParts = (options.EmbeddingGenerator is not null, options.EmbedText is not null,
             !string.IsNullOrWhiteSpace(options.EmbeddingVersion));
         if (embedParts is not ((true, true, true) or (false, false, false)))
         {
-            throw new ArgumentException(
+            throw new WallabyConfigurationException(
                 "PgvectorSinkOptions embedding requires EmbeddingGenerator, EmbedText, and EmbeddingVersion " +
-                "together (or none of them, for transform-provided vectors via VectorField).", nameof(options));
+                "together (or none of them, for transform-provided vectors via VectorField).");
         }
         if (options.EmbeddingGenerator is null && string.IsNullOrWhiteSpace(options.VectorField))
         {
-            throw new ArgumentException(
-                "PgvectorSinkOptions.VectorField must be a non-empty field name when no EmbeddingGenerator is set.",
-                nameof(options));
+            throw new WallabyConfigurationException(
+                "PgvectorSinkOptions.VectorField must be a non-empty field name when no EmbeddingGenerator is set.");
         }
     }
 }

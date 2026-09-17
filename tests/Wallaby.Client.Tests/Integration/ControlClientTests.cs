@@ -69,7 +69,7 @@ public class ControlClientTests(PostgresFixture pg)
         (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);
 
         // Suspend refuses instead of creating the table: only the host performs DDL.
-        await Should.ThrowAsync<InvalidOperationException>(() => client.SuspendAsync());
+        await Should.ThrowAsync<WallabySchemaVersionException>(() => client.SuspendAsync());
 
         // The client never creates the wallaby schema.
         await using var virginSource = NpgsqlDataSource.Create(builder.ConnectionString);

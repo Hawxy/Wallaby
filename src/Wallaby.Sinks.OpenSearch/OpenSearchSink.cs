@@ -1,3 +1,4 @@
+using System.Buffers;
 using OpenSearch.Client;
 using OpenSearch.Net;
 using Wallaby.Abstractions;
@@ -27,6 +28,9 @@ public sealed class OpenSearchSink : ISink, IDisposable
     /// <param name="options">Connection, routing, and delivery-behaviour settings.</param>
     public OpenSearchSink(string name, OpenSearchSinkOptions options)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        OpenSearchBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         var endpoint = new Uri(options.Endpoint, UriKind.Absolute);
@@ -53,16 +57,19 @@ public sealed class OpenSearchSink : ISink, IDisposable
     public async Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct)
     {
         var records = batch.Records;
+        // One buffer serves every chunk of this call; the previous request has fully settled before the
+        // next chunk resets it.
+        var buffer = new ArrayBufferWriter<byte>();
 
         // Chunks are sent sequentially so commit order is preserved across requests.
-        for (var offset = 0; offset < records.Count; offset += _options.MaxActionsPerRequest)
+        for (var offset = 0; offset < records.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxActionsPerRequest, records.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, records.Count - offset);
 
-            byte[] payload;
+            buffer.ResetWrittenCount();
             try
             {
-                payload = BulkJson.Write(Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
+                BulkJson.Write(buffer, Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
             }
             catch (Exception ex) when (ex is not WallabyConfigurationException)
             {
@@ -70,7 +77,7 @@ public sealed class OpenSearchSink : ISink, IDisposable
                 return DeliveryResult.Permanent($"OpenSearch bulk serialization failed: {ex.Message}", ex);
             }
 
-            var failure = await SendAsync(payload, ct);
+            var failure = await SendAsync(buffer.WrittenMemory, ct);
             if (failure is not null)
             {
                 return failure;
@@ -81,13 +88,13 @@ public sealed class OpenSearchSink : ISink, IDisposable
     }
 
     /// <summary>Send one bulk body; null on success, otherwise the classified failure.</summary>
-    private async Task<DeliveryResult?> SendAsync(byte[] payload, CancellationToken ct)
+    private async Task<DeliveryResult?> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         var parameters = new BulkRequestParameters
         {
             RequestConfiguration = new RequestConfiguration
             {
-                RequestTimeout = TimeSpan.FromMilliseconds(_options.TimeoutMs),
+                RequestTimeout = _options.Timeout,
             },
         };
         if (_options.Refresh)
@@ -95,10 +102,10 @@ public sealed class OpenSearchSink : ISink, IDisposable
             parameters.Refresh = Refresh.WaitFor;
         }
 
-        StringResponse response;
+        BytesResponse response;
         try
         {
-            response = await _client.LowLevel.BulkAsync<StringResponse>(PostData.Bytes(payload), parameters, ct);
+            response = await _client.LowLevel.BulkAsync<BytesResponse>(PostData.ReadOnlyMemory(payload), parameters, ct);
         }
         catch (OpenSearchClientException ex)
         {

@@ -178,7 +178,7 @@ internal sealed class BackfillScheduler(
                     // Reset the cursor so the coordinator starts from the beginning.
                     await store.SaveAsync(
                         new BackfillState(
-                            qualifiedName, BackfillStatus.InProgress, table.TransformVersion, null, 0,
+                            qualifiedName, BackfillStatus.InProgress, table.TransformVersion, 0,
                             DateTimeOffset.UtcNow),
                         ct);
                 }

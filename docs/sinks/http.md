@@ -44,7 +44,7 @@ builder.Services.AddWallaby(cdc =>
 | `Compression` | `None` | [Request-body compression](#compression): `Gzip` or `Brotli`. |
 | `Annotations` | `null` | Static key/values echoed at the top of every envelope. |
 | `MaxRecordsPerRequest` | `500` | Larger batches are split into sequential requests (commit order preserved). |
-| `TimeoutMs` | `30000` | Per-request timeout; composes with any timeout on the named client. |
+| `Timeout` | `30s` | Per-request timeout; composes with any timeout on the named client. |
 | `SerializerOptions` | `null` | Serializer for non-scalar document values - see [NativeAOT](#nativeaot). |
 
 ## Authentication

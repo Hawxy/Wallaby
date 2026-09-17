@@ -28,7 +28,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     }
 
     /// <summary>
-    /// Override the document id (defaults to the source primary key). Because deletes must also compute
+    /// Override the document id (defaults to the source primary key). The selected value is rendered
+    /// culture-invariantly, like <see cref="DocumentKey.ToString"/>. Because deletes must also compute
     /// the id, the table requires <c>REPLICA IDENTITY FULL</c> so the full old row is present on delete;
     /// self-configuration fails at startup when it is missing.
     /// </summary>
@@ -49,12 +50,13 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
                     "carry the full old row (self-config logs the exact DDL), or drop KeyedBy to key by " +
                     "primary key.");
             }
-            return keySelector(entity)?.ToString()
+            var key = keySelector(entity)
                 ?? throw new InvalidOperationException(
                     $"KeyedBy selector for '{typeof(TEntity).Name}' returned null on {change.Action} of " +
                     $"'{change.Metadata.QualifiedTableName}' (primary key {change.Key}). The key columns are " +
                     "likely missing from the replicated old row; run: " +
                     $"ALTER TABLE {change.Metadata.QualifiedTableName} REPLICA IDENTITY FULL;");
+            return DocumentKey.Format(key);
         };
         return this;
     }
@@ -140,6 +142,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// <paramref name="providerName"/> so the mapping resolves to the provider whose session type the
     /// transform expects.
     /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public EntityMapBuilder<TEntity> UsingTransformInvoker(
         Func<IServiceProvider, IWallabyTransformInvoker> factory, string? providerName = null)
     {

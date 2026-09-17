@@ -21,7 +21,7 @@ dotnet add package Wallaby.Sinks.Meilisearch
 ```csharp
 cdc.AddMeilisearchSink("meili", m =>
 {
-    m.Host = "http://localhost:7700";
+    m.Endpoint = "http://localhost:7700";
     m.ApiKey = key;            // master or a write key; null for an unsecured instance
     m.DefaultIndex = "search"; // optional fallback when a mapping has no destination
 });
@@ -45,9 +45,9 @@ cdc.AddMeilisearchSink("meili", m => { /* ... */ })
 | `ApiKey` | `null` | Master/write key; `null` for unsecured. |
 | `DefaultIndex` | `null` | Index used when a routed record has no destination. |
 | `PrimaryKey` | `id` | Document key field Wallaby injects into every document. |
-| `WaitTimeoutMs` | `60000` | Max wait per indexing task (every task is awaited before the batch is acked). |
-| `WaitIntervalMs` | `50` | Poll interval while waiting. |
-| `MaxRecordsPerBatch` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
+| `WaitTimeout` | `60s` | Max wait per indexing task (every task is awaited before the batch is acked). |
+| `WaitInterval` | `50ms` | Poll interval while waiting. |
+| `MaxRecordsPerRequest` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
 | `HttpClientName` | `null` | `IHttpClientFactory` client name to send through; `null` uses `MeilisearchSink.ClientNameFor(name)`. |
 | `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
 
@@ -72,7 +72,7 @@ the sink's `PrimaryKey`) and have their settings applied on startup.
 ```csharp
 cdc.AddMeilisearchSink("meili", m =>
 {
-    m.Host = "http://localhost:7700";
+    m.Endpoint = "http://localhost:7700";
     m.ConfigureIndex("products", s =>
     {
         s.SearchableAttributes = ["name", "description"];
@@ -155,7 +155,7 @@ If a way to customize this would be useful, open an issue.
   replaced, so composite keys work transparently.
 - A transform that returns `null` for a key (or omits it) issues a **delete** for that id.
 - Records are grouped by index; within an index, upserts are applied before deletes (each split into
-  requests of at most `MaxRecordsPerBatch` records), and distinct indexes are dispatched in parallel.
+  requests of at most `MaxRecordsPerRequest` records), and distinct indexes are dispatched in parallel.
 
 ## Delivery semantics
 

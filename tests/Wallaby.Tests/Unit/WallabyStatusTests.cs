@@ -11,7 +11,7 @@ public class WallabyStatusTests
         var status = new WallabyStatus();
 
         status.Current.Role.ShouldBe(WallabyNodeRole.Starting);
-        status.Current.LastIngestionLagSeconds.ShouldBe(-1d);
+        status.Current.LastIngestionLag.ShouldBeNull();
     }
 
     [Test]
@@ -27,7 +27,7 @@ public class WallabyStatusTests
         snapshot.Role.ShouldBe(WallabyNodeRole.Leader);
         snapshot.LeaderSince.ShouldBe(since);
         snapshot.LastAcknowledgedLsn.ShouldBe(42UL);
-        snapshot.LastIngestionLagSeconds.ShouldBe(3.5);
+        snapshot.LastIngestionLag.ShouldBe(TimeSpan.FromSeconds(3.5));
     }
 
     [Test]
@@ -38,7 +38,7 @@ public class WallabyStatusTests
         status.RecordProgress(1, 5.0, DateTimeOffset.UtcNow);
         status.RecordProgress(2, -1, DateTimeOffset.UtcNow);
 
-        status.Current.LastIngestionLagSeconds.ShouldBe(5.0);
+        status.Current.LastIngestionLag.ShouldBe(TimeSpan.FromSeconds(5));
         status.Current.LastAcknowledgedLsn.ShouldBe(2UL);
     }
 

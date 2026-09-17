@@ -135,7 +135,7 @@ Each `ChangeEvent<TEntity>` exposes:
 | `Record` | Current column values keyed by EF property name. |
 | `Changes` | Previous values of changed columns (updates), subject to `REPLICA IDENTITY`. |
 | `PrimaryKey` / `Key` | The source primary key, and its `DocumentKey`. |
-| `GetPrimaryKey<TKey>()` | The single-column key cast to `TKey`. |
+| `GetPrimaryKey<TKey>()` | The single-column key cast to `TKey`; throws for a composite key. |
 | `Metadata` | `Action`, `IsBackfill`, `CommitTimestamp`, `CommitLsn`, table name. |
 
 ## Per-row scoping

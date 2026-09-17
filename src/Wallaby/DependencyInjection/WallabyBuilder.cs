@@ -114,7 +114,7 @@ public sealed class WallabyBuilder
         var registration = _configuration.Providers.FirstOrDefault(p => p.Name == providerName)
             ?? throw new WallabyConfigurationException(
                 $"UseScopedEnrichmentSessions(\"{providerName}\", ...) requires that provider to be registered first " +
-                "(e.g. call UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...)).");
+                "(UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...), UseMarten() before UseTenantSessions()).");
         registration.ScopedEnrichmentSessions = factory;
         return this;
     }
@@ -231,8 +231,8 @@ public sealed class WallabyBuilder
         if (_configuration.CaptureIntended && _configuration.Providers.Count == 0)
         {
             throw new WallabyConfigurationException(
-                "Capturing requires a storage provider. Register one with " +
-                "UseEntityFrameworkCore<TContext>() (from Wallaby.Providers.EntityFrameworkCore).");
+                "Capturing requires a storage provider. Register one with UseEntityFrameworkCore<TContext>() " +
+                "(Wallaby.Providers.EntityFrameworkCore) or UseMarten() (Wallaby.Providers.Marten).");
         }
 
         // Sink names must be unique: mappings route by their owning sink's name, and the runtime keys the
@@ -288,7 +288,8 @@ public sealed class WallabyBuilder
                 !_configuration.Providers.Any(p => p.ScopedEnrichmentSessions is not null))
             {
                 throw new WallabyConfigurationException(
-                    $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register UseScopedContext(...).");
+                    $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register " +
+                    "scoped enrichment sessions (UseScopedDbContext(...) for EF Core, UseTenantSessions() for Marten).");
             }
         }
 
@@ -310,7 +311,7 @@ public sealed class WallabyBuilder
         {
             throw new WallabyConfigurationException(
                 "AddExternalSlot(...).ForEntity<T>(), ForAllEntities() and Except<T>() require a storage provider. " +
-                "Register one with UseEntityFrameworkCore<TContext>() or declare the tables by name via ForTable(...).");
+                "Register one with UseEntityFrameworkCore<TContext>() or UseMarten(), or declare the tables by name via ForTable(...).");
         }
 
         // External slots: names must be distinct from each other, and each must declare at least one table

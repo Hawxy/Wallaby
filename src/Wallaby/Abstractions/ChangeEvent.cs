@@ -20,7 +20,7 @@ namespace Wallaby.Abstractions;
 /// subject to the table's <c>REPLICA IDENTITY</c>. Null for inserts and backfill reads.
 /// </param>
 /// <param name="PrimaryKey">The primary key values, in key ordinal order.</param>
-public record ChangeEvent(
+public sealed record ChangeEvent(
     ChangeAction Action,
     ChangeMetadata Metadata,
     object? Entity,
@@ -61,9 +61,16 @@ public sealed record ChangeEvent<TEntity>(
         internal init;
     }
 
-    /// <summary>The single-column primary key cast to <typeparamref name="TKey"/> (for entities with a non-composite key).</summary>
+    /// <summary>The single-column primary key cast to <typeparamref name="TKey"/>.</summary>
+    /// <exception cref="InvalidOperationException">The key is composite; use <see cref="PrimaryKey"/> or <see cref="Key"/>.</exception>
     public TKey GetPrimaryKey<TKey>()
     {
+        if (PrimaryKey.Count != 1)
+        {
+            throw new InvalidOperationException(
+                $"GetPrimaryKey<{typeof(TKey).Name}>() requires a single-column primary key, but " +
+                $"'{Metadata.QualifiedTableName}' has {PrimaryKey.Count} key columns. Use PrimaryKey or Key instead.");
+        }
         return (TKey)PrimaryKey[0];
     }
 }

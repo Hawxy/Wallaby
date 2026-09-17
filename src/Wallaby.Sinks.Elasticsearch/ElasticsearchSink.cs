@@ -1,3 +1,4 @@
+using System.Buffers;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Wallaby.Abstractions;
@@ -28,6 +29,9 @@ public sealed class ElasticsearchSink : ISink, IDisposable
     /// <param name="options">Connection, routing, and delivery-behaviour settings.</param>
     public ElasticsearchSink(string name, ElasticsearchSinkOptions options)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        ElasticsearchBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         var endpoint = new Uri(options.Endpoint, UriKind.Absolute);
@@ -40,7 +44,7 @@ public sealed class ElasticsearchSink : ISink, IDisposable
     private static ElasticsearchClientSettings BuildSettings(Uri endpoint, ElasticsearchSinkOptions options)
     {
         var settings = new ElasticsearchClientSettings(endpoint)
-            .RequestTimeout(TimeSpan.FromMilliseconds(options.TimeoutMs));
+            .RequestTimeout(options.Timeout);
         if (options.ApiKey is not null)
         {
             settings.Authentication(new ApiKey(options.ApiKey));
@@ -59,16 +63,19 @@ public sealed class ElasticsearchSink : ISink, IDisposable
     public async Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct)
     {
         var records = batch.Records;
+        // One buffer serves every chunk of this call; the previous request has fully settled before the
+        // next chunk resets it.
+        var buffer = new ArrayBufferWriter<byte>();
 
         // Chunks are sent sequentially so commit order is preserved across requests.
-        for (var offset = 0; offset < records.Count; offset += _options.MaxActionsPerRequest)
+        for (var offset = 0; offset < records.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxActionsPerRequest, records.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, records.Count - offset);
 
-            byte[] payload;
+            buffer.ResetWrittenCount();
             try
             {
-                payload = BulkJson.Write(Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
+                BulkJson.Write(buffer, Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
             }
             catch (Exception ex) when (ex is not WallabyConfigurationException)
             {
@@ -76,7 +83,7 @@ public sealed class ElasticsearchSink : ISink, IDisposable
                 return DeliveryResult.Permanent($"Elasticsearch bulk serialization failed: {ex.Message}", ex);
             }
 
-            var failure = await SendAsync(payload, ct);
+            var failure = await SendAsync(buffer.WrittenMemory, ct);
             if (failure is not null)
             {
                 return failure;
@@ -87,15 +94,15 @@ public sealed class ElasticsearchSink : ISink, IDisposable
     }
 
     /// <summary>Send one bulk body; null on success, otherwise the classified failure.</summary>
-    private async Task<DeliveryResult?> SendAsync(byte[] payload, CancellationToken ct)
+    private async Task<DeliveryResult?> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         var path = _options.Refresh ? "/_bulk?refresh=wait_for" : "/_bulk";
 
-        StringResponse response;
+        BytesResponse response;
         try
         {
-            response = await _client.Transport.RequestAsync<StringResponse>(
-                new EndpointPath(HttpMethod.POST, path), PostData.Bytes(payload), null, null, ct);
+            response = await _client.Transport.RequestAsync<BytesResponse>(
+                new EndpointPath(HttpMethod.POST, path), PostData.ReadOnlyMemory(payload), null, null, ct);
         }
         catch (TransportException ex)
         {

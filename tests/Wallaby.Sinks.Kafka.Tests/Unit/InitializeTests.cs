@@ -3,12 +3,16 @@ using Dekaf.Errors;
 
 namespace Wallaby.Sinks.Kafka.Tests.Unit;
 
-/// <summary>Topic creation is cancellable and bounded by <c>AdminTimeoutMs</c>, never the client's internal retries.</summary>
+/// <summary>Topic creation is cancellable and bounded by <c>AdminTimeout</c>, never the client's internal retries.</summary>
 public class InitializeTests
 {
     private static KafkaSink Sink(int adminTimeoutMs)
     {
-        var options = new KafkaSinkOptions { BootstrapServers = "localhost:1", AdminTimeoutMs = adminTimeoutMs };
+        var options = new KafkaSinkOptions
+        {
+            BootstrapServers = "localhost:1",
+            AdminTimeout = TimeSpan.FromMilliseconds(adminTimeoutMs),
+        };
         options.Topics.Add(new KafkaTopicConfig { Name = "wallaby-init-test" });
         return new KafkaSink("kafka", options);
     }

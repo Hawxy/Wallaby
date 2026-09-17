@@ -41,8 +41,8 @@ Each mapped entity type resolves to the provider that models it:
 - If exactly one registered provider models the type, that provider wins - nothing to configure.
 - If both model it, a provider-typed `UsingTransform` overload breaks the tie: each provider's
   overloads pin the mapping to that provider.
-- Pin explicitly with `Map<T>().FromProvider(...)` (provider names: `"EntityFrameworkCore"`,
-  `"Marten"`).
+- Pin explicitly with `Map<T>().FromProvider(...)`; each package exposes its name as a constant
+  (`EfCoreWallabyBuilderExtensions.ProviderName`, `MartenWallabyBuilderExtensions.ProviderName`).
 - Remaining ambiguity, or a `FromProvider` pin that contradicts the transform's provider will fail
   fast at startup with guidance.
 - A type mapped under several sinks resolves once - all its mappings share one table, so a pin on any

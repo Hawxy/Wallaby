@@ -11,6 +11,22 @@ public enum WallabySuspensionState
 
     /// <summary>Every managed replication slot has been dropped; Wallaby idles until an explicit resume.</summary>
     Suspended,
+
+    /// <summary>A state written by a newer Wallaby host that this client version does not recognize.</summary>
+    Unknown,
+}
+
+/// <summary>What a managed replication slot is for.</summary>
+public enum WallabyManagedSlotKind
+{
+    /// <summary>Wallaby's own capture slot.</summary>
+    Primary,
+
+    /// <summary>A slot provisioned for a third-party consumer (<c>AddExternalSlot</c>).</summary>
+    External,
+
+    /// <summary>A kind written by a newer Wallaby host that this client version does not recognize.</summary>
+    Unknown,
 }
 
 /// <summary>Who initiated the current (or most recent) suspension.</summary>
@@ -26,7 +42,7 @@ public enum WallabySuspensionOrigin
 /// <summary>A replication slot Wallaby manages, joined with its live server state.</summary>
 /// <param name="SlotName">The slot name.</param>
 /// <param name="Publication">The publication the slot was provisioned for.</param>
-/// <param name="Kind"><c>primary</c> (Wallaby's own capture slot) or <c>external</c> (provisioned for a third-party consumer).</param>
+/// <param name="Kind">Whether this is Wallaby's own capture slot or one provisioned for a third-party consumer.</param>
 /// <param name="ExistsOnServer">Whether the slot currently exists in <c>pg_replication_slots</c>.</param>
 /// <param name="Active">Whether a consumer is currently streaming from the slot.</param>
 /// <param name="RetainedWalBytes">
@@ -53,7 +69,7 @@ public enum WallabySuspensionOrigin
 /// re-backfill. <c>null</c> when the slot is healthy, absent, or the server predates PostgreSQL 17.
 /// </param>
 public sealed record WallabyManagedSlot(
-    string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active,
+    string SlotName, string Publication, WallabyManagedSlotKind Kind, bool ExistsOnServer, bool Active,
     long? RetainedWalBytes = null, bool PublicationManaged = false, bool PublicationNarrowed = false,
     string? InvalidationReason = null);
 

@@ -166,7 +166,7 @@ public class DeliveryTests
     public async Task Request_timeout_is_retryable()
     {
         var handler = new CapturingHandler { OnRequest = ct => Task.Delay(10_000, ct) };
-        var sink = CreateSink(handler, o => o.TimeoutMs = 100);
+        var sink = CreateSink(handler, o => o.Timeout = TimeSpan.FromMilliseconds(100));
 
         var result = await sink.DeliverAsync(Batch(Upserts("1")), CancellationToken.None);
 

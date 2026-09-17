@@ -39,33 +39,32 @@ public static class OpenSearchBuilderExtensions
         {
             var options = new OpenSearchSinkOptions { Endpoint = "" };
             configure(sp, options);
-            Validate(options);
             return new OpenSearchSink(name, options);
         });
     }
 
-    private static void Validate(OpenSearchSinkOptions options)
+    internal static void Validate(OpenSearchSinkOptions options)
     {
         if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var endpoint)
             || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("OpenSearchSinkOptions.Endpoint must be an absolute http(s) URL.", nameof(options));
+            throw new WallabyConfigurationException("OpenSearchSinkOptions.Endpoint must be an absolute http(s) URL.");
         }
-        if (options.MaxActionsPerRequest <= 0)
+        if (options.MaxRecordsPerRequest <= 0)
         {
-            throw new ArgumentException("OpenSearchSinkOptions.MaxActionsPerRequest must be positive.", nameof(options));
+            throw new WallabyConfigurationException("OpenSearchSinkOptions.MaxRecordsPerRequest must be positive.");
         }
-        if (options.TimeoutMs <= 0)
+        if (options.Timeout <= TimeSpan.Zero)
         {
-            throw new ArgumentException("OpenSearchSinkOptions.TimeoutMs must be positive.", nameof(options));
+            throw new WallabyConfigurationException("OpenSearchSinkOptions.Timeout must be positive.");
         }
         if (options.Password is not null && options.Username is null)
         {
-            throw new ArgumentException("OpenSearchSinkOptions.Password requires Username.", nameof(options));
+            throw new WallabyConfigurationException("OpenSearchSinkOptions.Password requires Username.");
         }
         if (options.Username is not null && options.Password is null)
         {
-            throw new ArgumentException("OpenSearchSinkOptions.Username requires Password.", nameof(options));
+            throw new WallabyConfigurationException("OpenSearchSinkOptions.Username requires Password.");
         }
     }
 }

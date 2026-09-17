@@ -15,7 +15,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
 {
     private sealed record ProductRow(int Id, string Name);
 
-    private MeilisearchSink Sink() => TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey });
+    private MeilisearchSink Sink() => TestMeilisearchSink.Create("meili", new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey });
 
     [Test]
     public async Task Product_projection_syncs_insert_update_and_delete()
@@ -118,7 +118,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
     public async Task Document_missing_a_configured_attribute_fails_permanently()
     {
         // Validation is on by default.
-        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        var options = new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex("products_validated", s =>
         {
             s.SearchableAttributes = ["name"];
@@ -143,7 +143,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         // The Meilisearch 0.20 granular form (opting comparison/facet-search out) uses AttributePatterns
         // instead of a plain string. A wildcard-free pattern is a concrete field name, so it must still be
         // validated like the legacy string form.
-        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        var options = new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex("products_granular", s =>
         {
             s.SearchableAttributes = ["name"];
@@ -179,7 +179,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         var index = harness.Names.Named("products_validated_ok");
 
         // Validation is on by default; the projection emits every configured attribute.
-        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        var options = new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex(index, s => s.FilterableAttributes = ["category"]);
         harness.AddSink(TestMeilisearchSink.Create("meili", options))
             .Project<Product>("meili", index, p => new WallabyDocument { ["name"] = p.Name, ["category"] = p.CategoryId });
@@ -201,7 +201,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         var index = harness.Names.Named("products_vec");
 
         // Embedders ride the same settings update the initializer already applies.
-        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        var options = new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex(index, s => s.Embedders = new Dictionary<string, Embedder>
         {
             ["default"] = new Embedder { Source = EmbedderSource.UserProvided, Dimensions = 3 },
@@ -232,7 +232,7 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
         await using var harness = WallabyTestHarness.ForTestModel(pg.ConnectionString);
         var index = harness.Names.Named("products_cfg");
 
-        var options = new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey };
+        var options = new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey };
         options.ConfigureIndex(index,s =>
         {
             s.SearchableAttributes = ["name"];

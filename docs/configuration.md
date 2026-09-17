@@ -79,7 +79,7 @@ builder.Services.AddWallaby(cdc =>
 {
     cdc.UseEntityFrameworkCore<AppDbContext>() // or any other provider
        .UseConnectionString(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
-       .AddMeilisearchSink("meili", (sp, m) => m.Host = sp.GetRequiredService<IConfiguration>()["Meili:Host"]!)
+       .AddMeilisearchSink("meili", (sp, m) => m.Endpoint = sp.GetRequiredService<IConfiguration>()["Meili:Endpoint"]!)
        // ... mappings as usual ...
 });
 ```
