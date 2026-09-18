@@ -33,6 +33,11 @@ public sealed record SinkRecord(
 Records arrive in **commit order**. Each is either an upsert of `Document` under `DocumentId`, or a
 deletion of `DocumentId`.
 
+`SinkBatch`, `SinkRecord`, `SinkPurgeRequest`, `ChangeMetadata`, `ChangeEvent` and `BackfillState` are
+positional records you may construct yourself (tests, adapters). Their positional parameters are fixed
+for 1.x: anything Wallaby adds later arrives as an `init` property with a default, so existing
+constructor calls keep compiling and a sink that ignores a new property keeps working.
+
 ## Returning a result
 
 Classify the outcome so the dispatcher can react:
@@ -45,7 +50,10 @@ return DeliveryResult.Permanent("schema rejected");  // non-retryable - halts th
 
 Retryable failures are retried with exponential backoff and jitter. A permanent failure (or exhausted
 retries) halts the pipeline; the batch is retried after the leader session restarts (with its own backoff),
-so a batch is never silently dropped.
+so a batch is never silently dropped. The halt is pipeline-wide: every sink shares one replication slot
+and one acknowledgement point, so no sink receives further batches until the failing one accepts its
+batch. To isolate a destination whose reliability differs from the others, run it in its own Wallaby
+worker with its own `SlotName` and `PublicationName`.
 
 Throw `WallabyConfigurationException` for a configuration error (for example a record with no resolvable
 destination); any other exception thrown from `DeliverAsync` is treated as a permanent failure. Cancellation

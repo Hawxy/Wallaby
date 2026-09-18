@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
+using Wallaby.Internal;
 using Wallaby.Internal.Replication;
 using Wallaby.Providers;
 using Wallaby.Sinks;
@@ -79,6 +81,52 @@ public sealed class WallabyBuilder
     }
 
     /// <summary>
+    /// Supply the password for every connection Wallaby opens, for platforms that authenticate with a
+    /// short-lived token (RDS IAM, Azure Entra ID, Cloud SQL IAM). The pooled connections cache the value
+    /// and call <paramref name="provider"/> again every <paramref name="refreshInterval"/> (default 5
+    /// minutes); the replication connection calls it when a leader term starts, bounded to 30 seconds.
+    /// The pool's timer-driven call is not bounded, so apply a timeout inside the delegate. Postgres
+    /// authenticates only at connect time, so an open connection outlives its token. The connection
+    /// string must not set <c>Password</c> or <c>Passfile</c>.
+    /// </summary>
+    public WallabyBuilder UsePasswordProvider(Func<CancellationToken, ValueTask<string>> provider, TimeSpan? refreshInterval = null)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return UsePasswordProvider((_, ct) => provider(ct), refreshInterval);
+    }
+
+    /// <summary>
+    /// Provider-aware overload of <see cref="UsePasswordProvider(Func{CancellationToken, ValueTask{string}}, TimeSpan?)"/>:
+    /// the delegate receives the root provider on every call, so the credential source can come from the container.
+    /// </summary>
+    public WallabyBuilder UsePasswordProvider(
+        Func<IServiceProvider, CancellationToken, ValueTask<string>> provider, TimeSpan? refreshInterval = null)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (refreshInterval is { } interval && interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(refreshInterval), interval, "The refresh interval must be positive.");
+        }
+        _configuration.PasswordProvider = provider;
+        _configuration.PasswordRefreshInterval = refreshInterval ?? WallabyDataSource.DefaultPasswordRefreshInterval;
+        return this;
+    }
+
+    /// <summary>
+    /// Apply extra <see cref="NpgsqlDataSourceBuilder"/> configuration (TLS callbacks, logging, type plugins for
+    /// backfill reads) to the data source Wallaby builds for its pooled connections. Runs after Wallaby's own
+    /// settings. The replication connection is not built from the data source and is unaffected. Register the
+    /// password through <see cref="UsePasswordProvider(Func{CancellationToken, ValueTask{string}}, TimeSpan?)"/>,
+    /// not here, so the replication connection receives it too.
+    /// </summary>
+    public WallabyBuilder ConfigureDataSource(Action<NpgsqlDataSourceBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _configuration.ConfigureDataSource = configure;
+        return this;
+    }
+
+    /// <summary>
     /// Register a storage provider that derives a capture model and leases enrichment sessions.
     /// Called by provider packages' registration extensions (e.g. <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>
     /// from Wallaby.Providers.EntityFrameworkCore); consumers normally never call it directly. A provider is required
@@ -114,7 +162,7 @@ public sealed class WallabyBuilder
         var registration = _configuration.Providers.FirstOrDefault(p => p.Name == providerName)
             ?? throw new WallabyConfigurationException(
                 $"UseScopedEnrichmentSessions(\"{providerName}\", ...) requires that provider to be registered first " +
-                "(e.g. call UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...)).");
+                "(UseEntityFrameworkCore<TContext>() before UseScopedDbContext(...), UseMarten() before UseTenantSessions()).");
         registration.ScopedEnrichmentSessions = factory;
         return this;
     }
@@ -231,8 +279,8 @@ public sealed class WallabyBuilder
         if (_configuration.CaptureIntended && _configuration.Providers.Count == 0)
         {
             throw new WallabyConfigurationException(
-                "Capturing requires a storage provider. Register one with " +
-                "UseEntityFrameworkCore<TContext>() (from Wallaby.Providers.EntityFrameworkCore).");
+                "Capturing requires a storage provider. Register one with UseEntityFrameworkCore<TContext>() " +
+                "(Wallaby.Providers.EntityFrameworkCore) or UseMarten() (Wallaby.Providers.Marten).");
         }
 
         // Sink names must be unique: mappings route by their owning sink's name, and the runtime keys the
@@ -288,7 +336,8 @@ public sealed class WallabyBuilder
                 !_configuration.Providers.Any(p => p.ScopedEnrichmentSessions is not null))
             {
                 throw new WallabyConfigurationException(
-                    $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register UseScopedContext(...).");
+                    $"Map<{mapping.EntityClrType.Name}>().ScopedBy(...) has no effect: add .ScopedDestination(...) or register " +
+                    "scoped enrichment sessions (UseScopedDbContext(...) for EF Core, UseTenantSessions() for Marten).");
             }
         }
 
@@ -310,7 +359,7 @@ public sealed class WallabyBuilder
         {
             throw new WallabyConfigurationException(
                 "AddExternalSlot(...).ForEntity<T>(), ForAllEntities() and Except<T>() require a storage provider. " +
-                "Register one with UseEntityFrameworkCore<TContext>() or declare the tables by name via ForTable(...).");
+                "Register one with UseEntityFrameworkCore<TContext>() or UseMarten(), or declare the tables by name via ForTable(...).");
         }
 
         // External slots: names must be distinct from each other, and each must declare at least one table
@@ -330,6 +379,16 @@ public sealed class WallabyBuilder
             {
                 throw new WallabyConfigurationException(
                     $"AddExternalSlot(\"{external.SlotName}\").Except(...) requires ForAllEntities(); without it, declare only the tables you want via ForTable(...) or ForEntity<T>().");
+            }
+            if (!PgNames.IsValidSlotName(external.SlotName))
+            {
+                throw new WallabyConfigurationException(
+                    $"AddExternalSlot(\"{external.SlotName}\") is not a valid replication slot name: use {PgNames.SlotNameRule}.");
+            }
+            if (!PgNames.IsValidPublicationName(external.ResolvedPublicationName))
+            {
+                throw new WallabyConfigurationException(
+                    $"External publication name '{external.ResolvedPublicationName}' is not a valid publication name: it must be {PgNames.PublicationNameRule}.");
             }
             if (!slotNames.Add(external.SlotName))
             {

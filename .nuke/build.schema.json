@@ -30,7 +30,8 @@
         "NugetPack",
         "NugetPush",
         "Restore",
-        "Test"
+        "Test",
+        "TestPostgresMatrix"
       ]
     },
     "Verbosity": {
@@ -108,6 +109,10 @@
           "type": "string",
           "description": "Nuget Api Key",
           "default": "Secrets must be entered via 'nuke :secrets [profile]'"
+        },
+        "PostgresImage": {
+          "type": "string",
+          "description": "Postgres Docker image for the integration suites (sets WALLABY_TEST_PG_IMAGE; default postgres:17)"
         },
         "Solution": {
           "type": "string",

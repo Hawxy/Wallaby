@@ -21,7 +21,7 @@ dotnet add package Wallaby.Sinks.Meilisearch
 ```csharp
 cdc.AddMeilisearchSink("meili", m =>
 {
-    m.Host = "http://localhost:7700";
+    m.Endpoint = "http://localhost:7700";
     m.ApiKey = key;            // master or a write key; null for an unsecured instance
     m.DefaultIndex = "search"; // optional fallback when a mapping has no destination
 });
@@ -41,15 +41,16 @@ cdc.AddMeilisearchSink("meili", m => { /* ... */ })
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `Host` | *(required)* | Meilisearch base URL. |
+| `Endpoint` | *(required)* | Meilisearch base URL. |
 | `ApiKey` | `null` | Master/write key; `null` for unsecured. |
 | `DefaultIndex` | `null` | Index used when a routed record has no destination. |
 | `PrimaryKey` | `id` | Document key field Wallaby injects into every document. |
-| `WaitTimeoutMs` | `60000` | Max wait per indexing task (every task is awaited before the batch is acked). |
-| `WaitIntervalMs` | `50` | Poll interval while waiting. |
-| `MaxRecordsPerBatch` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
+| `WaitTimeout` | `60s` | Max wait per indexing task (every task is awaited before the batch is acked). |
+| `WaitInterval` | `50ms` | Poll interval while waiting. |
+| `MaxRecordsPerRequest` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
 | `HttpClientName` | `null` | `IHttpClientFactory` client name to send through; `null` uses `MeilisearchSink.ClientNameFor(name)`. |
 | `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
+| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (see [how documents are written](#how-documents-are-written)). |
 
 ## HttpClient
 
@@ -72,7 +73,7 @@ the sink's `PrimaryKey`) and have their settings applied on startup.
 ```csharp
 cdc.AddMeilisearchSink("meili", m =>
 {
-    m.Host = "http://localhost:7700";
+    m.Endpoint = "http://localhost:7700";
     m.ConfigureIndex("products", s =>
     {
         s.SearchableAttributes = ["name", "description"];
@@ -151,11 +152,14 @@ If a way to customize this would be useful, open an issue.
 - Your transform's `WallabyDocument` fields become the Meilisearch document. Wallaby stamps the configured
   `PrimaryKey` field with the record's document id (derived from the source primary key, or your
   `KeyedBy(...)` rule) - so you don't include it yourself.
+- Values are encoded by the same reflection-free writer the other sinks use (dates as ISO 8601,
+  `byte[]` as base64, vectors as number arrays); any other value type goes through `SerializerOptions`,
+  and a value that cannot be encoded fails delivery permanently.
 - Document ids are sanitized to Meilisearch's allowed set (`[a-zA-Z0-9-_]`); composite-key separators are
   replaced, so composite keys work transparently.
 - A transform that returns `null` for a key (or omits it) issues a **delete** for that id.
 - Records are grouped by index; within an index, upserts are applied before deletes (each split into
-  requests of at most `MaxRecordsPerBatch` records), and distinct indexes are dispatched in parallel.
+  requests of at most `MaxRecordsPerRequest` records), and distinct indexes are dispatched in parallel.
 
 ## Delivery semantics
 
@@ -168,10 +172,10 @@ the failed task):
 
 | Error | Outcome |
 | --- | --- |
-| Transport failures, timeouts, responses without a Meilisearch error code | **Retryable** - the dispatcher retries with exponential backoff. |
+| Transport failures (connection, socket, timeout), responses without a Meilisearch error code | **Retryable** - the dispatcher retries with exponential backoff. |
 | Environment-fixable codes: `index_not_found`, `internal`, disk/queue pressure, … | **Retryable**. Exception: `index_not_found` on a **delete** is treated as success, because deletes don't auto-create indexes, so a delete-only batch to an index that was never written (e.g. a per-tenant `ScopedDestination` index that saw a deletion before any upsert) has nothing to remove and would otherwise retry forever. |
 | Deterministic configuration/credential/payload errors: `invalid_api_key`, `missing_authorization_header`, `payload_too_large`, `invalid_document_id`, `missing_document_id`, `invalid_document_fields`, `invalid_document_geo_field`, `invalid_index_uid`, `invalid_index_primary_key`, `index_primary_key_already_exists`, `index_primary_key_multiple_candidates_found`, `bad_request` | **Permanent** - the pipeline halts (a `MeilisearchTaskFailedException` carries the failed task's code). |
-| A record with no destination and no `DefaultIndex`, or a document missing a [configured attribute](#attribute-validation) | **Permanent**. |
+| A record with no destination and no `DefaultIndex`, a document missing a [configured attribute](#attribute-validation), or a document value that cannot be encoded | **Permanent**. |
 
 ## Per-tenant indexes
 

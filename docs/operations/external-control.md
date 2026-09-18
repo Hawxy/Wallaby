@@ -25,8 +25,11 @@ await using var control = new WallabyControlClient(connectionString);
 await using var control = new WallabyControlClient(dataSource);
 ```
 
-A multi-host data source is automatically targeted at the primary. For dependency injection, three
-idempotent `AddWallabyControlClient` overloads register a singleton:
+A multi-host data source is automatically targeted at the primary. For token-based authentication
+(RDS IAM, Azure Entra ID, Cloud SQL IAM) build the data source yourself with Npgsql's
+`UsePeriodicPasswordProvider` and use the data-source constructor; the client opens only pooled
+connections, so nothing else is needed (see [authentication](/configuration#authentication-with-short-lived-tokens)).
+For dependency injection, three idempotent `AddWallabyControlClient` overloads register a singleton:
 
 ```csharp
 builder.Services.AddWallabyControlClient(connectionString);      // client owns the data source
@@ -46,7 +49,8 @@ var state = await control.GetStateAsync();
 // state.Origin         who initiated a suspension: Client | Configuration
 // state.Reason / RequestedBy / RequestedAt / SuspendedAt / ResumedAt
 // state.Slots          every managed slot: name, publication, kind, exists-on-server, active,
-//                      retained-WAL bytes (null when the slot is gone or read from a standby)
+//                      retained-WAL bytes (null when the slot is gone or read from a standby),
+//                      invalidation reason (null unless the server invalidated the slot)
 ```
 
 A slot's `RetainedWalBytes` is how much WAL the server must keep for it. Watch it especially for
@@ -162,7 +166,14 @@ await control.RequestBackfillAsync("public.products", purge: true);   // purge d
 await control.CancelBackfillAsync("public.products");  // withdraw a queued request (clears its purge mark)
 
 var status = await control.GetBackfillStatusAsync();   // every tracked table's state
+foreach (var table in status.Where(t => t.Status == WallabyBackfillStatus.InProgress))
+{
+    Console.WriteLine($"{table.Table}: {table.Progress:P0} done, about {table.EstimatedRemaining} left");
+}
 ```
+
+`Progress` and `EstimatedRemaining` derive from the [progress facts](/backfill#progress-and-eta) the host
+records; both are null when the table has no row estimate.
 
 Identical semantics to the in-host manager: the request is persisted (it survives restarts), the current
 leader is signalled instantly, and a request made while the table is already backfilling wins.
@@ -176,7 +187,9 @@ semantics). See [Backfill](/backfill) for how snapshots run and what
 ## Requirements and privileges
 
 - **The client never creates schema objects.** The `wallaby` schema is created and migrated by the
-  Wallaby host at startup, and the client checks its version ledger (`wallaby.schema_version`).
+  Wallaby host at startup, and the client checks its version ledger (`wallaby.schema_version`); an
+  operation the found version cannot serve throws `WallabySchemaVersionException`, which carries the
+  found and required versions.
   The only DDL it ever runs targets Wallaby-managed publications, and only in the
   no-host fallbacks: dropping them when it finalizes a suspension, and rewriting their membership when
   it applies a widening, in both cases objects the host recreates or re-narrows from configuration.

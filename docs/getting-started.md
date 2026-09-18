@@ -12,7 +12,7 @@ import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
 
 Your Postgres 15+ server must already have:
 
-- **`wal_level = logical`** set in `postgresql.conf` - required for logical replication.
+- **`wal_level = logical`** set in `postgresql.conf` - required for logical replication. (Not required for PG 19).
 - A role with the **`REPLICATION`** attribute (or superuser) for the connection string you give Wallaby.
 - Headroom in `max_replication_slots` and `max_wal_senders` (at least one slot/sender per Wallaby cluster).
 

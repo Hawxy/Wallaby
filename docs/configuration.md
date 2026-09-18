@@ -79,7 +79,7 @@ builder.Services.AddWallaby(cdc =>
 {
     cdc.UseEntityFrameworkCore<AppDbContext>() // or any other provider
        .UseConnectionString(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("App")!)
-       .AddMeilisearchSink("meili", (sp, m) => m.Host = sp.GetRequiredService<IConfiguration>()["Meili:Host"]!)
+       .AddMeilisearchSink("meili", (sp, m) => m.Endpoint = sp.GetRequiredService<IConfiguration>()["Meili:Endpoint"]!)
        // ... mappings as usual ...
 });
 ```
@@ -87,6 +87,78 @@ builder.Services.AddWallaby(cdc =>
 The delegates run once, when the host first resolves Wallaby's services, and receive the **root** provider
 (scoped services are unavailable). Resolving Wallaby's own services inside them creates a resolution cycle,
 and their configuration errors surface at host start instead of at registration.
+
+## Authentication with short-lived tokens
+
+Managed platforms can authenticate a role with a short-lived token instead of a password (RDS IAM
+authentication, Azure Entra ID, Cloud SQL IAM). Leave `Password` out of the connection string and supply
+the token through `UsePasswordProvider`:
+
+```csharp
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseEntityFrameworkCore<AppDbContext>()
+       .UseConnectionString("Host=db.internal;Database=app;Username=wallaby;SSL Mode=Require")
+       .UsePasswordProvider(ct => tokens.GetAsync(ct))       // Func<CancellationToken, ValueTask<string>>
+       // ... sinks and mappings as usual ...
+});
+```
+
+The provider feeds every connection Wallaby opens. The pooled connections (state, locks, backfill reads)
+cache the token and refresh it on a timer every `refreshInterval` (the optional second argument, default
+5 minutes, inside the 15-minute RDS lifetime with room for clock skew). The replication connection fetches
+a fresh token when a leader term starts. Postgres authenticates only at connect time, so an open
+connection outlives its token. A provider failure, an empty result, or a fetch slower than 30 seconds on
+the leader path fails that term, which the leader loop retries with its usual backoff. The pool's
+timer-driven fetch is not bounded by Wallaby, so apply a timeout inside the delegate. Setting `Password`
+or `Passfile` alongside a provider is rejected at startup.
+
+The `IServiceProvider`-taking overload resolves the credential source from the container on every call.
+Platform snippets (check each against the SDK you install):
+
+::: code-group
+
+```csharp [RDS IAM]
+using Amazon;
+using Amazon.RDS.Util;
+
+// Local SigV4 signing, no network call. The role needs rds-db:connect on the DB user.
+cdc.UsePasswordProvider(_ => new ValueTask<string>(
+    RDSAuthTokenGenerator.GenerateAuthToken(RegionEndpoint.USEast1, "db.abc.us-east-1.rds.amazonaws.com", 5432, "wallaby")));
+```
+
+```csharp [Azure Entra ID]
+using Azure.Core;
+using Azure.Identity;
+
+// Username is the Entra principal name; the credential caches tokens internally.
+cdc.UsePasswordProvider(async (sp, ct) =>
+{
+    var token = await sp.GetRequiredService<TokenCredential>()
+        .GetTokenAsync(new TokenRequestContext(["https://ossrdbms-aad.database.windows.net/.default"]), ct);
+    return token.Token;
+});
+```
+
+```csharp [Cloud SQL IAM]
+using Google.Apis.Auth.OAuth2;
+
+// Username is the IAM principal without the .gserviceaccount.com suffix.
+cdc.UsePasswordProvider(async ct =>
+{
+    var credential = await GoogleCredential.GetApplicationDefaultAsync(ct);
+    return await ((ITokenAccess)credential.UnderlyingCredential).GetAccessTokenForRequestAsync(cancellationToken: ct);
+});
+```
+
+:::
+
+`ConfigureDataSource(Action<NpgsqlDataSourceBuilder>)` applies any other data-source setup (TLS
+callbacks, logging, type plugins for backfill reads) to the pooled connections. Register the password
+through `UsePasswordProvider`, not there, so the replication connection receives it too.
+
+The [control client](/operations/external-control#creating-a-client) takes an `NpgsqlDataSource`, so
+build one with Npgsql's `UsePeriodicPasswordProvider` and hand it over.
 
 ## Large Transaction Handling
 
@@ -137,7 +209,9 @@ public readonly record struct SpillContext(
 
 Changes are appended per transaction (`xid`) as they stream and read back **in append order** at
 the commit. An implementation owns its own serialization of `RawChange`; the abstraction deals
-purely in changes.
+purely in changes. A round-trip must preserve every field: `RelationId`, `Schema`, `TableName`,
+`Action`, `NewValues` and `OldValues` (each `RawColumn` with its name, type and value, including the
+"unchanged TOAST" marker), `CommitLsn`, `CommitTimestamp`, `CommitIdx` and `BackfillRunId`.
 
 ### Implementation Guidance
 

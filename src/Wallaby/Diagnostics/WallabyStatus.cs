@@ -68,6 +68,7 @@ internal sealed class WallabyStatus : IWallabyStatus
                 LeaderSince = null,
                 SuspendedSince = null,
                 SuspensionReason = null,
+                ActiveBackfill = null,
             };
             return apply is null ? next : apply(next);
         });
@@ -150,13 +151,19 @@ internal sealed class WallabyStatus : IWallabyStatus
     internal void SetBackfillStreak(int attempts) =>
         Update(s => s with { ConsecutiveBackfillFailures = attempts, ConsecutiveBackfillPassFailures = 0 });
 
+    internal void BeginBackfill(WallabyBackfillProgress progress) => Update(s => s with { ActiveBackfill = progress });
+
+    internal void RecordBackfillProgress(WallabyBackfillProgress progress) => Update(s => s with { ActiveBackfill = progress });
+
+    internal void EndBackfill() => Update(s => s with { ActiveBackfill = null });
+
     internal void RecordProgress(ulong lsn, double lagSeconds, DateTimeOffset at) =>
         Update(s => s with
         {
             LastAcknowledgedLsn = lsn,
             LastProgressAt = at,
             // Keep the previous known lag when this transaction had no commit timestamp.
-            LastIngestionLagSeconds = lagSeconds >= 0 ? lagSeconds : s.LastIngestionLagSeconds,
+            LastIngestionLag = lagSeconds >= 0 ? TimeSpan.FromSeconds(lagSeconds) : s.LastIngestionLag,
             // A fully delivered + acknowledged transaction proves the leader is healthy; a crash-looping
             // leader never gets here, so its failure count accumulates across sessions.
             ConsecutiveLeaderFailures = 0,

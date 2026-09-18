@@ -67,7 +67,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// suspension survives restarts and the database outage during an engine upgrade; it ends only with
     /// <see cref="ResumeAsync(CancellationToken)"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="WallabySchemaVersionException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
     /// run against it): deploy a newer host first; it migrates the schema at startup.
     /// </exception>
@@ -179,7 +179,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
             return;
         }
 
-        throw new InvalidOperationException(version == 0
+        throw new WallabySchemaVersionException(version, ControlContract.SchemaVersion, version == 0
             ? "This database has no wallaby.schema_version ledger: no Wallaby host recent enough for " +
               "remote control has run against it. Deploy a Wallaby host first — it creates and migrates " +
               "the wallaby schema at startup."
@@ -200,7 +200,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// migration is done. Unmanaged publications (<c>ManagePublicationTables = false</c>) are never
     /// touched. Idempotent when already widened.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="WallabySchemaVersionException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
     /// run against it), or the installation is suspended (a suspension already drops the managed
     /// publications, so blocked migrations run now).
@@ -272,7 +272,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// <see cref="WallabyManagedSlot.PublicationNarrowed"/>). Only a host restores: the narrow lists
     /// come from the captured model, which this client doesn't have. A no-op when nothing is widened.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="WallabySchemaVersionException">
     /// The database's wallaby schema is older than this client requires; nothing it could have widened.
     /// </exception>
     public async Task<WallabyControlState> RestorePublicationsAsync(CancellationToken ct = default)
@@ -290,7 +290,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// already backfilling wins: the table re-runs from the start. A request for a table Wallaby does not
     /// capture stays <see cref="WallabyBackfillStatus.Requested"/> until a mapping for it deploys.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="WallabySchemaVersionException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
     /// run against it): deploy a newer host first; it migrates the schema at startup.
     /// </exception>
@@ -303,7 +303,7 @@ public sealed class WallabyControlClient : IAsyncDisposable
     /// (sinks must implement <c>ISinkPurger</c>; see <see cref="RequestBackfillAsync(string, CancellationToken)"/>
     /// for the request semantics).
     /// </summary>
-    /// <exception cref="InvalidOperationException">
+    /// <exception cref="WallabySchemaVersionException">
     /// The database's wallaby schema is older than this client requires (or no Wallaby host has ever
     /// run against it): deploy a newer host first; it migrates the schema at startup.
     /// </exception>
@@ -338,7 +338,11 @@ public sealed class WallabyControlClient : IAsyncDisposable
         var rows = await BackfillOperations.ListStatesAsync(_dataSource, ct);
         return rows
             .Select(r => new WallabyBackfillState(
-                r.TableQualified, Enum.Parse<WallabyBackfillStatus>(r.Status), r.RowsCopied, r.UpdatedAt))
+                r.TableQualified, ParseBackfillStatus(r.Status), r.RowsCopied, r.UpdatedAt)
+            {
+                EstimatedRows = r.EstimatedRows,
+                StartedAt = r.StartedAt,
+            })
             .ToList();
     }
 
@@ -390,13 +394,24 @@ public sealed class WallabyControlClient : IAsyncDisposable
         }
     }
 
+    // Persisted names a newer host may have added map to the Unknown members instead of failing the read.
+    internal static WallabyBackfillStatus ParseBackfillStatus(string status)
+        => Enum.TryParse<WallabyBackfillStatus>(status, out var parsed) ? parsed : WallabyBackfillStatus.Unknown;
+
+    internal static WallabyManagedSlotKind ParseSlotKind(string kind) => kind switch
+    {
+        "primary" => WallabyManagedSlotKind.Primary,
+        "external" => WallabyManagedSlotKind.External,
+        _ => WallabyManagedSlotKind.Unknown,
+    };
+
     private static WallabyControlState Map(ControlRow? row, IReadOnlyList<ManagedSlotRow> slots)
     {
         var mapped = slots.Count == 0
             ? []
             : slots.Select(s => new WallabyManagedSlot(
-                    s.SlotName, s.Publication, s.Kind, s.ExistsOnServer, s.Active, s.RetainedWalBytes,
-                    s.PublicationManaged, s.PublicationNarrowed))
+                    s.SlotName, s.Publication, ParseSlotKind(s.Kind), s.ExistsOnServer, s.Active, s.RetainedWalBytes,
+                    s.PublicationManaged, s.PublicationNarrowed, s.InvalidationReason))
                 .ToList() as IReadOnlyList<WallabyManagedSlot>;
         if (row is null)
         {
@@ -407,9 +422,10 @@ public sealed class WallabyControlClient : IAsyncDisposable
 
         var state = row.State switch
         {
+            ControlContract.StateRunning => WallabySuspensionState.Running,
             ControlContract.StateSuspendRequested => WallabySuspensionState.SuspendRequested,
             ControlContract.StateSuspended => WallabySuspensionState.Suspended,
-            _ => WallabySuspensionState.Running,
+            _ => WallabySuspensionState.Unknown,
         };
         var origin = row.Origin == ControlContract.OriginConfiguration
             ? WallabySuspensionOrigin.Configuration

@@ -69,7 +69,7 @@ public class ControlClientTests(PostgresFixture pg)
         (await client.ResumeAsync()).State.ShouldBe(WallabySuspensionState.Running);
 
         // Suspend refuses instead of creating the table: only the host performs DDL.
-        await Should.ThrowAsync<InvalidOperationException>(() => client.SuspendAsync());
+        await Should.ThrowAsync<WallabySchemaVersionException>(() => client.SuspendAsync());
 
         // The client never creates the wallaby schema.
         await using var virginSource = NpgsqlDataSource.Create(builder.ConnectionString);
@@ -100,6 +100,7 @@ public class ControlClientTests(PostgresFixture pg)
             // A slot on the server retains WAL from its restart_lsn; a slot missing from it reads null.
             state.Slots.Single(s => s.SlotName == live).RetainedWalBytes
                 .ShouldNotBeNull().ShouldBeGreaterThanOrEqualTo(0L);
+            state.Slots.Single(s => s.SlotName == live).InvalidationReason.ShouldBeNull();
             state.Slots.Single(s => s.SlotName == gone).RetainedWalBytes.ShouldBeNull();
         }
         finally

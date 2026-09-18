@@ -135,4 +135,37 @@ public class WallabyOptionsValidatorTests
 
         Validate(options).Failed.ShouldBeTrue();
     }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("Wallaby_Slot")]
+    [Arguments("wallaby-slot")]
+    [Arguments("wallaby slot")]
+    public void Slot_name_must_be_a_valid_replication_slot_name(string slotName)
+    {
+        var options = ValidOptions();
+        options.SlotName = slotName;
+
+        var result = Validate(options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage!.ShouldContain("SlotName");
+    }
+
+    [Test]
+    public void Slot_and_publication_names_are_capped_at_63_bytes()
+    {
+        var options = ValidOptions();
+        options.SlotName = new string('a', 64);
+        Validate(options).Failed.ShouldBeTrue();
+
+        options = ValidOptions();
+        options.PublicationName = new string('p', 64);
+        Validate(options).Failed.ShouldBeTrue();
+
+        options = ValidOptions();
+        options.SlotName = new string('a', 63);
+        options.PublicationName = "Mixed-Case Publication";
+        Validate(options).Succeeded.ShouldBeTrue();
+    }
 }

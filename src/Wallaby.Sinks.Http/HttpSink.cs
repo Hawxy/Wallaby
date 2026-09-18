@@ -54,6 +54,10 @@ public sealed class HttpSink : ISink
     /// <param name="factory">Factory providing the named <see cref="HttpClient"/>.</param>
     public HttpSink(string name, HttpSinkOptions options, IHttpClientFactory factory)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(factory);
+        HttpBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         _factory = factory;
@@ -138,7 +142,7 @@ public sealed class HttpSink : ISink
         HttpClient client, ReadOnlyMemory<byte> body, WebhookHeaders? signing, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(_options.TimeoutMs);
+        timeout.CancelAfter(_options.Timeout);
 
         try
         {
@@ -192,7 +196,7 @@ public sealed class HttpSink : ISink
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // The linked per-request timeout fired (also surfaces as TaskCanceledException from HttpClient).
-            return DeliveryResult.Retry($"HTTP sink request to {_endpoint} timed out after {_options.TimeoutMs}ms.");
+            return DeliveryResult.Retry($"HTTP sink request to {_endpoint} timed out after {_options.Timeout}.");
         }
         catch (HttpRequestException ex)
         {

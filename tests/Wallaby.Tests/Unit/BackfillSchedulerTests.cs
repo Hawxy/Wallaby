@@ -15,7 +15,7 @@ public class BackfillSchedulerTests
     private static readonly BackfillSchedulerOptions Defaults = new();
 
     private static BackfillState State(BackfillStatus status, string? version, bool purge = false) =>
-        new("public.products", status, version, CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow, purge);
+        new("public.products", status, version, RowsCopied: 0, DateTimeOffset.UtcNow, purge);
 
     private static BackfillDecision Decide(
         BackfillState? state, string? declaredVersion, BackfillSchedulerOptions? options = null,
@@ -110,9 +110,28 @@ public class BackfillSchedulerTests
     // The two tables SchedulerFor maps; ListAsync answers for exactly these.
     private static readonly string[] MappedTables = ["public.products", "public.orders"];
 
+    private sealed class StubEstimator(Func<CapturedTable, long?> estimate) : IBackfillRowEstimator
+    {
+        public Task<long?> EstimateAsync(CapturedTable table, CancellationToken ct) => Task.FromResult(estimate(table));
+    }
+
+    [Test]
+    public async Task A_fresh_run_saves_the_row_estimate()
+    {
+        var store = new RecordingStore(_ => null);
+        var scheduler = SchedulerFor(store, out var dataSource, new StubEstimator(t => t.TableName == "products" ? 42 : null));
+        await using var _ = dataSource;
+
+        await scheduler.RunDueBackfillsAsync(CancellationToken.None);
+
+        store.SavedStates.Single(s => s.TableQualifiedName == "public.products").EstimatedRows.ShouldBe(42);
+        store.SavedStates.Single(s => s.TableQualifiedName == "public.orders").EstimatedRows.ShouldBeNull();
+    }
+
     private sealed class RecordingStore(Func<string, BackfillState?> stateFor) : IBackfillStateStore
     {
         public List<string> Saved { get; } = [];
+        public List<BackfillState> SavedStates { get; } = [];
         public List<string> Failed { get; } = [];
         public DateTimeOffset NextAttempt { get; } = DateTimeOffset.UtcNow.AddSeconds(5);
 
@@ -120,6 +139,7 @@ public class BackfillSchedulerTests
         public Task SaveAsync(BackfillState state, CancellationToken ct)
         {
             Saved.Add(state.TableQualifiedName);
+            SavedStates.Add(state);
             return Task.CompletedTask;
         }
         public Task<DateTimeOffset> FailAsync(string t, string error, CancellationToken ct)
@@ -142,7 +162,8 @@ public class BackfillSchedulerTests
         public INotifySubscription Subscribe() => new WaitSignal([], () => { });
     }
 
-    private static BackfillScheduler SchedulerFor(RecordingStore store, out NpgsqlDataSource dataSource)
+    private static BackfillScheduler SchedulerFor(
+        RecordingStore store, out NpgsqlDataSource dataSource, IBackfillRowEstimator? estimator = null)
     {
         CapturedTable Table(string name) => new()
         {
@@ -163,7 +184,7 @@ public class BackfillSchedulerTests
             ],
             store, coordinator,
             new SinkPurgeRunner(new Dictionary<string, ISink>(), WallabyInstrumentation.NoOp, NullLogger.Instance),
-            new BackfillSchedulerOptions(), NullLogger.Instance);
+            new BackfillSchedulerOptions(), NullLogger.Instance, estimator: estimator);
     }
 
     [Test]
@@ -186,7 +207,7 @@ public class BackfillSchedulerTests
     {
         var notBefore = DateTimeOffset.UtcNow.AddMinutes(5);
         var store = new RecordingStore(t => new BackfillState(
-            t, BackfillStatus.Requested, "v1", CursorJson: null, RowsCopied: 0, DateTimeOffset.UtcNow,
+            t, BackfillStatus.Requested, "v1", RowsCopied: 0, DateTimeOffset.UtcNow,
             Purge: false, Attempts: 1, NextAttemptAt: notBefore, LastError: "boom"));
         var scheduler = SchedulerFor(store, out var dataSource);
         await using var _ = dataSource;
@@ -211,7 +232,7 @@ public class BackfillSchedulerTests
             => Task.FromResult<BackfillState?>(Completed(t));
 
         private static BackfillState Completed(string t)
-            => new(t, BackfillStatus.Completed, "v1", null, 0, DateTimeOffset.UtcNow);
+            => new(t, BackfillStatus.Completed, "v1", 0, DateTimeOffset.UtcNow);
 
         public Task<IReadOnlyList<string>> ListRequestedAsync(CancellationToken ct)
         {

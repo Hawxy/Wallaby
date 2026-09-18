@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Wallaby.Abstractions;
@@ -48,14 +49,15 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
     }
 
     /// <summary>
-    /// A stable string form of the key (single values render directly; composite keys are
-    /// joined with <c>|</c>). Suitable as a default sink document id.
+    /// A stable, culture-invariant string form of the key: single values render directly, composite
+    /// keys are joined with <c>|</c>, byte arrays render as lowercase hex, and null renders empty.
+    /// Suitable as a default sink document id.
     /// </summary>
     public override string ToString()
     {
         if (Values.Count == 1)
         {
-            return Values[0]?.ToString() ?? string.Empty;
+            return Format(Values[0]);
         }
 
         var sb = new StringBuilder();
@@ -65,8 +67,18 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
             {
                 sb.Append('|');
             }
-            sb.Append(Values[i]);
+            sb.Append(Format(Values[i]));
         }
         return sb.ToString();
     }
+
+    /// <summary>Render one key value the way <see cref="ToString"/> does.</summary>
+    internal static string Format(object? value) => value switch
+    {
+        null => string.Empty,
+        string s => s,
+        byte[] bytes => Convert.ToHexStringLower(bytes),
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? string.Empty,
+    };
 }

@@ -10,7 +10,7 @@ public enum BackfillStatus
     /// <summary>A backfill has been requested (manually or automatically) and is awaiting/running on the leader.</summary>
     Requested,
 
-    /// <summary>A backfill is in progress; <see cref="BackfillState.CursorJson"/> holds the resume point.</summary>
+    /// <summary>A backfill is in progress; it resumes from its persisted keyset cursor.</summary>
     InProgress,
 
     /// <summary>The backfill completed for the recorded <see cref="BackfillState.TransformVersion"/>.</summary>
@@ -34,7 +34,6 @@ public enum BackfillStatus
 /// The transform/projection version this backfill is for. A change versus the declared version
 /// triggers an automatic re-backfill.
 /// </param>
-/// <param name="CursorJson">Serialized keyset cursor (last primary key) for resuming an in-progress backfill.</param>
 /// <param name="RowsCopied">Number of rows snapshotted so far.</param>
 /// <param name="UpdatedAt">When the row was last updated.</param>
 /// <param name="Purge">
@@ -54,10 +53,23 @@ public sealed record BackfillState(
     string TableQualifiedName,
     BackfillStatus Status,
     string? TransformVersion,
-    string? CursorJson,
     long RowsCopied,
     DateTimeOffset UpdatedAt,
     bool Purge = false,
     int Attempts = 0,
     DateTimeOffset? NextAttemptAt = null,
-    string? LastError = null);
+    string? LastError = null)
+{
+    /// <summary>Serialized keyset cursor (last primary key) for resuming an in-progress backfill.</summary>
+    internal string? CursorJson { get; init; }
+
+    /// <summary>
+    /// The planner's row estimate for the table (partitions summed) when the current run started fresh;
+    /// null when unknown (never analysed, or the row predates this column). Compare with
+    /// <see cref="RowsCopied"/> for progress; it is an estimate, so the final count may differ.
+    /// </summary>
+    public long? EstimatedRows { get; init; }
+
+    /// <summary>When the current run started fresh; a resumed run keeps it. Null when the row predates this column.</summary>
+    public DateTimeOffset? StartedAt { get; init; }
+}

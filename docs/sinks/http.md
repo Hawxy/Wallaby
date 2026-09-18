@@ -44,7 +44,7 @@ builder.Services.AddWallaby(cdc =>
 | `Compression` | `None` | [Request-body compression](#compression): `Gzip` or `Brotli`. |
 | `Annotations` | `null` | Static key/values echoed at the top of every envelope. |
 | `MaxRecordsPerRequest` | `500` | Larger batches are split into sequential requests (commit order preserved). |
-| `TimeoutMs` | `30000` | Per-request timeout; composes with any timeout on the named client. |
+| `Timeout` | `30s` | Per-request timeout; composes with any timeout on the named client. |
 | `SerializerOptions` | `null` | Serializer for non-scalar document values - see [NativeAOT](#nativeaot). |
 
 ## Authentication
@@ -164,6 +164,10 @@ The response status classifies the outcome:
 
 Batches larger than `MaxRecordsPerRequest` are split into sequential requests in commit order; a failing
 chunk stops the delivery and the whole batch is redelivered after backoff.
+
+The sink cannot purge: a receiver has no "delete everything" contract, so a
+[purge-then-backfill](/backfill#purging-before-a-backfill) skips it with a warning and documents whose
+source rows disappeared without a delivered delete stay on the receiver.
 
 ## Compression
 

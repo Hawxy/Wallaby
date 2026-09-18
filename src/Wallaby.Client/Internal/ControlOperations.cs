@@ -20,7 +20,7 @@ internal sealed record ControlRow(
 /// <summary>A <c>wallaby.slot_registry</c> entry joined against the server's live slot catalog.</summary>
 internal sealed record ManagedSlotRow(
     string SlotName, string Publication, string Kind, bool ExistsOnServer, bool Active, long? RetainedWalBytes,
-    bool PublicationManaged, bool PublicationNarrowed);
+    bool PublicationManaged, bool PublicationNarrowed, string? InvalidationReason);
 
 /// <summary>
 /// Self-contained SQL operations on the wallaby control plane, shared verbatim between the host and the
@@ -263,7 +263,8 @@ internal static class ControlOperations
         NpgsqlDataSource dataSource, CancellationToken ct)
     {
         // The retained-WAL diff is guarded: pg_current_wal_lsn() errors on a standby in recovery,
-        // and a slot missing from the server has no restart_lsn.
+        // and a slot missing from the server has no restart_lsn. invalidation_reason exists from PG17;
+        // the jsonb projection reads null on older servers.
         await using var cmd = dataSource.CreateCommand(
             """
              SELECT r.slot_name, r.publication, r.kind,
@@ -275,7 +276,8 @@ internal static class ControlOperations
                     EXISTS (SELECT 1 FROM pg_publication p
                             JOIN pg_publication_rel pr ON pr.prpubid = p.oid
                             WHERE p.pubname = r.publication
-                              AND (pr.prattrs IS NOT NULL OR pr.prqual IS NOT NULL)) AS publication_narrowed
+                              AND (pr.prattrs IS NOT NULL OR pr.prqual IS NOT NULL)) AS publication_narrowed,
+                    to_jsonb(s) ->> 'invalidation_reason' AS invalidation_reason
              FROM wallaby.slot_registry r
              LEFT JOIN pg_replication_slots s USING (slot_name)
              ORDER BY r.slot_name
@@ -290,7 +292,8 @@ internal static class ControlOperations
                     reader.GetString(0), reader.GetString(1), reader.GetString(2),
                     reader.GetBoolean(3), reader.GetBoolean(4),
                     reader.IsDBNull(5) ? null : reader.GetInt64(5),
-                    reader.GetBoolean(6), reader.GetBoolean(7)));
+                    reader.GetBoolean(6), reader.GetBoolean(7),
+                    reader.IsDBNull(8) ? null : reader.GetString(8)));
             }
             return slots;
         }

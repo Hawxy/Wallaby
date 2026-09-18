@@ -15,19 +15,19 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o => o.Endpoint = endpoint))
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o => o.Endpoint = endpoint))
             .Message.ShouldContain("absolute");
     }
 
     [Test]
-    public void Max_actions_per_request_must_be_positive()
+    public void Max_records_per_request_must_be_positive()
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
         {
             o.Endpoint = "http://elasticsearch.local:9200";
-            o.MaxActionsPerRequest = 0;
+            o.MaxRecordsPerRequest = 0;
         }));
     }
 
@@ -36,10 +36,10 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
         {
             o.Endpoint = "http://elasticsearch.local:9200";
-            o.TimeoutMs = 0;
+            o.Timeout = TimeSpan.Zero;
         }));
     }
 
@@ -48,7 +48,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
         {
             o.Endpoint = "http://elasticsearch.local:9200";
             o.Password = "secret";
@@ -60,7 +60,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
         {
             o.Endpoint = "http://elasticsearch.local:9200";
             o.Username = "elastic";
@@ -72,11 +72,31 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddElasticsearchSink("search", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
         {
             o.Endpoint = "http://elasticsearch.local:9200";
             o.Username = "elastic";
             o.ApiKey = "key";
         })).Message.ShouldContain("mutually exclusive");
+    }
+
+    [Test]
+    public void The_constructor_validates_options()
+    {
+        Should.Throw<WallabyConfigurationException>(
+            () => new ElasticsearchSink("search", new ElasticsearchSinkOptions { Endpoint = "elasticsearch/relative" }));
+    }
+
+    [Test]
+    public void Configure_connection_rejects_the_built_in_credentials()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
+        {
+            o.Endpoint = "http://elasticsearch.local:9200";
+            o.ConfigureConnection = uri => new global::Elastic.Clients.Elasticsearch.ElasticsearchClientSettings(uri);
+            o.ApiKey = "key";
+        })).Message.ShouldContain("ConfigureConnection");
     }
 }

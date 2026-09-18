@@ -89,4 +89,21 @@ public class MartenProviderSeamTests
     {
         public Guid Id { get; set; }
     }
+
+    [Test]
+    public void ScopedByTenant_flags_the_entity_for_the_tenant_column_check()
+    {
+        var (builder, sink) = CapturingBuilder();
+        builder.UseMarten();
+        builder.UseTenantSessions();
+        sink.WithMappings(s => s
+            .Map<Doc>()
+            .ScopedByTenant()
+            .UsingTransform((_, changes, _) => Task.FromResult<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>(
+                changes.ToDictionary(c => c.Key, _ => (WallabyDocument?)null))));
+
+        var spec = builder.Build().ToCaptureSpec("Marten", new Dictionary<Type, string> { [typeof(Doc)] = "Marten" });
+
+        spec.RequiresTenantColumn.ShouldContain(typeof(Doc));
+    }
 }

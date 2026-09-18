@@ -1,10 +1,13 @@
 // NativeAOT smoke test: publishes with PublishAot and exercises the AOT-sensitive Wallaby paths at
-// runtime — spilled-change codecs, keyset cursors, Marten capture-plan derivation, and document
-// materialization through a source-generated System.Text.Json serializer. Exits non-zero on the first
-// failed check, so a CI publish + run catches both ILC-time and runtime AOT regressions.
+// runtime: spilled-change codecs, keyset cursors, Marten capture-plan derivation, document
+// materialization through a source-generated System.Text.Json serializer, and the envelopes of the
+// AOT-compatible sinks. Exits non-zero on the first failed check, so a CI publish + run catches both
+// ILC-time and runtime AOT regressions.
+using System.Buffers;
 using System.Collections;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Marten;
@@ -12,6 +15,10 @@ using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.AotSmokeTest;
 using Wallaby.Sinks;
+using Wallaby.Sinks.Http;
+using Wallaby.Sinks.Http.Internal;
+using Wallaby.Sinks.Kafka;
+using Wallaby.Sinks.Kafka.Internal;
 using Wallaby.Sinks.Pgvector;
 using Wallaby.Internal.Backfill;
 using Wallaby.Internal.Replication;
@@ -215,6 +222,40 @@ Check("vector documents serialize reflection-free and the pgvector sink construc
     sink.DisposeAsync().AsTask().GetAwaiter().GetResult();
 });
 
+Check("http and kafka envelopes write reflection-free and the sinks construct", () =>
+{
+    var record = new SinkRecord(
+        Destination: "products",
+        DocumentId: "1",
+        Document: new WallabyDocument { ["name"] = "roo", ["day"] = new DateOnly(2024, 1, 2), ["raw"] = new byte[] { 1, 2 } },
+        IsDeletion: false,
+        Metadata: new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UnixEpoch, 27271208, 0, IsBackfill: false));
+
+    var buffer = new ArrayBufferWriter<byte>();
+    EnvelopeWriter.Write(buffer, "hook", [record], 0, 1, annotations: null, serializerOptions: null);
+    var envelope = Encoding.UTF8.GetString(buffer.WrittenSpan);
+    if (!envelope.Contains("\"day\":\"2024-01-02\"") || !envelope.Contains("\"raw\":\"AQI=\""))
+    {
+        throw new InvalidOperationException($"http envelope values not written natively: {envelope}");
+    }
+
+    var key = KafkaMessageWriter.IdempotencyKey(record);
+    var value = Encoding.UTF8.GetString(KafkaMessageWriter.WriteValue(record, key, annotations: null, serializerOptions: null));
+    if (!value.Contains("\"operation\":\"upsert\"") || !value.Contains("\"day\":\"2024-01-02\""))
+    {
+        throw new InvalidOperationException($"kafka value not written natively: {value}");
+    }
+    if (KafkaMessageWriter.BuildHeaders(record, key).Count == 0)
+    {
+        throw new InvalidOperationException("kafka headers missing");
+    }
+
+    // Construction validates options; neither sink connects until its first delivery.
+    _ = new HttpSink("hook", new HttpSinkOptions { Endpoint = "http://localhost:8080/changes" }, new SmokeHttpClientFactory());
+    var kafka = new KafkaSink("events", new KafkaSinkOptions { BootstrapServers = "localhost:9092" });
+    kafka.DisposeAsync().AsTask().GetAwaiter().GetResult();
+});
+
 Console.WriteLine(failures == 0 ? "AOT smoke: all checks passed." : $"AOT smoke: {failures} check(s) FAILED.");
 return failures == 0 ? 0 : 1;
 
@@ -280,4 +321,9 @@ namespace Wallaby.AotSmokeTest
 
     [JsonSerializable(typeof(SmokeDoc))]
     public sealed partial class SmokeJsonContext : JsonSerializerContext;
+
+    public sealed class SmokeHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
+    }
 }

@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Text;
+using System.Text.Json;
 using Meilisearch;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
@@ -57,11 +59,14 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
     internal MeilisearchSink(string name, MeilisearchSinkOptions options, Func<HttpMessageHandler> transport)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        MeilisearchBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         _transport = transport;
         // The base address must end with '/' for the client's relative request URIs to resolve under it.
-        _baseAddress = new Uri(options.Host.EndsWith('/') ? options.Host : options.Host + "/");
+        _baseAddress = new Uri(options.Endpoint.EndsWith('/') ? options.Endpoint : options.Endpoint + "/");
         _requiredAttributes = BuildRequiredAttributes(options);
     }
 
@@ -260,12 +265,25 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         {
             return ClassifyByCode(ex.Code, $"Meilisearch request failed ({ex.Code ?? "no code"}): {ex.Message}", ex);
         }
-        catch (Exception ex) when (ex is not WallabyConfigurationException)
+        catch (MeilisearchSerializationException ex)
         {
-            // Transport failures and anything without a Meilisearch error code are retryable.
+            // A document value the JSON writer can't encode is a transform/configuration bug; retrying
+            // would never succeed.
+            return DeliveryResult.Permanent(ex.Message, ex.InnerException);
+        }
+        catch (Exception ex) when (IsTransportFailure(ex))
+        {
             return DeliveryResult.Retry($"Meilisearch delivery failed: {ex.Message}", ex);
         }
     }
+
+    // Connection, socket and timeout failures, including the SDK's own wrappers and a cancelled
+    // per-request timeout (the dispatcher turns a retryable result under a cancelled token into
+    // cancellation). A JsonException here comes from the SDK parsing a response that is not
+    // Meilisearch JSON (a proxy or load-balancer error page), so it is transport too.
+    private static bool IsTransportFailure(Exception ex)
+        => ex is HttpRequestException or IOException or TimeoutException or OperationCanceledException
+            or MeilisearchCommunicationError or MeilisearchTimeoutError or JsonException;
 
     private static DeliveryResult ClassifyByCode(string? code, string description, Exception exception)
         => code is not null && PermanentErrorCodes.Contains(code)
@@ -278,16 +296,16 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
         // Chunks keep each request payload well under Meilisearch's body limit; upserts complete before
         // deletions so a delete always wins over an earlier upsert of the same document in the batch.
-        for (var offset = 0; offset < group.Upserts.Count; offset += _options.MaxRecordsPerBatch)
+        for (var offset = 0; offset < group.Upserts.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxRecordsPerBatch, group.Upserts.Count - offset);
-            var info = await index.AddDocumentsAsync(group.Upserts.GetRange(offset, count), _options.PrimaryKey, ct);
+            var count = Math.Min(_options.MaxRecordsPerRequest, group.Upserts.Count - offset);
+            var info = await index.AddDocumentsJsonAsync(WriteDocumentsJson(group.Upserts, offset, count), _options.PrimaryKey, ct);
             await WaitAsync(index, info, ct);
         }
 
-        for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerBatch)
+        for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxRecordsPerBatch, group.Deletions.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, group.Deletions.Count - offset);
             try
             {
                 var info = await index.DeleteDocumentsAsync(group.Deletions.GetRange(offset, count), ct);
@@ -303,11 +321,36 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         }
     }
 
+    // Documents are written with the shared reflection-free writer, so values encode exactly as the
+    // other sinks encode them and SerializerOptions covers the rest.
+    private string WriteDocumentsJson(List<IReadOnlyDictionary<string, object?>> documents, int offset, int count)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using var writer = new Utf8JsonWriter(buffer);
+        try
+        {
+            writer.WriteStartArray();
+            for (var i = offset; i < offset + count; i++)
+            {
+                var document = documents[i];
+                SinkEnvelopeJson.WriteDocument(writer, document, (string)document[_options.PrimaryKey]!, _options.SerializerOptions);
+            }
+            writer.WriteEndArray();
+            writer.Flush();
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            throw new MeilisearchSerializationException(ex);
+        }
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
     private async Task WaitAsync(global::Meilisearch.Index index, TaskInfo info, CancellationToken ct)
     {
         // Every task is awaited to completion, so a batch is only reported delivered (and the LSN acked)
         // once Meilisearch has actually applied it.
-        var result = await index.WaitForTaskAsync(info.TaskUid, _options.WaitTimeoutMs, _options.WaitIntervalMs, ct);
+        var result = await index.WaitForTaskAsync(
+            info.TaskUid, _options.WaitTimeout.TotalMilliseconds, (int)_options.WaitInterval.TotalMilliseconds, ct);
         if (result.Status is TaskInfoStatus.Failed or TaskInfoStatus.Canceled)
         {
             string? code = null;
@@ -432,7 +475,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         string id)
     {
         // Documents are field bags. Copy defensively (so a transform-returned dictionary isn't mutated)
-        // and stamp the primary key; the Meilisearch client serializes the dictionary as-is.
+        // and stamp the primary key.
         var copy = new Dictionary<string, object?>(document.Count + 1, StringComparer.Ordinal);
         foreach (var kvp in document)
         {

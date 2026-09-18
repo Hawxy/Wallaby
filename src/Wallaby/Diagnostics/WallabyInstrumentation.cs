@@ -103,6 +103,10 @@ public sealed class WallabyInstrumentation : IDisposable
 
     private sealed record SlotWalSample(string Slot, long Bytes);
 
+    // The whole-table backfill in flight, mirrored from the status snapshot by the coordinator. Null = none
+    // running; the gauges emit nothing then.
+    private WallabyBackfillProgress? _activeBackfill;
+
     // Per sink, the Stopwatch timestamp of the last successful delivery; the lag gauge derives seconds-since.
     private readonly ConcurrentDictionary<string, long> _sinkLastDeliveredAt = new(StringComparer.Ordinal);
 
@@ -161,6 +165,12 @@ public sealed class WallabyInstrumentation : IDisposable
         _meter.CreateObservableGauge(
             "wallaby.sink.delivery.lag", ObserveSinkDeliveryLag, unit: "s",
             description: "Seconds since each sink last accepted a batch.");
+        _meter.CreateObservableGauge(
+            "wallaby.backfill.rows_copied", ObserveBackfillRowsCopied, unit: "{row}",
+            description: "Rows the running whole-table backfill has copied so far.");
+        _meter.CreateObservableGauge(
+            "wallaby.backfill.rows_estimated", ObserveBackfillRowsEstimated, unit: "{row}",
+            description: "The planner's row estimate for the running whole-table backfill.");
     }
 
     /// <summary>The underlying meter (exposed for tests that attach a <c>MetricCollector</c>).</summary>
@@ -469,6 +479,24 @@ public sealed class WallabyInstrumentation : IDisposable
     }
 
     // ---- backfill ----
+
+    internal void RecordActiveBackfill(WallabyBackfillProgress? progress) => _activeBackfill = progress;
+
+    private IEnumerable<Measurement<long>> ObserveBackfillRowsCopied()
+    {
+        if (_activeBackfill is { } active)
+        {
+            yield return new Measurement<long>(active.RowsCopied, new KeyValuePair<string, object?>(TableTag, active.Table));
+        }
+    }
+
+    private IEnumerable<Measurement<long>> ObserveBackfillRowsEstimated()
+    {
+        if (_activeBackfill is { EstimatedRows: { } estimated } active)
+        {
+            yield return new Measurement<long>(estimated, new KeyValuePair<string, object?>(TableTag, active.Table));
+        }
+    }
 
     internal void BackfillStarted() => _backfillActive.Add(1);
     internal void BackfillCompleted() => _backfillActive.Add(-1);

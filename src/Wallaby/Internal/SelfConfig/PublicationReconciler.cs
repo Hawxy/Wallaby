@@ -5,11 +5,12 @@ namespace Wallaby.Internal.SelfConfig;
 
 /// <summary>
 /// Outcome of ensuring a publication: whether it was created, whether it publishes via the
-/// partition root (always true for a managed publication after the ensure), and the tables it
-/// publishes with a column list.
+/// partition root (always true for a managed publication after the ensure), whether whole-table
+/// members publish stored generated columns (<c>publish_generated_columns = stored</c>, PG18+), and
+/// the tables it publishes with a column list.
 /// </summary>
 internal readonly record struct PublicationEnsureResult(
-    bool Created, bool ViaRoot, IReadOnlyList<NarrowedPublicationTable> NarrowedTables);
+    bool Created, bool ViaRoot, bool PublishesGeneratedColumns, IReadOnlyList<NarrowedPublicationTable> NarrowedTables);
 
 /// <summary>
 /// A table the ensured publication publishes with a column list. <see cref="FilteredColumns"/> are the
@@ -29,29 +30,36 @@ internal sealed record NarrowedPublicationTable(
 /// applied per table, column-list drift atomically via <c>SET TABLE</c>. Candidate column lists are
 /// resolved against live catalog state (<see cref="ColumnListPlanner"/>) before any DDL. Managed
 /// publications always set <c>publish_via_partition_root</c> so partitioned tables publish under the
-/// root's name and schema.
+/// root's name and schema, and on PG18+ <c>publish_generated_columns = stored</c> when asked, so
+/// captured stored generated columns reach the stream.
 /// </summary>
 internal sealed class PublicationReconciler(ILogger logger)
 {
-    /// <summary>Ensure <paramref name="pub"/> exists with the desired tables.</summary>
+    /// <summary>
+    /// Ensure <paramref name="pub"/> exists with the desired tables. <paramref name="publishGeneratedColumns"/>
+    /// requires PG18+ (older servers reject the option).
+    /// </summary>
     public async Task<PublicationEnsureResult> EnsureAsync(
         NpgsqlConnection connection,
         string pub,
         IReadOnlyList<PublicationTableSpec> desiredTables,
         bool reconcile,
+        bool publishGeneratedColumns,
         List<string>? warnings,
         CancellationToken ct)
     {
-        // null = publication absent.
-        (bool AllTables, bool ViaRoot)? existing = null;
+        // null = publication absent. pubgencols exists from PG18 ('n' none, 's' stored); the jsonb
+        // projection reads null on older servers.
+        (bool AllTables, bool ViaRoot, bool GeneratedColumns)? existing = null;
         await using (var probe = new NpgsqlCommand(
-            "SELECT puballtables, pubviaroot FROM pg_publication WHERE pubname = @p", connection))
+            "SELECT puballtables, pubviaroot, to_jsonb(p) ->> 'pubgencols' FROM pg_publication p WHERE pubname = @p",
+            connection))
         {
             probe.Parameters.AddWithValue("p", pub);
             await using var reader = await probe.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct))
             {
-                existing = (reader.GetBoolean(0), reader.GetBoolean(1));
+                existing = (reader.GetBoolean(0), reader.GetBoolean(1), !reader.IsDBNull(2) && reader.GetString(2) == "s");
             }
         }
 
@@ -60,12 +68,14 @@ internal sealed class PublicationReconciler(ILogger logger)
         if (existing is null)
         {
             var tableList = string.Join(", ", resolved.Select(FormatTableClause));
+            var publicationOptions = publishGeneratedColumns
+                ? "publish_via_partition_root = true, publish_generated_columns = stored"
+                : "publish_via_partition_root = true";
             await ExecutePublicationDdlAsync(
                 connection, pub,
-                $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList} " +
-                "WITH (publish_via_partition_root = true)", ct);
+                $"CREATE PUBLICATION {PgExec.QuoteIdentifier(pub)} FOR TABLE {tableList} WITH ({publicationOptions})", ct);
             logger.PublicationCreated(pub, resolved.Count);
-            return new PublicationEnsureResult(Created: true, ViaRoot: true, narrowed);
+            return new PublicationEnsureResult(Created: true, ViaRoot: true, publishGeneratedColumns, narrowed);
         }
 
         if (reconcile)
@@ -86,17 +96,26 @@ internal sealed class PublicationReconciler(ILogger logger)
                     $"ALTER PUBLICATION {PgExec.QuoteIdentifier(pub)} SET (publish_via_partition_root = true)", ct);
                 logger.PublicationViaRootEnabled(pub);
             }
+            if (publishGeneratedColumns && !existing.Value.GeneratedColumns)
+            {
+                await PgExec.ExecuteAsync(
+                    connection,
+                    $"ALTER PUBLICATION {PgExec.QuoteIdentifier(pub)} SET (publish_generated_columns = stored)", ct);
+                logger.PublicationGeneratedColumnsEnabled(pub);
+            }
             await ReconcileTablesAsync(connection, pub, resolved, ct);
-            return new PublicationEnsureResult(Created: false, ViaRoot: true, narrowed);
+            return new PublicationEnsureResult(
+                Created: false, ViaRoot: true, existing.Value.GeneratedColumns || publishGeneratedColumns, narrowed);
         }
 
         // Used as-is (unreconciled), so the desired column lists were not applied.
-        return new PublicationEnsureResult(Created: false, ViaRoot: existing.Value.ViaRoot, NarrowedTables: []);
+        return new PublicationEnsureResult(
+            Created: false, existing.Value.ViaRoot, existing.Value.GeneratedColumns, NarrowedTables: []);
     }
 
     /// <summary>
-    /// Resolve candidate column lists against live catalog state (replica identity, generated columns),
-    /// demoting to whole-table where a list would be unsafe. No-op when every candidate is whole-table.
+    /// Resolve candidate column lists against live catalog state (replica identity), demoting to
+    /// whole-table where a list would be unsafe. No-op when every candidate is whole-table.
     /// Also reports the tables that end up column-listed, with the physical columns filtered out.
     /// </summary>
     private async Task<(IReadOnlyList<PublicationTableSpec> Resolved, IReadOnlyList<NarrowedPublicationTable> Narrowed)>
@@ -120,10 +139,6 @@ internal sealed class PublicationReconciler(ILogger logger)
                              FROM pg_index i
                              JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)
                              WHERE i.indrelid = c.oid AND i.indisreplident), '{}') AS replident_index_cols,
-                   COALESCE((SELECT array_agg(a.attname::text)
-                             FROM pg_attribute a
-                             WHERE a.attrelid = c.oid AND a.attnum > 0
-                               AND NOT a.attisdropped AND a.attgenerated <> ''), '{}') AS generated_cols,
                    COALESCE((SELECT array_agg(a.attname::text ORDER BY a.attnum)
                              FROM pg_attribute a
                              WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), '{}') AS all_cols
@@ -142,9 +157,8 @@ internal sealed class PublicationReconciler(ILogger logger)
                 catalog[key] = new TableCatalogInfo(
                     reader.GetString(2),
                     reader.GetString(3),
-                    reader.GetFieldValue<string[]>(4),
-                    reader.GetFieldValue<string[]>(5));
-                physicalColumns[key] = reader.GetFieldValue<string[]>(6);
+                    reader.GetFieldValue<string[]>(4));
+                physicalColumns[key] = reader.GetFieldValue<string[]>(5);
             }
         }
 
@@ -152,16 +166,12 @@ internal sealed class PublicationReconciler(ILogger logger)
         var narrowed = new List<NarrowedPublicationTable>();
         foreach (var candidate in candidates)
         {
-            var (effective, warning, omittedGenerated) = ColumnListPlanner.Plan(
+            var (effective, warning) = ColumnListPlanner.Plan(
                 candidate, catalog.GetValueOrDefault((candidate.Schema, candidate.Table)));
             if (warning is not null)
             {
                 warnings?.Add(warning);
                 logger.ConfigurationWarning(warning);
-            }
-            foreach (var column in omittedGenerated)
-            {
-                logger.GeneratedColumnOmitted(column, candidate.QualifiedName);
             }
             resolved.Add(effective);
 
@@ -312,6 +322,9 @@ internal static partial class PublicationReconcilerLog
     [LoggerMessage(Level = LogLevel.Information, Message = "Enabled publish_via_partition_root on publication {Publication}.")]
     internal static partial void PublicationViaRootEnabled(this ILogger logger, string publication);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "Enabled publish_generated_columns = stored on publication {Publication}.")]
+    internal static partial void PublicationGeneratedColumnsEnabled(this ILogger logger, string publication);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Added table {Table} to publication {Publication}.")]
     internal static partial void TableAddedToPublication(this ILogger logger, string table, string publication);
 
@@ -323,7 +336,4 @@ internal static partial class PublicationReconcilerLog
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Table {Table} reverted to publishing all columns in publication {Publication}.")]
     internal static partial void PublicationColumnListRemoved(this ILogger logger, string table, string publication);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Generated column {Column} on {Table} omitted from the publication column list (never published by pgoutput).")]
-    internal static partial void GeneratedColumnOmitted(this ILogger logger, string column, string table);
 }

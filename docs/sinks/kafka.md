@@ -50,10 +50,10 @@ builder.Services.AddWallaby(cdc =>
 | `Topics` | empty | Topics to [create on startup](#topic-creation); empty skips creation entirely. |
 | `ConfigureClient` | `null` | Connection-level settings on the shared client behind the producer and admin client [TLS/SASL](#authentication), connection timeouts, DNS behaviour. |
 | `ConfigureProducer` | `null` | Producer settings the sink does not wrap (batch size, retry policy, socket buffers); runs after the sink's own configuration, so it wins on conflict, except idempotence and acks (see below). |
-| `Compression` | `Lz4` | Message batch compression (`None`, `Gzip`, `Snappy`, `Lz4`, `Zstd`). |
-| `LingerMs` | `5` | How long the producer lingers to fill a batch before sending. |
-| `MessageTimeoutMs` | `30000` | How long the producer retries transient broker errors internally before the failure surfaces as retryable. |
-| `AdminTimeoutMs` | `30000` | Ceiling on the startup [topic-creation](#topic-creation) request; an unreachable broker fails the leader session (which retries with backoff) instead of stalling startup. |
+| `Compression` | `Lz4` | Message batch compression (`KafkaSinkCompression`: `None`, `Gzip`, `Snappy`, `Lz4`, `Zstd`). |
+| `Linger` | `5ms` | How long the producer lingers to fill a batch before sending. |
+| `MessageTimeout` | `30s` | How long the producer retries transient broker errors internally before the failure surfaces as retryable. Must exceed `Linger`. |
+| `AdminTimeout` | `30s` | Ceiling on the startup [topic-creation](#topic-creation) request; an unreachable broker fails the leader session (which retries with backoff) instead of stalling startup. |
 | `Annotations` | `null` | Static key/values echoed in every message value. |
 | `SerializerOptions` | `null` | Serializer for non-scalar document values, see [NativeAOT](#nativeaot). |
 
@@ -135,8 +135,12 @@ Failures are classified for the dispatcher:
 
 | Error | Outcome |
 | --- | --- |
-| Retriable broker errors, delivery timeouts, connection failures | **Retryable** - the producer retries internally until `MessageTimeoutMs`, then the dispatcher retries with backoff. |
+| Retriable broker errors, delivery timeouts, connection failures | **Retryable** - the producer retries internally until `MessageTimeout`, then the dispatcher retries with backoff. |
 | Non-retriable broker errors (message too large, authorization failures, fenced producer) | **Permanent** - the pipeline halts. |
+
+The sink cannot purge: a topic cannot be emptied per document, so a
+[purge-then-backfill](/backfill#purging-before-a-backfill) skips it with a warning. On a compacted topic
+a document whose source row disappeared without a delivered delete keeps its last message.
 
 ## Topic creation
 

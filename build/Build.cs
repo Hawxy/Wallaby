@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Nuke.Common;
 using Nuke.Common.CI;
@@ -17,6 +18,18 @@ using static Nuke.Common.Tools.DotNet.DotNetTasks;
     OnPushBranches = ["main"],
     OnPullRequestBranches = ["main"],
     InvokedTargets = [nameof(Test), nameof(AotSmoke)])]
+[GitHubActions(
+    "Postgres Matrix",
+    GitHubActionsImage.UbuntuLatest,
+    OnPushBranches = ["main"],
+    OnCronSchedule = "0 3 * * 1",
+    InvokedTargets = [nameof(TestPostgresMatrix)])]
+[GitHubActions(
+    "Release",
+    GitHubActionsImage.UbuntuLatest,
+    OnPushTags = ["v*"],
+    InvokedTargets = [nameof(Test), nameof(AotSmoke), nameof(NugetPush)],
+    ImportSecrets = [nameof(NugetApiKey)])]
 [GitHubActions(
     "Manual Nuget Push",
     GitHubActionsImage.UbuntuLatest,
@@ -57,28 +70,55 @@ class Build : NukeBuild
         });
     
     
+    [Parameter("Postgres Docker image for the integration suites (sets WALLABY_TEST_PG_IMAGE; default postgres:17)")]
+    readonly string PostgresImage;
+
+    /// <summary>
+    /// The oldest supported major and the newest, run beside the default 17 by the matrix workflow.
+    /// Docker Hub has no postgres:19 tag until GA; switch to it then.
+    /// </summary>
+    static readonly string[] PostgresMatrixImages = ["postgres:15", "postgres:19beta3"];
+
     Target Test => _ => _
+        .DependsOn(Compile)
+        .Executes(() => RunTests(PostgresImage));
+
+    Target TestPostgresMatrix => _ => _
         .DependsOn(Compile)
         .Executes(() =>
         {
-            DotNetTest(s =>
+            foreach (var image in PostgresMatrixImages)
             {
-                // Release, matching Compile: reuses its output instead of a second Debug build, and
-                // tests the configuration that ships.
-                var config = s
-                    .AddProcessAdditionalArguments("--project", Solution)
-                    .AddProcessAdditionalArguments("--configuration", "Release");
-
-                if (IsServerBuild)
-                {
-                    // CI runners have 2 vCPUs; running the Testcontainers-backed suites in parallel
-                    // oversubscribes them and starves timing-sensitive e2e tests.
-                    config = config.AddProcessAdditionalArguments("--max-parallel-test-modules", "1");
-                }
-
-                return config;
-            });
+                Log.Information("Running the test suite against {Image}", image);
+                RunTests(image);
+            }
         });
+
+    void RunTests(string postgresImage)
+    {
+        DotNetTest(s =>
+        {
+            // Release, matching Compile: reuses its output instead of a second Debug build, and
+            // tests the configuration that ships.
+            var config = s
+                .AddProcessAdditionalArguments("--project", Solution)
+                .AddProcessAdditionalArguments("--configuration", "Release");
+
+            if (postgresImage is not null)
+            {
+                config = config.SetProcessEnvironmentVariable("WALLABY_TEST_PG_IMAGE", postgresImage);
+            }
+
+            if (IsServerBuild)
+            {
+                // CI runners have 2 vCPUs; running the Testcontainers-backed suites in parallel
+                // oversubscribes them and starves timing-sensitive e2e tests.
+                config = config.AddProcessAdditionalArguments("--max-parallel-test-modules", "1");
+            }
+
+            return config;
+        });
+    }
     
     Target AotSmoke => _ => _
         .Executes(() =>
@@ -94,26 +134,17 @@ class Build : NukeBuild
             ProcessTasks.StartProcess(exe, workingDirectory: output).AssertZeroExitCode();
         });
 
-    static readonly string[] PackableProjects =
-    [
-        "Wallaby",
-        "Wallaby.Providers.EntityFrameworkCore",
-        "Wallaby.Providers.Marten",
-        "Wallaby.Sinks.Http",
-        "Wallaby.Sinks.Kafka",
-        "Wallaby.Sinks.Meilisearch",
-        "Wallaby.AspNetCore.HealthChecks",
-        "Wallaby.Client",
-        "Wallaby.Testing",
-    ];
+    // Every project under src/ ships as a package; tests/ and samples/ never do.
+    IEnumerable<Project> PackableProjects => Solution.AllProjects
+        .Where(x => x.Directory.Parent == RootDirectory / "src")
+        .OrderBy(x => x.Name);
 
     Target NugetPack => _ => _
         .DependsOn(Compile)
         .Executes(() =>
         {
-            foreach (var name in PackableProjects)
+            foreach (var project in PackableProjects)
             {
-                var project = Solution.AllProjects.Single(x => x.Name == name);
                 DotNetPack(_ => _
                     .SetProject(project)
                     .SetConfiguration("Release")
@@ -129,6 +160,10 @@ class Build : NukeBuild
         .Requires(() => !string.IsNullOrEmpty(NugetApiKey))
         .Executes(() =>
         {
+            AssertReleaseTagMatchesPackageVersion();
+
+            // PDBs are embedded in the assemblies (DotNet.ReproducibleBuilds), so there is no symbols
+            // package to push.
             DotNetNuGetPush(_ => _
                 .SetSource("https://api.nuget.org/v3/index.json")
                 .SetTargetPath(ArtifactsDirectory / "*.nupkg")
@@ -136,5 +171,20 @@ class Build : NukeBuild
                 .EnableNoSymbols()
                 .SetApiKey(NugetApiKey));
         });
+
+    // A release tag must name the version in Package.Build.props: with skip-duplicate on, a mismatch
+    // would otherwise push nothing and still report success.
+    void AssertReleaseTagMatchesPackageVersion()
+    {
+        var reference = GitHubActions.Instance?.Ref;
+        if (reference is null || !reference.StartsWith("refs/tags/v"))
+        {
+            return;
+        }
+
+        var version = XmlTasks.XmlPeekSingle(RootDirectory / "Package.Build.props", "/Project/PropertyGroup/Version");
+        Assert.True(reference == $"refs/tags/v{version}",
+            $"Release tag '{reference}' does not match the package version {version} in Package.Build.props.");
+    }
 
 }

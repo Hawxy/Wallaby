@@ -19,7 +19,7 @@ public static class MeilisearchBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(configure);
 
-        var options = new MeilisearchSinkOptions { Host = "" };
+        var options = new MeilisearchSinkOptions { Endpoint = "" };
         configure(options);
         Validate(options);
 
@@ -41,40 +41,40 @@ public static class MeilisearchBuilderExtensions
         builder.Services.AddHttpClient();
         return builder.AddSink(name, sp =>
         {
-            var options = new MeilisearchSinkOptions { Host = "" };
+            var options = new MeilisearchSinkOptions { Endpoint = "" };
             configure(sp, options);
-            Validate(options);
             return CreateSink(name, options, sp);
         });
     }
 
-    private static void Validate(MeilisearchSinkOptions options)
+    internal static void Validate(MeilisearchSinkOptions options)
     {
-        if (!Uri.TryCreate(options.Host, UriKind.Absolute, out _))
+        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var endpoint)
+            || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("MeilisearchSinkOptions.Host must be an absolute URL.", nameof(options));
+            throw new WallabyConfigurationException("MeilisearchSinkOptions.Endpoint must be an absolute http(s) URL.");
         }
-        if (options.MaxRecordsPerBatch <= 0)
+        if (options.MaxRecordsPerRequest <= 0)
         {
-            throw new ArgumentException("MeilisearchSinkOptions.MaxRecordsPerBatch must be positive.", nameof(options));
+            throw new WallabyConfigurationException("MeilisearchSinkOptions.MaxRecordsPerRequest must be positive.");
         }
-        if (options.WaitTimeoutMs <= 0)
+        if (options.WaitTimeout <= TimeSpan.Zero)
         {
-            throw new ArgumentException("MeilisearchSinkOptions.WaitTimeoutMs must be positive.", nameof(options));
+            throw new WallabyConfigurationException("MeilisearchSinkOptions.WaitTimeout must be positive.");
         }
-        if (options.WaitIntervalMs <= 0)
+        if (options.WaitInterval <= TimeSpan.Zero)
         {
-            throw new ArgumentException("MeilisearchSinkOptions.WaitIntervalMs must be positive.", nameof(options));
+            throw new WallabyConfigurationException("MeilisearchSinkOptions.WaitInterval must be positive.");
         }
         if (string.IsNullOrWhiteSpace(options.PrimaryKey))
         {
-            throw new ArgumentException("MeilisearchSinkOptions.PrimaryKey is required.", nameof(options));
+            throw new WallabyConfigurationException("MeilisearchSinkOptions.PrimaryKey is required.");
         }
         foreach (var index in options.Indexes)
         {
             if (string.IsNullOrWhiteSpace(index.Name))
             {
-                throw new ArgumentException("MeilisearchIndexConfig.Name is required.", nameof(options));
+                throw new WallabyConfigurationException("MeilisearchIndexConfig.Name is required.");
             }
         }
     }

@@ -84,7 +84,9 @@ For a mapping that needs constructor arguments, pass an instance directly:
 
 Transforms are **batch-invoked**: you receive all the insert/update/read changes for the entity in a commit (or a
 backfill chunk) and return one document per source key. This lets you resolve many keys in a single
-round-trip. Return a `null` document (or simply omit a key) to **delete** that key from the sink.
+round-trip. Return a `null` document **or omit the key** to **delete** that key's document from the
+sink: an omitted key is a delete, never a skip, so a transform must return an entry for every change
+it wants to keep.
 
 ::: tip
 Deletes never reach a transform as the row is already gone. The engine deletes by key directly, using
@@ -104,10 +106,10 @@ sink.Map<Product>()
 
 Because the engine deletes by key, the custom id must also be computable when the row is gone. A
 `KeyedBy` mapping therefore requires `REPLICA IDENTITY FULL` on its table, and self-configuration
-**fails at startup** when it is missing (with the DDL to run) - with a partial old row the delete
-would silently target a wrong or PK-named document that was never written. With full identity, EF Core
-materializes the deleted entity from the old row's values, and Marten rehydrates the deleted document
-from the old tuple's `data`; if a delete still arrives without an entity, it fails with an error rather
+**fails at startup** when it is missing (with the DDL to run).
+
+With full identity, EF Core materializes the deleted entity from the old row's values, and Marten rehydrates the deleted document
+from the old tuple's `data`. If a delete still arrives without an entity, it fails with an error rather
 than falling back to the primary key. The same applies to an entity-derived `ScopedBy` paired with
 `ScopedDestination` (deletes must resolve their destination); the `ChangeEvent` overload of `ScopedBy`
 reads captured columns instead and carries no such requirement.
@@ -135,7 +137,7 @@ Each `ChangeEvent<TEntity>` exposes:
 | `Record` | Current column values keyed by EF property name. |
 | `Changes` | Previous values of changed columns (updates), subject to `REPLICA IDENTITY`. |
 | `PrimaryKey` / `Key` | The source primary key, and its `DocumentKey`. |
-| `GetPrimaryKey<TKey>()` | The single-column key cast to `TKey`. |
+| `GetPrimaryKey<TKey>()` | The single-column key cast to `TKey`; throws for a composite key. |
 | `Metadata` | `Action`, `IsBackfill`, `CommitTimestamp`, `CommitLsn`, table name. |
 
 ## Per-row scoping

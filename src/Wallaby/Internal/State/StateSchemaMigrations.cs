@@ -201,8 +201,17 @@ internal static class StateSchemaMigrations
         ALTER TABLE wallaby.fanout_queue ADD COLUMN IF NOT EXISTS traceparent text;
         """;
 
+    /// <summary>
+    /// Progress facts for a backfill run: the planner's row estimate captured when the run started
+    /// fresh (null when unknown) and the fresh start time, so progress and an ETA can be derived.
+    /// </summary>
+    private const string BackfillProgress = """
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS estimated_rows bigint;
+        ALTER TABLE wallaby.backfill_state ADD COLUMN IF NOT EXISTS started_at timestamptz;
+        """;
+
     public static readonly IReadOnlyList<(int Version, string Ddl)> Steps =
         [(1, Baseline), (2, FanoutRetryState), (3, ControlAssertionHeartbeat), (4, ControlResumePurgeFlag),
          (5, RegistryPublicationOwnership), (6, ControlPublicationWidening), (7, BackfillRetryState),
-         (8, CheckpointIntoRegistry), (9, FanoutTraceparent)];
+         (8, CheckpointIntoRegistry), (9, FanoutTraceparent), (10, BackfillProgress)];
 }

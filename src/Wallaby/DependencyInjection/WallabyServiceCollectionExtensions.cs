@@ -81,7 +81,16 @@ public static class WallabyServiceCollectionExtensions
             }
         });
 
-        services.AddSingleton(sp => new WallabyDataSource(sp.GetRequiredService<WallabyOptions>().ConnectionString));
+        services.AddSingleton(sp =>
+        {
+            var configuration = sp.GetRequiredService<WallabyConfiguration>();
+            var passwordProvider = configuration.PasswordProvider;
+            return new WallabyDataSource(
+                sp.GetRequiredService<WallabyOptions>().ConnectionString,
+                passwordProvider is null ? null : ct => passwordProvider(sp, ct),
+                configuration.PasswordRefreshInterval,
+                configuration.ConfigureDataSource);
+        });
 
         services.AddMetrics();
         services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));

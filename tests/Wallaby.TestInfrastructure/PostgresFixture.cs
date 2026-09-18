@@ -31,7 +31,7 @@ public class PostgresFixture : IAsyncInitializer, IAsyncDisposable
             command.Add("-c");
             command.Add(setting);
         }
-        _container = new PostgreSqlBuilder("postgres:17").WithCommand([.. command]).Build();
+        _container = new PostgreSqlBuilder(PostgresImages.Default).WithCommand([.. command]).Build();
     }
 
     /// <summary>A normal connection string to the container (also usable for the replication connection).</summary>

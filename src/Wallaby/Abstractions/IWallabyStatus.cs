@@ -46,8 +46,8 @@ public sealed record WallabyStatusSnapshot
     /// <summary>When the last transaction was acknowledged; null if none yet this session.</summary>
     public DateTimeOffset? LastProgressAt { get; init; }
 
-    /// <summary>The most recent ingestion lag (now − source commit timestamp) in seconds; <c>-1</c> if unknown.</summary>
-    public double LastIngestionLagSeconds { get; init; } = -1;
+    /// <summary>The most recent ingestion lag (now minus source commit timestamp); null until known.</summary>
+    public TimeSpan? LastIngestionLag { get; init; }
 
     /// <summary>
     /// Consecutive failed leader sessions. Reset when a transaction is fully delivered and acknowledged,
@@ -105,6 +105,20 @@ public sealed record WallabyStatusSnapshot
     /// <summary>Per sink, when it last accepted a batch this session. Empty until a first delivery.</summary>
     public IReadOnlyDictionary<string, DateTimeOffset> LastSinkDeliveryAt { get; init; } =
         System.Collections.ObjectModel.ReadOnlyDictionary<string, DateTimeOffset>.Empty;
+
+    /// <summary>The whole-table backfill this leader is running right now; null when none is.</summary>
+    public WallabyBackfillProgress? ActiveBackfill { get; init; }
+}
+
+/// <summary>Progress of the whole-table backfill a leader is running.</summary>
+/// <param name="Table">Schema-qualified source table name.</param>
+/// <param name="RowsCopied">Rows snapshotted so far, including those a previous attempt persisted.</param>
+/// <param name="EstimatedRows">The planner's row estimate when the run started fresh; null when unknown.</param>
+/// <param name="StartedAt">When the run started fresh (a resumed run keeps it).</param>
+public sealed record WallabyBackfillProgress(string Table, long RowsCopied, long? EstimatedRows, DateTimeOffset StartedAt)
+{
+    /// <summary>Fraction complete (0 to 1) when an estimate exists; null otherwise.</summary>
+    public double? Fraction => EstimatedRows is > 0 ? Math.Min(1d, RowsCopied / (double)EstimatedRows.Value) : null;
 }
 
 /// <summary>

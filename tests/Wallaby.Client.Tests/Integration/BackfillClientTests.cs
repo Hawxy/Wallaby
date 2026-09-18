@@ -22,6 +22,40 @@ public class BackfillClientTests(PostgresFixture pg)
     private Task EnsureBackfillTableAsync() => WallabyStateSchema.EnsureAsync(pg.DataSource);
 
     [Test]
+    public async Task Status_carries_the_progress_facts_and_tolerates_rows_without_them()
+    {
+        var table = $"public.orders_{Guid.NewGuid():N}";
+        await using var client = new WallabyControlClient(pg.ConnectionString);
+        try
+        {
+            await EnsureBackfillTableAsync();
+            await ExecAsync(
+                $"""
+                  INSERT INTO wallaby.backfill_state (table_qualified, status, rows_copied, updated_at, estimated_rows, started_at)
+                  VALUES ('{table}', 'InProgress', 250, now(), 1000, now() - interval '5 minutes'),
+                         ('{table}_legacy', 'Completed', 7, now(), NULL, NULL)
+                  """);
+
+            var status = await client.GetBackfillStatusAsync();
+
+            var entry = status.Single(s => s.Table == table);
+            entry.EstimatedRows.ShouldBe(1000);
+            entry.StartedAt.ShouldNotBeNull();
+            entry.Progress.ShouldBe(0.25);
+            entry.EstimatedRemaining.ShouldNotBeNull().ShouldBeGreaterThan(TimeSpan.FromMinutes(14));
+
+            var legacy = status.Single(s => s.Table == $"{table}_legacy");
+            legacy.EstimatedRows.ShouldBeNull();
+            legacy.StartedAt.ShouldBeNull();
+            legacy.Progress.ShouldBeNull();
+        }
+        finally
+        {
+            await ExecAsync($"DELETE FROM wallaby.backfill_state WHERE table_qualified LIKE '{table}%'");
+        }
+    }
+
+    [Test]
     public async Task Request_marks_the_table_requested_and_preserves_its_transform_version()
     {
         var table = $"public.orders_{Guid.NewGuid():N}";
@@ -167,7 +201,7 @@ public class BackfillClientTests(PostgresFixture pg)
         await using var client = new WallabyControlClient(builder.ConnectionString);
 
         (await client.GetBackfillStatusAsync()).ShouldBeEmpty();
-        await Should.ThrowAsync<InvalidOperationException>(() => client.RequestBackfillAsync("public.orders"));
+        await Should.ThrowAsync<WallabySchemaVersionException>(() => client.RequestBackfillAsync("public.orders"));
         // Cancel has nothing to withdraw, so it reports false instead of throwing.
         (await client.CancelBackfillAsync("public.orders")).ShouldBeFalse();
     }

@@ -110,10 +110,10 @@ A purge runs before a fresh backfill when:
   (`WithBackfillVersion("v4", purgeOnChange: true)`), so documents whose ids or shape changed don't
   remain under old keys.
 
-Purging is an optional sink capability (`ISinkPurger`). The Meilisearch sink is the only sink that implements it right now.
-A sink without the capability, such as the Kafka
-and HTTP sinks, or a custom sink that doesn't opt in, is skipped with a warning and its destinations
-keep any stale documents.
+Purging is an optional sink capability (`ISinkPurger`), implemented by the Meilisearch, Elasticsearch,
+OpenSearch and pgvector sinks. A sink without the capability, such as the Kafka and HTTP sinks, or a
+custom sink that doesn't opt in, is skipped with a warning and its destinations keep any stale
+documents.
 
 Two caveats:
 
@@ -183,6 +183,25 @@ Failures are visible in three places: the leader's log (one error per attempt), 
 columns surfaced through `IWallabyBackfillManager.GetStatusAsync`, and the
 [health check](/operations/health-checks), which grades **Degraded** once the worst failing table crosses
 `BackfillFailureThreshold` consecutive failures.
+
+### Progress and ETA
+
+When a run starts fresh, Wallaby records the planner's row estimate for the table (`pg_class.reltuples`,
+summed over partitions) as `estimated_rows` and the start time as `started_at` in `wallaby.backfill_state`,
+next to the `rows_copied` count every chunk advances. The estimate is null when the table has never been
+analysed, so run `ANALYZE` after a bulk load if you want a denominator; it is an estimate, and the final
+count can differ.
+
+The facts surface in four places:
+
+- `IWallabyBackfillManager.GetStatusAsync` and the [control client](/operations/external-control#triggering-backfills):
+  `EstimatedRows` and `StartedAt`, plus the client's derived `Progress` (0 to 1) and `EstimatedRemaining`.
+  The remaining time uses the average rate since the run started, so a run resumed after downtime reads
+  pessimistic until it catches up.
+- `IWallabyStatus.Current.ActiveBackfill` on the leader while a whole-table backfill runs, and the
+  [health check](/operations/health-checks) `backfill*` data keys.
+- The `wallaby.backfill.rows_copied` and `wallaby.backfill.rows_estimated` gauges, tagged by table and
+  present only while a backfill runs (see [observability](/operations/observability)).
 
 ## Scoped (fan-out) backfill
 

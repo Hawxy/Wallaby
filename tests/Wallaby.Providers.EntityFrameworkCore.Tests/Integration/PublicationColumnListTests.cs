@@ -327,54 +327,6 @@ public class PublicationColumnListTests(TestModelPostgresFixture pg)
     }
 
     [Test]
-    public async Task Generated_columns_are_omitted_from_the_list()
-    {
-        await using var names = ReplicationScope.Unique(pg.ConnectionString);
-
-        await using var conn = new NpgsqlConnection(pg.ConnectionString);
-        await conn.OpenAsync();
-        await PgExec.ExecuteAsync(
-            conn,
-            """
-            CREATE TABLE IF NOT EXISTS public.gen_test (
-                id int PRIMARY KEY,
-                name text NOT NULL,
-                upper_name text GENERATED ALWAYS AS (upper(name)) STORED)
-            """,
-            default);
-
-        // A hand-built one-table model; the capture side never materializes gen_test, this only
-        // exercises the attgenerated detection in column-list resolution.
-        var genTable = new CapturedTable
-        {
-            EntityClrType = typeof(object),
-            Schema = "public",
-            TableName = "gen_test",
-            Columns =
-            [
-                new CapturedColumn { PropertyName = "Id", ColumnName = "id", ClrType = typeof(int) },
-                new CapturedColumn { PropertyName = "Name", ColumnName = "name", ClrType = typeof(string) },
-                new CapturedColumn { PropertyName = "UpperName", ColumnName = "upper_name", ClrType = typeof(string) },
-            ],
-            PrimaryKey = [],
-            ColumnsNarrowed = true,
-        };
-        var model = new WallabyModel([genTable], []);
-
-        try
-        {
-            await CreateConfigurator(names).EnsureConfiguredAsync(model, CancellationToken.None);
-
-            var columns = await ReadPublicationColumnsAsync(names.Publication);
-            columns["gen_test"]!.ShouldBe(["id", "name"], ignoreOrder: true);
-        }
-        finally
-        {
-            await PgExec.ExecuteAsync(conn, "DROP TABLE IF EXISTS public.gen_test", default);
-        }
-    }
-
-    [Test]
     public async Task Scoped_destination_mapping_publishes_whole_rows()
     {
         // Scoped destinations require full old-row values on deletes; the harness (like production

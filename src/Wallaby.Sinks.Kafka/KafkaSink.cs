@@ -9,7 +9,6 @@ using Dekaf.Protocol;
 using Microsoft.Extensions.Logging;
 using Wallaby.Abstractions;
 using Wallaby.Sinks.Kafka.Internal;
-using CompressionType = Dekaf.Protocol.Records.CompressionType;
 using DeliveryResult = Wallaby.Abstractions.DeliveryResult;
 
 namespace Wallaby.Sinks.Kafka;
@@ -26,6 +25,8 @@ namespace Wallaby.Sinks.Kafka;
 /// </summary>
 public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
 {
+    private static readonly TimeSpan MaxRequestTimeout = TimeSpan.FromSeconds(30);
+
     private readonly KafkaSinkOptions _options;
     private readonly ILoggerFactory? _loggerFactory;
 
@@ -49,6 +50,9 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
 
     internal KafkaSink(string name, KafkaSinkOptions options, IKafkaProducer<string, byte[]>? producer, ILoggerFactory? loggerFactory = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        KafkaBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         _producer = producer;
@@ -81,16 +85,17 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         }
 
         // The delivery timeout must cover at least one full request plus the linger window; derive the
-        // per-request bound from the configured ceiling so any valid MessageTimeoutMs builds.
-        var requestTimeoutMs = Math.Min(30_000, _options.MessageTimeoutMs - _options.LingerMs);
+        // per-request bound from the configured ceiling so any valid MessageTimeout builds.
+        var requestTimeout = TimeSpan.FromTicks(
+            Math.Min(MaxRequestTimeout.Ticks, (_options.MessageTimeout - _options.Linger).Ticks));
 
         var builder = GetClient().CreateProducer<string, byte[]>()
-            .WithLinger(TimeSpan.FromMilliseconds(_options.LingerMs))
-            .WithRequestTimeout(TimeSpan.FromMilliseconds(requestTimeoutMs))
-            .WithDeliveryTimeout(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs))
+            .WithLinger(_options.Linger)
+            .WithRequestTimeout(requestTimeout)
+            .WithDeliveryTimeout(_options.MessageTimeout)
             // A produce call also blocks on metadata/buffer space before enqueueing; bound that wait by
-            // the same ceiling so every delivery failure surfaces within MessageTimeoutMs.
-            .WithMaxBlock(TimeSpan.FromMilliseconds(_options.MessageTimeoutMs));
+            // the same ceiling so every delivery failure surfaces within MessageTimeout.
+            .WithMaxBlock(_options.MessageTimeout);
         ApplyCompression(builder, _options.Compression);
         _options.ConfigureProducer?.Invoke(builder);
 
@@ -104,22 +109,22 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
     }
 
     // Lz4/Zstd/Snappy also register their codec, so selecting them is a single call per type.
-    private static void ApplyCompression(ProducerBuilder<string, byte[]> builder, CompressionType compression)
+    private static void ApplyCompression(ProducerBuilder<string, byte[]> builder, KafkaSinkCompression compression)
     {
         switch (compression)
         {
-            case CompressionType.None:
+            case KafkaSinkCompression.None:
                 break;
-            case CompressionType.Gzip:
+            case KafkaSinkCompression.Gzip:
                 builder.UseGzipCompression();
                 break;
-            case CompressionType.Lz4:
+            case KafkaSinkCompression.Lz4:
                 builder.UseLz4Compression();
                 break;
-            case CompressionType.Zstd:
+            case KafkaSinkCompression.Zstd:
                 builder.UseZstdCompression();
                 break;
-            case CompressionType.Snappy:
+            case KafkaSinkCompression.Snappy:
                 builder.UseSnappyCompression();
                 break;
             default:
@@ -142,14 +147,14 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         }
 
         // One deadline across all topics: the admin client retries transient failures internally, so an
-        // unreachable broker would otherwise stall the leader session well past AdminTimeoutMs.
+        // unreachable broker would otherwise stall the leader session well past AdminTimeout.
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(_options.AdminTimeoutMs);
+        deadline.CancelAfter(_options.AdminTimeout);
 
         try
         {
             await using var admin = GetClient().CreateAdminClient().Build();
-            var createOptions = new CreateTopicsOptions { TimeoutMs = _options.AdminTimeoutMs };
+            var createOptions = new CreateTopicsOptions { TimeoutMs = (int)_options.AdminTimeout.TotalMilliseconds };
             foreach (var topic in _options.Topics)
             {
                 var spec = new NewTopic
@@ -176,7 +181,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             throw new TimeoutException(
-                $"Kafka topic creation for sink '{Name}' timed out after {_options.AdminTimeoutMs}ms.");
+                $"Kafka topic creation for sink '{Name}' timed out after {_options.AdminTimeout}.");
         }
     }
 
@@ -261,7 +266,7 @@ public sealed class KafkaSink : ISink, ISinkInitializer, IAsyncDisposable
         }
     }
 
-    // The producer retries retriable broker errors internally until MessageTimeoutMs, so what surfaces
+    // The producer retries retriable broker errors internally until MessageTimeout, so what surfaces
     // here is either a request the cluster will never accept or a transient condition worth retrying
     // from the dispatcher with backoff.
     private static DeliveryResult Classify(KafkaException exception)

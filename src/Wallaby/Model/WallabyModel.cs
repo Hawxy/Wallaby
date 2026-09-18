@@ -1,7 +1,7 @@
 namespace Wallaby.Model;
 
 /// <summary>
-/// The set of tables selected for capture, derived from the consumer's EF Core model. Built once at
+/// The set of tables selected for capture, derived from the storage provider's model. Built once at
 /// startup and used for self-configuration, decoding, and materialization. Includes both the directly
 /// mapped (primary) tables and any tables captured only to drive dependent fan-out.
 /// </summary>

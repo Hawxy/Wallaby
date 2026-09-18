@@ -183,4 +183,29 @@ public class MartenModelProviderTests
         // A hierarchy is one table, carried by its root.
         tables.ShouldBe(["docs.mt_doc_plaindoc", "docs.mt_doc_softdoc", "docs.mt_doc_tenantdoc", "docs.mt_doc_basedoc"], ignoreOrder: true);
     }
+
+    [Test]
+    public void ScopedByTenant_on_a_document_without_a_tenant_column_fails_at_startup()
+    {
+        var spec = new CaptureSpec
+        {
+            DeclaredEntities = [typeof(PlainDoc)],
+            RequiresTenantColumn = new HashSet<Type> { typeof(PlainDoc) },
+        };
+
+        Should.Throw<WallabyConfigurationException>(() => Provider().BuildCapturePlan(spec))
+            .Message.ShouldContain("MultiTenanted");
+    }
+
+    [Test]
+    public void ScopedByTenant_on_a_conjoined_document_is_accepted()
+    {
+        var spec = new CaptureSpec
+        {
+            DeclaredEntities = [typeof(TenantDoc)],
+            RequiresTenantColumn = new HashSet<Type> { typeof(TenantDoc) },
+        };
+
+        Provider().BuildCapturePlan(spec).Model.FindByClrType(typeof(TenantDoc)).ShouldNotBeNull();
+    }
 }

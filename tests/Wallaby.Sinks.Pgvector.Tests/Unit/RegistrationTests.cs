@@ -29,14 +29,14 @@ public class RegistrationTests
     [Test]
     public void Invalid_options_fail()
     {
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.ConnectionString = " ")));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.Dimensions = 0)));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.Schema = "bad-schema")));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.DefaultTable = "bad.table")));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.MaxRowsPerBatch = 0)));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.MaxEmbeddingBatchSize = 0)));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.MaxEmbeddingConcurrency = 0)));
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.VectorField = " ")));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.ConnectionString = " ")));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.Dimensions = 0)));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.Schema = "bad-schema")));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.DefaultTable = "bad.table")));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.MaxRecordsPerRequest = 0)));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.MaxEmbeddingBatchSize = 0)));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.MaxEmbeddingConcurrency = 0)));
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.VectorField = " ")));
     }
 
     [Test]
@@ -44,18 +44,25 @@ public class RegistrationTests
     {
         // Schema and DefaultTable reach interpolated SQL, so the constructor enforces the identifier
         // rule even when the builder's Validate is bypassed.
-        Should.Throw<ArgumentException>(() => new PgvectorSink("pgv", Valid(o => o.Schema = "bad\"schema")));
-        Should.Throw<ArgumentException>(() => new PgvectorSink("pgv", Valid(o => o.DefaultTable = "bad.table")));
+        Should.Throw<WallabyConfigurationException>(() => new PgvectorSink("pgv", Valid(o => o.Schema = "bad\"schema")));
+        Should.Throw<WallabyConfigurationException>(() => new PgvectorSink("pgv", Valid(o => o.DefaultTable = "bad.table")));
     }
 
     [Test]
     public void A_partial_embedding_configuration_fails()
     {
-        var ex = Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(
+        var ex = Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(
             Valid(o => o.EmbeddingGenerator = new StubEmbeddingGenerator())));
         ex.Message.ShouldContain("together");
 
-        Should.Throw<ArgumentException>(() => PgvectorBuilderExtensions.Validate(
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(
             Valid(o => { o.EmbedText = d => "x"; o.EmbeddingVersion = "m/1"; })));
+    }
+
+    [Test]
+    public void Embedding_timeout_must_be_positive_when_set()
+    {
+        Should.Throw<WallabyConfigurationException>(() => PgvectorBuilderExtensions.Validate(Valid(o => o.EmbeddingTimeout = TimeSpan.Zero)));
+        PgvectorBuilderExtensions.Validate(Valid(o => o.EmbeddingTimeout = null));
     }
 }

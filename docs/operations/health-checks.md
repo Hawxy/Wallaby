@@ -28,7 +28,8 @@ Registered as **`wallaby`** (tag `wallaby`). It reports:
 
 - **Unhealthy**: When the CDC background service has **terminated** (faulted out of its hosted loop), or
   when the leader is **crash-looping**: sessions keep dying before a single transaction is fully delivered
-  and acknowledged (a poison event, e.g. a throwing transform or a sink permanently rejecting a batch).
+  and acknowledged (a poison event, e.g. a throwing transform or a sink permanently rejecting a batch;
+  one sink's permanent failure stalls every sink, since all share the slot).
   Delivery does not advance in that state, so after `CrashLoopFailureThreshold` consecutive leader-session
   failures (default **3**) the check goes Unhealthy and its description carries the last error.
 - **Degraded**: While the installation is [suspended](/operations/major-version-upgrades): the node is
@@ -76,6 +77,7 @@ The check attaches a `data` dictionary for diagnostics. Keys with no value yet (
 | `consecutiveBackfillPassFailures` | The backfill worker's own loop failing outright rather than one table. |
 | `slotName` | The replication slot this node manages. |
 | `lastSinkDeliveryAt:<sink>` | When each sink last accepted a batch; one entry per sink that has delivered this session. |
+| `backfillTable`, `backfillRowsCopied`, `backfillStartedAt`, `backfillEstimatedRows` | The whole-table backfill this leader is running: its table, rows copied so far, fresh start time and, when the table has statistics, the planner's row estimate. Present only while one runs. |
 
 Each subsystem's Degraded grade fires on the worse of its job and pass counters against the same
 threshold. `consecutiveLeaderFailures` only resets on real progress or a clean step-down - not just

@@ -13,7 +13,6 @@
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.Tests" />
-    <InternalsVisibleTo Include="Wallaby.Sinks.Meilisearch.Tests" />
   </ItemGroup>
 
   <ItemGroup>

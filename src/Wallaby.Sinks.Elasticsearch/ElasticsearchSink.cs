@@ -1,3 +1,4 @@
+using System.Buffers;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Wallaby.Abstractions;
@@ -11,9 +12,9 @@ namespace Wallaby.Sinks.Elasticsearch;
 /// deletions remove by that same id. Records are routed to the index named by
 /// <see cref="SinkRecord.Destination"/> (falling back to <see cref="ElasticsearchSinkOptions.DefaultIndex"/>);
 /// indices are not created or configured by the sink: they auto-create on first write unless pre-created
-/// with explicit settings/mappings.
+/// with explicit settings/mappings. A purge empties an index with <c>_delete_by_query</c>.
 /// </summary>
-public sealed class ElasticsearchSink : ISink, IDisposable
+public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
 {
     private readonly ElasticsearchSinkOptions _options;
     private readonly ElasticsearchClientSettings _settings;
@@ -28,6 +29,9 @@ public sealed class ElasticsearchSink : ISink, IDisposable
     /// <param name="options">Connection, routing, and delivery-behaviour settings.</param>
     public ElasticsearchSink(string name, ElasticsearchSinkOptions options)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        ElasticsearchBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         var endpoint = new Uri(options.Endpoint, UriKind.Absolute);
@@ -39,8 +43,7 @@ public sealed class ElasticsearchSink : ISink, IDisposable
 
     private static ElasticsearchClientSettings BuildSettings(Uri endpoint, ElasticsearchSinkOptions options)
     {
-        var settings = new ElasticsearchClientSettings(endpoint)
-            .RequestTimeout(TimeSpan.FromMilliseconds(options.TimeoutMs));
+        var settings = new ElasticsearchClientSettings(endpoint);
         if (options.ApiKey is not null)
         {
             settings.Authentication(new ApiKey(options.ApiKey));
@@ -59,16 +62,19 @@ public sealed class ElasticsearchSink : ISink, IDisposable
     public async Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct)
     {
         var records = batch.Records;
+        // One buffer serves every chunk of this call; the previous request has fully settled before the
+        // next chunk resets it.
+        var buffer = new ArrayBufferWriter<byte>();
 
         // Chunks are sent sequentially so commit order is preserved across requests.
-        for (var offset = 0; offset < records.Count; offset += _options.MaxActionsPerRequest)
+        for (var offset = 0; offset < records.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxActionsPerRequest, records.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, records.Count - offset);
 
-            byte[] payload;
+            buffer.ResetWrittenCount();
             try
             {
-                payload = BulkJson.Write(Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
+                BulkJson.Write(buffer, Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
             }
             catch (Exception ex) when (ex is not WallabyConfigurationException)
             {
@@ -76,7 +82,7 @@ public sealed class ElasticsearchSink : ISink, IDisposable
                 return DeliveryResult.Permanent($"Elasticsearch bulk serialization failed: {ex.Message}", ex);
             }
 
-            var failure = await SendAsync(payload, ct);
+            var failure = await SendAsync(buffer.WrittenMemory, ct);
             if (failure is not null)
             {
                 return failure;
@@ -86,16 +92,45 @@ public sealed class ElasticsearchSink : ISink, IDisposable
         return DeliveryResult.Success;
     }
 
+    /// <inheritdoc />
+    public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
+    {
+        var index = SinkDestination.Resolve(request, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
+        var path = $"/{Uri.EscapeDataString(index)}/_delete_by_query?conflicts=proceed&refresh=true";
+
+        var response = await _client.Transport.RequestAsync<BytesResponse>(
+            new EndpointPath(HttpMethod.POST, path), PostData.ReadOnlyMemory(BulkJson.MatchAllQuery), null, RequestConfig(), ct);
+
+        var status = response.ApiCallDetails.HttpStatusCode;
+        if (status == 404)
+        {
+            return; // The index was never written: nothing to purge.
+        }
+        if (status is null or < 200 or >= 300 || response.ApiCallDetails.OriginalException is not null)
+        {
+            throw new InvalidOperationException(
+                $"Elasticsearch purge of index '{index}' failed: " +
+                (response.ApiCallDetails.OriginalException?.Message ?? $"status {status}"),
+                response.ApiCallDetails.OriginalException);
+        }
+        if (BulkJson.DescribeDeleteByQueryFailure(response.Body) is { } failure)
+        {
+            throw new InvalidOperationException($"Elasticsearch purge of index '{index}' failed: {failure}");
+        }
+    }
+
+    private RequestConfiguration RequestConfig() => new() { RequestTimeout = _options.Timeout };
+
     /// <summary>Send one bulk body; null on success, otherwise the classified failure.</summary>
-    private async Task<DeliveryResult?> SendAsync(byte[] payload, CancellationToken ct)
+    private async Task<DeliveryResult?> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         var path = _options.Refresh ? "/_bulk?refresh=wait_for" : "/_bulk";
 
-        StringResponse response;
+        BytesResponse response;
         try
         {
-            response = await _client.Transport.RequestAsync<StringResponse>(
-                new EndpointPath(HttpMethod.POST, path), PostData.Bytes(payload), null, null, ct);
+            response = await _client.Transport.RequestAsync<BytesResponse>(
+                new EndpointPath(HttpMethod.POST, path), PostData.ReadOnlyMemory(payload), null, RequestConfig(), ct);
         }
         catch (TransportException ex)
         {

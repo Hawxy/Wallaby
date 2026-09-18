@@ -27,6 +27,28 @@ public class WallabyHealthCheckTests
     }
 
     [Test]
+    public async Task An_active_backfill_is_described()
+    {
+        var started = DateTimeOffset.UtcNow;
+        var snapshot = Snap(WallabyNodeRole.Leader) with
+        {
+            ActiveBackfill = new WallabyBackfillProgress("public.orders", 250, 1_000, started),
+        };
+
+        var result = await new WallabyHealthCheck(new FakeStatus(snapshot))
+            .CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        result.Data["backfillTable"].ShouldBe("public.orders");
+        result.Data["backfillRowsCopied"].ShouldBe(250L);
+        result.Data["backfillEstimatedRows"].ShouldBe(1_000L);
+        result.Data["backfillStartedAt"].ShouldBe(started);
+
+        var idle = await new WallabyHealthCheck(new FakeStatus(Snap(WallabyNodeRole.Leader)))
+            .CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+        idle.Data.ContainsKey("backfillTable").ShouldBeFalse();
+    }
+
+    [Test]
     [Arguments(WallabyNodeRole.Starting)]
     [Arguments(WallabyNodeRole.Leader)]
     [Arguments(WallabyNodeRole.Standby)]

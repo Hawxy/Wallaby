@@ -126,7 +126,7 @@ internal sealed class PgvectorTables(string sinkName, NpgsqlDataSource dataSourc
 
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
-        foreach (var chunk in rows.Chunk(options.MaxRowsPerBatch))
+        foreach (var chunk in rows.Chunk(options.MaxRecordsPerRequest))
         {
             await using var writeBatch = new NpgsqlBatch(connection, transaction);
             foreach (var row in chunk)

@@ -1,4 +1,4 @@
-namespace Wallaby.Abstractions;
+namespace Wallaby.Internal.State;
 
 /// <summary>
 /// The durable replication position for a slot: the highest commit LSN whose changes have been
@@ -6,4 +6,4 @@ namespace Wallaby.Abstractions;
 /// </summary>
 /// <param name="ConfirmedLsn">The confirmed commit LSN, as a <see cref="ulong"/>.</param>
 /// <param name="UpdatedAt">When the checkpoint was last persisted.</param>
-public sealed record Checkpoint(ulong ConfirmedLsn, DateTimeOffset UpdatedAt);
+internal sealed record Checkpoint(ulong ConfirmedLsn, DateTimeOffset UpdatedAt);

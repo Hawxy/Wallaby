@@ -5,14 +5,14 @@ using static Wallaby.Sinks.Meilisearch.Tests.Unit.MeilisearchTestHelpers;
 
 namespace Wallaby.Sinks.Meilisearch.Tests.Unit;
 
-/// <summary>Large batches split into sequential requests capped at <c>MaxRecordsPerBatch</c> records.</summary>
+/// <summary>Large batches split into sequential requests capped at <c>MaxRecordsPerRequest</c> records.</summary>
 public class BatchingTests
 {
     [Test]
     public async Task Upserts_are_chunked_by_max_records_per_batch()
     {
         var stub = new StubHandler();
-        var sink = Sink(stub, o => o.MaxRecordsPerBatch = 2);
+        var sink = Sink(stub, o => o.MaxRecordsPerRequest = 2);
         var records = Enumerable.Range(1, 5).Select(i => Upsert(i.ToString())).ToArray();
 
         var result = await sink.DeliverAsync(Batch(records), CancellationToken.None);
@@ -25,7 +25,7 @@ public class BatchingTests
     public async Task Deletions_are_chunked_by_max_records_per_batch()
     {
         var stub = new StubHandler();
-        var sink = Sink(stub, o => o.MaxRecordsPerBatch = 2);
+        var sink = Sink(stub, o => o.MaxRecordsPerRequest = 2);
         var records = Enumerable.Range(1, 5).Select(i => Delete(i.ToString())).ToArray();
 
         var result = await sink.DeliverAsync(Batch(records), CancellationToken.None);
@@ -38,7 +38,7 @@ public class BatchingTests
     public async Task Upserts_complete_before_deletions_within_an_index()
     {
         var stub = new StubHandler();
-        var sink = Sink(stub, o => o.MaxRecordsPerBatch = 10);
+        var sink = Sink(stub, o => o.MaxRecordsPerRequest = 10);
 
         // Interleaved on input; the sink still applies all upserts, then all deletions.
         var result = await sink.DeliverAsync(
@@ -53,10 +53,10 @@ public class BatchingTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddMeilisearchSink("meili", o =>
         {
-            o.Host = "http://localhost:7700";
-            o.MaxRecordsPerBatch = 0;
+            o.Endpoint = "http://localhost:7700";
+            o.MaxRecordsPerRequest = 0;
         }));
     }
 }

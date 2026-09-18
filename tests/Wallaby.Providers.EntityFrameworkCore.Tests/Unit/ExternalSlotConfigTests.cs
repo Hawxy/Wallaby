@@ -342,4 +342,14 @@ public class ExternalSlotConfigTests
         Should.Throw<WallabyConfigurationException>(() => ExternalSlotResolver.Resolve([registration], modelProviders: []))
             .Message.ShouldContain("ForAllEntities()");
     }
+
+    [Test]
+    public void An_external_slot_name_must_be_a_valid_replication_slot_name()
+    {
+        var builder = ProvisionOnlyBuilder();
+        builder.AddExternalSlot("Elt-Slot", s => s.ForTable("orders"));
+
+        Should.Throw<WallabyConfigurationException>(() => builder.Build())
+            .Message.ShouldContain("replication slot name");
+    }
 }

@@ -11,7 +11,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", _ => { }))
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", _ => { }))
             .Message.ShouldContain("BootstrapServers");
     }
 
@@ -20,10 +20,10 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", o =>
         {
             o.BootstrapServers = "broker:9092";
-            o.MessageTimeoutMs = 0;
+            o.MessageTimeout = TimeSpan.Zero;
         }));
     }
 
@@ -32,10 +32,10 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", o =>
         {
             o.BootstrapServers = "broker:9092";
-            o.LingerMs = -1;
+            o.Linger = TimeSpan.FromMilliseconds(-1);
         }));
     }
 
@@ -46,7 +46,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", o =>
         {
             o.BootstrapServers = "broker:9092";
             o.Topics.Add(new KafkaTopicConfig { Name = "orders", Partitions = partitions });
@@ -60,7 +60,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", o =>
         {
             o.BootstrapServers = "broker:9092";
             o.Topics.Add(new KafkaTopicConfig { Name = "orders", ReplicationFactor = replicationFactor });
@@ -72,7 +72,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", o =>
         {
             o.BootstrapServers = "broker:9092";
             o.Topics.Add(new KafkaTopicConfig { Name = " " });
@@ -80,15 +80,22 @@ public class RegistrationTests
     }
 
     [Test]
-    public void Brotli_compression_is_rejected()
+    public void An_undefined_compression_value_is_rejected()
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddKafkaSink("kafka", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddKafkaSink("kafka", o =>
         {
             o.BootstrapServers = "broker:9092";
-            o.Compression = Dekaf.Protocol.Records.CompressionType.Brotli;
-        })).Message.ShouldContain("Brotli");
+            o.Compression = (KafkaSinkCompression)42;
+        })).Message.ShouldContain("Compression");
+    }
+
+    [Test]
+    public void The_constructor_validates_options()
+    {
+        Should.Throw<WallabyConfigurationException>(
+            () => new KafkaSink("kafka", new KafkaSinkOptions { BootstrapServers = " " }));
     }
 
     [Test]

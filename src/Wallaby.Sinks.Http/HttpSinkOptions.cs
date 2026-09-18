@@ -5,7 +5,7 @@ namespace Wallaby.Sinks.Http;
 /// <summary>Configuration for a <see cref="HttpSink"/>.</summary>
 public sealed class HttpSinkOptions
 {
-    /// <summary>Absolute URL every envelope is POSTed to, e.g. <c>https://api.example.com/wallaby</c>.</summary>
+    /// <summary>Absolute http(s) URL every envelope is POSTed to, e.g. <c>https://api.example.com/wallaby</c>.</summary>
     public required string Endpoint { get; set; }
 
     /// <summary>
@@ -54,10 +54,10 @@ public sealed class HttpSinkOptions
     public int MaxRecordsPerRequest { get; set; } = 500;
 
     /// <summary>
-    /// Per-request timeout in milliseconds. Enforced with a linked cancellation, so it composes with
-    /// any <see cref="HttpClient.Timeout"/> configured on the named client (whichever fires first).
+    /// Per-request timeout. Enforced with a linked cancellation, so it composes with any
+    /// <see cref="HttpClient.Timeout"/> configured on the named client (whichever fires first).
     /// </summary>
-    public int TimeoutMs { get; set; } = 30_000;
+    public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Serializer for document values beyond the natively written scalar types. On NativeAOT hosts,

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using Wallaby.Sinks;
@@ -17,7 +18,11 @@ public class BulkPayloadTests
 
     private static byte[] Write(IReadOnlyList<Wallaby.Abstractions.SinkRecord> records,
         int offset = 0, int? count = null, string? defaultIndex = null)
-        => BulkJson.Write(SinkName, records, offset, count ?? records.Count, defaultIndex, serializerOptions: null);
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        BulkJson.Write(buffer, SinkName, records, offset, count ?? records.Count, defaultIndex, serializerOptions: null);
+        return buffer.WrittenSpan.ToArray();
+    }
 
     [Test]
     public void Upsert_writes_an_action_line_and_a_document_line()

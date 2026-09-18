@@ -41,7 +41,8 @@ internal sealed class BackfillScheduler(
     SinkPurgeRunner purger,
     BackfillSchedulerOptions options,
     ILogger logger,
-    WallabyStatus? status = null)
+    WallabyStatus? status = null,
+    IBackfillRowEstimator? estimator = null)
 {
     // Base delay before retrying after a failed scheduler pass (the store itself unreachable;
     // individual table failures are handled per table), growing exponentially to a cap.
@@ -178,8 +179,11 @@ internal sealed class BackfillScheduler(
                     // Reset the cursor so the coordinator starts from the beginning.
                     await store.SaveAsync(
                         new BackfillState(
-                            qualifiedName, BackfillStatus.InProgress, table.TransformVersion, null, 0,
-                            DateTimeOffset.UtcNow),
+                            qualifiedName, BackfillStatus.InProgress, table.TransformVersion, 0,
+                            DateTimeOffset.UtcNow)
+                        {
+                            EstimatedRows = estimator is null ? null : await estimator.EstimateAsync(table.Table, ct),
+                        },
                         ct);
                 }
 

@@ -105,10 +105,11 @@ internal sealed class LeaderSession(
         await using var spill = CreateSpill();
 
         // Npgsql rejects a multi-host replication connection, so a multi-host string is resolved to its
-        // primary by probing; re-resolved each session, so a failover is picked up on re-election.
-        var replicationConnectionString = await ReplicationPrimaryResolver.ResolveAsync(
-            dataSource.ConnectionString, linked.Token);
-        if (!ReferenceEquals(replicationConnectionString, dataSource.ConnectionString))
+        // primary by probing; re-resolved each session, so a failover is picked up on re-election. The
+        // password provider (when set) supplies the token for the probes and the stream alike.
+        var authenticated = await dataSource.ConnectionStringWithPasswordAsync(linked.Token);
+        var replicationConnectionString = await ReplicationPrimaryResolver.ResolveAsync(authenticated, linked.Token);
+        if (!ReferenceEquals(replicationConnectionString, authenticated))
         {
             _logger.ReplicationPrimaryResolved(new NpgsqlConnectionStringBuilder(replicationConnectionString).Host!);
         }
@@ -132,7 +133,7 @@ internal sealed class LeaderSession(
                 AutoBackfillNewTables = options.AutoBackfillNewTables,
                 AutoBackfillOnVersionChange = options.AutoBackfillOnVersionChange,
             },
-            _logger, status);
+            _logger, status, new PostgresBackfillRowEstimator(dataSource.Source, _logger));
 
         // A background-task fault fails the whole leader session (first fault wins): the task records it,
         // cancels the workload, and the fault is rethrown below so the caller halts and retries with backoff.

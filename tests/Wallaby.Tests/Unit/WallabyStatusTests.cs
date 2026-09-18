@@ -11,7 +11,7 @@ public class WallabyStatusTests
         var status = new WallabyStatus();
 
         status.Current.Role.ShouldBe(WallabyNodeRole.Starting);
-        status.Current.LastIngestionLagSeconds.ShouldBe(-1d);
+        status.Current.LastIngestionLag.ShouldBeNull();
     }
 
     [Test]
@@ -27,7 +27,30 @@ public class WallabyStatusTests
         snapshot.Role.ShouldBe(WallabyNodeRole.Leader);
         snapshot.LeaderSince.ShouldBe(since);
         snapshot.LastAcknowledgedLsn.ShouldBe(42UL);
-        snapshot.LastIngestionLagSeconds.ShouldBe(3.5);
+        snapshot.LastIngestionLag.ShouldBe(TimeSpan.FromSeconds(3.5));
+    }
+
+    [Test]
+    public void An_active_backfill_is_tracked_until_it_ends_or_the_role_changes()
+    {
+        var status = new WallabyStatus();
+        status.EnterLeader(DateTimeOffset.UtcNow);
+        var started = DateTimeOffset.UtcNow;
+
+        status.BeginBackfill(new WallabyBackfillProgress("public.orders", 0, 1_000, started));
+        status.RecordBackfillProgress(new WallabyBackfillProgress("public.orders", 250, 1_000, started));
+
+        var active = status.Current.ActiveBackfill.ShouldNotBeNull();
+        active.RowsCopied.ShouldBe(250);
+        active.Fraction.ShouldBe(0.25);
+
+        status.EndBackfill();
+        status.Current.ActiveBackfill.ShouldBeNull();
+
+        status.BeginBackfill(new WallabyBackfillProgress("public.orders", 0, null, started));
+        status.Current.ActiveBackfill.ShouldNotBeNull().Fraction.ShouldBeNull();
+        status.EnterStandby();
+        status.Current.ActiveBackfill.ShouldBeNull();
     }
 
     [Test]
@@ -38,7 +61,7 @@ public class WallabyStatusTests
         status.RecordProgress(1, 5.0, DateTimeOffset.UtcNow);
         status.RecordProgress(2, -1, DateTimeOffset.UtcNow);
 
-        status.Current.LastIngestionLagSeconds.ShouldBe(5.0);
+        status.Current.LastIngestionLag.ShouldBe(TimeSpan.FromSeconds(5));
         status.Current.LastAcknowledgedLsn.ShouldBe(2UL);
     }
 

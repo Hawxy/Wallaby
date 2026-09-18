@@ -26,7 +26,8 @@ namespace Wallaby.Internal.Backfill;
 /// </para>
 /// </summary>
 internal sealed class WatermarkBackfillCoordinator(
-    NpgsqlDataSource dataSource, IBackfillStateStore store, ILogger logger, WallabyInstrumentation? instrumentation = null)
+    NpgsqlDataSource dataSource, IBackfillStateStore store, ILogger logger, WallabyInstrumentation? instrumentation = null,
+    WallabyStatus? status = null)
 {
     // Windows awaiting their high watermark. Added by the backfill/fan-out tasks, removed by the pipeline,
     // so this is the one structure that genuinely crosses threads.
@@ -75,17 +76,39 @@ internal sealed class WatermarkBackfillCoordinator(
 
         using var activity = _instr.StartBackfill(table.QualifiedName, WallabyInstrumentation.BackfillKindTable);
 
-        var rowsCopied = await RunChunkLoopAsync(
-            pager, table.QualifiedName, activity, cursor, startRows,
-            // Guarded save: a manual request arriving mid-run wins over every later progress write,
-            // so the row stays Requested and the scheduler re-runs the table fresh.
-            (cur, rows, hasMore, token) => store.SaveProgressAsync(
-                table.QualifiedName,
-                hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
-                KeysetCodec.SerializeCursor(cur, pkColumns),
-                rows,
-                token),
-            ct);
+        // Progress for the status snapshot and the gauges; the estimate and start time come from the
+        // fresh-run save, so a resumed run reports against the same denominator.
+        var progress = new WallabyBackfillProgress(
+            table.QualifiedName, startRows, existing?.EstimatedRows, existing?.StartedAt ?? DateTimeOffset.UtcNow);
+        status?.BeginBackfill(progress);
+        _instr.RecordActiveBackfill(progress);
+
+        long rowsCopied;
+        try
+        {
+            rowsCopied = await RunChunkLoopAsync(
+                pager, table.QualifiedName, activity, cursor, startRows,
+                // Guarded save: a manual request arriving mid-run wins over every later progress write,
+                // so the row stays Requested and the scheduler re-runs the table fresh.
+                async (cur, rows, hasMore, token) =>
+                {
+                    await store.SaveProgressAsync(
+                        table.QualifiedName,
+                        hasMore ? BackfillStatus.InProgress : BackfillStatus.Completed,
+                        KeysetCodec.SerializeCursor(cur, pkColumns),
+                        rows,
+                        token);
+                    progress = progress with { RowsCopied = rows };
+                    status?.RecordBackfillProgress(progress);
+                    _instr.RecordActiveBackfill(progress);
+                },
+                ct);
+        }
+        finally
+        {
+            status?.EndBackfill();
+            _instr.RecordActiveBackfill(null);
+        }
 
         activity?.SetTag("wallaby.backfill.rows", rowsCopied);
         logger.BackfillComplete(table.QualifiedName, rowsCopied);

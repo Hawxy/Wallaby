@@ -8,7 +8,7 @@ documents to pluggable **destinations** (sinks) with at-least-once delivery. It 
 the publication and replication slot from your model, supports **versioned backfill** (initial
 snapshots and shape-change reindexes), and is **cluster-safe** via leader election.
 
-**Meilisearch**, **Kafka**, **Elasticsearch**, **OpenSearch**, and **HTTP/webhook** sinks are supported out of the box.
+**Meilisearch**, **Kafka**, **Elasticsearch**, **OpenSearch**, **pgvector**, and **HTTP/webhook** sinks are supported out of the box.
 Contributions for additional sinks are welcome.
 
 Requires Postgres 15+ and .NET 10+.
@@ -17,19 +17,20 @@ Requires Postgres 15+ and .NET 10+.
 
 ## Packages
 
-| Project                        | Purpose                                  |
-|--------------------------------|------------------------------------------|
-| `Wallaby`                      | Core package (provider-agnostic).        |
-| `Wallaby.Providers.EntityFrameworkCore`  | EF Core storage provider.                |
-| `Wallaby.Providers.Marten`               | Marten storage provider.                 |
-| `Wallaby.Sinks.Http`           | HTTP/webhook destination sink.           |
-| `Wallaby.Sinks.Elasticsearch`  | Elasticsearch destination sink.          |
-| `Wallaby.Sinks.Kafka`          | Kafka destination sink (keyed messages, tombstone deletes). |
-| `Wallaby.Sinks.Meilisearch`    | Meilisearch destination sink.            |
-| `Wallaby.Sinks.OpenSearch`     | OpenSearch destination sink.             |
-| `Wallaby.Client`               | Standalone remote control plane (suspend/resume, backfills, inspection) via Postgres |
-| `Wallaby.Testing`              | End-to-end pipeline test harness with real logical replication. |
-| `Wallaby.AspNetCore.HealthChecks` | ASP.NET Core health check for Wallaby nodes. |
+| Project                                 | Purpose                                                                               |
+|-----------------------------------------|---------------------------------------------------------------------------------------|
+| `Wallaby`                               | Core package (provider-agnostic).                                                     |
+| `Wallaby.Providers.EntityFrameworkCore` | EF Core storage provider.                                                             |
+| `Wallaby.Providers.Marten`              | Marten storage provider.                                                              |
+| `Wallaby.Sinks.Http`                    | HTTP/webhook destination sink.                                                        |
+| `Wallaby.Sinks.Elasticsearch`           | Elasticsearch destination sink.                                                       |
+| `Wallaby.Sinks.Kafka`                   | Kafka destination sink (keyed messages, tombstone deletes).                           |
+| `Wallaby.Sinks.Meilisearch`             | Meilisearch destination sink.                                                         |
+| `Wallaby.Sinks.OpenSearch`              | OpenSearch destination sink.                                                          |
+| `Wallaby.Sinks.Pgvector`                | Postgres pgvector destination sink, with optional sink-side embedding.                |
+| `Wallaby.Client`                        | Standalone remote control plane (suspend/resume, backfills, inspection) via Postgres. |
+| `Wallaby.Testing`                       | End-to-end pipeline test harness with real logical replication.                       |
+| `Wallaby.AspNetCore.HealthChecks`       | ASP.NET Core liveness health check for Wallaby nodes.                                 |
 
 ## Quick start
 
@@ -41,7 +42,7 @@ builder.Services.AddWallaby(cdc =>
     cdc.UseEntityFrameworkCore<AppDbContext>()
        .UseConnectionString(conn)
        .ConfigureOptions(o => { o.SlotName = "app_cdc"; o.PublicationName = "app_cdc_pub"; })
-       .AddMeilisearchSink("meili", m => { m.Host = "http://localhost:7700"; m.ApiKey = key; })
+       .AddMeilisearchSink("meili", m => { m.Endpoint = "http://localhost:7700"; m.ApiKey = key; })
 
        // Mapping = routing only. The transform does the data shaping.
        .WithMappings(sink => sink

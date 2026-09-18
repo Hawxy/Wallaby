@@ -16,10 +16,10 @@ public sealed class OpenSearchSinkOptions
     public string? Password { get; set; }
 
     /// <summary>
-    /// Full override for building the client's connection settings from <see cref="Endpoint"/> — use it for
+    /// Full override for building the client's connection settings from <see cref="Endpoint"/>: use it for
     /// AWS SigV4 (the <c>OpenSearch.Net.Auth.AwsSigV4</c> connection), client certificates, connection pools,
-    /// or proxies. When set, <see cref="Username"/>/<see cref="Password"/> are ignored; configure all
-    /// authentication on the returned settings.
+    /// or proxies. When set, <see cref="Username"/>/<see cref="Password"/> must be left unset (configure
+    /// authentication on the returned settings); <see cref="Timeout"/> still applies per request.
     /// </summary>
     public Func<Uri, ConnectionSettings>? ConfigureConnection { get; set; }
 
@@ -27,13 +27,16 @@ public sealed class OpenSearchSinkOptions
     public string? DefaultIndex { get; set; }
 
     /// <summary>
-    /// Maximum actions per <c>_bulk</c> request. Larger batches are split into sequential requests,
+    /// Maximum records per <c>_bulk</c> request. Larger batches are split into sequential requests,
     /// preserving commit order.
     /// </summary>
-    public int MaxActionsPerRequest { get; set; } = 500;
+    public int MaxRecordsPerRequest { get; set; } = 500;
 
-    /// <summary>Per-request timeout in milliseconds.</summary>
-    public int TimeoutMs { get; set; } = 30_000;
+    /// <summary>
+    /// Per-request timeout, applied to every <c>_bulk</c> request and to a purge's <c>_delete_by_query</c>
+    /// (which runs synchronously, so a very large index may need more than the default).
+    /// </summary>
+    public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// When true, bulk requests use <c>refresh=wait_for</c> so documents are searchable before the batch is
@@ -43,10 +46,8 @@ public sealed class OpenSearchSinkOptions
     public bool Refresh { get; set; }
 
     /// <summary>
-    /// Serializer for document values beyond the natively written scalar types. On NativeAOT hosts,
-    /// point <see cref="JsonSerializerOptions.TypeInfoResolver"/> at a source-generated
-    /// <see cref="System.Text.Json.Serialization.JsonSerializerContext"/> covering the value types your
-    /// transforms emit; without it, non-scalar values fail delivery permanently on AOT.
+    /// Serializer for document values beyond the natively written scalar types (numbers, strings, dates,
+    /// <c>byte[]</c> as base64, vectors as number arrays). Null uses the default reflection-based options.
     /// </summary>
     public JsonSerializerOptions? SerializerOptions { get; set; }
 }

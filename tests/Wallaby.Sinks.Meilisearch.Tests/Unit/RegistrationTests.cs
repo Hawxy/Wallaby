@@ -8,7 +8,7 @@ namespace Wallaby.Sinks.Meilisearch.Tests.Unit;
 /// <summary>Validation and container requirements of <c>AddMeilisearchSink</c>.</summary>
 public class RegistrationTests
 {
-    private static readonly MeilisearchSinkOptions ValidOptions = new() { Host = "http://localhost:7700" };
+    private static readonly MeilisearchSinkOptions ValidOptions = new() { Endpoint = "http://localhost:7700" };
 
     [Test]
     public void Sink_resolution_requires_the_http_client_factory()
@@ -26,7 +26,7 @@ public class RegistrationTests
         var services = new ServiceCollection();
         var builder = new WallabyBuilder(services); // as constructed by the eager AddWallaby overload
 
-        builder.AddMeilisearchSink("meili", o => o.Host = "http://localhost:7700");
+        builder.AddMeilisearchSink("meili", o => o.Endpoint = "http://localhost:7700");
 
         using var provider = services.BuildServiceProvider();
         provider.GetService<IHttpMessageHandlerFactory>().ShouldNotBeNull();
@@ -61,26 +61,27 @@ public class RegistrationTests
     [Test]
     [Arguments("")]
     [Arguments("meili/relative")]
-    public void Host_must_be_an_absolute_url(string host)
+    [Arguments("ftp://meili.local")]
+    public void Endpoint_must_be_an_absolute_http_url(string endpoint)
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o => o.Host = host))
-            .Message.ShouldContain("absolute");
+        Should.Throw<WallabyConfigurationException>(() => builder.AddMeilisearchSink("meili", o => o.Endpoint = endpoint))
+            .Message.ShouldContain("absolute http(s)");
     }
 
     [Test]
-    [Arguments(0d)]
-    [Arguments(-1d)]
-    public void Wait_timeout_must_be_positive(double waitTimeoutMs)
+    [Arguments(0)]
+    [Arguments(-1)]
+    public void Wait_timeout_must_be_positive(int waitTimeoutSeconds)
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddMeilisearchSink("meili", o =>
         {
-            o.Host = "http://localhost:7700";
-            o.WaitTimeoutMs = waitTimeoutMs;
-        })).Message.ShouldContain("WaitTimeoutMs");
+            o.Endpoint = "http://localhost:7700";
+            o.WaitTimeout = TimeSpan.FromSeconds(waitTimeoutSeconds);
+        })).Message.ShouldContain("WaitTimeout");
     }
 
     [Test]
@@ -88,11 +89,23 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddMeilisearchSink("meili", o =>
         {
-            o.Host = "http://localhost:7700";
-            o.WaitIntervalMs = 0;
-        })).Message.ShouldContain("WaitIntervalMs");
+            o.Endpoint = "http://localhost:7700";
+            o.WaitInterval = TimeSpan.Zero;
+        })).Message.ShouldContain("WaitInterval");
+    }
+
+    [Test]
+    public void The_constructor_validates_options()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient();
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IHttpMessageHandlerFactory>();
+
+        Should.Throw<WallabyConfigurationException>(
+            () => new MeilisearchSink("meili", new MeilisearchSinkOptions { Endpoint = "meili/relative" }, factory));
     }
 
     [Test]
@@ -100,9 +113,9 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddMeilisearchSink("meili", o =>
         {
-            o.Host = "http://localhost:7700";
+            o.Endpoint = "http://localhost:7700";
             o.PrimaryKey = " ";
         })).Message.ShouldContain("PrimaryKey");
     }
@@ -112,9 +125,9 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddMeilisearchSink("meili", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddMeilisearchSink("meili", o =>
         {
-            o.Host = "http://localhost:7700";
+            o.Endpoint = "http://localhost:7700";
             o.ConfigureIndex("");
         })).Message.ShouldContain("Name");
     }
@@ -131,7 +144,7 @@ public class RegistrationTests
         var builder = new WallabyBuilder(services);
 
         var registration = builder
-            .AddMeilisearchSink("meili", (sp, o) => o.Host = sp.GetRequiredService<HostSetting>().Url)
+            .AddMeilisearchSink("meili", (sp, o) => o.Endpoint = sp.GetRequiredService<HostSetting>().Url)
             .Registration;
 
         using var provider = services.BuildServiceProvider();
@@ -149,11 +162,11 @@ public class RegistrationTests
         var builder = new WallabyBuilder(services); // registers AddHttpClient eagerly
 
         var registration = builder
-            .AddMeilisearchSink("meili", (_, o) => o.Host = "meili/relative")
+            .AddMeilisearchSink("meili", (_, o) => o.Endpoint = "meili/relative")
             .Registration;
 
         using var provider = services.BuildServiceProvider();
-        Should.Throw<ArgumentException>(() => registration.Factory(provider))
+        Should.Throw<WallabyConfigurationException>(() => registration.Factory(provider))
             .Message.ShouldContain("absolute");
     }
 }

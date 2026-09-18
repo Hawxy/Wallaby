@@ -8,6 +8,9 @@ namespace Wallaby.Providers.EntityFrameworkCore;
 /// <summary>EF Core provider registration for the Wallaby builder.</summary>
 public static class EfCoreWallabyBuilderExtensions
 {
+    /// <summary>The provider name this package registers under, for <c>Map&lt;T&gt;().FromProvider(...)</c>.</summary>
+    public const string ProviderName = "EntityFrameworkCore";
+
     /// <summary>
     /// Drive capture from the EF Core model of <typeparamref name="TContext"/> and lease it for transform
     /// enrichment. Required whenever Wallaby streams (any sink)
@@ -17,13 +20,13 @@ public static class EfCoreWallabyBuilderExtensions
     /// otherwise a DI scope). Omit it entirely for a provision-only worker that declares external slots by
     /// table name only.
     /// </summary>
-    public static WallabyBuilder UseEntityFrameworkCore<TContext>(this WallabyBuilder cdc)
+    public static WallabyBuilder UseEntityFrameworkCore<TContext>(this WallabyBuilder builder)
         where TContext : DbContext
     {
-        ArgumentNullException.ThrowIfNull(cdc);
-        return cdc.UseProvider(new WallabyProviderRegistration
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.UseProvider(new WallabyProviderRegistration
         {
-            Name = "EntityFrameworkCore",
+            Name = ProviderName,
             ModelProvider = sp => new EfCoreModelProvider(DbContextResolver.ReadModel<TContext>(sp)),
             EnrichmentSessions = sp => new DbContextEnrichmentSessionProvider(() => DbContextResolver.Lease<TContext>(sp)),
         });
@@ -36,11 +39,11 @@ public static class EfCoreWallabyBuilderExtensions
     /// only this provider's mappings are affected.
     /// </summary>
     public static WallabyBuilder UseScopedDbContext(
-        this WallabyBuilder cdc, Func<object?, IServiceProvider, DbContext> factory)
+        this WallabyBuilder builder, Func<object?, IServiceProvider, DbContext> factory)
     {
-        ArgumentNullException.ThrowIfNull(cdc);
+        ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(factory);
-        return cdc.UseScopedEnrichmentSessions(
-            "EntityFrameworkCore", sp => new ScopedDbContextEnrichmentSessionProvider(factory, sp));
+        return builder.UseScopedEnrichmentSessions(
+            ProviderName, sp => new ScopedDbContextEnrichmentSessionProvider(factory, sp));
     }
 }

@@ -22,7 +22,7 @@ internal sealed class SlotProvisioner(ILogger logger)
         var existing = await GetSlotAsync(connection, slot, ct);
         if (existing is not null)
         {
-            var (slotType, plugin, walStatus) = existing.Value;
+            var (slotType, plugin, walStatus, invalidationReason) = existing.Value;
 
             // Adopt a slot we didn't create this run. It must be a pgoutput logical slot — anything else
             // (a physical slot, or a logical slot on a different output plugin) can't serve this slot's
@@ -45,10 +45,10 @@ internal sealed class SlotProvisioner(ILogger logger)
                 return (false, null, false);
             }
 
-            // The server invalidated the slot (e.g. max_slot_wal_keep_size exceeded); its WAL is gone and
-            // streaming from it can never resume. Recreate it — the caller repairs the missed window via
-            // checkpoint gap detection and re-backfill.
-            logger.SlotInvalidated(slot);
+            // The server invalidated the slot (max_slot_wal_keep_size exceeded, idle_replication_slot_timeout
+            // on PG18+, ...); streaming from it can never resume. Recreate it: the caller repairs the missed
+            // window via checkpoint gap detection and re-backfill.
+            logger.SlotInvalidated(slot, invalidationReason ?? "unknown");
             await PgExec.ExecuteAsync(connection, "SELECT pg_drop_replication_slot(@s)", ct, ("s", slot));
         }
 
@@ -64,11 +64,15 @@ internal sealed class SlotProvisioner(ILogger logger)
         return (true, consistentPoint, alreadyRegistered);
     }
 
-    private static async Task<(string SlotType, string? Plugin, string? WalStatus)?> GetSlotAsync(
+    // invalidation_reason exists from PG17; the jsonb projection reads null on older servers.
+    private static async Task<(string SlotType, string? Plugin, string? WalStatus, string? InvalidationReason)?> GetSlotAsync(
         NpgsqlConnection connection, string slot, CancellationToken ct)
     {
         await using var cmd = new NpgsqlCommand(
-            "SELECT slot_type, plugin, wal_status::text FROM pg_replication_slots WHERE slot_name = @s", connection);
+            """
+            SELECT slot_type, plugin, wal_status::text, to_jsonb(s) ->> 'invalidation_reason'
+            FROM pg_replication_slots s WHERE slot_name = @s
+            """, connection);
         cmd.Parameters.AddWithValue("s", slot);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
@@ -79,7 +83,8 @@ internal sealed class SlotProvisioner(ILogger logger)
         var slotType = reader.GetString(0);
         var plugin = reader.IsDBNull(1) ? null : reader.GetString(1);
         var walStatus = reader.IsDBNull(2) ? null : reader.GetString(2);
-        return (slotType, plugin, walStatus);
+        var invalidationReason = reader.IsDBNull(3) ? null : reader.GetString(3);
+        return (slotType, plugin, walStatus, invalidationReason);
     }
 
     private static Task UpsertSlotRegistryAsync(
@@ -106,6 +111,6 @@ internal static partial class SlotProvisionerLog
     [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot {Slot} at {ConsistentPoint}.")]
     internal static partial void SlotCreated(this ILogger logger, string slot, string? consistentPoint);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot {Slot} was invalidated by the server (wal_status=lost); dropping and recreating it.")]
-    internal static partial void SlotInvalidated(this ILogger logger, string slot);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Replication slot {Slot} was invalidated by the server (wal_status=lost, invalidation_reason={Reason}); dropping and recreating it.")]
+    internal static partial void SlotInvalidated(this ILogger logger, string slot, string reason);
 }

@@ -7,7 +7,7 @@ namespace Wallaby.Providers.Marten;
 /// Adapts a lambda to <see cref="IWallabyMartenTransform{TEntity}"/> for the trivial cases that don't
 /// warrant a dedicated class (e.g. projecting straight from the change with no enrichment).
 /// </summary>
-public sealed class DelegateTransform<TEntity>(
+internal sealed class DelegateTransform<TEntity>(
     Func<IQuerySession, IReadOnlyList<ChangeEvent<TEntity>>, CancellationToken, Task<IReadOnlyDictionary<DocumentKey, WallabyDocument?>>> handler)
     : IWallabyMartenTransform<TEntity>
     where TEntity : class

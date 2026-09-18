@@ -10,9 +10,10 @@ namespace Wallaby.Internal.SelfConfig;
 /// </summary>
 internal sealed class ServerValidator(ILogger logger)
 {
-    public async Task ValidateAsync(NpgsqlConnection connection, IReadOnlyCollection<string> slotNames, CancellationToken ct)
+    /// <summary>Validates the server and returns its <c>server_version_num</c> (e.g. 170004 for 17.4).</summary>
+    public async Task<int> ValidateAsync(NpgsqlConnection connection, IReadOnlyCollection<string> slotNames, CancellationToken ct)
     {
-        var versionNum = await PgExec.ScalarLongAsync(
+        var versionNum = (int)await PgExec.ScalarLongAsync(
             connection, "SELECT current_setting('server_version_num')::int", ct);
         if (versionNum < 150000)
         {
@@ -23,7 +24,13 @@ internal sealed class ServerValidator(ILogger logger)
         }
 
         var walLevel = await PgExec.ScalarStringAsync(connection, "SHOW wal_level", ct);
-        if (!string.Equals(walLevel, "logical", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(walLevel, "replica", StringComparison.OrdinalIgnoreCase) && versionNum >= 190000)
+        {
+            // PostgreSQL 19 raises the effective WAL level to logical while any logical slot exists, so
+            // creating the slot is enough; no restart needed.
+            logger.LogicalDecodingAutoEnabled();
+        }
+        else if (!string.Equals(walLevel, "logical", StringComparison.OrdinalIgnoreCase))
         {
             throw new WallabyConfigurationException(
                 $"Postgres 'wal_level' is '{walLevel}', but logical replication requires 'logical'. " +
@@ -72,6 +79,7 @@ internal sealed class ServerValidator(ILogger logger)
         }
 
         logger.ServerValidationPassed(maxSlots, usedSlots);
+        return versionNum;
     }
 }
 
@@ -83,4 +91,7 @@ internal static partial class ServerValidatorLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not verify the REPLICATION privilege for role {Role}; logical replication will fail to start without it. Grant it with 'ALTER ROLE ... WITH REPLICATION' or 'GRANT rds_replication TO ...' ")]
     internal static partial void ReplicationPrivilegeUnverified(this ILogger logger, string? role);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Postgres 'wal_level' is 'replica'; PostgreSQL 19 enables logical decoding automatically while a logical replication slot exists (see effective_wal_level).")]
+    internal static partial void LogicalDecodingAutoEnabled(this ILogger logger);
 }

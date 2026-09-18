@@ -1,3 +1,4 @@
+using System.Buffers;
 using OpenSearch.Client;
 using OpenSearch.Net;
 using Wallaby.Abstractions;
@@ -9,10 +10,10 @@ namespace Wallaby.Sinks.OpenSearch;
 /// Upserts are indexed with <c>_id</c> set to the record's document id (so updates are idempotent), and
 /// deletions remove by that same id. Records are routed to the index named by
 /// <see cref="SinkRecord.Destination"/> (falling back to <see cref="OpenSearchSinkOptions.DefaultIndex"/>);
-/// indexes are not created or configured by the sink — they auto-create on first write unless pre-created
-/// with explicit settings/mappings.
+/// indexes are not created or configured by the sink: they auto-create on first write unless pre-created
+/// with explicit settings/mappings. A purge empties an index with <c>_delete_by_query</c>.
 /// </summary>
-public sealed class OpenSearchSink : ISink, IDisposable
+public sealed class OpenSearchSink : ISink, ISinkPurger, IDisposable
 {
     private readonly OpenSearchSinkOptions _options;
     private readonly ConnectionSettings _settings;
@@ -27,6 +28,9 @@ public sealed class OpenSearchSink : ISink, IDisposable
     /// <param name="options">Connection, routing, and delivery-behaviour settings.</param>
     public OpenSearchSink(string name, OpenSearchSinkOptions options)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        OpenSearchBuilderExtensions.Validate(options);
         Name = name;
         _options = options;
         var endpoint = new Uri(options.Endpoint, UriKind.Absolute);
@@ -53,16 +57,19 @@ public sealed class OpenSearchSink : ISink, IDisposable
     public async Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct)
     {
         var records = batch.Records;
+        // One buffer serves every chunk of this call; the previous request has fully settled before the
+        // next chunk resets it.
+        var buffer = new ArrayBufferWriter<byte>();
 
         // Chunks are sent sequentially so commit order is preserved across requests.
-        for (var offset = 0; offset < records.Count; offset += _options.MaxActionsPerRequest)
+        for (var offset = 0; offset < records.Count; offset += _options.MaxRecordsPerRequest)
         {
-            var count = Math.Min(_options.MaxActionsPerRequest, records.Count - offset);
+            var count = Math.Min(_options.MaxRecordsPerRequest, records.Count - offset);
 
-            byte[] payload;
+            buffer.ResetWrittenCount();
             try
             {
-                payload = BulkJson.Write(Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
+                BulkJson.Write(buffer, Name, records, offset, count, _options.DefaultIndex, _options.SerializerOptions);
             }
             catch (Exception ex) when (ex is not WallabyConfigurationException)
             {
@@ -70,7 +77,7 @@ public sealed class OpenSearchSink : ISink, IDisposable
                 return DeliveryResult.Permanent($"OpenSearch bulk serialization failed: {ex.Message}", ex);
             }
 
-            var failure = await SendAsync(payload, ct);
+            var failure = await SendAsync(buffer.WrittenMemory, ct);
             if (failure is not null)
             {
                 return failure;
@@ -80,25 +87,53 @@ public sealed class OpenSearchSink : ISink, IDisposable
         return DeliveryResult.Success;
     }
 
-    /// <summary>Send one bulk body; null on success, otherwise the classified failure.</summary>
-    private async Task<DeliveryResult?> SendAsync(byte[] payload, CancellationToken ct)
+    /// <inheritdoc />
+    public async Task PurgeAsync(SinkPurgeRequest request, CancellationToken ct)
     {
-        var parameters = new BulkRequestParameters
+        var index = SinkDestination.Resolve(request, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
+        var parameters = new DeleteByQueryRequestParameters
         {
-            RequestConfiguration = new RequestConfiguration
-            {
-                RequestTimeout = TimeSpan.FromMilliseconds(_options.TimeoutMs),
-            },
+            Conflicts = Conflicts.Proceed,
+            Refresh = Refresh.True,
+            RequestConfiguration = RequestConfig(),
         };
+
+        var response = await _client.LowLevel.DeleteByQueryAsync<BytesResponse>(
+            index, PostData.ReadOnlyMemory(BulkJson.MatchAllQuery), parameters, ct);
+
+        var status = response.HttpStatusCode;
+        if (status == 404)
+        {
+            return; // The index was never written: nothing to purge.
+        }
+        if (status is null or < 200 or >= 300 || response.OriginalException is not null)
+        {
+            throw new InvalidOperationException(
+                $"OpenSearch purge of index '{index}' failed: " +
+                (response.OriginalException?.Message ?? $"status {status}"),
+                response.OriginalException);
+        }
+        if (BulkJson.DescribeDeleteByQueryFailure(response.Body) is { } failure)
+        {
+            throw new InvalidOperationException($"OpenSearch purge of index '{index}' failed: {failure}");
+        }
+    }
+
+    private RequestConfiguration RequestConfig() => new() { RequestTimeout = _options.Timeout };
+
+    /// <summary>Send one bulk body; null on success, otherwise the classified failure.</summary>
+    private async Task<DeliveryResult?> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+    {
+        var parameters = new BulkRequestParameters { RequestConfiguration = RequestConfig() };
         if (_options.Refresh)
         {
             parameters.Refresh = Refresh.WaitFor;
         }
 
-        StringResponse response;
+        BytesResponse response;
         try
         {
-            response = await _client.LowLevel.BulkAsync<StringResponse>(PostData.Bytes(payload), parameters, ct);
+            response = await _client.LowLevel.BulkAsync<BytesResponse>(PostData.ReadOnlyMemory(payload), parameters, ct);
         }
         catch (OpenSearchClientException ex)
         {

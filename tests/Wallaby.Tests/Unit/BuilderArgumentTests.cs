@@ -67,4 +67,22 @@ public class BuilderArgumentTests
 
         Should.Throw<ArgumentException>(() => builder.UseConnectionString(connectionString!));
     }
+
+    [Test]
+    public void A_password_provider_is_required()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentNullException>(() => builder.UsePasswordProvider((Func<CancellationToken, ValueTask<string>>)null!));
+        Should.Throw<ArgumentNullException>(() => builder.ConfigureDataSource(null!));
+    }
+
+    [Test]
+    public void A_password_refresh_interval_must_be_positive()
+    {
+        var builder = new WallabyBuilder(new ServiceCollection());
+
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => builder.UsePasswordProvider(_ => new ValueTask<string>("token"), TimeSpan.Zero));
+    }
 }

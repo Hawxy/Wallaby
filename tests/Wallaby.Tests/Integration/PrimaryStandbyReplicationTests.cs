@@ -7,6 +7,7 @@ using Wallaby.Abstractions;
 using Wallaby.Internal.Replication;
 using Wallaby.Internal.SelfConfig;
 using Wallaby.Model;
+using Wallaby.TestInfrastructure;
 
 namespace Wallaby.Tests.Integration;
 
@@ -26,7 +27,7 @@ public class PrimaryStandbyReplicationTests
 
         // The stock image's pg_hba has no "replication" entry, which pg_basebackup needs.
         var allowReplication = "#!/bin/bash\necho 'host replication all all trust' >> \"$PGDATA/pg_hba.conf\"\n";
-        await using var primary = new PostgreSqlBuilder("postgres:17")
+        await using var primary = new PostgreSqlBuilder(PostgresImages.Default)
             .WithNetwork(network)
             .WithNetworkAliases("pg-primary")
             .WithCommand("-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10")
@@ -42,7 +43,7 @@ public class PrimaryStandbyReplicationTests
             "do rm -rf \"$PGDATA\"; sleep 1; done; " +
             "exec gosu postgres postgres";
         await using var standby = new ContainerBuilder()
-            .WithImage("postgres:17")
+            .WithImage(PostgresImages.Default)
             .WithNetwork(network)
             .WithNetworkAliases("pg-standby")
             .WithPortBinding(5432, assignRandomHostPort: true)

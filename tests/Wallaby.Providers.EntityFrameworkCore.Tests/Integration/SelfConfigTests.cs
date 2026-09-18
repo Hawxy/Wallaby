@@ -362,8 +362,11 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
     [Test]
     public async Task Wrong_wal_level_fails_fast()
     {
-        // A plain Postgres (default wal_level = replica) should be rejected with guidance.
-        await using var plain = new PostgreSqlBuilder("postgres:17").Build();
+        // wal_level=minimal can never decode (replica is auto-raised to logical on PG19, so it is not a
+        // reliable negative); minimal requires max_wal_senders=0.
+        await using var plain = new PostgreSqlBuilder(PostgresImages.Default)
+            .WithCommand("-c", "wal_level=minimal", "-c", "max_wal_senders=0")
+            .Build();
         await plain.StartAsync();
         try
         {
@@ -380,5 +383,33 @@ public class SelfConfigTests(TestModelPostgresFixture pg)
         {
             await plain.DisposeAsync();
         }
+    }
+
+    [Test]
+    public async Task Postgres_19_streams_under_the_default_replica_wal_level()
+    {
+        // No wal_level flag: the stock image runs with wal_level=replica, which PG19 raises to logical
+        // while a logical slot exists. Validation must accept it and the pipeline must stream.
+        await using var container = new PostgreSqlBuilder(PostgresImages.Postgres19).Build();
+        await container.StartAsync();
+        var connectionString = container.GetConnectionString();
+
+        await using (var ctx = new AppDbContext(TestModelFactory.CreateOptions(connectionString)))
+        {
+            await ctx.Database.EnsureCreatedAsync();
+        }
+
+        await using var harness = WallabyTestHarness.ForTestModel(connectionString).Broadcast().Capture<Product>();
+        var capture = harness.AddCaptureSink();
+        await harness.SelfConfigureAsync();
+
+        var categoryId = await harness.Db.AddCategoryAsync();
+        await harness.Db.AddProductsAsync(categoryId, [("pg19", 0)]);
+        await harness.RunUntilAsync(() => capture.For("products").Any(r => r.Document is not null));
+
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync();
+        (await PgExec.ScalarStringAsync(conn, "SHOW wal_level", default)).ShouldBe("replica");
+        (await PgExec.ScalarStringAsync(conn, "SHOW effective_wal_level", default)).ShouldBe("logical");
     }
 }

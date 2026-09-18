@@ -46,10 +46,10 @@ cdc.AddOpenSearchSink("search", s => { /* ... */ })
 | `Username` / `Password` | `null` | Basic auth; `null` for unsecured. |
 | `ConfigureConnection` | `null` | Full override for the client's connection settings ([see below](#authentication)). |
 | `DefaultIndex` | `null` | Index used when a routed record has no destination; a record with neither fails permanently. |
-| `MaxActionsPerRequest` | `500` | Actions per `_bulk` request; larger batches are split into sequential requests, preserving commit order. |
-| `TimeoutMs` | `30000` | Per-request timeout. |
+| `MaxRecordsPerRequest` | `500` | Records per `_bulk` request; larger batches are split into sequential requests, preserving commit order. |
+| `Timeout` | `30s` | Per-request timeout. |
 | `Refresh` | `false` | When true, bulk requests use `refresh=wait_for` so documents are searchable before the batch is acknowledged. |
-| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (required for such values on NativeAOT hosts). |
+| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (numbers, strings, dates, `byte[]`, vectors). |
 
 ## Indexes
 
@@ -103,8 +103,15 @@ cdc.AddOpenSearchSink("search", s =>
 });
 ```
 
-When `ConfigureConnection` is set, `Username`/`Password` are ignored — configure all
-authentication on the returned settings.
+When `ConfigureConnection` is set, leave `Username`/`Password` unset (registration fails otherwise)
+and configure all authentication on the returned settings; `Timeout` still applies per request.
+
+## Purging
+
+The sink implements [purge-then-backfill](/backfill#purging-before-a-backfill): a purge runs
+`_delete_by_query` with `match_all` against the mapping's index (`conflicts=proceed`, `refresh=true`),
+synchronously and under the per-request `Timeout`, so a very large index may need a longer timeout.
+An index that does not exist yet is nothing to purge.
 
 ## Delivery semantics
 

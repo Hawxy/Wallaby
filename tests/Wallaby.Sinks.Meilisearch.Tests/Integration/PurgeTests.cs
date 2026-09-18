@@ -12,7 +12,7 @@ public class PurgeTests(MeilisearchFixture meili)
     private static string UniqueIndex() => $"purge_{Guid.NewGuid():N}";
 
     private MeilisearchSink Sink(string? defaultIndex = null) => TestMeilisearchSink.Create(
-        "meili", new MeilisearchSinkOptions { Host = meili.Host, ApiKey = meili.ApiKey, DefaultIndex = defaultIndex });
+        "meili", new MeilisearchSinkOptions { Endpoint = meili.Host, ApiKey = meili.ApiKey, DefaultIndex = defaultIndex });
 
     private static SinkRecord Upsert(string index, string id, string name)
         => new(index, id, new WallabyDocument { ["name"] = name }, IsDeletion: false,

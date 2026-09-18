@@ -74,7 +74,7 @@ public class RegistrationTests
         using var provider = new ServiceCollection().BuildServiceProvider();
 
         var ex = Should.Throw<WallabyConfigurationException>(
-            () => HttpSinkBuilderExtensions.CreateSink("webhook", ValidOptions, provider));
+            () => HttpBuilderExtensions.CreateSink("webhook", ValidOptions, provider));
         ex.Message.ShouldContain("services.AddHttpClient()");
     }
 
@@ -85,18 +85,19 @@ public class RegistrationTests
         services.AddHttpClient();
         using var provider = services.BuildServiceProvider();
 
-        HttpSinkBuilderExtensions.CreateSink("webhook", ValidOptions, provider).Name.ShouldBe("webhook");
+        HttpBuilderExtensions.CreateSink("webhook", ValidOptions, provider).Name.ShouldBe("webhook");
     }
 
     [Test]
     [Arguments("")]
     [Arguments("hooks/relative")]
-    public void Endpoint_must_be_an_absolute_url(string endpoint)
+    [Arguments("ftp://receiver.example/hooks")]
+    public void Endpoint_must_be_an_absolute_http_url(string endpoint)
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddHttpSink("webhook", o => o.Endpoint = endpoint))
-            .Message.ShouldContain("absolute");
+        Should.Throw<WallabyConfigurationException>(() => builder.AddHttpSink("webhook", o => o.Endpoint = endpoint))
+            .Message.ShouldContain("absolute http(s)");
     }
 
     [Test]
@@ -104,7 +105,7 @@ public class RegistrationTests
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddHttpSink("webhook", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddHttpSink("webhook", o =>
         {
             o.Endpoint = "https://receiver.example/hooks";
             o.MaxRecordsPerRequest = 0;
@@ -114,14 +115,26 @@ public class RegistrationTests
     [Test]
     [Arguments(0)]
     [Arguments(-1)]
-    public void Timeout_must_be_positive(int timeoutMs)
+    public void Timeout_must_be_positive(int timeoutSeconds)
     {
         var builder = new WallabyBuilder(new ServiceCollection());
 
-        Should.Throw<ArgumentException>(() => builder.AddHttpSink("webhook", o =>
+        Should.Throw<WallabyConfigurationException>(() => builder.AddHttpSink("webhook", o =>
         {
             o.Endpoint = "https://receiver.example/hooks";
-            o.TimeoutMs = timeoutMs;
-        })).Message.ShouldContain("TimeoutMs");
+            o.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        })).Message.ShouldContain("Timeout");
+    }
+
+    [Test]
+    public void The_constructor_validates_options()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient();
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IHttpClientFactory>();
+
+        Should.Throw<WallabyConfigurationException>(
+            () => new HttpSink("webhook", new HttpSinkOptions { Endpoint = "hooks/relative" }, factory));
     }
 }

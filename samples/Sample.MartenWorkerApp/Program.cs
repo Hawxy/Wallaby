@@ -35,7 +35,7 @@ builder.Services.AddWallaby(cdc =>
        })
        .AddMeilisearchSink("meili", m =>
        {
-           m.Host = meiliHost;
+           m.Endpoint = meiliHost;
            m.ApiKey = meiliKey;
        })
        // Class-based transform, resolved from the container; bump the version to force a reindex.

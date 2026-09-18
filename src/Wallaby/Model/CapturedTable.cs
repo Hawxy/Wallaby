@@ -1,9 +1,9 @@
 namespace Wallaby.Model;
 
-/// <summary>A mapped column of a captured table, bridging the EF Core property and its Postgres column.</summary>
+/// <summary>A mapped column of a captured table, bridging the model property and its Postgres column.</summary>
 public sealed class CapturedColumn
 {
-    /// <summary>The EF Core property name.</summary>
+    /// <summary>The model property name (an EF Core property, or a Marten document member).</summary>
     public required string PropertyName { get; init; }
 
     /// <summary>The physical Postgres column name.</summary>
@@ -17,7 +17,7 @@ public sealed class CapturedColumn
 }
 
 /// <summary>
-/// A table selected for capture, resolved from the EF Core model. Drives publication membership,
+/// A table selected for capture, resolved from the storage provider's model. Drives publication membership,
 /// replica-identity validation, and entity materialization.
 /// </summary>
 public sealed class CapturedTable

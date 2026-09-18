@@ -9,7 +9,8 @@ namespace Wallaby.Providers.Marten;
 /// <summary>Marten provider registration for the Wallaby builder.</summary>
 public static class MartenWallabyBuilderExtensions
 {
-    internal const string ProviderName = "Marten";
+    /// <summary>The provider name this package registers under, for <c>Map&lt;T&gt;().FromProvider(...)</c>.</summary>
+    public const string ProviderName = "Marten";
 
     /// <summary>
     /// Drive capture from the Marten document store registered in the container (via <c>AddMarten</c>)
@@ -17,18 +18,18 @@ public static class MartenWallabyBuilderExtensions
     /// front (<c>RegisterDocumentType</c>, <c>Schema.For&lt;T&gt;()</c>, …) are visible to capture —
     /// Marten's lazy first-use discovery happens too late for a capture model built at startup.
     /// </summary>
-    public static WallabyBuilder UseMarten(this WallabyBuilder cdc)
-        => cdc.UseMarten(sp => sp.GetRequiredService<IDocumentStore>());
+    public static WallabyBuilder UseMarten(this WallabyBuilder builder)
+        => builder.UseMarten(sp => sp.GetRequiredService<IDocumentStore>());
 
     /// <summary>
     /// Drive capture from a Marten document store resolved by <paramref name="store"/> — for hosts with
     /// multiple stores or a store not registered as <see cref="IDocumentStore"/>.
     /// </summary>
-    public static WallabyBuilder UseMarten(this WallabyBuilder cdc, Func<IServiceProvider, IDocumentStore> store)
+    public static WallabyBuilder UseMarten(this WallabyBuilder builder, Func<IServiceProvider, IDocumentStore> store)
     {
-        ArgumentNullException.ThrowIfNull(cdc);
+        ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(store);
-        return cdc.UseProvider(new WallabyProviderRegistration
+        return builder.UseProvider(new WallabyProviderRegistration
         {
             Name = ProviderName,
             ModelProvider = sp => new MartenModelProvider(store(sp).Options),
@@ -43,10 +44,10 @@ public static class MartenWallabyBuilderExtensions
     /// when the store isn't registered as <see cref="IDocumentStore"/>.
     /// </summary>
     public static WallabyBuilder UseTenantSessions(
-        this WallabyBuilder cdc, Func<IServiceProvider, IDocumentStore>? store = null)
+        this WallabyBuilder builder, Func<IServiceProvider, IDocumentStore>? store = null)
     {
-        ArgumentNullException.ThrowIfNull(cdc);
+        ArgumentNullException.ThrowIfNull(builder);
         store ??= sp => sp.GetRequiredService<IDocumentStore>();
-        return cdc.UseScopedEnrichmentSessions(ProviderName, sp => new MartenTenantSessionProvider(store(sp)));
+        return builder.UseScopedEnrichmentSessions(ProviderName, sp => new MartenTenantSessionProvider(store(sp)));
     }
 }

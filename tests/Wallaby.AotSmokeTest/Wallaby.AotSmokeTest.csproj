@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wallaby\Wallaby.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Sinks.Http\Wallaby.Sinks.Http.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Sinks.Kafka\Wallaby.Sinks.Kafka.csproj" />
     <ProjectReference Include="..\..\src\Wallaby.Sinks.Pgvector\Wallaby.Sinks.Pgvector.csproj" />
     <ProjectReference Include="..\..\src\Wallaby.Providers.Marten\Wallaby.Providers.Marten.csproj" />
   </ItemGroup>
