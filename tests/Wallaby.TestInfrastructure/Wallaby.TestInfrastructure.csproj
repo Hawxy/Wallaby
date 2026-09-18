@@ -19,6 +19,8 @@
     <ProjectReference Include="..\..\src\Wallaby.Testing\Wallaby.Testing.csproj" />
     <ProjectReference Include="..\..\src\Wallaby.Providers.EntityFrameworkCore\Wallaby.Providers.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\..\src\Wallaby.Providers.Marten\Wallaby.Providers.Marten.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Providers.Tables\Wallaby.Providers.Tables.csproj" />
+    <ProjectReference Include="..\..\src\Wallaby.Providers.Tables\Wallaby.Providers.Tables.csproj" />
   </ItemGroup>
 
 </Project>

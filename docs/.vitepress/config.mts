@@ -73,6 +73,8 @@ export default defineConfig({
               { text: 'Multi-Tenancy', link: '/providers/marten/multi-tenancy' },
             ]
           },
+          { text: 'Plain Tables', link: '/providers/tables/' },
+          { text: 'Plain Tables', link: '/providers/tables/' },
         ]
       },
       {
