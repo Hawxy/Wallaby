@@ -7,8 +7,8 @@ namespace Wallaby.Providers.Tables;
 /// <summary>
 /// Registers the POCOs the provider captures. Only registered types are handled, so a type that also
 /// belongs to another provider's model is never claimed twice. Table, column and key metadata come from
-/// <c>System.ComponentModel.DataAnnotations</c> attributes, the fluent <see cref="TableBuilder{TEntity}"/>
-/// overrides, and the naming convention, in that order of precedence (fluent first).
+/// the fluent <see cref="TableBuilder{TEntity}"/> overrides, else <c>System.ComponentModel.DataAnnotations</c>
+/// attributes, else the naming convention.
 /// </summary>
 public sealed class TablesModelBuilder
 {

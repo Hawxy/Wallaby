@@ -25,8 +25,6 @@ using Wallaby.Internal.Replication;
 using Wallaby.Providers.Marten.Internal;
 using Wallaby.Providers.Tables;
 using Wallaby.Providers.Tables.Internal;
-using Wallaby.Providers.Tables;
-using Wallaby.Providers.Tables.Internal;
 using Wallaby.Model;
 using Wallaby.Providers;
 using Weasel.Core;
@@ -258,45 +256,6 @@ Check("http and kafka envelopes write reflection-free and the sinks construct", 
     _ = new HttpSink("hook", new HttpSinkOptions { Endpoint = "http://localhost:8080/changes" }, new SmokeHttpClientFactory());
     var kafka = new KafkaSink("events", new KafkaSinkOptions { BootstrapServers = "localhost:9092" });
     kafka.DisposeAsync().AsTask().GetAwaiter().GetResult();
-});
-
-Check("tables capture plan derives and materializes a positional record", () =>
-{
-    var tables = new TablesModelBuilder();
-    tables.UseSnakeCase();
-    tables.Add<SmokeRow>();
-    var plan = new TablesModelProvider(tables.Build()).BuildCapturePlan(new CaptureSpec { DeclaredEntities = [typeof(SmokeRow)] });
-
-    var table = plan.Model.FindByClrType(typeof(SmokeRow))
-        ?? throw new InvalidOperationException("SmokeRow table missing from the capture plan");
-    AssertEqual("smoke", table.Schema, "schema");
-    AssertEqual("smoke_rows", table.TableName, "table name");
-    AssertEqual("id", table.PrimaryKey[0].ColumnName, "key column");
-
-    var id = Guid.NewGuid();
-    var insert = new RawChange
-    {
-        RelationId = 1,
-        Schema = table.Schema,
-        TableName = table.TableName,
-        Action = ChangeAction.Insert,
-        NewValues =
-        [
-            new RawColumn { ColumnName = "id", Value = id },
-            new RawColumn { ColumnName = "name", Value = "roo" },
-            new RawColumn { ColumnName = "qty", Value = 3L },
-        ],
-    };
-
-    if (!plan.Materializer.TryMaterialize(insert, out var row))
-    {
-        throw new InvalidOperationException("insert was not materialized");
-    }
-    var entity = (SmokeRow)row.Entity!;
-    AssertEqual(id, entity.Id, "materialized id");
-    AssertEqual("roo", entity.Name, "materialized name");
-    AssertEqual(3, entity.Qty, "materialized qty");
-    AssertEqual(id, row.PrimaryKey[0], "primary key");
 });
 
 Check("tables capture plan derives and materializes a positional record", () =>

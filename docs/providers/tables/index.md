@@ -85,28 +85,28 @@ relation exactly as Postgres reports them, so a quoted mixed-case identifier nee
 
 ### Types
 
-A property maps to a single column when its type is a scalar the pgoutput decoder produces or
-[value coercion](/mappings#value-coercion) can bridge: the numeric types, `string`, `char`, `bool`,
-`Guid`, `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, `byte[]`, `BigInteger`,
-`IPAddress`, `PhysicalAddress`, `BitArray`, enums (from text or number), nullable versions of those, and
+A property maps to a single column when its type is a scalar the pgoutput decoder produces or value
+coercion can bridge: the numeric types, `string`, `char`, `bool`, `Guid`, `DateTime`, `DateTimeOffset`,
+`DateOnly`, `TimeOnly`, `TimeSpan`, `byte[]`, `IPAddress`, `PhysicalAddress`, `BitArray`, enums (from
+text or number), nullable versions of those, and
 single-dimension arrays of them. A property of any other type (a nested class, a collection,
 `JsonElement`) fails registration with the remedy: mark it `[NotMapped]` or `Ignore(...)` it. JSON
 columns are not supported in this version.
 
 Key properties are further limited to the types a backfill cursor can persist: numbers, strings,
-`Guid`, dates and times, `byte[]` and enums.
+`Guid`, dates and times, and `byte[]`. An enum key is rejected at registration.
 
 ### Records and constructors
 
 A type needs a public parameterless constructor, or exactly one public constructor whose parameters
-all match mapped properties by name (case-insensitive). Positional records satisfy the second rule:
+all match public properties by name (case-insensitive). Positional records satisfy the second rule:
 
 ```csharp
 public sealed record Order(int Id, string CustomerRef, decimal Total);
 ```
 
-Constructor parameters take the row values; remaining properties with a setter (`init` included) are
-assigned afterwards. A property with a getter only is still captured into `ChangeEvent.Record` but
+Constructor parameters take the row values, and a parameter for an ignored or `[NotMapped]` property
+receives its default; remaining properties with a setter (`init` included) are assigned afterwards. A property with a getter only is still captured into `ChangeEvent.Record` but
 never assigned. A column absent from the change (a narrowed selection, or a delete under
 `REPLICA IDENTITY DEFAULT`) leaves its member at the default value.
 

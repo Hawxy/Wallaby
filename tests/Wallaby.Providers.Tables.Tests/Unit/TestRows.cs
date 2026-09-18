@@ -69,6 +69,12 @@ public sealed class UnsupportedKey
     public int[] Id { get; set; } = [];
 }
 
+/// <summary>An enum key cannot be rebound from a persisted cursor.</summary>
+public sealed class EnumKey
+{
+    public Status Id { get; set; }
+}
+
 /// <summary>Two constructors, neither parameterless: ambiguous.</summary>
 public sealed class TwoCtors
 {

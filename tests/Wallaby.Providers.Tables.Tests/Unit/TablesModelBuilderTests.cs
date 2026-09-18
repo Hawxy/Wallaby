@@ -136,6 +136,8 @@ public class TablesModelBuilderTests
     {
         Should.Throw<WallabyConfigurationException>(() => Build(t => t.Add<UnsupportedKey>()))
             .Message.ShouldContain("backfill cursor");
+        Should.Throw<WallabyConfigurationException>(() => Build(t => t.Add<EnumKey>()))
+            .Message.ShouldContain("backfill cursor");
     }
 
     [Test]

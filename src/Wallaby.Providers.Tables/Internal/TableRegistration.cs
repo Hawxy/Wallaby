@@ -31,6 +31,8 @@ internal sealed class ConstructorPlan
 
     /// <summary>Per parameter, the index into the registration's member list, or -1 for an unmapped property.</summary>
     public required int[] ParameterMembers { get; init; }
+
+    public required Type[] ParameterTypes { get; init; }
 }
 
 /// <summary>
@@ -135,7 +137,7 @@ internal sealed class TableRegistration
             {
                 throw new WallabyConfigurationException(
                     $"Key property '{typeName}.{keyMember.PropertyName}' has type '{keyMember.ClrType.Name}', which " +
-                    "cannot be used in a backfill cursor. Keys must be numbers, strings, Guids, dates, times, byte arrays or enums.");
+                    "cannot be used in a backfill cursor. Keys must be numbers, strings, Guids, dates, times or byte arrays.");
             }
         }
 
@@ -211,7 +213,7 @@ internal sealed class TableRegistration
         var constructors = source.Constructors.Where(c => c.IsPublic).ToList();
         if (constructors.FirstOrDefault(c => c.GetParameters().Length == 0) is { } parameterless)
         {
-            return new ConstructorPlan { Constructor = parameterless, ParameterMembers = [] };
+            return new ConstructorPlan { Constructor = parameterless, ParameterMembers = [], ParameterTypes = [] };
         }
 
         var candidates = new List<ConstructorPlan>();
@@ -240,7 +242,12 @@ internal sealed class TableRegistration
             }
             if (matched)
             {
-                candidates.Add(new ConstructorPlan { Constructor = constructor, ParameterMembers = indices });
+                candidates.Add(new ConstructorPlan
+                {
+                    Constructor = constructor,
+                    ParameterMembers = indices,
+                    ParameterTypes = [.. parameters.Select(p => p.ParameterType)],
+                });
             }
         }
 

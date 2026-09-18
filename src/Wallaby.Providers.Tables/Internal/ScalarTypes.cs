@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Net;
 using System.Net.NetworkInformation;
-using System.Numerics;
 
 namespace Wallaby.Providers.Tables.Internal;
 
@@ -17,12 +16,13 @@ internal static class ScalarTypes
         typeof(bool), typeof(byte), typeof(sbyte), typeof(short), typeof(ushort), typeof(int), typeof(uint),
         typeof(long), typeof(ulong), typeof(float), typeof(double), typeof(decimal), typeof(char),
         typeof(string), typeof(Guid), typeof(DateTime), typeof(DateTimeOffset), typeof(DateOnly),
-        typeof(TimeOnly), typeof(TimeSpan), typeof(byte[]), typeof(BigInteger), typeof(IPAddress),
-        typeof(PhysicalAddress), typeof(BitArray),
+        typeof(TimeOnly), typeof(TimeSpan), typeof(byte[]), typeof(IPAddress), typeof(PhysicalAddress),
+        typeof(BitArray),
     ];
 
-    // The types a keyset cursor persists (KeysetCodec.WriteValue); a key outside this set cannot resume
-    // a backfill.
+    // The types a keyset cursor persists and binds back as a query parameter (KeysetCodec.WriteValue).
+    // Enums are excluded: a resumed cursor would rebind a text-backed enum as a CLR enum, which Npgsql
+    // cannot write.
     private static readonly HashSet<Type> KeyScalars =
     [
         typeof(bool), typeof(byte), typeof(sbyte), typeof(short), typeof(ushort), typeof(int), typeof(uint),
@@ -50,7 +50,7 @@ internal static class ScalarTypes
     public static bool IsSupportedKey(Type type)
     {
         var underlying = Nullable.GetUnderlyingType(type) ?? type;
-        return KeyScalars.Contains(underlying) || underlying.IsEnum;
+        return KeyScalars.Contains(underlying);
     }
 
     /// <summary>
@@ -88,7 +88,6 @@ internal static class ScalarTypes
             _ when type == typeof(DateOnly) => default(DateOnly),
             _ when type == typeof(TimeOnly) => default(TimeOnly),
             _ when type == typeof(TimeSpan) => TimeSpan.Zero,
-            _ when type == typeof(BigInteger) => BigInteger.Zero,
             _ => throw new InvalidOperationException($"No default value is known for '{type}'."),
         };
     }

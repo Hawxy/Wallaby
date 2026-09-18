@@ -74,7 +74,6 @@ export default defineConfig({
             ]
           },
           { text: 'Plain Tables', link: '/providers/tables/' },
-          { text: 'Plain Tables', link: '/providers/tables/' },
         ]
       },
       {

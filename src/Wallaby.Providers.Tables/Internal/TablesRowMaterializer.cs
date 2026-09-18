@@ -80,13 +80,13 @@ internal sealed class TablesRowMaterializer : IRowMaterializer
         }
         else
         {
-            var parameters = constructor.Constructor.GetParameters();
-            var args = new object?[parameters.Length];
+            var parameterTypes = constructor.ParameterTypes;
+            var args = new object?[parameterTypes.Length];
             for (var i = 0; i < args.Length; i++)
             {
                 var index = plan.ConstructorArguments[i];
                 var value = index >= 0 && present[index] ? values[index] : null;
-                args[i] = value ?? ScalarTypes.DefaultValue(parameters[i].ParameterType);
+                args[i] = value ?? ScalarTypes.DefaultValue(parameterTypes[i]);
             }
             instance = constructor.Constructor.Invoke(args);
         }
