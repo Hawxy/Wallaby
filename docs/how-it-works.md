@@ -12,12 +12,13 @@ import InternalsFlow from './.vitepress/theme/InternalsFlow.vue'
 Wallaby is quite complex internally and instead of writing a wall of text, I thought a diagram 
 that explains a few primary flows would make more sense.
 
-Pick a flow to watch it move through the engine, click any stage for what it does, or take the
-diagram full screen:
+Pick a flow to watch it move through the engine and click any stage for what it does:
 
 <InternalsFlow />
 
 ## Additional Notes
+
+You likely don't need to know any of this unless you want to work on Wallaby's internals.
 
 ### Slot-loss gap detection
 
