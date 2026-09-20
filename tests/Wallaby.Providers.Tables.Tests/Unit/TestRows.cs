@@ -40,6 +40,13 @@ public sealed class KeyedByAttribute
     public string Name { get; set; } = "";
 }
 
+/// <summary>Key attributes where one member renames its column without setting an order.</summary>
+public sealed class KeyedByAttributeWithoutOrder
+{
+    [Key] public int Code { get; set; }
+    [Key, Column("region_code")] public string Region { get; set; } = "";
+}
+
 /// <summary>Type-name key convention (<c>InvoiceId</c>).</summary>
 public sealed class Invoice
 {

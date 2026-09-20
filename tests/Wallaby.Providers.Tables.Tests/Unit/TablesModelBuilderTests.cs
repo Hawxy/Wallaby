@@ -111,6 +111,21 @@ public class TablesModelBuilderTests
     }
 
     [Test]
+    public void A_column_attribute_without_an_order_keeps_declaration_order()
+    {
+        var keyed = Single<KeyedByAttributeWithoutOrder>(t => t.Add<KeyedByAttributeWithoutOrder>());
+
+        keyed.Key.Select(k => k.PropertyName).ShouldBe(["Code", "Region"]);
+    }
+
+    [Test]
+    public void HasKey_rejects_a_repeated_property()
+    {
+        Should.Throw<WallabyConfigurationException>(() => Build(t => t.Add<OrderLine>().HasKey(l => l.OrderId, l => l.OrderId)))
+            .Message.ShouldContain("more than once");
+    }
+
+    [Test]
     public void The_type_name_id_convention_applies()
     {
         Single<Invoice>(t => t.Add<Invoice>()).Key.Single().PropertyName.ShouldBe("InvoiceId");

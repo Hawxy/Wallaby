@@ -126,7 +126,9 @@ internal sealed class TableRegistration
             members.Add(member);
             if (isKey)
             {
-                keyAttributed.Add((member, columnAttribute?.Order ?? int.MaxValue, members.Count - 1));
+                // ColumnAttribute.Order is -1 when unset; treat that like no attribute at all.
+                var keyOrder = columnAttribute is { Order: >= 0 } ? columnAttribute.Order : int.MaxValue;
+                keyAttributed.Add((member, keyOrder, members.Count - 1));
             }
         }
 

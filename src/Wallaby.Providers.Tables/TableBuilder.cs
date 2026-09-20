@@ -34,6 +34,10 @@ public sealed class TableBuilder<TEntity>
         {
             throw new WallabyConfigurationException($"HasKey<{typeof(TEntity).Name}>(...) must name at least one property.");
         }
+        if (names.Distinct(StringComparer.Ordinal).Count() != names.Length)
+        {
+            throw new WallabyConfigurationException($"HasKey<{typeof(TEntity).Name}>(...) names the same property more than once.");
+        }
         _source.Key = [.. names];
         return this;
     }
