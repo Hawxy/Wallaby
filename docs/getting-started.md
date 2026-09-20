@@ -4,9 +4,12 @@ description: "Postgres prerequisites, package selection, and first-run configura
 
 <script setup>
 import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
+import CopyPromptButton from './.vitepress/theme/CopyPromptButton.vue'
 </script>
 
 # Getting Started
+
+<CopyPromptButton />
 
 ## Server prerequisites
 

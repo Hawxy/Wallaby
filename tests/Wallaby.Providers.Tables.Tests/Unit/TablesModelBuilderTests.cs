@@ -63,7 +63,7 @@ public class TablesModelBuilderTests
     [Test]
     [Arguments("OrderId", "order_id")]
     [Arguments("HTTPStatus", "http_status")]
-    [Arguments("Line2Number", "line2_number")]
+    [Arguments("Line2Number", "line2number")]
     [Arguments("Id", "id")]
     [Arguments("already_snake", "already_snake")]
     public void Snake_case_handles_acronyms_and_digits(string input, string expected)

@@ -79,8 +79,9 @@ precedence:
 | Key | `HasKey(o => o.A, o => o.B)`, in argument order | `[Key]` members, ordered by `[Column(Order = n)]` then declaration | A property named `Id` or `{Type}Id` |
 | Skip | `Ignore(o => o.Scratch)` | `[NotMapped]` | A property with no getter |
 
-`UseSnakeCase()` turns unannotated names into snake_case (`OrderLine` to `order_line`, `HTTPStatus` to
-`http_status`); attribute and fluent names are always used verbatim. Names are matched against the
+`UseSnakeCase()` turns unannotated names into snake_case with the same rules as EFCore.NamingConventions
+(`OrderLine` to `order_line`, `HTTPStatus` to `http_status`); attribute and fluent names are always used
+verbatim. Names are matched against the
 relation exactly as Postgres reports them, so a quoted mixed-case identifier needs the same casing.
 
 ### Types

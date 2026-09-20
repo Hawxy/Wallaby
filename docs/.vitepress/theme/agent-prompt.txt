@@ -1,0 +1,159 @@
+You are setting up Wallaby, a Postgres change data capture library for .NET, in this repository.
+Wallaby streams row changes from Postgres logical replication, materializes them into EF Core
+entities, Marten documents, or annotated POCOs, runs a transform, and delivers the resulting
+documents to a sink (Meilisearch, Elasticsearch, OpenSearch, Kafka, pgvector, HTTP, or custom).
+Requires Postgres 15+ and .NET 10+. Docs: https://wallabycdc.net/
+
+Work in three phases: infer, ask, implement. Do not write code before phase 2 is answered.
+
+## Phase 1: infer from the project
+
+Inspect the repository and record each finding with the file that proves it. Never guess a value
+you could read from a file.
+
+1. Target framework. Read global.json, Directory.Build.props, and the host csproj. Wallaby needs
+   net10.0 or later. If the project targets an older TFM, stop and report that before anything else.
+2. Storage provider. Pick exactly one default and explain why:
+   - A class deriving from DbContext plus a package reference to
+     Npgsql.EntityFrameworkCore.PostgreSQL means the EF Core provider
+     (package Wallaby.Providers.EntityFrameworkCore, builder call UseEntityFrameworkCore<TContext>()).
+     Note whether the context is registered with AddDbContext or AddDbContextFactory; both work.
+   - A call to AddMarten or a package reference to Marten means the Marten provider
+     (package Wallaby.Providers.Marten, builder call UseMarten()). List the document types
+     registered up front via RegisterDocumentType<T>() or Schema.For<T>(); only those can be
+     mapped. Note any SoftDeleted() or tenancy configuration.
+   - Neither means the plain-tables provider (package Wallaby.Providers.Tables, builder call
+     UseTables(tables => ...)). Look for Dapper, raw Npgsql, or SQL migration files to find table
+     names, schemas, and key columns. This provider does not read the catalog, so every table
+     needs a registered POCO.
+   - Both EF Core and Marten present: propose both providers on one slot and pin ambiguous
+     types with FromProvider(...).
+3. Connection string. Find the Postgres connection string source: appsettings*.json
+   ConnectionStrings, user secrets (UserSecretsId in the csproj), environment variables, Aspire
+   AppHost references, or docker-compose. Record the key name, not the value. Never print a
+   password. Note whether the role is likely to have the REPLICATION attribute; if the compose
+   file or migrations create the role, check there.
+4. Postgres server. From docker-compose, Aspire, Testcontainers setup, or infra files, record the
+   image or version and whether wal_level=logical, max_replication_slots, and max_wal_senders are
+   set. On PG 19 wal_level=logical is not required. Note if the target is a managed platform
+   (RDS, Aurora, Azure Database for PostgreSQL, Cloud SQL) because that changes authentication
+   and upgrade handling.
+5. Hosting model. Is there a Worker (Microsoft.NET.Sdk.Worker) project, a web API, or both?
+   Wallaby should run in a separate worker service where possible, so look for an existing
+   worker to host it before proposing a new one.
+6. Candidate entities. List the entity or document types with a primary key that look like
+   read-model or search candidates (names such as Product, Order, Customer, Article). Flag any
+   EF Core TPH hierarchy: those tables cannot be captured. Flag entities with a TenantId or
+   similar property, and any Marten conjoined tenancy, as multi-tenancy signals.
+7. Existing destinations. Look for packages or compose services already in the project:
+   Meilisearch, Elastic.Clients.Elasticsearch, OpenSearch.Client, a Kafka client, pgvector, or an
+   HTTP receiver. An existing destination is the default sink.
+8. Cross-cutting infrastructure. Note whether OpenTelemetry (AddOpenTelemetry), health checks
+   (AddHealthChecks), and a test project with Testcontainers already exist, so Wallaby's
+   observability, health check, and Wallaby.Testing can be wired the same way.
+9. Existing Wallaby usage. Grep for AddWallaby. If it exists, switch to extending it rather than
+   adding a second registration.
+
+Present the findings as a short table before asking anything.
+
+## Phase 2: ask the user
+
+Ask only what the codebase cannot answer. Ask everything in one batch, offer a default for each,
+and proceed with the default for anything left unanswered. Skip a question when phase 1 settled it.
+
+1. Which entities or tables should be captured, and to which destination name (index, topic,
+   table, or route) should each go? Default: the candidates from phase 1, one destination per
+   entity, lowercase plural of the type name.
+2. What should each document contain? A flat field list per entity is enough. Default: the
+   entity's scalar properties, keyed by the primary key. Ask whether any document needs data from
+   a related table; that decides DependsOn(...) on EF Core, a second registered type on plain
+   tables.
+3. Which sink? Default: the destination already in the project, otherwise Meilisearch for search,
+   Kafka for events, HTTP for a custom receiver. Ask where the sink endpoint and credential live
+   (configuration key name only).
+4. Where should Wallaby run: an existing worker, a new worker project, or inside the web app?
+   Default: an existing worker if one exists, otherwise a new Worker project, because CDC scales
+   independently of the API.
+5. Slot and publication names. Default: "<app>_cdc_slot" and "<app>_cdc_pub" derived from the
+   solution name. One slot per Wallaby cluster; a second worker needs its own pair.
+6. May Wallaby's role receive the REPLICATION attribute, and may migrations set
+   REPLICA IDENTITY FULL on captured tables where needed? Wallaby never alters tables itself.
+7. Multi-tenancy, only if phase 1 found a tenant signal: should documents be routed to a
+   per-tenant destination (ScopedBy + ScopedDestination) or just enriched per tenant?
+8. Managed platform authentication, only if phase 1 found RDS, Azure, or Cloud SQL: password or
+   short-lived token via UsePasswordProvider?
+9. Should an initial backfill of existing rows run on first start? Default: yes
+   (AutoBackfillNewTables is on by default).
+
+Do not ask about batching, retries, spill, or advanced options; the defaults are correct for
+almost every deployment.
+
+## Phase 3: implement
+
+Use only APIs named here or in the docs. If something you need is not documented, say so instead
+of inventing a method.
+
+1. Packages, added to the host project:
+   - Wallaby (core, pulled in transitively by a provider)
+   - one provider: Wallaby.Providers.EntityFrameworkCore, Wallaby.Providers.Marten, or
+     Wallaby.Providers.Tables
+   - one sink: Wallaby.Sinks.Meilisearch, Wallaby.Sinks.Elasticsearch, Wallaby.Sinks.OpenSearch,
+     Wallaby.Sinks.Kafka, Wallaby.Sinks.Pgvector, or Wallaby.Sinks.Http
+   - optional: Wallaby.AspNetCore.HealthChecks, Wallaby.Testing (test project only)
+2. Registration in Program.cs, in this order on the builder returned by AddWallaby:
+   provider, UseConnectionString(...), ConfigureOptions(o => { o.SlotName; o.PublicationName; }),
+   Add<Sink>Sink("name", opts => ...), WithMappings(sink => sink.Map<TEntity>()...).
+   Read connection strings and sink settings through the IServiceProvider overloads of
+   UseConnectionString and the sink options when they come from IConfiguration.
+   The connection string must be supplied to Wallaby even when EF Core or Marten already has one.
+3. Declare each mapping inline with the fluent builder inside WithMappings: sink.Map<TEntity>()
+   chaining ToDestination("..."), WithBackfillVersion("v1"), and
+   UsingTransform<TEntity, TTransform>(). Move a mapping into its own class implementing
+   IWallabyEntityMapping<TEntity>, applied with sink.Apply<TMapping>(), only when the inline
+   chain grows long (several DependsOn, Consumes, or scoping calls) or AddWallaby becomes hard
+   to read. Put the transform in its own class implementing the provider's transform interface:
+   IWallabyEfTransform<T> receives the DbContext, IWallabyMartenTransform<T> receives an
+   IQuerySession, IWallabyTablesTransform<T> receives an NpgsqlDataSource. A transform returns
+   one WallabyDocument per change key; an omitted key is a delete, never a skip. Deletes never
+   reach the transform.
+4. Provider specifics:
+   - EF Core: add DependsOn(nav) when a transform reads a related table. Use Consumes(...) or
+     ConsumesAllExcept(...) to keep large columns off the wire when no transform reads them.
+   - Marten: map only documents registered up front. Soft-deleted documents need
+     REPLICA IDENTITY FULL.
+   - Plain tables: register each type with tables.Add<T>(), call UseSnakeCase() when column names
+     are snake_case, declare composite keys with HasKey(...). JSON columns map only to string,
+     and DependsOn is unavailable.
+5. Replica identity. KeyedBy(...), entity-derived ScopedDestination, and Marten soft deletes
+   require REPLICA IDENTITY FULL. Add "ALTER TABLE <schema.table> REPLICA IDENTITY FULL;" to a
+   migration for those tables only. Otherwise leave identity at DEFAULT; Wallaby heals missing
+   TOAST values by re-reading the row.
+6. Postgres prerequisites, as a checklist in the summary and as compose or infra edits when the
+   project owns them: wal_level=logical (not on PG 19), a role with REPLICATION, headroom in
+   max_replication_slots and max_wal_senders. Do not create the slot or publication by hand;
+   Wallaby self-configures both from the model and fails fast with guidance when a prerequisite is
+   missing.
+7. Optional wiring, matched to what phase 1 found: AddHealthChecks().AddWallaby() when health
+   checks exist; AddMeter("Wallaby") and AddSource("Wallaby") when OpenTelemetry exists; a
+   Wallaby.Testing end-to-end test using CaptureSink when a Testcontainers-based test project
+   exists.
+8. Verify. Build the solution. If Docker is available and the project has a compose file, start
+   Postgres and the sink, run the worker, insert a row, and confirm the document lands. Report
+   exactly what was verified and what was not.
+
+## Guardrails
+
+- Never commit or log secrets. Reference configuration keys, never values.
+- Do not add a sink or provider the user did not choose.
+- Do not modify the user's existing DbContext model or Marten registrations beyond what mapping
+  requires.
+- Every captured table needs a primary key. EF Core TPH hierarchies cannot be captured.
+- Bump WithBackfillVersion whenever a transform's output shape changes; say so in the summary.
+- A permanent sink failure halts the whole pipeline, since every sink shares one slot. Mention
+  this when more than one sink is configured and suggest a second worker with its own slot for a
+  destination whose reliability differs.
+
+## Deliverable
+
+End with: the files added or changed, the Postgres prerequisite checklist with the SQL to run,
+the configuration keys the operator must set, and the verification result.
