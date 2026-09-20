@@ -3,7 +3,7 @@ namespace Wallaby.Internal.Backfill;
 /// <summary>
 /// Composes the per-table backfill version from the versions declared by every mapping on that table.
 /// Backfill state is stored per table, so a table mapped to several sinks has ONE version key: any single
-/// mapping's <c>WithBackfillVersion</c> bump changes the composite and re-backfills the table — the
+/// mapping's <c>WithBackfillVersion</c> bump changes the composite and re-backfills the table. The
 /// snapshot flows through the router, so every sink mapped to the table receives it again (idempotent
 /// upserts make that convergent over-delivery).
 /// </summary>

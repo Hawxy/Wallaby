@@ -14,7 +14,7 @@ namespace Wallaby.Internal.Backfill;
 /// bracketing each chunk with low/high watermark emissions via <c>pg_logical_emit_message</c>. The live
 /// pipeline (which receives those messages through pgoutput as <c>LogicalDecodingMessage</c>) records
 /// concurrent change keys between the watermarks and emits the deduplicated snapshot rows at the high
-/// watermark — guaranteeing no gaps and that live changes always win for overlapping keys.
+/// watermark, guaranteeing no gaps and that live changes always win for overlapping keys.
 /// <para>
 /// Chunks are pipelined: while the live pipeline delivers one chunk, the loop already reads the next
 /// (its progress still persists in emission order), so snapshot reads overlap transform/sink delivery.
@@ -66,7 +66,7 @@ internal sealed class WatermarkBackfillCoordinator(
         }
         else
         {
-            // The persisted cursor was built against a different key shape (or format) — resuming with it
+            // The persisted cursor was built against a different key shape (or format); resuming with it
             // would page incorrectly, so restart the snapshot from the beginning.
             logger.BackfillCursorRejected(table.QualifiedName);
             startRows = 0;
@@ -119,7 +119,7 @@ internal sealed class WatermarkBackfillCoordinator(
     /// (a dependent fan-out's affected set). The lookup filter may span several bounded-parameter
     /// batches (see <see cref="KeysetFilter.ForLookup"/>), scanned sequentially; resume is
     /// (<paramref name="startBatch"/>, <paramref name="startCursor"/>). <paramref name="saveProgress"/>
-    /// receives (batch, cursor, rows, hasMore) — hasMore stays true until the last chunk of the last
+    /// receives (batch, cursor, rows, hasMore); hasMore stays true until the last chunk of the last
     /// batch, so the job completes only when the whole scope is done. <paramref name="trigger"/> is the
     /// enqueuing trigger's trace context (default when untraced); the run's span links back to it.
     /// </summary>
@@ -132,7 +132,7 @@ internal sealed class WatermarkBackfillCoordinator(
         if (startBatch >= filters.Count)
         {
             // A resume point past the current batch count (e.g. a changed batching bound) can't be
-            // trusted; rescan the whole scope — upsert-only, so overlap is safe.
+            // trusted; rescan the whole scope (upsert-only, so overlap is safe).
             startBatch = 0;
             startCursor = null;
         }
@@ -191,8 +191,8 @@ internal sealed class WatermarkBackfillCoordinator(
         _instr.BackfillStarted();
         try
         {
-            // Hold a single connection across all watermark emissions for this backfill — keeps the
-            // session alive and avoids the per-watermark open/auth overhead (two emissions per chunk).
+            // One connection across all watermark emissions for this backfill avoids the per-watermark
+            // open/auth overhead (two emissions per chunk).
             await using var emitter = await dataSource.OpenConnectionAsync(ct);
 
             while (true)
@@ -359,7 +359,6 @@ internal sealed class WatermarkBackfillCoordinator(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="WatermarkBackfillCoordinator"/>.</summary>
 internal static partial class WatermarkBackfillCoordinatorLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting backfill of {Table}.")]

@@ -176,14 +176,13 @@ internal sealed class PostgresFanoutQueueStore(NpgsqlDataSource dataSource) : IF
 
     /// <summary>
     /// The canonical JSON for a lookup set: tuples sorted by their serialized form so the same logical
-    /// set produces identical bytes — and so an identical <c>lookup_hash</c>, which is what lets repeat
-    /// triggers coalesce regardless of the order changes were encountered in.
+    /// set produces identical bytes and an identical <c>lookup_hash</c>, letting repeat triggers coalesce
+    /// regardless of the order changes were encountered in.
     /// </summary>
     internal static string CanonicalValuesJson(IReadOnlyList<object?[]> tuples)
     {
-        // Each tuple is serialized once; its JSON (closing ']' included — that bracket participates in
-        // the ordinal comparison, and persisted lookup_hash values depend on the resulting order) is
-        // both the sort key and the raw value stitched into the final array.
+        // Each tuple's JSON is both the sort key and the raw value in the final array. The closing ']'
+        // participates in the ordinal comparison, and persisted lookup_hash values depend on that order.
         var serialized = new string[tuples.Count];
         for (var i = 0; i < serialized.Length; i++)
         {

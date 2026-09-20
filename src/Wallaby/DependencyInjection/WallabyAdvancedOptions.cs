@@ -1,17 +1,14 @@
 namespace Wallaby.DependencyInjection;
 
-/// <summary>
-/// Internal tuning knobs. The defaults are safe for almost all deployments.
-/// You shouldn't modify these unless you know what you're doing.
-/// </summary>
+/// <summary>Internal tuning knobs. The defaults suit almost all deployments.</summary>
 public sealed class WallabyAdvancedOptions
 {
     /// <summary>
     /// Safety ceiling on how many changes a single <em>non-streamed</em> transaction may buffer in memory
     /// before processing. Transactions larger than the server's <c>logical_decoding_work_mem</c> are
-    /// streamed and spilled out of memory (see <see cref="WallabyBuilder.SpillToDatabase"/> and friends), so
-    /// they never hit this ceiling; it exists so a pathological transaction the server did not stream
-    /// fails fast with an actionable error instead of exhausting memory. Must be greater than zero.
+    /// streamed and spilled (see <see cref="WallabyBuilder.SpillToDatabase"/>), so they never hit this
+    /// ceiling; it makes a pathological transaction the server did not stream fail fast instead of
+    /// exhausting memory. Must be greater than zero.
     /// </summary>
     public int MaxBufferedChangesPerTransaction { get; set; } = 1_000_000;
 
@@ -51,25 +48,24 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan KeepaliveInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Fallback poll interval for the dependent fan-out queue. The worker is primarily woken on demand via
-    /// LISTEN/NOTIFY the instant a job is enqueued; this interval is only a safety net that re-checks the queue
-    /// in case a notification is ever missed (e.g. a dropped listening connection). Lower it for tighter
-    /// worst-case fan-out latency at the cost of more idle queue polls.
+    /// Fallback poll interval for the dependent fan-out queue. The worker is woken via LISTEN/NOTIFY when
+    /// a job is enqueued; this interval is a safety net for a missed notification (e.g. a dropped
+    /// listening connection). Lower it for tighter worst-case fan-out latency at the cost of more idle polls.
     /// </summary>
     public TimeSpan FanoutPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Fallback poll interval for manual backfill requests. The leader's scheduler is primarily woken on
-    /// demand via LISTEN/NOTIFY the instant a request is persisted; this interval is only a safety net that
-    /// re-checks for requests in case a notification is ever missed (e.g. a dropped listening connection).
+    /// Fallback poll interval for manual backfill requests. The leader's scheduler is woken via
+    /// LISTEN/NOTIFY when a request is persisted; this interval is a safety net for a missed notification
+    /// (e.g. a dropped listening connection).
     /// </summary>
     public TimeSpan BackfillPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Fallback poll interval for the suspend/resume control state: how often the leader re-checks for a
-    /// suspension request and a suspended node re-checks for a resume. Both are primarily woken on demand
-    /// via LISTEN/NOTIFY the instant the control row changes; this interval is only a safety net in case a
-    /// notification is ever missed (e.g. a dropped listening connection).
+    /// suspension request and a suspended node re-checks for a resume. Both are woken via LISTEN/NOTIFY
+    /// when the control row changes; this interval is a safety net for a missed notification (e.g. a
+    /// dropped listening connection).
     /// </summary>
     public TimeSpan ControlPollInterval { get; set; } = TimeSpan.FromSeconds(15);
 
@@ -104,11 +100,10 @@ public sealed class WallabyAdvancedOptions
 
     /// <summary>
     /// Minimum interval between checkpoint writes to the slot's <c>wallaby.slot_registry</c> row. The
-    /// checkpoint backs slot-loss gap
-    /// detection and observability; the authoritative resume position is the slot's
-    /// <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only widens a
-    /// detected gap, and the repair is a re-backfill either way). <see cref="TimeSpan.Zero"/> writes on
-    /// every acknowledged transaction.
+    /// checkpoint backs slot-loss gap detection and observability; the authoritative resume position is
+    /// the slot's <c>confirmed_flush_lsn</c>, so a seconds-stale checkpoint is safe (a stale value only
+    /// widens a detected gap, and the repair is a re-backfill either way). <see cref="TimeSpan.Zero"/>
+    /// writes on every acknowledged transaction.
     /// </summary>
     public TimeSpan CheckpointSaveInterval { get; set; } = TimeSpan.FromSeconds(5);
 

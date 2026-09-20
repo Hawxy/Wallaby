@@ -18,37 +18,36 @@ internal sealed class CommittedTransaction
     public DateTimeOffset? CommitTimestamp { get; init; }
 
     /// <summary>
-    /// The in-memory changes in commit order (for a normal, non-streamed transaction). Empty when
-    /// <see cref="IsStreamed"/> — read those changes via <see cref="Spill"/> instead.
+    /// Changes in commit order for a non-streamed transaction. Empty when <see cref="IsStreamed"/>;
+    /// read those via <see cref="Spill"/> instead.
     /// </summary>
     public required IReadOnlyList<RawChange> Changes { get; init; }
 
     /// <summary>
-    /// Generic WAL messages (from <c>pg_logical_emit_message</c>) seen inside this transaction, in
-    /// arrival order. Used by the backfill coordinator to bracket snapshot chunks with low/high
-    /// watermarks; empty for ordinary data transactions (and always empty for streamed transactions, whose
-    /// own tiny watermark transactions are never streamed).
+    /// Generic WAL messages (<c>pg_logical_emit_message</c>) in this transaction, in arrival order. The
+    /// backfill coordinator uses them to bracket snapshot chunks with low/high watermarks. Always empty
+    /// for streamed transactions (watermark transactions are tiny and never streamed).
     /// </summary>
     public IReadOnlyList<Watermark> Watermarks { get; init; } = Array.Empty<Watermark>();
 
     /// <summary>
-    /// True when this transaction carried a <c>wallaby.heartbeat</c> message — an idle-slot heartbeat
-    /// emitted only to advance <c>confirmed_flush_lsn</c>. Used to tag its span and keep it out of the
-    /// throughput rollup; never set on streamed transactions (heartbeats are tiny).
+    /// True when this transaction carried a <c>wallaby.heartbeat</c> message (an idle-slot heartbeat
+    /// emitted only to advance <c>confirmed_flush_lsn</c>). Tags its span and keeps it out of the
+    /// throughput rollup; never set on streamed transactions.
     /// </summary>
     public bool ContainsHeartbeat { get; init; }
 
     /// <summary>
     /// Qualified names (<c>schema.table</c>) of captured tables truncated in this transaction, in arrival
-    /// order. Truncates are not propagated to sinks — the pipeline logs a warning that the affected sinks
-    /// now diverge until purged and re-backfilled. Empty for transactions without truncates.
+    /// order. Truncates are not propagated to sinks; the pipeline warns that the affected sinks diverge
+    /// until purged and re-backfilled.
     /// </summary>
     public IReadOnlyList<string> TruncatedTables { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// True for a pgoutput v2 streamed (large) transaction whose changes were spilled out of memory rather
-    /// than buffered in <see cref="Changes"/>. Read them in order via <c>Spill.ReadAsync(StreamXid)</c>; the
-    /// consumer stamps each with this transaction's commit metadata and discards the spill when done.
+    /// True for a pgoutput v2 streamed (large) transaction whose changes were spilled rather than buffered
+    /// in <see cref="Changes"/>. Read them via <c>Spill.ReadAsync(StreamXid)</c>; the consumer stamps each
+    /// with this transaction's commit metadata and discards the spill when done.
     /// </summary>
     public bool IsStreamed { get; init; }
 

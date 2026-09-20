@@ -30,8 +30,8 @@ public interface IWallabyBackfillManager
     /// <summary>
     /// Cancel a queued backfill request for <typeparamref name="TEntity"/> before the leader serves
     /// it, clearing any pending purge mark with it. Returns false when no request is queued. A
-    /// backfill already running is not interrupted (though a re-run request queued behind it is
-    /// withdrawn), and a request the leader has already begun serving proceeds.
+    /// backfill the leader has already begun serving is not interrupted (though a re-run request
+    /// queued behind it is withdrawn).
     /// </summary>
     Task<bool> CancelBackfillAsync<TEntity>(CancellationToken ct = default) where TEntity : class;
 

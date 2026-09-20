@@ -6,16 +6,15 @@ namespace Wallaby.Internal.Replication;
 
 /// <summary>
 /// Disk-backed <see cref="ITransactionSpill"/>: one append-only file per xid under a directory, each change
-/// written as a length-prefixed <see cref="SpillCodec"/> record. The truest memory bound and zero source-DB
-/// load, but it needs a writable path (mount a volume in locked-down containers). Opt in via
-/// <c>SpillToDisk</c>; the database backend is the default.
+/// written as a length-prefixed <see cref="SpillCodec"/> record. Zero source-DB load, but needs a writable
+/// path. Opt in via <c>SpillToDisk</c>; the database backend is the default.
 /// </summary>
 internal sealed class FileTransactionSpill : ITransactionSpill
 {
     private readonly string _directory;
     private readonly Dictionary<uint, FileStream> _writers = [];
 
-    // First append offset per (xid, subxid) — the truncation point when that subtransaction aborts.
+    // First append offset per (xid, subxid): the truncation point when that subtransaction aborts.
     // In-memory only: spill files never survive a session (ClearAsync runs before streaming appends).
     private readonly Dictionary<uint, Dictionary<uint, long>> _subxidFirstOffsets = [];
 

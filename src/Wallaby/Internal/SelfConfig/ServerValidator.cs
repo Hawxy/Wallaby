@@ -83,7 +83,6 @@ internal sealed class ServerValidator(ILogger logger)
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="ServerValidator"/>.</summary>
 internal static partial class ServerValidatorLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby server validation passed (wal_level=logical, max_replication_slots={MaxSlots}, in use={UsedSlots}).")]

@@ -161,7 +161,7 @@ internal sealed class PostgresBackfillStore(NpgsqlDataSource dataSource) : IBack
     public async Task<int> MaxAttemptsAsync(CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
-        // Terminal rows keep their history but no longer represent pending work.
+        // Terminal rows keep their history but are not pending work.
         return (int)await PgExec.ScalarLongAsync(
             connection,
             "SELECT coalesce(max(attempts), 0) FROM wallaby.backfill_state WHERE status IN ('Requested', 'InProgress')",

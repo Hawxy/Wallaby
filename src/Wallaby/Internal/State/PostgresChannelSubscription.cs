@@ -16,7 +16,7 @@ internal sealed class PostgresChannelSubscription(NpgsqlDataSource dataSource, s
         try
         {
             var connection = await EnsureListeningAsync(ct);
-            // Returns true if a notification arrived, false on timeout — either way the caller re-checks.
+            // Returns true if a notification arrived, false on timeout; either way the caller re-checks.
             await connection.WaitAsync(fallbackTimeout, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

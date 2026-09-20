@@ -14,15 +14,14 @@ namespace Wallaby.Internal.Replication;
 /// Serializes a <see cref="RawChange"/> to/from a self-describing UTF-8 JSON form for spilling a streamed (large)
 /// transaction out of memory and reading it back at commit. Unlike <c>KeysetCodec</c> (which is told each
 /// element's target type on the way out), this records a per-value type tag so the exact decoded CLR value is
-/// reconstructed without the EF model — the downstream materializer then coerces it exactly as for a live change.
+/// reconstructed without the EF model; the downstream materializer then coerces it as for a live change.
 /// Common scalar types and single-dimensional arrays of them are tagged explicitly; anything else falls back to
-/// type-tagged reflection-based JSON (round-trips within the process, which is all the spill needs — it is
-/// discarded on restart). The fallback requires reflection-based serialization and is unavailable in
-/// trimmed/NativeAOT hosts, where such values fail the spill with a descriptive error instead.
+/// type-tagged reflection-based JSON, which round-trips within the process (the spill is discarded on restart).
+/// The fallback is unavailable in trimmed/NativeAOT hosts, where such values fail the spill with a descriptive
+/// error instead.
 /// <para>
-/// The codec is a shared implementation detail of the built-in spill backends, which own their own framing
-/// (length-prefixed bytes on disk, a <c>bytea</c> column in the database). It exposes a single canonical UTF-8
-/// byte form so both backends store identical bytes with no transcoding.
+/// Shared by the built-in spill backends, which own their own framing (length-prefixed bytes on disk, a
+/// <c>bytea</c> column in the database); both store the same canonical UTF-8 bytes.
 /// </para>
 /// </summary>
 internal static partial class SpillCodec

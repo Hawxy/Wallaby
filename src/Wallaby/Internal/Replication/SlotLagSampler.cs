@@ -54,7 +54,6 @@ internal sealed class SlotLagSampler(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="SlotLagSampler"/>.</summary>
 internal static partial class SlotLagSamplerLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Retained-WAL sampling failed; retrying next tick.")]

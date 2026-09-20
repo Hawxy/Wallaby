@@ -17,9 +17,8 @@ public static class WallabyServiceCollectionExtensions
 {
     /// <summary>
     /// Add Postgres CDC. Supply a connection string via <c>cdc.UseConnectionString(...)</c>. For capture
-    /// (any sink) also register a storage provider,
-    /// e.g. <c>cdc.UseEntityFrameworkCore&lt;TContext&gt;()</c> from the Wallaby.Providers.EntityFrameworkCore
-    /// package. If only external slots are declared (no capture), Wallaby
+    /// (any sink) also register a storage provider, e.g. <c>cdc.UseEntityFrameworkCore&lt;TContext&gt;()</c>
+    /// from Wallaby.Providers.EntityFrameworkCore. If only external slots are declared (no sink), Wallaby
     /// runs provision-only: it creates/reconciles those slots and never opens a primary slot or streams.
     /// Wallaby owns a pooled <c>NpgsqlDataSource</c> built from the connection string for all non-replication work.
     /// <see cref="WallabyOptions"/> participates in the standard options pipeline: <c>Configure&lt;WallabyOptions&gt;</c>
@@ -54,7 +53,7 @@ public static class WallabyServiceCollectionExtensions
     {
         services.AddOptions();
 
-        // Bridge the builder's option actions into the options pipeline at THIS registration position:
+        // Bridge the builder's option actions into the options pipeline at this registration position:
         // Configure<WallabyOptions> calls made before AddWallaby run first (the builder overrides them), later
         // ones override the builder, and PostConfigure always wins.
         services.AddSingleton<IConfigureOptions<WallabyOptions>>(sp => new ConfigureOptions<WallabyOptions>(options =>
@@ -95,7 +94,7 @@ public static class WallabyServiceCollectionExtensions
         services.AddMetrics();
         services.AddSingleton(sp => new WallabyInstrumentation(sp.GetRequiredService<IMeterFactory>()));
 
-        // Live node status surface (role, progress, faults) — read by diagnostics and health checks.
+        // Live node status surface (role, progress, faults), read by diagnostics and health checks.
         services.AddSingleton(sp =>
         {
             var configuration = sp.GetRequiredService<WallabyConfiguration>();
@@ -108,9 +107,9 @@ public static class WallabyServiceCollectionExtensions
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(sp.GetRequiredService<WallabyDataSource>().Source));
 
-        // Capture runtime — registered unconditionally as lazy factories; only the hosted-service dispatch
-        // below (or a consumer resolving IWallabyBackfillManager) materializes it. The providers and the
-        // capture plans they build are resolved once; the runtime and the backfill manager share the merged plan.
+        // Capture runtime: registered unconditionally as lazy factories; only the hosted-service dispatch
+        // below (or a consumer resolving IWallabyBackfillManager) materializes it. Providers and their
+        // capture plans are resolved once; the runtime and the backfill manager share the merged plan.
         services.AddSingleton(sp =>
         {
             var config = sp.GetRequiredService<WallabyConfiguration>();
@@ -135,7 +134,7 @@ public static class WallabyServiceCollectionExtensions
         services.AddSingleton<ExternalSlotProvisioningService>();
 
         // Capture: stream via the runtime. Provision-only: create the declared external slots (if any) and
-        // idle — no primary slot/stream. Decided at host start.
+        // idle, with no primary slot/stream. Decided at host start.
         services.AddSingleton<IHostedService>(sp =>
             sp.GetRequiredService<WallabyConfiguration>().CaptureIntended
                 ? sp.GetRequiredService<WallabyBackgroundService>()

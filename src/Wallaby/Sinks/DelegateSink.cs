@@ -3,7 +3,7 @@ using Wallaby.Abstractions;
 namespace Wallaby.Sinks;
 
 /// <summary>
-/// An in-process sink that forwards each delivered batch to a handler delegate.  The handler should be
+/// An in-process sink that forwards each delivered batch to a handler delegate. The handler should be
 /// idempotent (keyed by <see cref="SinkRecord.DocumentId"/>) to honor at-least-once delivery.
 /// </summary>
 public sealed class DelegateSink(

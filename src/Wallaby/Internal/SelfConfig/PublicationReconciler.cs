@@ -264,7 +264,7 @@ internal sealed class PublicationReconciler(ILogger logger)
 
         // Changing a member's column list must NOT be done as DROP TABLE + ADD TABLE: pgoutput filters
         // each change by the catalog state at its commit, so a transaction committed inside the gap is
-        // silently never published — an at-least-once violation. SET TABLE replaces the whole set
+        // silently never published, an at-least-once violation. SET TABLE replaces the whole set
         // atomically in one statement.
         var setList = string.Join(", ", desiredTables.Select(FormatTableClause));
         await ExecutePublicationDdlAsync(
@@ -313,7 +313,6 @@ internal sealed class PublicationReconciler(ILogger logger)
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="PublicationReconciler"/>.</summary>
 internal static partial class PublicationReconcilerLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Created publication {Publication} for {TableCount} table(s).")]

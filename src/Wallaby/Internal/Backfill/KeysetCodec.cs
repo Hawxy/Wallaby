@@ -25,7 +25,7 @@ internal static class KeysetCodec
     /// <summary>
     /// Deserialize a PK cursor, coercing each element to the matching target type. Returns false when the
     /// persisted JSON is not a current-version envelope for exactly <paramref name="pkColumns"/> (ordinal,
-    /// order-sensitive) or its values cannot be coerced back — the caller restarts from scratch. Null/empty
+    /// order-sensitive) or its values cannot be coerced back; the caller restarts from scratch. Null/empty
     /// input is a valid "no cursor yet".
     /// </summary>
     public static bool TryDeserializeCursor(
@@ -86,9 +86,9 @@ internal static class KeysetCodec
     }
 
     /// <summary>
-    /// Deserialize a scoped-backfill cursor. Cursors persisted before batching carry no batch index and
-    /// read back as batch 0. Returns false on a stale/mismatched envelope or values that cannot be coerced
-    /// back — the caller reruns the scope fresh. Null/empty input is a valid "no cursor yet".
+    /// Deserialize a scoped-backfill cursor. A missing batch index reads back as batch 0. Returns false on
+    /// a stale/mismatched envelope or values that cannot be coerced back; the caller reruns the scope
+    /// fresh. Null/empty input is a valid "no cursor yet".
     /// </summary>
     public static bool TryDeserializeScopedCursor(
         string? json, IReadOnlyList<string> pkColumns, IReadOnlyList<Type> targets,
@@ -259,7 +259,7 @@ internal static class KeysetCodec
 
 /// <summary>
 /// The persisted shape of a keyset cursor: format version, PK column names, cursor values, and (for
-/// scoped cursors) the filter-batch index — absent on whole-table cursors, reading back as 0.
+/// scoped cursors) the filter-batch index, absent on whole-table cursors and reading back as 0.
 /// </summary>
 internal sealed class CursorEnvelope
 {

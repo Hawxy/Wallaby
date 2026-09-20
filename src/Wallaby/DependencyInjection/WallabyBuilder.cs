@@ -44,8 +44,8 @@ public sealed class WallabyBuilder
     /// <summary>
     /// Provider-aware overload of <see cref="ConfigureOptions(Action{WallabyOptions})"/>: the action runs
     /// on first options resolution with the root provider, so option values can come from services (e.g.
-    /// <c>IConfiguration</c>) while registration — and <see cref="Services"/> — stays eager. Resolving
-    /// Wallaby's own services (<see cref="WallabyOptions"/>, <see cref="Abstractions.IWallabyStatus"/>, …)
+    /// <c>IConfiguration</c>) while registration (and <see cref="Services"/>) stays eager. Resolving
+    /// Wallaby's own services (<see cref="WallabyOptions"/>, <see cref="Abstractions.IWallabyStatus"/>, ...)
     /// inside it creates a resolution cycle.
     /// </summary>
     public WallabyBuilder ConfigureOptions(Action<IServiceProvider, WallabyOptions> configure)
@@ -57,7 +57,7 @@ public sealed class WallabyBuilder
 
     /// <summary>
     /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill reads.
-    /// Shorthand for <c>ConfigureOptions(o =&gt; o.ConnectionString = ...)</c> — like any option value it can
+    /// Shorthand for <c>ConfigureOptions(o =&gt; o.ConnectionString = ...)</c>; like any option value it can
     /// also be supplied (or overridden) through <c>Configure&lt;WallabyOptions&gt;</c>, configuration binding, or
     /// <c>PostConfigure</c>, and is validated as non-empty on first resolution.
     /// </summary>
@@ -129,11 +129,11 @@ public sealed class WallabyBuilder
     /// <summary>
     /// Register a storage provider that derives a capture model and leases enrichment sessions.
     /// Called by provider packages' registration extensions (e.g. <c>UseEntityFrameworkCore&lt;TContext&gt;()</c>
-    /// from Wallaby.Providers.EntityFrameworkCore); consumers normally never call it directly. A provider is required
-    /// whenever Wallaby streams (any sink) and to
-    /// resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c> table declarations; omit it for a
-    /// provision-only worker that declares external slots by table name only. Multiple providers may be
-    /// registered (their capture plans merge onto one slot/publication); names must be unique.
+    /// from Wallaby.Providers.EntityFrameworkCore); consumers normally never call it directly. A provider is
+    /// required whenever Wallaby streams (any sink) and to resolve <c>AddExternalSlot(...).ForEntity&lt;T&gt;()</c>
+    /// table declarations; omit it for a provision-only worker that declares external slots by table name
+    /// only. Multiple providers may be registered (their capture plans merge onto one slot/publication);
+    /// names must be unique.
     /// </summary>
     public WallabyBuilder UseProvider(WallabyProviderRegistration registration)
     {
@@ -198,9 +198,9 @@ public sealed class WallabyBuilder
 
     /// <summary>
     /// Provision an additional pgoutput publication + logical replication slot for the declared tables.
-    /// Wallaby creates it and reconciles its table set on every startup, but never consumes it — so a
+    /// Wallaby creates it and reconciles its table set on every startup, but never consumes it, so a
     /// third-party CDC tool (e.g. an ELT) can read from it independently. Wallaby never drops these slots;
-    /// remove a no-longer-needed slot/publication manually (it pins WAL until then).
+    /// remove an unneeded slot/publication manually (it pins WAL until then).
     /// </summary>
     public WallabyBuilder AddExternalSlot(string slotName, Action<ExternalSlotBuilder> configure)
     {
@@ -214,9 +214,9 @@ public sealed class WallabyBuilder
 
     /// <summary>
     /// Deploy this node suspended: on startup it drops every replication slot Wallaby manages (primary and
-    /// external) and idles until resumed, so a platform blocked by logical slots — e.g. an RDS/Aurora
-    /// major-version upgrade precheck — can proceed. Enables a two-phase upgrade with no admin endpoint:
-    /// deploy with <c>Suspend()</c>, run the engine upgrade, then deploy without it — the flag-less node
+    /// external) and idles until resumed, so a platform blocked by logical slots (e.g. an RDS/Aurora
+    /// major-version upgrade precheck) can proceed. Enables a two-phase upgrade with no admin endpoint:
+    /// deploy with <c>Suspend()</c>, run the engine upgrade, then deploy without it; the flag-less node
     /// resumes automatically, recreates the slots, and re-backfills every mapped table. While deployed, the
     /// flag is re-asserted over remote resumes; a suspension requested at runtime (Wallaby.Client)
     /// is never auto-resumed. Shorthand for <c>ConfigureOptions(o =&gt; o.Suspended = true)</c>.
@@ -233,9 +233,9 @@ public sealed class WallabyBuilder
 
     /// <summary>
     /// Spill pgoutput v2 streamed (large) transactions to local disk instead of the default database backend.
-    /// Lowest source-DB impact and the truest memory bound, but needs a writable <paramref name="directory"/> —
-    /// defaults to a per-slot folder under the OS temp path; mount a writable volume when the container's root
-    /// filesystem is read-only.
+    /// Lowest source-DB impact and the truest memory bound, but needs a writable <paramref name="directory"/>
+    /// (defaults to a per-slot folder under the OS temp path); mount a writable volume when the container's
+    /// root filesystem is read-only.
     /// </summary>
     public WallabyBuilder SpillToDisk(string? directory = null)
         => UseTransactionSpill(ctx => new FileTransactionSpill(
@@ -243,7 +243,7 @@ public sealed class WallabyBuilder
 
     /// <summary>
     /// Spill pgoutput v2 streamed (large) transactions to a <c>wallaby.stream_buffer</c> UNLOGGED table on the
-    /// source database. This is the default — disk-free and zero-config (works wherever Wallaby connects), at the
+    /// source database. This is the default: disk-free and zero-config (works wherever Wallaby connects), at the
     /// cost of extra source-DB I/O during a huge transaction. Use <see cref="SpillToDisk"/> to avoid that I/O when
     /// a writable path is available.
     /// </summary>
@@ -252,11 +252,11 @@ public sealed class WallabyBuilder
             ctx.DataSource, ctx.SlotName, ctx.Services.GetService<WallabyInstrumentation>()));
 
     /// <summary>
-    /// Supply a custom <see cref="ITransactionSpill"/> backend for pgoutput v2 streamed (large) transactions —
+    /// Supply a custom <see cref="ITransactionSpill"/> backend for pgoutput v2 streamed (large) transactions,
     /// e.g. an object store or cache. The <paramref name="factory"/> is invoked once per leader session with a
     /// <see cref="SpillContext"/> (the source data source, slot name, and service provider), so it may resolve
     /// its own dependencies and should return a fresh instance each call (the runtime disposes it at session end).
-    /// Note that only a backend spilling to durable/external storage actually bounds memory; an in-RAM store just
+    /// Only a backend spilling to durable/external storage actually bounds memory; an in-RAM store just
     /// relocates it. Overrides <see cref="SpillToDisk"/>/<see cref="SpillToDatabase"/>; the default is the database.
     /// </summary>
     public WallabyBuilder UseTransactionSpill(Func<SpillContext, ITransactionSpill> factory)
@@ -268,14 +268,11 @@ public sealed class WallabyBuilder
 
     internal WallabyConfiguration Build()
     {
-        // Structural validation only — option VALUES (the connection string, slot/publication names, sizes,
-        // intervals) are not final until the options pipeline runs (Configure/binding/PostConfigure may still
-        // supply or change them), so those checks live in WallabyOptionsValidator and surface on first WallabyOptions
-        // resolution.
+        // Structural validation only. Option values (connection string, slot/publication names, sizes,
+        // intervals) are not final until the options pipeline runs, so those checks live in
+        // WallabyOptionsValidator and surface on first WallabyOptions resolution.
 
-        // Capturing (any sink) requires a provider. Without a sink, Wallaby runs in provision-only mode:
-        // it just provisions the declared external slots (no primary slot, no streaming), so no provider
-        // is required.
+        // Capturing (any sink) requires a provider; a provision-only instance (external slots, no sink) does not.
         if (_configuration.CaptureIntended && _configuration.Providers.Count == 0)
         {
             throw new WallabyConfigurationException(
@@ -295,9 +292,8 @@ public sealed class WallabyBuilder
             }
         }
 
-        // A capture set with no mappings at all can't deliver anything and would create a publication
-        // with no tables. Fail here rather than at startup with a Postgres syntax error. (An individual
-        // sink without mappings is fine as long as another sink maps something.)
+        // A capture set with no mappings would create a publication with no tables; fail here rather than
+        // at startup with a Postgres syntax error. (A sink without mappings is fine if another sink maps something.)
         if (_configuration.CaptureIntended && !_configuration.AllMappings.Any())
         {
             throw new WallabyConfigurationException(
@@ -354,7 +350,7 @@ public sealed class WallabyBuilder
             }
         }
 
-        // Entity-typed declarations resolve against a provider's model, so they need a declared provider. ForTable(...) does not.
+        // Entity-typed declarations resolve against a provider's model; ForTable(...) does not.
         if (_configuration.Providers.Count == 0 && _configuration.ExternalSlots.Any(e => e.NeedsModel))
         {
             throw new WallabyConfigurationException(
@@ -362,10 +358,9 @@ public sealed class WallabyBuilder
                 "Register one with UseEntityFrameworkCore<TContext>() or UseMarten(), or declare the tables by name via ForTable(...).");
         }
 
-        // External slots: names must be distinct from each other, and each must declare at least one table
-        // (a pgoutput publication needs tables). Collisions with the PRIMARY slot/publication are checked by
-        // WallabyOptionsValidator, since those names are not final until the options pipeline runs. The default
-        // publication name here must match ExternalSlotResolver.
+        // External slot names must be distinct and each must declare at least one table (a pgoutput
+        // publication needs tables). Collisions with the primary slot/publication are checked by
+        // WallabyOptionsValidator, since those names are not final until the options pipeline runs.
         var slotNames = new HashSet<string>(StringComparer.Ordinal);
         var publicationNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var external in _configuration.ExternalSlots)

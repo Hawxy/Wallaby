@@ -258,7 +258,7 @@ internal sealed class WallabyPipeline(
     }
 
     // Normal transaction: materialize the in-memory changes, dispatch them (with watermark/backfill handling),
-    // and resolve dependent fan-out. Unchanged from the pre-streaming behaviour.
+    // and resolve dependent fan-out.
     private async Task<int> ProcessInMemoryAsync(CommittedTransaction transaction, CancellationToken ct)
     {
         var appEvents = new List<ChangeEvent>(transaction.Changes.Count);
@@ -320,8 +320,8 @@ internal sealed class WallabyPipeline(
             raw.CommitTimestamp = transaction.CommitTimestamp;
             raw.CommitIdx = idx++;
 
-            // Note while passing whether any change can trigger fan-out, so the fan-out's second
-            // spill read below is skipped entirely for transactions that touched no dependent table.
+            // Tracked so the fan-out's second spill read below is skipped for transactions that touched
+            // no dependent table.
             if (!sawDependentChange && dependentResolver is not null && dependentResolver.HasBindingFor(raw.Schema, raw.TableName))
             {
                 sawDependentChange = true;
@@ -420,7 +420,7 @@ internal sealed class WallabyPipeline(
     }
 
     // Wide tails offload to the fan-out queue as the resolver cuts them; without a queue the callback is
-    // null and the resolver keeps the tail inline (dropped past its valve, matching prior behavior).
+    // null and the resolver delivers only each binding's inline first page.
     private readonly Func<ScopedFanoutSpec, CancellationToken, Task>? _enqueueTail = fanoutQueue is null
         ? null
         : fanoutQueue.EnqueueAsync;
@@ -589,7 +589,6 @@ internal sealed class WallabyPipeline(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="WallabyPipeline"/>.</summary>
 internal static partial class WallabyPipelineLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby pipeline started for slot {Slot}.")]

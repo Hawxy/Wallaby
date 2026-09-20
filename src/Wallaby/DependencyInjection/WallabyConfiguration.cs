@@ -71,16 +71,15 @@ internal sealed class MappingRegistration
     public bool RequiresMaterializedEntity => HasEntityKeyedId || (HasEntityScopedKey && DestinationSelector is not null);
 
     /// <summary>
-    /// Navigation expressions declared via <c>DependsOn(...)</c>. Each expression points at a single
-    /// one-hop navigation whose target/join table should be captured and fan changes out to this
-    /// entity. Resolved against the storage provider's model at startup (via
-    /// <see cref="IWallabyModelProvider.BuildCapturePlan"/>).
+    /// Navigation expressions declared via <c>DependsOn(...)</c>. Each is a single one-hop navigation whose
+    /// target/join table is captured and fans changes out to this entity. Resolved against the storage
+    /// provider's model at startup (via <see cref="IWallabyModelProvider.BuildCapturePlan"/>).
     /// </summary>
     public List<LambdaExpression> DeclaredDependencies { get; } = [];
 }
 
 /// <summary>
-/// A declared external replication slot — an additional pgoutput publication + slot that Wallaby
+/// A declared external replication slot: an additional pgoutput publication + slot that Wallaby
 /// provisions (and reconciles) for a third-party CDC consumer (e.g. an ELT tool) but never consumes.
 /// Table declarations are resolved to schema-qualified names against the storage provider's model at startup.
 /// </summary>
@@ -116,16 +115,15 @@ internal sealed class ExternalSlotRegistration
     public bool HasExclusions => ExcludedTableNames.Count > 0 || ExcludedEntityTypes.Count > 0;
 }
 
-/// <summary>The immutable result of the fluent builder, consumed by the runtime.</summary>
+/// <summary>The result of the fluent builder, consumed by the runtime.</summary>
 internal sealed class WallabyConfiguration
 {
     /// <summary>
     /// Option mutations queued by <see cref="WallabyBuilder.ConfigureOptions(Action{WallabyOptions})"/> and
     /// <see cref="WallabyBuilder.UseConnectionString(string)"/> (and their provider-aware overloads).
-    /// Applied to the <see cref="WallabyOptions"/> being built by the options pipeline at the
-    /// <c>AddWallaby</c> registration position, so they compose with the standard
-    /// <c>Configure&lt;WallabyOptions&gt;</c>/<c>PostConfigure</c> calls in registration order; the provider
-    /// passed in is the root provider available at options-pipeline time.
+    /// Applied by the options pipeline at the <c>AddWallaby</c> registration position, so they compose with
+    /// <c>Configure&lt;WallabyOptions&gt;</c>/<c>PostConfigure</c> calls in registration order. The provider
+    /// passed in is the root provider.
     /// </summary>
     public List<Action<IServiceProvider, WallabyOptions>> OptionsActions { get; } = [];
 
@@ -166,9 +164,8 @@ internal sealed class WallabyConfiguration
     public List<WallabyProviderRegistration> Providers { get; } = [];
 
     /// <summary>
-    /// True when the consumer declared anything that requires the streaming pipeline (a sink; mappings
-    /// only exist attached to one). When false, Wallaby runs in provision-only mode: it only creates the
-    /// declared external slots and never opens a primary slot or streams.
+    /// True when a sink is declared (mappings only exist attached to one). When false, Wallaby runs
+    /// provision-only: it creates the declared external slots and never opens a primary slot or streams.
     /// </summary>
     public bool CaptureIntended => Sinks.Count > 0;
 

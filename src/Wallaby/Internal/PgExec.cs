@@ -16,7 +16,6 @@ internal static class PgExec
         return await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    /// <summary>Open a connection from the data source, run the command, and dispose the connection.</summary>
     public static async Task<int> ExecuteAsync(
         NpgsqlDataSource dataSource, string sql, CancellationToken ct, params (string Name, object? Value)[] parameters)
     {

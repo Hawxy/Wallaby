@@ -61,7 +61,7 @@ public sealed class SinkMappingBuilder
     }
 
     /// <summary>
-    /// Apply a mapping configuration class — equivalent to <see cref="Map{TEntity}"/> followed by the
+    /// Apply a mapping configuration class: equivalent to <see cref="Map{TEntity}"/> followed by the
     /// class's <c>Configure(...)</c> calls. Returns this builder so applications chain.
     /// </summary>
     public SinkMappingBuilder Apply<TMapping>() where TMapping : IWallabyEntityMapping, new()

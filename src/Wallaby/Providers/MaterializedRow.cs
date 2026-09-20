@@ -5,7 +5,7 @@ namespace Wallaby.Providers;
 /// <summary>The result of materializing a <see cref="Model.RawChange"/> against the provider's model.</summary>
 /// <param name="Action">
 /// The action the routed <see cref="ChangeEvent"/> carries. Normally the raw change's action; a provider
-/// may substitute what the change <em>means</em> in its model — e.g. surface a soft-delete UPDATE as a
+/// may substitute what the change <em>means</em> in its model, e.g. surface a soft-delete UPDATE as a
 /// Delete. Backfill detection keys off the raw action, not this.
 /// </param>
 /// <param name="Entity">The materialized CLR entity (may be partial for deletes).</param>

@@ -9,10 +9,9 @@ namespace Wallaby.Internal.Replication;
 
 /// <summary>
 /// Disk-free <see cref="ITransactionSpill"/>: buffers a streamed transaction's changes in the
-/// <c>wallaby.stream_buffer</c> <b>UNLOGGED</b> table on the source database (so it works wherever Wallaby can
-/// connect, with no local disk). UNLOGGED means the buffer writes generate no WAL (no slot feedback, no
-/// re-capture) and are auto-truncated on crash. Engages only for streamed (large) transactions, so the extra
-/// source I/O is paid only then. Appends are buffered to a small bounded window and flushed via binary COPY.
+/// <c>wallaby.stream_buffer</c> <b>UNLOGGED</b> table on the source database. UNLOGGED means the buffer
+/// writes generate no WAL (no slot feedback, no re-capture) and are auto-truncated on crash. Appends are
+/// buffered to a small bounded window and flushed via binary COPY.
 /// </summary>
 internal sealed class PostgresUnloggedTableSpill(
     NpgsqlDataSource dataSource, string slotName, WallabyInstrumentation? instrumentation = null) : ITransactionSpill

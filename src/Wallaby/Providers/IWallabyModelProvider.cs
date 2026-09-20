@@ -8,7 +8,7 @@ namespace Wallaby.Providers;
 public interface IWallabyModelProvider
 {
     /// <summary>
-    /// Resolve the capture plan — tables, keys, dependent-table bindings, and the row materializer —
+    /// Resolve the capture plan (tables, keys, dependent-table bindings, and the row materializer)
     /// once at startup. Declared <c>DependsOn(...)</c> expressions in <paramref name="spec"/> are resolved
     /// against the provider's model here.
     /// </summary>

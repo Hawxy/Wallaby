@@ -13,10 +13,9 @@ namespace Wallaby.Internal.Control;
 internal sealed class PostgresControlStore(WallabyDataSource dataSource, WallabyOptions options, ILogger logger)
 {
     /// <summary>
-    /// The control row; <c>null</c> (no row/table yet) means running. A control table predating this
-    /// build's columns (an upgraded deployment reading before any leader bootstrapped) is healed by
-    /// applying the pending schema steps and retrying, so every later operation in the same pass sees
-    /// a current schema.
+    /// The control row; <c>null</c> (no row/table yet) means running. A control table missing this
+    /// build's columns is healed by applying the pending schema steps and retrying, so every later
+    /// operation in the same pass sees a current schema.
     /// </summary>
     public async Task<ControlRow?> ReadAsync(CancellationToken ct)
     {

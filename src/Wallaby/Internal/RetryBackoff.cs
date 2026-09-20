@@ -11,7 +11,6 @@ internal sealed class RetryBackoff(TimeSpan baseDelay)
     private readonly TimeSpan _maxDelay = baseDelay > TimeSpan.FromMinutes(2) ? baseDelay : TimeSpan.FromMinutes(2);
     private int _attempt;
 
-    /// <summary>Reset back to the base delay (call after a healthy run).</summary>
     public void Reset() => _attempt = 0;
 
     /// <summary>The next delay (and advance the schedule): <c>min(base · 2^n, cap)</c> with ±20% jitter.</summary>

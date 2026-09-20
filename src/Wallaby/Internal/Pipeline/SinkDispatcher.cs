@@ -199,7 +199,6 @@ internal sealed class SinkDispatcher
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="SinkDispatcher"/>.</summary>
 internal static partial class SinkDispatcherLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Sink {Sink} delivery attempt {Attempt} failed with a retryable error; retrying in {Delay}.")]

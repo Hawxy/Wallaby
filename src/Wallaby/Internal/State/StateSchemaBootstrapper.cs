@@ -80,8 +80,8 @@ internal sealed class StateSchemaBootstrapper(ILogger? logger = null)
         logger?.SchemaMigrated(lockedVersion, currentVersion);
     }
 
-    // Missing ledger (or missing schema entirely) reads as version 0: a fresh database, or one
-    // bootstrapped by a pre-versioning beta; both adopted by the baseline step.
+    // A missing ledger (or schema) reads as version 0: a fresh or pre-versioning database, which the
+    // baseline step adopts.
     private static async Task<long> TryReadVersionAsync(NpgsqlConnection connection, CancellationToken ct)
     {
         try
@@ -107,7 +107,6 @@ internal sealed class StateSchemaBootstrapper(ILogger? logger = null)
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="StateSchemaBootstrapper"/>.</summary>
 internal static partial class StateSchemaBootstrapperLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Migrated the wallaby state schema from version {FromVersion} to {ToVersion}.")]

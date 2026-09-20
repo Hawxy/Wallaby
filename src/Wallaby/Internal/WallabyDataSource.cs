@@ -69,7 +69,6 @@ internal sealed class WallabyDataSource : IAsyncDisposable
             Source = source;
     }
 
-    /// <summary>The pooled data source Wallaby opens normal connections from.</summary>
     public NpgsqlDataSource Source { get; }
 
     /// <summary>

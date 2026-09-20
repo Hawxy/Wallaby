@@ -54,7 +54,6 @@ internal sealed class SinkPurgeRunner(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="SinkPurgeRunner"/>.</summary>
 internal static partial class SinkPurgeRunnerLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message =

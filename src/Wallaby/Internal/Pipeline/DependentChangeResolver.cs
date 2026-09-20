@@ -186,7 +186,7 @@ internal sealed class DependentChangeResolver(
                 if (acc.Flushed)
                 {
                     // The scope is already streaming to the queue in chunk jobs; flush the final partial
-                    // one and skip the inline page — a page over just the residual tuples would be an
+                    // one and skip the inline page: a page over just the residual tuples would be an
                     // arbitrary slice of a scope the queue is delivering anyway.
                     if (acc.Tuples.Count > 0 && enqueueTail is not null)
                     {
@@ -381,7 +381,6 @@ internal sealed class DependentChangeResolver(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="DependentChangeResolver"/>.</summary>
 internal static partial class DependentChangeResolverLog
 {
     [LoggerMessage(Level = LogLevel.Debug, Message = "An update on dependent table {Schema}.{Table} carried no old lookup values (REPLICA IDENTITY is not FULL); a re-pointed lookup column fans out only to its new value's rows. Set REPLICA IDENTITY FULL on the table to also refresh the rows it left behind. Logged once per table.")]
