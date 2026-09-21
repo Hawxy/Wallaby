@@ -1,41 +1,86 @@
 ---
-description: "Keeping Elasticsearch indices continuously in sync with Postgres tables via idempotent bulk upserts and deletes."
+title: "Sync Postgres to Elasticsearch from .NET"
+description: "Keep Elasticsearch indices in sync with Postgres from C#: bulk upserts and deletes driven by logical replication, mapped from your EF Core or Marten model."
 ---
 
 # Elasticsearch Sink
 
-The `Wallaby.Sinks.Elasticsearch` package keeps Elasticsearch indices continuously in sync with your
-Postgres tables. Changes are delivered through the `_bulk` API: upserts are indexed with `_id` set
-to a stable document id (so updates are idempotent) and deletions remove by that same id. It works
-with self-managed Elasticsearch and Elastic Cloud.
+Keep Elasticsearch indices in sync with Postgres from your .NET application. The
+`Wallaby.Sinks.Elasticsearch` package streams committed row changes out of Postgres logical
+replication and delivers them through the `_bulk` API: upserts are indexed with `_id` set to a
+stable document id (so updates are idempotent) and deletions remove by that same id. No polling, no
+dual writes, no reindex script. It works with self-managed Elasticsearch and Elastic Cloud.
 
-## Install
+## Quickstart
 
 ```bash
 dotnet add package Wallaby.Sinks.Elasticsearch
 ```
 
-## Register
+Register Wallaby, point it at a storage provider, add the sink, and map an entity. The mapping's
+destination is the **index name** (index names must be lowercase).
 
-```csharp
-cdc.AddElasticsearchSink("search", s =>
+::: code-group
+
+```csharp [EF Core]
+builder.Services.AddWallaby(cdc =>
 {
-    s.Endpoint = "https://localhost:9200";
-    s.ApiKey = apiKey;            // or Username/Password; omit both for an unsecured cluster
-    s.DefaultIndex = "documents"; // optional fallback when a mapping has no destination
+    cdc.UseEntityFrameworkCore<AppDbContext>()
+       .UseConnectionString(conn)
+       .AddElasticsearchSink("search", s =>
+       {
+           s.Endpoint = "https://localhost:9200";
+           s.ApiKey = apiKey;
+           s.DefaultIndex = "documents";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
 });
 ```
 
-Then attach the entities it indexes, using the destination as the **index name** (index names must
-be lowercase):
-
-```csharp
-cdc.AddElasticsearchSink("search", s => { /* ... */ })
-   .WithMappings(sink => sink
-       .Map<Product>()
-       .ToDestination("products")
-       .UsingTransform(/* ... */));
+```csharp [Marten]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseMarten()
+       .UseConnectionString(conn)
+       .AddElasticsearchSink("search", s =>
+       {
+           s.Endpoint = "https://localhost:9200";
+           s.ApiKey = apiKey;
+           s.DefaultIndex = "documents";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
 ```
+
+```csharp [Plain tables]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseTables(tables => tables.Add<Product>())
+       .UseConnectionString(conn)
+       .AddElasticsearchSink("search", s =>
+       {
+           s.Endpoint = "https://localhost:9200";
+           s.ApiKey = apiKey;
+           s.DefaultIndex = "documents";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+:::
+
+The transform shapes each change into the document you want indexed; see
+[mappings](/mappings#transforms). For the Postgres server settings Wallaby needs, see
+[getting started](/getting-started#server-prerequisites).
 
 ## Options
 

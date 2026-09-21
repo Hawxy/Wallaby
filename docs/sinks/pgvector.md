@@ -1,46 +1,101 @@
 ---
-description: "Syncing Postgres tables into pgvector vector tables, with optional sink-side embedding that re-embeds only changed text."
+title: "Sync Postgres to pgvector embeddings from .NET"
+description: "Keep pgvector tables and embeddings in sync with Postgres from C#: sink-side embedding re-embeds only changed text, so restarts and backfills never re-embed."
 ---
 
 # Pgvector Sink
 
-The `Wallaby.Sinks.Pgvector` package keeps [pgvector](https://github.com/pgvector/pgvector) tables
-continuously in sync with your source tables - the "my RAG corpus is just Postgres" setup, with no
-extra search infrastructure. Upserts are idempotent by id and deletes remove by id, so redelivery
-converges. Its main feature is **sink-side embedding**: configure an embedding generator and the
-sink embeds documents at delivery time, re-embedding only rows whose text actually changed. The
-destination table doubles as the durable embedding cache, so restarts, failovers, and re-backfills
-never re-embed unchanged text.
+Keep [pgvector](https://github.com/pgvector/pgvector) tables and their embeddings in sync with
+Postgres from your .NET application: the "my RAG corpus is just Postgres" setup, with no extra
+search infrastructure. The `Wallaby.Sinks.Pgvector` package streams committed row changes out of
+logical replication, upserts idempotently by id and deletes by id, so redelivery converges.
 
-## Install
+Its main feature is **sink-side embedding**: configure an embedding generator and the sink embeds
+documents at delivery time, re-embedding only rows whose text actually changed. The destination
+table doubles as the durable embedding cache, so restarts, failovers, and re-backfills never
+re-embed unchanged text.
+
+## Quickstart
 
 ```bash
 dotnet add package Wallaby.Sinks.Pgvector
 ```
 
-## Register
+::: code-group
 
-```csharp
-cdc.AddPgvectorSink("vectors", v =>
+```csharp [EF Core]
+builder.Services.AddWallaby(cdc =>
 {
-    v.ConnectionString = vectorDbConn;   // often a different database than the CDC source
-    v.Dimensions = 1536;
-    v.EmbeddingGenerator = generator;    // any Microsoft.Extensions.AI IEmbeddingGenerator
-    v.EmbedText = d => $"{d["name"]}\n{d["description"]}";
-    v.EmbeddingVersion = "text-embedding-3-small/1";
-})
-.WithMappings(sink => sink
-    .Map<Product>()
-    .ToDestination("products")           // the destination table
-    .WithBackfillVersion("v1", purgeOnChange: true)
-    .UsingTransform(/* emit name + description as plain text */));
+    cdc.UseEntityFrameworkCore<AppDbContext>()
+       .UseConnectionString(conn)
+       .AddPgvectorSink("vectors", v =>
+       {
+           v.ConnectionString = vectorDbConn;
+           v.Dimensions = 1536;
+           v.EmbeddingGenerator = generator;
+           v.EmbedText = d => $"{d["name"]}\n{d["description"]}";
+           v.EmbeddingVersion = "text-embedding-3-small/1";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .WithBackfillVersion("v1", purgeOnChange: true)
+           .UsingTransform(/* ... */));
+});
 ```
+
+```csharp [Marten]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseMarten()
+       .UseConnectionString(conn)
+       .AddPgvectorSink("vectors", v =>
+       {
+           v.ConnectionString = vectorDbConn;
+           v.Dimensions = 1536;
+           v.EmbeddingGenerator = generator;
+           v.EmbedText = d => $"{d["name"]}\n{d["description"]}";
+           v.EmbeddingVersion = "text-embedding-3-small/1";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .WithBackfillVersion("v1", purgeOnChange: true)
+           .UsingTransform(/* ... */));
+});
+```
+
+```csharp [Plain tables]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseTables(tables => tables.Add<Product>())
+       .UseConnectionString(conn)
+       .AddPgvectorSink("vectors", v =>
+       {
+           v.ConnectionString = vectorDbConn;
+           v.Dimensions = 1536;
+           v.EmbeddingGenerator = generator;
+           v.EmbedText = d => $"{d["name"]}\n{d["description"]}";
+           v.EmbeddingVersion = "text-embedding-3-small/1";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .WithBackfillVersion("v1", purgeOnChange: true)
+           .UsingTransform(/* ... */));
+});
+```
+
+:::
 
 `generator` is any
 [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/microsoft-extensions-ai)
 `IEmbeddingGenerator<string, Embedding<float>>` - OpenAI, Azure, Ollama, Bedrock, ONNX, or your own.
 Leave the three embedding options unset and the sink instead stores a vector your transform supplies
 in the document's `VectorField` (default `embedding`, as `float[]` or `ReadOnlyMemory<float>`).
+
+For the Postgres server settings Wallaby needs, see
+[getting started](/getting-started#server-prerequisites).
 
 ## The table
 
@@ -74,7 +129,7 @@ Query it like any pgvector table (`ORDER BY embedding <=> $1 LIMIT 10`), joining
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `ConnectionString` | *(required)* | Destination database. |
+| `ConnectionString` | *(required)* | Destination database; often not the CDC source database. |
 | `ConfigureDataSource` | `null` | Extra `NpgsqlDataSourceBuilder` configuration (TLS callbacks, loggers, ...). |
 | `Schema` | `public` | Schema holding the destination tables. |
 | `DefaultTable` | `null` | Table used when a routed record has no destination. |

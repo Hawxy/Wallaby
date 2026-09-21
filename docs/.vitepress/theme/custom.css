@@ -426,3 +426,9 @@ html {
 .vp-doc th {
   background-color: var(--vp-c-bg-soft);
 }
+
+/* A sidebar group whose header is also a link keeps the section-header styling */
+.VPSidebarItem.level-0 > .item > .link .text {
+  font-size: 12px;
+  text-transform: uppercase;
+}

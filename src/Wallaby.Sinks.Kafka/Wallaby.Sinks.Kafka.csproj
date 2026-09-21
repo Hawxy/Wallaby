@@ -5,8 +5,8 @@
     <PackageId>Wallaby.Sinks.Kafka</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Kafka destination/sink for Wallaby: produce Postgres changes to Kafka topics, keyed by document id with tombstone deletes.</Description>
-    <PackageTags>kafka;sink</PackageTags>
+    <Description>Produce Postgres changes to Kafka topics from .NET, with no Debezium and no Kafka Connect. Change data capture sink for Wallaby: one message per record keyed by document id, tombstone deletes, and commit order preserved per document.</Description>
+    <PackageTags>kafka;streaming;event-streaming;sink;sync</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

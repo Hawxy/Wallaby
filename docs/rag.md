@@ -1,5 +1,6 @@
 ---
-description: "Keeping embeddings and RAG corpora continuously in sync with Postgres using CDC: destination-side embedding, the pgvector sink, and model migrations."
+title: "Keep RAG embeddings fresh with Postgres CDC"
+description: "Keep embeddings and RAG corpora in sync with Postgres from .NET using CDC: destination-side embedding, the pgvector sink, and re-embedding on model changes."
 ---
 
 # RAG & Embeddings

@@ -1,22 +1,27 @@
 ---
-description: "POSTing change batches to any HTTP endpoint as a JSON envelope, with named-client auth, Standard Webhooks signing, and idempotency keys."
+title: "Send Postgres changes to a webhook from .NET"
+description: "POST Postgres inserts, updates and deletes to any HTTP endpoint from C#: JSON envelope, Standard Webhooks signing, idempotency keys, at-least-once delivery."
 ---
 
-# HTTP Sink
+# HTTP (Webhook) Sink
 
-The `Wallaby.Sinks.Http` package POSTs batches of changes to any HTTP endpoint as a JSON envelope of
-upsert/delete records. Retries, ordering, and at-least-once delivery are handled by the pipeline; your receiver just applies
-records idempotently.
+Send Postgres changes to any webhook or HTTP endpoint from your .NET application. The
+`Wallaby.Sinks.Http` package POSTs batches of changes as a JSON envelope of upsert/delete records.
+Retries, ordering, and at-least-once delivery are handled by the pipeline; your receiver just
+applies records idempotently.
 
-## Install
+## Quickstart
 
 ```bash
 dotnet add package Wallaby.Sinks.Http
 ```
 
-## Register
+Register Wallaby, point it at a storage provider, add the sink, and map an entity. The mapping's
+destination is echoed on every record in [the envelope](#the-envelope).
 
-```csharp
+::: code-group
+
+```csharp [EF Core]
 builder.Services.AddWallaby(cdc =>
 {
     cdc.UseEntityFrameworkCore<AppDbContext>()
@@ -24,7 +29,7 @@ builder.Services.AddWallaby(cdc =>
        .AddHttpSink("webhook", o =>
        {
            o.Endpoint = "https://api.example.com/wallaby";
-           o.SigningSecret = secret; // optional Standard Webhooks signing ("whsec_...")
+           o.SigningSecret = secret;
        })
        .WithMappings(sink => sink
            .Map<Product>()
@@ -32,6 +37,46 @@ builder.Services.AddWallaby(cdc =>
            .UsingTransform(/* ... */));
 });
 ```
+
+```csharp [Marten]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseMarten()
+       .UseConnectionString(conn)
+       .AddHttpSink("webhook", o =>
+       {
+           o.Endpoint = "https://api.example.com/wallaby";
+           o.SigningSecret = secret;
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+```csharp [Plain tables]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseTables(tables => tables.Add<Product>())
+       .UseConnectionString(conn)
+       .AddHttpSink("webhook", o =>
+       {
+           o.Endpoint = "https://api.example.com/wallaby";
+           o.SigningSecret = secret;
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+:::
+
+The transform shapes each change into the record body; see [mappings](/mappings#transforms). For the
+Postgres server settings Wallaby needs, see
+[getting started](/getting-started#server-prerequisites).
 
 ## Options
 

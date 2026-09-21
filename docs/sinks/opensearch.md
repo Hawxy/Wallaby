@@ -1,42 +1,89 @@
 ---
-description: "Keeping OpenSearch indexes continuously in sync with Postgres tables via idempotent bulk upserts and deletes."
+title: "Sync Postgres to OpenSearch from .NET"
+description: "Keep OpenSearch indexes in sync with Postgres from C#: bulk upserts and deletes via logical replication. Works with self-managed and Amazon OpenSearch Service."
 ---
 
 # OpenSearch Sink
 
-The `Wallaby.Sinks.OpenSearch` package keeps OpenSearch indexes continuously in sync with your
-Postgres tables. Changes are delivered through the `_bulk` API: upserts are indexed with `_id` set
-to a stable document id (so updates are idempotent) and deletions remove by that same id. It works
-with self-managed OpenSearch and Amazon OpenSearch Service.
+Keep OpenSearch indexes in sync with Postgres from your .NET application. The
+`Wallaby.Sinks.OpenSearch` package streams committed row changes out of Postgres logical replication
+and delivers them through the `_bulk` API: upserts are indexed with `_id` set to a stable document id
+(so updates are idempotent) and deletions remove by that same id. No polling, no dual writes, no
+reindex script. It works with self-managed OpenSearch and Amazon OpenSearch Service.
 
-## Install
+## Quickstart
 
 ```bash
 dotnet add package Wallaby.Sinks.OpenSearch
 ```
 
-## Register
+Register Wallaby, point it at a storage provider, add the sink, and map an entity. The mapping's
+destination is the **index name** (index names must be lowercase).
 
-```csharp
-cdc.AddOpenSearchSink("search", s =>
+::: code-group
+
+```csharp [EF Core]
+builder.Services.AddWallaby(cdc =>
 {
-    s.Endpoint = "https://localhost:9200";
-    s.Username = "wallaby";       // basic auth; omit for an unsecured cluster
-    s.Password = password;
-    s.DefaultIndex = "documents"; // optional fallback when a mapping has no destination
+    cdc.UseEntityFrameworkCore<AppDbContext>()
+       .UseConnectionString(conn)
+       .AddOpenSearchSink("search", s =>
+       {
+           s.Endpoint = "https://localhost:9200";
+           s.Username = "wallaby";
+           s.Password = password;
+           s.DefaultIndex = "documents";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
 });
 ```
 
-Then attach the entities it indexes, using the destination as the **index name** (index names must
-be lowercase):
-
-```csharp
-cdc.AddOpenSearchSink("search", s => { /* ... */ })
-   .WithMappings(sink => sink
-       .Map<Product>()
-       .ToDestination("products")
-       .UsingTransform(/* ... */));
+```csharp [Marten]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseMarten()
+       .UseConnectionString(conn)
+       .AddOpenSearchSink("search", s =>
+       {
+           s.Endpoint = "https://localhost:9200";
+           s.Username = "wallaby";
+           s.Password = password;
+           s.DefaultIndex = "documents";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
 ```
+
+```csharp [Plain tables]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseTables(tables => tables.Add<Product>())
+       .UseConnectionString(conn)
+       .AddOpenSearchSink("search", s =>
+       {
+           s.Endpoint = "https://localhost:9200";
+           s.Username = "wallaby";
+           s.Password = password;
+           s.DefaultIndex = "documents";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+:::
+
+The transform shapes each change into the document you want indexed; see
+[mappings](/mappings#transforms). For the Postgres server settings Wallaby needs, see
+[getting started](/getting-started#server-prerequisites).
 
 ## Options
 

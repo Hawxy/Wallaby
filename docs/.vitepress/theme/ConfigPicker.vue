@@ -64,6 +64,12 @@ const sinks = [
     link: '/sinks/opensearch',
   },
   {
+    title: 'pgvector',
+    sub: 'vectors in postgres',
+    label: 'Pgvector →',
+    link: '/sinks/pgvector',
+  },
+  {
     title: 'custom',
     sub: 'your own target',
     label: 'Custom Sinks →',

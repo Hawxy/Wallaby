@@ -1,5 +1,6 @@
 ---
-description: "Capturing plain Postgres tables into annotated POCOs with no ORM: naming conventions, keys, records, Dapper-style transforms, column selection and backfills."
+title: "Postgres CDC without an ORM"
+description: "Postgres change data capture with no ORM in .NET: annotated POCOs, naming conventions, keys, Dapper-style transforms, column selection and backfills."
 ---
 
 # Plain Tables

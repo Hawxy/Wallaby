@@ -1,5 +1,6 @@
 ---
-description: "Capturing changes through your EF Core model: registration, enrichment transforms, dependent tables, and replica identity migrations."
+title: "Postgres CDC for EF Core"
+description: "Postgres change data capture driven by your EF Core model in .NET: registration, enrichment transforms, dependent tables, and replica identity migrations."
 ---
 
 # EF Core

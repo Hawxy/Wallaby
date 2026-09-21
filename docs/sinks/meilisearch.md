@@ -1,41 +1,87 @@
 ---
-description: "Keeping Meilisearch indexes continuously in sync with Postgres tables via idempotent upserts and deletes."
+title: "Sync Postgres to Meilisearch from .NET"
+description: "Keep a Meilisearch index in sync with Postgres from C#: install Wallaby.Sinks.Meilisearch, map an EF Core entity or Marten document, and changes stream in live."
 ---
 
 # Meilisearch Sink
 
-The `Wallaby.Sinks.Meilisearch` package keeps Meilisearch indexes continuously in sync with your
-Postgres tables. Upserts are written with a stable primary key (so updates are idempotent) and
-deletions remove by that same id. The sink also supports
+Keep a Meilisearch index in sync with Postgres from your .NET application. The
+`Wallaby.Sinks.Meilisearch` package streams committed row changes out of Postgres logical
+replication and writes them to Meilisearch as idempotent upserts and deletes: no polling, no dual
+writes, and no reindex script. The sink also supports
 [purge-then-backfill](/backfill#purging-before-a-backfill): a purge deletes all of an index's
 documents (the index and its settings survive) so the backfill rebuilds it from scratch.
 
-## Install
+## Quickstart
 
 ```bash
 dotnet add package Wallaby.Sinks.Meilisearch
 ```
 
-## Register
+Register Wallaby, point it at a storage provider, add the sink, and map an entity. The mapping's
+destination is the **index name**.
 
-```csharp
-cdc.AddMeilisearchSink("meili", m =>
+::: code-group
+
+```csharp [EF Core]
+builder.Services.AddWallaby(cdc =>
 {
-    m.Endpoint = "http://localhost:7700";
-    m.ApiKey = key;            // master or a write key; null for an unsecured instance
-    m.DefaultIndex = "search"; // optional fallback when a mapping has no destination
+    cdc.UseEntityFrameworkCore<AppDbContext>()
+       .UseConnectionString(conn)
+       .AddMeilisearchSink("meili", m =>
+       {
+           m.Endpoint = "http://localhost:7700";
+           m.ApiKey = key;
+           m.DefaultIndex = "search";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
 });
 ```
 
-Then attach the entities it indexes, using the destination as the **index name**:
-
-```csharp
-cdc.AddMeilisearchSink("meili", m => { /* ... */ })
-   .WithMappings(sink => sink
-       .Map<Product>()
-       .ToDestination("products")
-       .UsingTransform(/* ... */));
+```csharp [Marten]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseMarten()
+       .UseConnectionString(conn)
+       .AddMeilisearchSink("meili", m =>
+       {
+           m.Endpoint = "http://localhost:7700";
+           m.ApiKey = key;
+           m.DefaultIndex = "search";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
 ```
+
+```csharp [Plain tables]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseTables(tables => tables.Add<Product>())
+       .UseConnectionString(conn)
+       .AddMeilisearchSink("meili", m =>
+       {
+           m.Endpoint = "http://localhost:7700";
+           m.ApiKey = key;
+           m.DefaultIndex = "search";
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+:::
+
+The transform shapes each change into the document you want indexed; see
+[mappings](/mappings#transforms). For the Postgres server settings Wallaby needs, see
+[getting started](/getting-started#server-prerequisites).
 
 ## Options
 

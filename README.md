@@ -1,15 +1,21 @@
 # Wallaby
 
+[![NuGet](https://img.shields.io/nuget/v/Wallaby.svg?logo=nuget&label=nuget)](https://www.nuget.org/packages/Wallaby)
+[![Downloads](https://img.shields.io/nuget/dt/Wallaby.svg?logo=nuget&label=downloads)](https://www.nuget.org/packages/Wallaby)
+[![Build](https://github.com/Hawxy/Wallaby/actions/workflows/Build_%26_Test.yml/badge.svg)](https://github.com/Hawxy/Wallaby/actions/workflows/Build_%26_Test.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 Postgres Change Data Capture for .NET, driven by your **EF Core model, Marten documents or plain tables**.
+
+Keep **Meilisearch**, **Elasticsearch**, **OpenSearch**, **Kafka**, **pgvector** or any **HTTP/webhook**
+endpoint in sync with Postgres, with no dual writes, no outbox table, no Debezium and no Kafka Connect.
+Contributions for additional sinks are welcome.
 
 Wallaby streams row changes from Postgres logical replication, materializes them into your mapped
 EF Core entities, Marten documents or annotated POCOs, lets you **transform/enrich** them, and routes the resulting
 documents to pluggable **destinations** (sinks) with at-least-once delivery. It **self-configures**
 the publication and replication slot from your model, supports **versioned backfill** (initial
 snapshots and shape-change reindexes), and is **cluster-safe** via leader election.
-
-**Meilisearch**, **Kafka**, **Elasticsearch**, **OpenSearch**, **pgvector**, and **HTTP/webhook** sinks are supported out of the box.
-Contributions for additional sinks are welcome.
 
 Requires Postgres 15+ and .NET 10+.
 

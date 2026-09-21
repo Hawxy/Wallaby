@@ -1,4 +1,5 @@
 ---
+title: "Postgres CDC in .NET: getting started"
 description: "Postgres prerequisites, package selection, and first-run configuration for adding Wallaby CDC to a .NET service."
 ---
 

@@ -5,8 +5,8 @@
     <PackageId>Wallaby.Sinks.Http</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>HTTP/webhook destination/sink for Wallaby: POST batches of Postgres changes to any endpoint.</Description>
-    <PackageTags>webhook;http;sink</PackageTags>
+    <Description>POST Postgres changes to any HTTP endpoint or webhook from .NET. Change data capture sink for Wallaby: JSON envelopes of upsert/delete records with Standard Webhooks signing, idempotency keys, and at-least-once delivery.</Description>
+    <PackageTags>webhook;http;webhooks;sink;sync</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

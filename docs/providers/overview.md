@@ -1,5 +1,6 @@
 ---
-description: "What a storage provider contributes and how to choose between the EF Core, Marten and plain-table providers."
+title: "Choosing a Wallaby storage provider"
+description: "Choosing between the EF Core, Marten and plain-table providers for Postgres change data capture in .NET, and what a storage provider contributes."
 ---
 
 # Overview

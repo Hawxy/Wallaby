@@ -5,8 +5,8 @@
     <PackageId>Wallaby.Sinks.Pgvector</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Postgres pgvector destination/sink for Wallaby: sync documents into vector tables, with optional sink-side embedding via Microsoft.Extensions.AI.</Description>
-    <PackageTags>pgvector;vector;embeddings;rag;sink</PackageTags>
+    <Description>Keep pgvector tables and embeddings in sync with Postgres from .NET. Change data capture sink for Wallaby with optional sink-side embedding via Microsoft.Extensions.AI: only rows whose text changed are re-embedded, and the destination table doubles as the embedding cache.</Description>
+    <PackageTags>pgvector;vector;vector-database;embeddings;rag;sink;sync</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

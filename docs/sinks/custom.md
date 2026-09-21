@@ -1,5 +1,6 @@
 ---
-description: "Implementing ISink to deliver change batches to any destination, and the delivery contract a sink must honor."
+title: "Write a custom Postgres CDC sink in .NET"
+description: "Implement ISink to deliver Postgres change batches anywhere from C#: the delivery contract, retry and permanent-failure semantics, purge, and registration."
 ---
 
 # Custom Sinks

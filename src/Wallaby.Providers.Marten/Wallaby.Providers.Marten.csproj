@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Marten storage provider for Wallaby: drives capture from your Marten document store — document table discovery, JSONB rehydration through the store's serializer, soft-delete-aware delete events, conjoined tenancy, and IQuerySession-based transforms/enrichment.</Description>
+    <Description>Postgres change data capture for Marten documents. Storage provider for Wallaby: document table discovery, JSONB rehydration through the store's serializer, soft-delete-aware delete events, conjoined tenancy, and IQuerySession-based transforms.</Description>
     <PackageTags>marten;document-database;jsonb</PackageTags>
   </PropertyGroup>
 
