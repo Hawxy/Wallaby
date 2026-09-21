@@ -8,8 +8,8 @@ namespace Wallaby.Internal.SelfConfig;
 /// everything resolves to it directly (its own model errors surface unchanged). With several, a type
 /// pinned via a provider-typed <c>UsingTransform</c> or <c>FromProvider(...)</c> on any of its mappings
 /// must be modeled by that provider; otherwise the providers' models are probed via
-/// <see cref="IWallabyModelProvider.Handles"/> and exactly one claimant must exist — none or several
-/// fails fast with the fixes spelled out. A type mapped to several sinks resolves once: all its mappings
+/// <see cref="IWallabyModelProvider.Handles"/> and exactly one claimant must exist (none or several
+/// fails fast with the fixes spelled out). A type mapped to several sinks resolves once: all its mappings
 /// share a table, so they share a provider (conflicting pins are rejected at build time).
 /// </summary>
 internal static class ProviderAffinityResolver

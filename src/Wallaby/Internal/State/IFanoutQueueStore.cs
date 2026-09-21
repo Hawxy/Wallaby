@@ -37,8 +37,8 @@ internal interface IFanoutQueueStore
 
     /// <summary>
     /// Postpone a job by <paramref name="delay"/>, leaving its status and attempt count unchanged. Used when
-    /// the job can't run yet — e.g. its table/columns aren't in the current model (a transient deploy-time
-    /// divergence) — so it is retried later without dropping it or starving others.
+    /// the job can't run yet (e.g. its table/columns aren't in the current model during a deploy), so it
+    /// is retried later without dropping it or starving others.
     /// </summary>
     Task DeferAsync(string tableQualified, string lookupHash, TimeSpan delay, CancellationToken ct);
 

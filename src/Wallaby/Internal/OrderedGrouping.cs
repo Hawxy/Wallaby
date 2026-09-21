@@ -4,9 +4,8 @@ namespace Wallaby.Internal;
 internal static class OrderedGrouping
 {
     /// <summary>
-    /// Group <paramref name="source"/> by <paramref name="keySelector"/>, groups in first-occurrence order
-    /// and each group's items in source order (a <c>GroupBy</c> whose ordering is guaranteed, used
-    /// where commit order must survive the split).
+    /// Group by key with groups in first-occurrence order and items in source order, used where commit
+    /// order must survive the split.
     /// </summary>
     public static List<(TKey Key, List<T> Items)> GroupPreservingOrder<T, TKey>(
         IReadOnlyList<T> source, Func<T, TKey> keySelector)

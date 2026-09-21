@@ -8,7 +8,7 @@ namespace Wallaby.Internal.Cluster;
 
 /// <summary>
 /// Default <see cref="IClusterLock"/> backed by DistributedLock.Postgres: a transaction-scoped advisory
-/// lock on a dedicated connection the library owns and monitors. 
+/// lock on a dedicated connection the library owns and monitors.
 /// </summary>
 internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource) : IClusterLock
 {
@@ -31,7 +31,7 @@ internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource) : IClust
 
     /// <summary>
     /// Deterministic 64-bit key derived from the name (FNV-1a), used as the advisory lock id. Every node
-    /// version must derive the same key for the same name — the cluster's mutual exclusion depends on it —
+    /// version must derive the same key for the same name (the cluster's mutual exclusion depends on it),
     /// so this hash is pinned by a test and must never change.
     /// </summary>
     internal static long StableKey(string value)

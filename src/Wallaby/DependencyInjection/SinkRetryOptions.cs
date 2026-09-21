@@ -8,7 +8,7 @@ namespace Wallaby.DependencyInjection;
 public sealed class SinkRetryOptions
 {
     /// <summary>
-    /// Retry attempts after the first delivery try (0–100). <c>0</c> disables in-dispatch retry entirely:
+    /// Retry attempts after the first delivery try (0 to 100). <c>0</c> disables in-dispatch retry entirely:
     /// the first retryable failure halts the leader session and leader-level backoff takes over.
     /// </summary>
     public int MaxAttempts { get; set; } = 10;

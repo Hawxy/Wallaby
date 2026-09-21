@@ -13,16 +13,22 @@ import FlowLink from './flow/FlowLink.vue';
 // path each cycle.
 const providers = [
   {
-    title: 'efcore provider',
-    sub: 'relational storage',
-    label: 'EF Core Setup →',
+    title: 'ef core',
+    sub: 'entity model',
+    label: 'EF Core →',
     link: '/providers/entity-framework-core',
   },
   {
-    title: 'marten provider',
-    sub: 'document storage',
-    label: 'Marten Setup →',
+    title: 'marten',
+    sub: 'documents',
+    label: 'Marten →',
     link: '/providers/marten',
+  },
+  {
+    title: 'tables',
+    sub: 'plain pocos',
+    label: 'Tables →',
+    link: '/providers/tables',
   },
 ];
 
@@ -68,7 +74,7 @@ const sinks = [
 // deliveries rotate across the sinks that have pages (placeholders are skipped)
 const liveSinks = sinks.flatMap((s, i) => (s.link ? [i] : []));
 
-// 0/1 = provider path, 2 = external slots path; rotates each cycle
+// 0..2 = provider path, 3 = external slots path; rotates each cycle
 const target = ref(0);
 // chip processing the packet (amber): '' | 'p0' | 'p1' | 'ext'
 const lit = ref('');
@@ -89,12 +95,12 @@ useFlowCycle({
   interval: 3600,
   cycle: (): FlowStep[] => {
     if (started) {
-      target.value = (target.value + 1) % 3;
+      target.value = (target.value + 1) % (providers.length + 1);
       if (target.value === 0) round += 1;
     }
     started = true;
     const t = target.value;
-    const provider = t < 2;
+    const provider = t < providers.length;
     const sink = liveSinks[(t + round) % liveSinks.length];
     return [
       [0, () => { tickLsn(); flash.value = 'src'; pulse.value = 'stem'; }],
@@ -258,6 +264,10 @@ useFlowCycle({
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+}
+
+.is-providers .wb-config-group-grid {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 /* bus: horizontal rail from the capture lane's center to the external

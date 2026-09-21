@@ -5,7 +5,7 @@ namespace Wallaby.Internal.Pipeline;
 
 /// <summary>
 /// A routing rule binding an entity type to a sink/destination (and a transform that shapes the document).
-/// Routing concerns only — the transform owns the data shaping. A record so test infrastructure can
+/// Routing concerns only; the transform owns the data shaping. A record so test infrastructure can
 /// late-bind <see cref="Sessions"/> via <c>with</c>.
 /// </summary>
 internal sealed record EntityMapping
@@ -38,7 +38,7 @@ internal sealed record EntityMapping
         => DocumentIdSelector?.Invoke(change) ?? change.Key.ToString();
 
     /// <summary>
-    /// The scope key for a change (null when the mapping is not scoped). Runs for deletes too — a
+    /// The scope key for a change (null when the mapping is not scoped). Runs for deletes too: a
     /// record-based selector resolves the key from captured (old-row) values even when no entity was
     /// materialized; the entity-typed <c>ScopedBy</c> overload guards its own entity access.
     /// </summary>

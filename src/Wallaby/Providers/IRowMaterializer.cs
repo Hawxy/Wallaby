@@ -12,7 +12,7 @@ public interface IRowMaterializer
 {
     /// <summary>
     /// Materialize a decoded change. Returns false when the change's table is not part of the model
-    /// (a benign skip). A materialization <em>failure</em> (bad value/conversion, missing key) must throw —
+    /// (a benign skip). A materialization <em>failure</em> (bad value/conversion, missing key) must throw:
     /// it is a poison change that halts the pipeline.
     /// </summary>
     bool TryMaterialize(RawChange change, [NotNullWhen(true)] out MaterializedRow? row);

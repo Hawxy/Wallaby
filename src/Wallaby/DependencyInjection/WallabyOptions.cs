@@ -10,17 +10,16 @@ public sealed class WallabyOptions
     public string PublicationName { get; set; } = "wallaby_cdc_pub";
 
     /// <summary>
-    /// Backfill keyset page size. Chunk rows are held in memory — up to two chunks at once (the one being
-    /// delivered plus the prefetched next) — so capped at 100,000.
+    /// Backfill keyset page size. Chunk rows are held in memory (up to two chunks at once: the one being
+    /// delivered plus the prefetched next), so capped at 100,000.
     /// </summary>
     public int ChunkSize { get; set; } = 500;
 
     /// <summary>
-    /// Maximum number of records handed to a sink (and to a transform) in a single batch. Bounds the
-    /// working set for large live transactions, dependent fan-out, and backfill alike: the pipeline
-    /// slices each dispatch into windows of at most this many records. It also caps the inline portion
-    /// of a dependent fan-out — a wider fan-out's tail is offloaded to a scoped backfill job.
-    /// Batches are materialized lists, so capped at 100,000.
+    /// Maximum number of records handed to a sink (and to a transform) in a single batch. The pipeline
+    /// slices each dispatch (live transactions, dependent fan-out, and backfill) into windows of at most
+    /// this many records. It also caps the inline portion of a dependent fan-out; a wider fan-out's tail
+    /// is offloaded to a scoped backfill job. Batches are materialized lists, so capped at 100,000.
     /// </summary>
     public int MaxBatchSize { get; set; } = 1000;
 
@@ -72,7 +71,7 @@ public sealed class WallabyOptions
 
     /// <summary>
     /// Deploy-time suspension flag (see <see cref="WallabyBuilder.Suspend"/>). While set, this node drops
-    /// every managed replication slot and idles instead of streaming — so a platform blocked by logical
+    /// every managed replication slot and idles instead of streaming, so a platform blocked by logical
     /// slots (e.g. an RDS/Aurora major-version upgrade) can proceed. A node deployed without the flag
     /// automatically resumes a flag-driven suspension; a runtime-requested one (Wallaby.Client's
     /// <c>SuspendAsync</c>) persists until an explicit resume.
@@ -83,15 +82,15 @@ public sealed class WallabyOptions
     public string? SuspensionReason { get; set; }
 
     /// <summary>
-    /// Internal tuning knobs (HA election cadence, connection keepalives, buffering ceilings). The
-    /// defaults are safe for almost all deployments.
+    /// Internal tuning knobs (HA election cadence, connection keepalives, buffering ceilings). The defaults
+    /// suit almost all deployments.
     /// </summary>
     public WallabyAdvancedOptions Advanced { get; } = new();
 
     /// <summary>
     /// Postgres connection string used for replication, checkpoint storage, advisory locks, and backfill
     /// reads. Supply it via <see cref="WallabyBuilder.UseConnectionString(string)"/> or through the options pipeline
-    /// (<c>Configure&lt;WallabyOptions&gt;</c>, configuration binding, or <c>PostConfigure</c> — the standard
+    /// (<c>Configure&lt;WallabyOptions&gt;</c>, configuration binding, or <c>PostConfigure</c>; the standard
     /// ordering applies). Validated as non-empty on first resolution.
     /// </summary>
     public string ConnectionString { get; set; } = string.Empty;

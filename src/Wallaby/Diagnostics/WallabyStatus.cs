@@ -7,8 +7,8 @@ namespace Wallaby.Diagnostics;
 /// Mutable, thread-safe implementation of <see cref="IWallabyStatus"/>. The runtime, pipeline, and background
 /// service update it at lifecycle points; reads (from health-check probe threads) are lock-free via an
 /// atomically-swapped immutable snapshot. Per-sink delivery timestamps are the highest-frequency update, so
-/// they mutate a concurrent map in place and are composed into the snapshot on read — not atomic with the
-/// other snapshot fields.
+/// they mutate a concurrent map in place and are composed into the snapshot on read, so they are not atomic
+/// with the other snapshot fields.
 /// </summary>
 internal sealed class WallabyStatus : IWallabyStatus
 {

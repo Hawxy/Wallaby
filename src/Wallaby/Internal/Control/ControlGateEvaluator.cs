@@ -6,7 +6,7 @@ namespace Wallaby.Internal.Control;
 /// <summary>What the control state requires of a node before it may provision slots or stream.</summary>
 internal enum ControlGateAction
 {
-    /// <summary>No suspension in effect — provision/stream normally.</summary>
+    /// <summary>No suspension in effect: provision/stream normally.</summary>
     Proceed,
 
     /// <summary>A suspension is requested but not finalized: drop the managed slots (under the cluster lock).</summary>
@@ -19,7 +19,7 @@ internal enum ControlGateAction
 /// <summary>
 /// Evaluates the suspend/resume control gate every hosted service passes before touching slots,
 /// reconciling the deployed <c>Suspend()</c> flag with the durable control row: the flag asserts a
-/// configuration-origin suspension (over a remote resume) and its absence auto-resumes one — while a
+/// configuration-origin suspension (over a remote resume) and its absence auto-resumes one; a
 /// client-origin suspension is never auto-resumed.
 /// </summary>
 internal static class ControlGateEvaluator
@@ -77,7 +77,6 @@ internal static class ControlGateEvaluator
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="ControlGateEvaluator"/>.</summary>
 internal static partial class ControlGateEvaluatorLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "This node is deployed with Suspend(): requesting installation-wide suspension (managed replication slots will be dropped).")]

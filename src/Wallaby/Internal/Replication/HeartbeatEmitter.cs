@@ -5,14 +5,14 @@ namespace Wallaby.Internal.Replication;
 
 /// <summary>
 /// Leader-side idle heartbeat. Since Postgres 15 pgoutput skips empty transactions, so a slot whose
-/// mapped tables are quiet receives nothing to acknowledge and pins WAL while other tables churn —
+/// mapped tables are quiet receives nothing to acknowledge and pins WAL while other tables churn,
 /// until <c>max_slot_wal_keep_size</c> invalidates it. Whenever no transaction has been acknowledged
 /// for one interval, this emits a tiny transactional <c>wallaby.heartbeat</c> message on a normal
 /// connection; it flows through pgoutput as an empty committed transaction and advances
-/// <c>confirmed_flush_lsn</c> through the pipeline's ordinary delivery/ack path.
+/// <c>confirmed_flush_lsn</c> through the ordinary delivery/ack path.
 /// <para>
 /// The heartbeat's own acknowledgement registers as progress on the following tick, so the effective
-/// idle cadence is between one and two intervals — irrelevant at WAL-retention timescales.
+/// idle cadence is between one and two intervals.
 /// </para>
 /// </summary>
 internal sealed class HeartbeatEmitter(

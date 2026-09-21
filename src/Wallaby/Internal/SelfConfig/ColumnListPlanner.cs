@@ -28,7 +28,7 @@ internal static class ColumnListPlanner
         PublicationTableSpec candidate, TableCatalogInfo? catalog)
     {
         // Whole-table candidates need no catalog input; a table missing from the catalog (model ahead
-        // of migrations) passes through so the subsequent DDL fails fast like a missing table today.
+        // of migrations) passes through so the subsequent DDL fails fast.
         if (candidate.Columns is null || catalog is null)
         {
             return (candidate, null);
@@ -65,7 +65,7 @@ internal static class ColumnListPlanner
         }
 
         // 'd': the captured set always includes the primary key. 'n': UPDATE/DELETE on a published
-        // table already error at DML time regardless of column lists — a list adds no new failure mode.
+        // table already error at DML time regardless of column lists; a list adds no new failure mode.
         return (candidate, null);
     }
 }

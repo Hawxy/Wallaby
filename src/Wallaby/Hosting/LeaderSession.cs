@@ -69,11 +69,10 @@ internal sealed class LeaderSession(
     {
         var controlStore = new PostgresControlStore(dataSource, options, _logger);
 
-        // A suspension in force must be honored before self-config can recreate any slot. Tolerates a
-        // database no suspension-aware version has touched (no control table reads as running). The same
-        // read fixes this term's publication-width baseline: bootstrap reconciles to it, and the watcher
-        // bounces the session when the flag flips, so a flip between here and the watcher's first read
-        // cannot be missed.
+        // A suspension in force must be honored before self-config can recreate any slot (a missing
+        // control table reads as running). The same read fixes this term's publication-width baseline:
+        // bootstrap reconciles to it, and the watcher bounces the session when the flag flips, so a flip
+        // between here and the watcher's first read cannot be missed.
         var controlRow = await controlStore.ReadAsync(ct);
         if (controlRow is not null && controlRow.State != ControlContract.StateRunning)
         {
@@ -136,9 +135,8 @@ internal sealed class LeaderSession(
             _logger, status, new PostgresBackfillRowEstimator(dataSource.Source, _logger));
 
         // A background-task fault fails the whole leader session (first fault wins): the task records it,
-        // cancels the workload, and the fault is rethrown below so the caller halts and retries with backoff.
-        // The scheduler and fan-out worker handle their own failures internally (per-table/per-job backoff,
-        // pass-level retry), so their catches here are backstops.
+        // cancels the workload, and the fault is rethrown below so the caller retries with backoff. The
+        // scheduler and fan-out worker retry internally, so their catches here are backstops.
         Exception? backgroundFault = null;
         var background = new List<Task>(5);
 
@@ -162,9 +160,8 @@ internal sealed class LeaderSession(
 
         // Watches for a suspension request (LISTEN + fallback poll) and cancels the workload so the
         // session winds down and releases the slot; the caller then drops it. Its first read also closes
-        // the race where a suspension lands between this session's pre-check and slot creation. Transient
-        // read errors are retried inside; an unexpected exit bounces the session, since a session nobody
-        // watches would ignore a suspension until the client drops the slot itself.
+        // the race where a suspension lands between this session's pre-check and slot creation. An
+        // unexpected exit bounces the session, since an unwatched session would ignore a suspension.
         var controlWatcher = new ControlStateWatcher(
             controlStore, widenPublications, options.Advanced.ControlPollInterval, _logger);
         Background(token => controlWatcher.RunAsync(linked, token), _logger.ControlWatcherStopped);
@@ -251,16 +248,13 @@ internal sealed class LeaderSession(
     }
 
     /// <summary>
-    /// Detects and repairs a slot-loss gap: a persisted checkpoint behind the slot's consistent point can
-    /// only mean the slot was recreated after that checkpoint was written (invalidation, failover, manual
-    /// drop), so every change between the two LSNs was never streamed. A recreated slot with no
-    /// checkpoint at all is the same gap observed before the first interval-throttled checkpoint save
-    /// (e.g. suspend/resume early in an install's life, or while it only ever backfilled), so it
-    /// repairs too, as does a checkpoint ahead of a just-recreated slot's consistent point (a WAL
-    /// history rewound by a cluster rebuild, where LSN comparison proves nothing about continuity).
-    /// Repairs by marking all mapped tables for re-backfill; the marks are durable before
-    /// the checkpoint advances to the consistent point, so a crash mid-repair re-detects on the next
-    /// leader session.
+    /// Detects and repairs a slot-loss gap: a persisted checkpoint behind the slot's consistent point means
+    /// the slot was recreated after that checkpoint (invalidation, failover, manual drop), so changes
+    /// between the two LSNs were never streamed. A recreated slot with no checkpoint at all repairs too
+    /// (the gap may predate the first interval-throttled save), as does a checkpoint ahead of a recreated
+    /// slot's consistent point (a WAL history rewound by a cluster rebuild, where LSN comparison proves
+    /// nothing). Repairs by marking all mapped tables for re-backfill; the marks are durable before the
+    /// checkpoint advances, so a crash mid-repair re-detects on the next leader session.
     /// </summary>
     private async Task RepairSlotGapAsync(SelfConfigResult selfConfig, CancellationToken ct)
     {
@@ -393,7 +387,6 @@ internal sealed class LeaderSession(
             : new PostgresUnloggedTableSpill(dataSource.Source, options.SlotName, instrumentation);
 }
 
-/// <summary>Source-generated log messages for <see cref="LeaderSession"/>.</summary>
 internal static partial class LeaderSessionLog
 {
     [LoggerMessage(Level = LogLevel.Error, Message = "Replication slot {Slot} was recreated: changes between {CheckpointLsn} and {ConsistentPoint} were never streamed. Re-backfilling all mapped tables to converge sinks.")]

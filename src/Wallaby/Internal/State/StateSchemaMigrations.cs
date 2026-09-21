@@ -32,8 +32,8 @@ internal static class StateSchemaMigrations
     public const int CurrentVersion = ControlContract.SchemaVersion;
 
     /// <summary>
-    /// Baseline: the full schema as deployed by the 1.0.0 betas. Databases bootstrapped by those betas
-    /// (which had no version ledger) adopt it as a no-op and get stamped version 1.
+    /// Baseline: the full pre-versioning schema. A database bootstrapped without a version ledger adopts
+    /// it as a no-op and is stamped version 1.
     /// </summary>
     private const string Baseline = """
         CREATE TABLE IF NOT EXISTS wallaby.checkpoint (
@@ -172,10 +172,9 @@ internal static class StateSchemaMigrations
         """;
 
     /// <summary>
-    /// Folds <c>wallaby.checkpoint</c> into <c>wallaby.slot_registry</c>: both tables were keyed by
-    /// slot name and held LSN facts about the same slot, read together only by slot-gap repair. The
-    /// provisioner registers every slot before its first checkpoint write, so a checkpoint row without
-    /// a registry row cannot occur outside manual tampering; such orphans are dropped with the table.
+    /// Folds <c>wallaby.checkpoint</c> into <c>wallaby.slot_registry</c>. The provisioner registers every
+    /// slot before its first checkpoint write, so a checkpoint row without a registry row only arises from
+    /// manual tampering; such orphans are dropped with the table.
     /// </summary>
     private const string CheckpointIntoRegistry = """
         ALTER TABLE wallaby.slot_registry ADD COLUMN IF NOT EXISTS confirmed_lsn pg_lsn NULL;

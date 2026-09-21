@@ -10,9 +10,7 @@ namespace Wallaby.Providers;
 /// </summary>
 public static class ValueCoercion
 {
-    // Cache the case-insensitive enum-name → underlying-value map per enum type. Enum.Parse goes
-    // through reflection + IL emit on first call; afterwards it's still a few dictionary probes,
-    // but caching collapses it to a single lookup per row.
+    // Per-enum case-insensitive name map: one lookup per row instead of Enum.Parse's probes.
     private static readonly ConcurrentDictionary<Type, Dictionary<string, object>> EnumByName = new();
 
     /// <summary>Coerce <paramref name="rawValue"/> to <paramref name="targetType"/> (nullable-aware; null/DBNull → null).</summary>

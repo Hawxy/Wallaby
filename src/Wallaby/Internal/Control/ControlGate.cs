@@ -160,7 +160,6 @@ internal sealed class ControlGate(
         => Task.Delay(delay <= TimeSpan.Zero ? TimeSpan.FromSeconds(1) : delay, ct);
 }
 
-/// <summary>Source-generated log messages for <see cref="ControlGate"/>.</summary>
 internal static partial class ControlGateLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Finalizing Wallaby suspension for slot {Slot}: dropping every managed replication slot.")]

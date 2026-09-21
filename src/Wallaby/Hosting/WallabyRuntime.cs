@@ -94,7 +94,7 @@ internal sealed class WallabyRuntime
 
             if (leadership is null)
             {
-                // The lock is reachable and held by another node — a healthy standby, not an error.
+                // The lock is reachable and held by another node: a healthy standby, not an error.
                 backoff.Reset();
                 _status.EnterStandby(); // a standby claims no failure streaks; the transition clears them
                 _logger.Standby(_options.SlotName);
@@ -144,7 +144,7 @@ internal sealed class WallabyRuntime
                     _status.RecordLeaderFailure(Describe(ex));
                     if (Stopwatch.GetElapsedTime(sessionStart) >= HealthyLeaderSession)
                     {
-                        // A long session that then dropped is likely transient — retry at the base delay.
+                        // A long session that then dropped is likely transient; retry at the base delay.
                         // The failure counter clears only on real progress or a clean step-down.
                         backoff.Reset();
                     }
@@ -168,7 +168,6 @@ internal sealed class WallabyRuntime
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 }
 
-/// <summary>Source-generated log messages for <see cref="WallabyRuntime"/>.</summary>
 internal static partial class WallabyRuntimeLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to acquire Wallaby leadership; retrying.")]

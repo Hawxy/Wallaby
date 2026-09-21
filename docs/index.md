@@ -16,9 +16,9 @@ hero:
 
 features:
   - title: Automated Configuration
-    details: Point at your EF Core or Marten entities and get up & running with minimal effort. Get compile-time errors as your model changes.
+    details: Point at your EF Core entities, Marten documents or plain tables and get up & running with minimal effort. Get compile-time errors as your model changes.
   - title: Transform + Enrich
-    details: Convert, enhance & flatten materialized changes into the required shape for your output destination. Use your existing EF & Marten tooling or drop down to manual SQL.
+    details: Convert, enhance & flatten materialized changes into the required shape for your output destination. Use your existing EF & Marten tooling, or Dapper and raw Npgsql on plain tables.
   - title: Pluggable Sinks
     details: Ship your transformed data to anywhere it needs to go, be it a search index, vector DB or just a plain HTTP endpoint. At-least-once delivery ensures your data never goes missing.
   - title: Versioned Backfilling

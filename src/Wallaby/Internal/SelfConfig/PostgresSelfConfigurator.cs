@@ -378,7 +378,6 @@ internal sealed class PostgresSelfConfigurator(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="PostgresSelfConfigurator"/>.</summary>
 internal static partial class PostgresSelfConfiguratorLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby self-config complete: publication {Publication} (created={PubCreated}), slot {Slot} (created={SlotCreated}).")]

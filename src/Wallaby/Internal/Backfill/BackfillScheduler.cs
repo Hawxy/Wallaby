@@ -226,7 +226,7 @@ internal sealed class BackfillScheduler(
             // A cancelled table stays skipped (even on a version change) until a new request marks it
             // Requested again.
             BackfillStatus.Cancelled => new(BackfillAction.Skip, Purge: false),
-            // A version-change Fresh fires from a Completed row (its flag is false — completion clears
+            // A version-change Fresh fires from a Completed row (its flag is false; completion clears
             // it), so the purge intent comes from the mappings' opt-in.
             BackfillStatus.Completed when options.AutoBackfillOnVersionChange && state.TransformVersion != declaredVersion
                 => new(BackfillAction.Fresh, state.Purge || purgeOnVersionChange),
@@ -235,7 +235,6 @@ internal sealed class BackfillScheduler(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="BackfillScheduler"/>.</summary>
 internal static partial class BackfillSchedulerLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfill {Action} for {Table} (version {Version}).")]

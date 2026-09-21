@@ -4,9 +4,12 @@ description: "Postgres prerequisites, package selection, and first-run configura
 
 <script setup>
 import ConfigPicker from './.vitepress/theme/ConfigPicker.vue'
+import CopyPromptButton from './.vitepress/theme/CopyPromptButton.vue'
 </script>
 
 # Getting Started
+
+<CopyPromptButton />
 
 ## Server prerequisites
 
@@ -29,7 +32,7 @@ pgoutput consumer:
 <ConfigPicker />
 
 ::: tip Mixing Providers
-The EF Core and Marten providers can run side by side in one Wallaby instance, sharing a single
+The EF Core, Marten and plain-table providers can run side by side in one Wallaby instance, sharing a single
 replication slot - see the [providers overview](/providers/overview#combining-providers).
 :::
 

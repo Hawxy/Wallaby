@@ -6,12 +6,11 @@ namespace Wallaby.Internal.Control;
 
 /// <summary>
 /// Leader-side control watcher: observes the control row (LISTEN + fallback poll) and cancels the leader
-/// workload when a suspension is requested (so the session winds down cleanly and releases the slot for
-/// the runtime to drop) or when the publication-widening flag flips against the session's baseline, so
-/// the next term's bootstrap reconciles the publications to the new width (a plain session bounce: the
-/// slot is untouched and checkpoint continuity holds). A transient read failure is logged and retried so
-/// it never faults a healthy streaming session; the watcher ends on cancellation or an observed
-/// transition, and any other exit is supervised by the session as a fault.
+/// workload when a suspension is requested (the session winds down and releases the slot for the runtime
+/// to drop) or when the publication-widening flag flips against the session's baseline (a plain bounce
+/// so the next term's bootstrap reconciles the publications; the slot is untouched). A transient read
+/// failure is logged and retried; the watcher ends on cancellation or an observed transition, and any
+/// other exit is supervised by the session as a fault.
 /// </summary>
 internal sealed class ControlStateWatcher(
     PostgresControlStore store, bool widenedBaseline, TimeSpan pollInterval, ILogger logger)
@@ -22,8 +21,7 @@ internal sealed class ControlStateWatcher(
     /// <summary>
     /// Why the session was cancelled: <see cref="LeaderSessionOutcome.SuspendRequested"/> when a
     /// suspension was observed, <see cref="LeaderSessionOutcome.Reconfigure"/> when the
-    /// publication-widening flag changed (the next leader term applies the new width via its normal
-    /// reconcile), null while neither has been seen.
+    /// publication-widening flag changed, null while neither has been seen.
     /// </summary>
     public LeaderSessionOutcome? Observed => _observed;
 
@@ -68,7 +66,6 @@ internal sealed class ControlStateWatcher(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="ControlStateWatcher"/>.</summary>
 internal static partial class ControlStateWatcherLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby suspension requested; winding down the leader session.")]

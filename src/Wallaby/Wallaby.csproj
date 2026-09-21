@@ -15,10 +15,12 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Wallaby.Testing" />
     <InternalsVisibleTo Include="Wallaby.Providers.Marten" />
+    <InternalsVisibleTo Include="Wallaby.Providers.Tables" />
     <InternalsVisibleTo Include="Wallaby.TestInfrastructure" />
     <InternalsVisibleTo Include="Wallaby.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.EntityFrameworkCore.Tests" />
     <InternalsVisibleTo Include="Wallaby.Providers.Marten.Tests" />
+    <InternalsVisibleTo Include="Wallaby.Providers.Tables.Tests" />
     <InternalsVisibleTo Include="Wallaby.Sinks.Meilisearch.Tests" />
     <InternalsVisibleTo Include="Wallaby.AotSmokeTest" />
     <InternalsVisibleTo Include="Wallaby.Benchmarks" />

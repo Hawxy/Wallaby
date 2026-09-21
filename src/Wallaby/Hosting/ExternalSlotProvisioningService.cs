@@ -13,11 +13,10 @@ namespace Wallaby.Hosting;
 /// <summary>
 /// Provision-only hosted service: when the consumer declares external slots but no capture (no sink or
 /// mappings), this creates/reconciles the declared pgoutput publications + slots. There is no primary
-/// slot and no streaming. Each provisioning round runs under the cluster lock so only one node
-/// provisions at a time, and is idempotent. The service then stays alive watching the control channel:
-/// a suspension drops the slots (honored via the gate, never undone by re-provisioning), and each
-/// resume re-provisions them. A failure faults the host (which restarts and retries), matching
-/// <see cref="WallabyBackgroundService"/>.
+/// slot and no streaming. Each provisioning round is idempotent and runs under the cluster lock. The
+/// service then stays alive watching the control channel: a suspension drops the slots (honored via
+/// the gate, never undone by re-provisioning), and each resume re-provisions them. A failure faults
+/// the host (which restarts and retries), matching <see cref="WallabyBackgroundService"/>.
 /// </summary>
 internal sealed class ExternalSlotProvisioningService(
     WallabyConfiguration config,
@@ -37,7 +36,7 @@ internal sealed class ExternalSlotProvisioningService(
         {
             logger.ProvisioningStarting(WallabyVersion.Current);
 
-            // No external slots declared (e.g. behind a consumer env gate) — do nothing, don't touch the DB.
+            // No external slots declared (e.g. behind a consumer env gate): do nothing, don't touch the DB.
             if (config.ExternalSlots.Count == 0)
             {
                 logger.NoExternalSlots();
@@ -108,7 +107,6 @@ internal sealed class ExternalSlotProvisioningService(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="ExternalSlotProvisioningService"/>.</summary>
 internal static partial class ExternalSlotProvisioningServiceLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Wallaby {Version} starting in provision-only mode (no capture declared).")]

@@ -27,13 +27,13 @@ internal enum BatchFlushReason
 /// <summary>
 /// Accumulates committed transactions into bounded batches by greedy drain: after awaiting the first
 /// transaction, more are added only while the stream's <c>MoveNextAsync</c> completes synchronously
-/// (messages already buffered, the behind-the-stream case). An idle stream therefore yields batches of
-/// one with no added latency, while a burst fills batches to the caps. Streamed and watermark-carrying
-/// transactions are always solo batches: streamed transactions page through their spill, and watermark
-/// ordering must not cross a batch boundary. A read left pending when a batch flushes stays in flight
-/// (<see cref="ReadInFlight"/> lets the keepalive guard skip sends while Npgsql is reading) and is
-/// resumed for the next batch. Transactions are never split across batches, so the last transaction's
-/// <c>EndLsn</c> is the batch's acknowledgement point.
+/// (messages already buffered). An idle stream therefore yields batches of one with no added latency,
+/// while a burst fills batches to the caps. Streamed and watermark-carrying transactions are always solo
+/// batches: streamed transactions page through their spill, and watermark ordering must not cross a
+/// batch boundary. A read left pending when a batch flushes stays in flight (<see cref="ReadInFlight"/>
+/// lets the keepalive guard skip sends while Npgsql is reading) and is resumed for the next batch.
+/// Transactions are never split across batches, so the last transaction's <c>EndLsn</c> is the batch's
+/// acknowledgement point.
 /// </summary>
 internal sealed class TransactionBatcher : IAsyncDisposable
 {

@@ -51,7 +51,7 @@ public sealed record WallabyStatusSnapshot
 
     /// <summary>
     /// Consecutive failed leader sessions. Reset when a transaction is fully delivered and acknowledged,
-    /// on a clean step-down (lost lock), or on becoming a standby — never merely because a failing session
+    /// on a clean step-down (lost lock), or on becoming a standby, never merely because a failing session
     /// survived for a while first. A steadily climbing value therefore indicates a crash-looping leader
     /// (e.g. a sink that permanently rejects a batch), even when each session streams before dying.
     /// </summary>

@@ -24,9 +24,8 @@ internal sealed class SlotProvisioner(ILogger logger)
         {
             var (slotType, plugin, walStatus, invalidationReason) = existing.Value;
 
-            // Adopt a slot we didn't create this run. It must be a pgoutput logical slot — anything else
-            // (a physical slot, or a logical slot on a different output plugin) can't serve this slot's
-            // purpose, so fail fast rather than silently assuming it matches the declaration.
+            // Adopting an existing slot requires a pgoutput logical slot; a physical slot or a different
+            // output plugin can't serve this purpose, so fail fast.
             if (!string.Equals(slotType, "logical", StringComparison.Ordinal) ||
                 !string.Equals(plugin, "pgoutput", StringComparison.Ordinal))
             {
@@ -105,7 +104,6 @@ internal sealed class SlotProvisioner(ILogger logger)
             ("s", slot), ("p", publication), ("cp", consistentPoint), ("k", kind), ("m", publicationManaged));
 }
 
-/// <summary>Source-generated log messages for <see cref="SlotProvisioner"/>.</summary>
 internal static partial class SlotProvisionerLog
 {
     [LoggerMessage(Level = LogLevel.Information, Message = "Created pgoutput replication slot {Slot} at {ConsistentPoint}.")]

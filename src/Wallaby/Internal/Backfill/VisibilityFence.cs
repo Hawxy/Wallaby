@@ -50,7 +50,6 @@ internal sealed class VisibilityFence(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="VisibilityFence"/>.</summary>
 internal static partial class VisibilityFenceLog
 {
     [LoggerMessage(Level = LogLevel.Warning, Message = "Visibility fence for {Table} timed out after {TimeoutMs} ms; reading the chunk without it. A commit racing the low watermark may leave a stale document until the table is next backfilled.")]

@@ -27,8 +27,7 @@ public sealed class WallabyModel
         Warnings = warnings ?? [];
 
         _byQualifiedName = tables.ToDictionary(t => (t.Schema, t.TableName));
-        // A CLR type may appear once (typical) or be shared across primary/dependent — the first
-        // (primary) capture wins.
+        // A CLR type may be shared across primary/dependent captures; the first (primary) capture wins.
         _byClrType = tables.GroupBy(t => t.EntityClrType).ToDictionary(g => g.Key, g => g.First());
 
         _bindingsByDependentTable = new Dictionary<(string, string), List<DependentBinding>>();

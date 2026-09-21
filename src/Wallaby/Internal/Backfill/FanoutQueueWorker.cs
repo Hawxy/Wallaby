@@ -85,8 +85,8 @@ internal sealed class FanoutQueueWorker(
                 break;
             }
 
-            // A job re-armed (or deferred) during this pass would otherwise spin the loop; once we've seen
-            // it, stop — the next pass picks it up again.
+            // A job re-armed (or deferred) during this pass would otherwise spin the loop; stop once it
+            // has been seen and let the next pass pick it up.
             if (!processed.Add($"{job.TableQualified}|{job.LookupHash}"))
             {
                 break;
@@ -129,7 +129,7 @@ internal sealed class FanoutQueueWorker(
         if (!_tablesByName.TryGetValue(job.TableQualified, out var lookup) ||
             !TryResolveColumnTypes(lookup.ColumnTypesByName, job.LookupColumns, out var columnTypes))
         {
-            // The model doesn't (yet) include this table/columns — likely a transient deploy-time
+            // The model doesn't (yet) include this table/columns, likely a transient deploy-time
             // divergence. Defer rather than drop, so the job survives until the model converges; warn once.
             if (_warnedDivergent.Add($"{job.TableQualified}|{job.LookupHash}"))
             {
@@ -162,7 +162,7 @@ internal sealed class FanoutQueueWorker(
         if (!fresh && !KeysetCodec.TryDeserializeScopedCursor(
                 job.CursorJson, lookup.PkColumns, lookup.PkTypes, out startBatch, out startCursor))
         {
-            // The job's cursor was built against a different key shape (or format) — rerun the scope fresh.
+            // The job's cursor was built against a different key shape (or format); rerun the scope fresh.
             logger.FanoutCursorRejected(job.TableQualified);
             fresh = true;
             startBatch = 0;
@@ -218,7 +218,6 @@ internal sealed class FanoutQueueWorker(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="FanoutQueueWorker"/>.</summary>
 internal static partial class FanoutQueueWorkerLog
 {
     [LoggerMessage(Level = LogLevel.Error, Message = "Fan-out queue worker pass failed; retrying.")]

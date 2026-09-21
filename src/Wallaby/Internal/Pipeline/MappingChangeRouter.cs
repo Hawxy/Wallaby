@@ -11,9 +11,8 @@ namespace Wallaby.Internal.Pipeline;
 /// changes, <em>sub-grouped by scope key</em> (e.g. tenant) so each invocation gets a same-scope enrichment
 /// session and only that scope's changes, producing a document per source key; a missing or null document
 /// becomes a deletion. Deletes are routed directly by key (no transform), but still resolve their scope key
-/// so a scoped destination is honored. Sessions come from each mapping's <see cref="EntityMapping.Sessions"/>:
-/// one lease per distinct (session provider, scope key) per batch: a type's mappings share a provider and so
-/// share a session, while mappings on different providers lease independently; all are disposed at the end.
+/// so a scoped destination is honored. Sessions come from each mapping's <see cref="EntityMapping.Sessions"/>,
+/// one lease per distinct (session provider, scope key) per batch, all disposed at the end.
 /// </summary>
 internal sealed class MappingChangeRouter : IChangeRouter
 {

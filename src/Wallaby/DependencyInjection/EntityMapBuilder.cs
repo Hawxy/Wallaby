@@ -7,8 +7,7 @@ namespace Wallaby.DependencyInjection;
 
 /// <summary>
 /// Configures one entity mapping of a sink: its destination, document-id rule, backfill version, and the
-/// transform that shapes its document. The transform holds all the enrichment/transformation logic;
-/// everything here is routing.
+/// transform that shapes its document. The transform holds the enrichment logic; everything here is routing.
 /// </summary>
 public sealed class EntityMapBuilder<TEntity> where TEntity : class
 {
@@ -68,7 +67,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     /// <param name="purgeOnChange">
     /// Purge sink destinations before the re-backfill a version change triggers, so documents whose ids
     /// or shape changed don't linger under old keys. Backfill is per table, so every non-scoped
-    /// (sink, destination) pair mapped to this entity's table is purged — including other mappings'.
+    /// (sink, destination) pair mapped to this entity's table is purged, including other mappings'.
     /// Requires sinks to implement <see cref="Abstractions.ISinkPurger"/>.
     /// </param>
     public EntityMapBuilder<TEntity> WithBackfillVersion(string version, bool purgeOnChange = false)
@@ -115,8 +114,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Derive a per-row scope key from the raw <see cref="ChangeEvent"/>. Use this overload when the key is not
-    /// a property of the entity itself but lives in another captured column, for example a shadow property such
-    /// as a multi-tenancy <c>tenant_id</c> (read it via <c>c.Record["TenantId"]</c>). 
+    /// a property of the entity but lives in another captured column, e.g. a shadow property such as a
+    /// multi-tenancy <c>tenant_id</c> (read via <c>c.Record["TenantId"]</c>).
     /// </summary>
     public EntityMapBuilder<TEntity> ScopedBy(Func<ChangeEvent, object?> keySelector)
     {
@@ -156,7 +155,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
 
     /// <summary>
     /// Pin this mapping to the named storage provider. Only needed when more than one registered provider
-    /// models <typeparamref name="TEntity"/> and the transform's type doesn't already decide it — the usual
+    /// models <typeparamref name="TEntity"/> and the transform's type doesn't already decide it; otherwise
     /// auto-resolution assigns each mapping to the sole provider that models its type.
     /// </summary>
     public EntityMapBuilder<TEntity> FromProvider(string providerName)

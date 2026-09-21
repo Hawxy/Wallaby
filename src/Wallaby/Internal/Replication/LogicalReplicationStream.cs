@@ -16,10 +16,10 @@ namespace Wallaby.Internal.Replication;
 /// after downstream delivery, preserving at-least-once semantics.
 /// </summary>
 /// <remarks>
-/// We construct a <see cref="LogicalReplicationConnection"/> directly from the supplied connection
-/// string: replication connections run in a special protocol mode and cannot be obtained from
+/// The <see cref="LogicalReplicationConnection"/> is built directly from the connection string:
+/// replication connections run in a separate protocol mode and cannot be obtained from
 /// <see cref="NpgsqlDataSource.OpenConnectionAsync(CancellationToken)"/>, and Npgsql strips the
-/// password from <c>NpgsqlDataSource.ConnectionString</c> so we can't reuse it for auth.
+/// password from <c>NpgsqlDataSource.ConnectionString</c>, so that cannot be reused for auth.
 /// </remarks>
 internal sealed class LogicalReplicationStream(
     string connectionString, string slotName, string publicationName, ITransactionSpill spill,
@@ -30,12 +30,10 @@ internal sealed class LogicalReplicationStream(
     private readonly PgOutputReplicationSlot _slot = new(slotName);
     // Serializes all status-update writes (acks + keepalives) so they never overlap on the connection.
     private readonly SemaphoreSlim _statusLock = new(1, 1);
-    // Protocol v2 with streaming: the server streams a transaction larger than its logical_decoding_work_mem
-    // before commit (StreamStart/Stop/Commit/Abort), so the assembler can buffer it incrementally rather than
-    // the server holding the whole transaction. Well within the PG15 floor (enforced by ServerValidator).
-    // Binary mode so Npgsql decodes values to proper CLR types (e.g. DateTime, decimal) rather than text.
-    // messages: true asks pgoutput to forward generic WAL messages from pg_logical_emit_message, the
-    // transport for backfill low/high watermarks.
+    // Protocol v2 with streaming: the server streams a transaction larger than logical_decoding_work_mem
+    // before commit (StreamStart/Stop/Commit/Abort), so the assembler buffers it incrementally.
+    // Binary mode so Npgsql decodes values to CLR types rather than text. messages: true forwards generic
+    // WAL messages from pg_logical_emit_message, the transport for backfill low/high watermarks.
     private readonly PgOutputReplicationOptions _options =
         new(publicationName, PgOutputProtocolVersion.V2, binary: true, streamingMode: PgOutputStreamingMode.On, messages: true);
 
@@ -86,16 +84,14 @@ internal sealed class LogicalReplicationStream(
     }
 
     /// <summary>
-    /// Create the keepalive guard for a pipeline run: a single timer loop that sends a status update on
-    /// each tick falling inside a <see cref="KeepaliveGuard.BeginTransaction"/>/<see
-    /// cref="KeepaliveGuard.EndTransactionAsync"/> window, i.e. while a batch is being processed,
-    /// when the consumer isn't pulling from the stream and Npgsql can't answer the server's keepalives.
-    /// The update reports the last <see cref="AcknowledgeAsync"/> position (it never calls
-    /// <c>SetReplicationStatus</c>), so <c>confirmed_flush_lsn</c> is not advanced past durable delivery.
-    /// <paramref name="readInFlight"/> reports whether the batcher left a stream read in flight; Npgsql
-    /// answers the server's keepalives itself while reading, so the guard skips those ticks.
-    /// Cancelling <paramref name="abort"/> (shutdown/lost lock) aborts an in-flight send, so teardown
-    /// can't be blocked by a wedged connection.
+    /// Create the keepalive guard for a pipeline run: a timer loop that sends a status update on each tick
+    /// inside a <see cref="KeepaliveGuard.BeginTransaction"/>/<see cref="KeepaliveGuard.EndTransactionAsync"/>
+    /// window, when the consumer isn't pulling from the stream and Npgsql can't answer the server's
+    /// keepalives. The update reports the last <see cref="AcknowledgeAsync"/> position (it never calls
+    /// <c>SetReplicationStatus</c>), so <c>confirmed_flush_lsn</c> never advances past durable delivery.
+    /// Ticks are skipped while <paramref name="readInFlight"/> reports a pending stream read, since Npgsql
+    /// answers keepalives itself while reading. Cancelling <paramref name="abort"/> aborts an in-flight
+    /// send so teardown can't be blocked by a wedged connection.
     /// </summary>
     public KeepaliveGuard StartKeepalive(TimeSpan interval, CancellationToken abort, Func<bool>? readInFlight = null)
         => new(this, interval, abort, readInFlight);
@@ -114,18 +110,15 @@ internal sealed class LogicalReplicationStream(
     }
 
     /// <summary>
-    /// Send a status update, translating the exceptions Npgsql leaks when the replication stream
-    /// terminates concurrently with the send. Npgsql 10.0.3's <c>SendFeedback</c> swallows every
-    /// exception from the send itself (including cancellation), then re-arms its status timer with a
-    /// null-forgiving dereference in a finally block; the replication enumerator's teardown disposes
-    /// and nulls that timer without synchronizing with an in-flight send. A send overlapping a
-    /// pending stream read (the batcher's in-flight read, see <see cref="KeepaliveGuard"/>) can
-    /// therefore surface <see cref="NullReferenceException"/> or
-    /// <see cref="ObjectDisposedException"/> when that read observes cancellation or a connection
-    /// fault and terminates the enumerator. Streaming has always begun by the time this is called,
-    /// so those exceptions prove the stream terminated: report cancellation when the token is
-    /// cancelled, otherwise a descriptive failure (the underlying fault, if any, surfaces on the
-    /// next stream read).
+    /// Send a status update, translating the exceptions Npgsql leaks when the stream terminates during
+    /// the send. Npgsql 10.0.3's <c>SendFeedback</c> swallows every exception from the send itself, then
+    /// re-arms its status timer with a null-forgiving dereference in a finally block; the enumerator's
+    /// teardown disposes and nulls that timer without synchronizing with an in-flight send. A send
+    /// overlapping a pending stream read (see <see cref="KeepaliveGuard"/>) can therefore surface
+    /// <see cref="NullReferenceException"/> or <see cref="ObjectDisposedException"/> when that read
+    /// terminates the enumerator. Streaming has begun by the time this is called, so those exceptions
+    /// prove the stream terminated: report cancellation when the token is cancelled, otherwise a
+    /// descriptive failure (any underlying fault surfaces on the next stream read).
     /// </summary>
     private async Task SendStatusUpdateGuardedAsync(CancellationToken ct)
     {
@@ -161,16 +154,14 @@ internal sealed class LogicalReplicationStream(
     }
 
     /// <summary>
-    /// One long-lived timer loop per pipeline run: the per-batch hot path is just a flag write on
-    /// begin and an uncontended gate acquire on end, with no timer/task churn per batch. The guard's
-    /// sends stay out of windows where the enumerator is reading: the Begin/End bracket covers the
-    /// processing side, and the <c>readInFlight</c> probe covers a batcher read left pending across a
-    /// flush (Npgsql answers the server's keepalives itself during reads, so no guard send is needed
-    /// then). The one deliberate overlap is the pipeline's batch ack while such a read is pending: the
-    /// same <c>SendFeedback</c> path Npgsql's own <c>WalReceiverStatusInterval</c> timer (default 10s,
-    /// active in every deployment) already exercises concurrently with reads, with all feedback writers
-    /// serialized inside Npgsql. The write path is safe, but stream termination during the overlap is
-    /// not: the pending read tearing down the enumerator races the send's timer re-arm (see
+    /// One long-lived timer loop per pipeline run; the per-batch hot path is a flag write on begin and
+    /// an uncontended gate acquire on end. Sends stay out of windows where the enumerator is reading:
+    /// the Begin/End bracket covers processing, and the <c>readInFlight</c> probe covers a batcher read
+    /// left pending across a flush (Npgsql answers keepalives itself during reads). The one deliberate
+    /// overlap is the pipeline's batch ack while such a read is pending: the same <c>SendFeedback</c>
+    /// path Npgsql's own <c>WalReceiverStatusInterval</c> timer already exercises concurrently with
+    /// reads, with all feedback writers serialized inside Npgsql. The write path is safe, but stream
+    /// termination during the overlap races the send's timer re-arm (see
     /// <see cref="SendStatusUpdateGuardedAsync"/>); re-verify both on Npgsql upgrades.
     /// </summary>
     internal sealed class KeepaliveGuard : IAsyncDisposable
@@ -195,14 +186,13 @@ internal sealed class LogicalReplicationStream(
             _loop = RunAsync();
         }
 
-        /// <summary>Mark a transaction as being processed: ticks now send status updates.</summary>
+        /// <summary>Mark a transaction as being processed; ticks send status updates while set.</summary>
         public void BeginTransaction() => _processing = true;
 
         /// <summary>
-        /// Mark processing finished. A barrier: on return no send is in flight and none will start until
-        /// the next <see cref="BeginTransaction"/>, so the caller can resume reading the stream. An
-        /// in-flight send on a healthy connection is never torn mid-write; on abort it is cancelled and
-        /// this returns (the caller's next stream operation observes the same token).
+        /// Mark processing finished. A barrier: on return no send is in flight and none starts until the
+        /// next <see cref="BeginTransaction"/>, so the caller can resume reading the stream. On abort an
+        /// in-flight send is cancelled and this returns.
         /// </summary>
         public async ValueTask EndTransactionAsync()
         {
@@ -232,8 +222,8 @@ internal sealed class LogicalReplicationStream(
                     await _gate.WaitAsync(_abort);
                     try
                     {
-                        // Re-check under the gate: EndTransactionAsync may have won it in between, and
-                        // the enumerator may be reading again; sending now would race the socket read.
+                        // Re-check under the gate: EndTransactionAsync may have won it in between and the
+                        // enumerator may be reading again; a send would race the socket read.
                         if (_processing && _readInFlight?.Invoke() is not true)
                         {
                             await _stream.SendKeepaliveAsync(_abort);

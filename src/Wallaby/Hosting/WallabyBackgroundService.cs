@@ -21,7 +21,7 @@ internal sealed class WallabyBackgroundService(
         }
         catch (Exception ex)
         {
-            // The only reliable "Wallaby died" signal — BackgroundService exposes no queryable terminated flag.
+            // The only reliable "Wallaby died" signal: BackgroundService exposes no queryable terminated flag.
             status.MarkFaulted($"{ex.GetType().Name}: {ex.Message}");
             logger.BackgroundServiceTerminated(ex);
             throw;
@@ -29,7 +29,6 @@ internal sealed class WallabyBackgroundService(
     }
 }
 
-/// <summary>Source-generated log messages for <see cref="WallabyBackgroundService"/>.</summary>
 internal static partial class WallabyBackgroundServiceLog
 {
     [LoggerMessage(Level = LogLevel.Critical, Message = "Wallaby background service terminated unexpectedly.")]

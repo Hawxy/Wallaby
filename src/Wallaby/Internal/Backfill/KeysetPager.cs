@@ -156,8 +156,7 @@ internal sealed class KeysetPager
         _columnNames = table.Columns.Select(c => c.ColumnName).ToArray();
         _readModes = table.Columns.Select(c => c.ReadMode).ToArray();
 
-        // Map each primary-key column to its index in _columnNames so we can read PK values
-        // straight from the row buffer without a second GetOrdinal lookup.
+        // Index of each primary-key column in _columnNames, so PK values read straight from the row buffer.
         _pkIndexInColumns = new int[table.PrimaryKey.Count];
         for (var i = 0; i < table.PrimaryKey.Count; i++)
         {
@@ -165,7 +164,6 @@ internal sealed class KeysetPager
             var idx = Array.IndexOf(_columnNames, pkName);
             if (idx < 0)
             {
-                // PK column not in capture set; shouldn't happen, but guard anyway.
                 throw new InvalidOperationException(
                     $"Primary key column '{pkName}' is not part of the captured columns for {table.Schema}.{table.TableName}.");
             }
@@ -214,8 +212,7 @@ internal sealed class KeysetPager
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-        // Ordinals are stable for the lifetime of the reader; cache them once instead of
-        // calling GetOrdinal for every column on every row.
+        // Ordinals are stable for the lifetime of the reader; resolve them once.
         var ordinals = new int[columnCount];
         for (var i = 0; i < columnCount; i++)
         {
