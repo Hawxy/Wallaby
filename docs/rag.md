@@ -6,7 +6,7 @@ description: "Keep embeddings and RAG corpora in sync with Postgres from .NET us
 # RAG & Embeddings
 
 Keeping vectors in sync as part of a RAG corpus or semantic search index is a critical part of ensuring its freshness. 
-Wallaby is perfectly suited for ensuring this requirement.
+Wallaby is perfectly suited for this requirement.
 
 The ideal solution is to **let the destination own embedding**. When the party that stores the vector
 also computes it, no vectors pass through the pipeline, there is no cache to build or invalidate, and
@@ -55,7 +55,7 @@ index converged.
 
 ## Postgres as the vector store: the pgvector sink
 
-For "my RAG corpus is just Postgres", the [pgvector sink](/sinks/pgvector) does the embedding
+For "my RAG is just Postgres", the [pgvector sink](/sinks/pgvector) does the embedding
 itself, since Postgres has no native embedder:
 
 ```csharp
@@ -100,6 +100,5 @@ stale. Encode the model in the [backfill version](/backfill#automatic-backfill) 
 The bump triggers a full re-backfill of the entity, and `purgeOnChange: true`
 [purges the destination first](/backfill#purging-before-a-backfill) so no old-model vectors survive
 alongside new ones. For the pgvector sink, change `EmbeddingVersion` in the same deploy (it feeds
-the stored hash); for destination-side embedders, update the embedder/endpoint configuration.
-Dimension changes (e.g. 1536 → 3072) also need the index or column recreated - purge handles the
+the stored hash). Dimension changes (e.g. 1536 → 3072) also need the index or column recreated - purge handles the
 documents, not the schema.

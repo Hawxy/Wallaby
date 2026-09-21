@@ -16,15 +16,19 @@ publication, so adding a second destination costs no extra load on Postgres.
 
 ## Choosing a destination
 
-| Destination | Package | Reach for it when | Deletes | Vectors |
-| --- | --- | --- | --- | --- |
-| [Meilisearch](/sinks/meilisearch) | `Wallaby.Sinks.Meilisearch` | Fast typo-tolerant product or in-app search | by id | server-side embedders |
-| [Elasticsearch](/sinks/elasticsearch) | `Wallaby.Sinks.Elasticsearch` | Search plus analytics, self-managed or Elastic Cloud | by id | `dense_vector` |
-| [OpenSearch](/sinks/opensearch) | `Wallaby.Sinks.OpenSearch` | AWS-managed search (Amazon OpenSearch Service) | by id | `knn_vector` |
-| [Kafka](/sinks/kafka) | `Wallaby.Sinks.Kafka` | Fanning changes out to other services | tombstone | n/a |
-| [pgvector](/sinks/pgvector) | `Wallaby.Sinks.Pgvector` | A RAG corpus that stays inside Postgres | by id | sink-side embedding |
-| [HTTP](/sinks/http) | `Wallaby.Sinks.Http` | Anything that exposes an endpoint | in the envelope | n/a |
-| [Custom](/sinks/custom) | n/a | Everything else | your call | your call |
+| Destination | Package | Reach for it when | NativeAOT |
+| --- | --- | --- | --- |
+| [Meilisearch](/sinks/meilisearch) | `Wallaby.Sinks.Meilisearch` | Fast typo-tolerant product or in-app search | no (client SDK) |
+| [Elasticsearch](/sinks/elasticsearch) | `Wallaby.Sinks.Elasticsearch` | Search plus analytics, self-managed or Elastic Cloud | no (client SDK) |
+| [OpenSearch](/sinks/opensearch) | `Wallaby.Sinks.OpenSearch` | AWS-managed search (Amazon OpenSearch Service) | no (client SDK) |
+| [Kafka](/sinks/kafka) | `Wallaby.Sinks.Kafka` | Fanning changes out to other services | yes |
+| [pgvector](/sinks/pgvector) | `Wallaby.Sinks.Pgvector` | A RAG corpus that stays inside Postgres | yes |
+| [HTTP](/sinks/http) | `Wallaby.Sinks.Http` | Anything that exposes an endpoint | yes |
+| [Custom](/sinks/custom) | n/a | Everything else | your call |
+
+Meilisearch, Elasticsearch and OpenSearch depend on client SDKs that are not trim- or
+NativeAOT-safe. All other packages are marked `IsAotCompatible`. See each page's NativeAOT
+section for the `SerializerOptions` a trimmed host needs.
 
 If you are keeping embeddings fresh rather than building a search index, start at
 [RAG & Embeddings](/rag), which covers when to let the destination own embedding and when to do it
