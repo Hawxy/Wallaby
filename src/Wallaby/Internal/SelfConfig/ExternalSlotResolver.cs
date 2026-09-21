@@ -43,8 +43,8 @@ internal static class ExternalSlotResolver
                 {
                     throw new WallabyConfigurationException(
                         $"AddExternalSlot(\"{registration.SlotName}\").ForAllEntities() requires a storage provider " +
-                        "to resolve the model. Register one with UseEntityFrameworkCore<TContext>() or declare the " +
-                        "tables by name via ForTable(...).");
+                        "to resolve the model. Register one with UseEntityFrameworkCore<TContext>(), UseMarten() " +
+                        "or UseTables(...), or declare the tables by name via ForTable(...).");
                 }
                 foreach (var (_, provider) in modelProviders)
                 {
@@ -123,7 +123,7 @@ internal static class ExternalSlotResolver
         {
             throw new WallabyConfigurationException(
                 $"{call} requires a storage provider to resolve the table. Register one with " +
-                $"UseEntityFrameworkCore<TContext>() or use {via.ByName}.");
+                $"UseEntityFrameworkCore<TContext>(), UseMarten() or UseTables(...), or use {via.ByName}.");
         }
 
         var resolver = modelProviders.Count == 1 ? modelProviders[0].Provider : PickClaimant();

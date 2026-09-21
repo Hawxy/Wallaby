@@ -277,7 +277,8 @@ public sealed class WallabyBuilder
         {
             throw new WallabyConfigurationException(
                 "Capturing requires a storage provider. Register one with UseEntityFrameworkCore<TContext>() " +
-                "(Wallaby.Providers.EntityFrameworkCore) or UseMarten() (Wallaby.Providers.Marten).");
+                "(Wallaby.Providers.EntityFrameworkCore), UseMarten() (Wallaby.Providers.Marten) or " +
+                "UseTables(tables => tables.Add<T>()) (Wallaby.Providers.Tables).");
         }
 
         // Sink names must be unique: mappings route by their owning sink's name, and the runtime keys the
@@ -355,7 +356,8 @@ public sealed class WallabyBuilder
         {
             throw new WallabyConfigurationException(
                 "AddExternalSlot(...).ForEntity<T>(), ForAllEntities() and Except<T>() require a storage provider. " +
-                "Register one with UseEntityFrameworkCore<TContext>() or UseMarten(), or declare the tables by name via ForTable(...).");
+                "Register one with UseEntityFrameworkCore<TContext>(), UseMarten() or UseTables(...), or declare " +
+                "the tables by name via ForTable(...).");
         }
 
         // External slot names must be distinct and each must declare at least one table (a pgoutput

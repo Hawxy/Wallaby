@@ -17,8 +17,9 @@ public static class WallabyServiceCollectionExtensions
 {
     /// <summary>
     /// Add Postgres CDC. Supply a connection string via <c>cdc.UseConnectionString(...)</c>. For capture
-    /// (any sink) also register a storage provider, e.g. <c>cdc.UseEntityFrameworkCore&lt;TContext&gt;()</c>
-    /// from Wallaby.Providers.EntityFrameworkCore. If only external slots are declared (no sink), Wallaby
+    /// (any sink) also register a storage provider: <c>cdc.UseEntityFrameworkCore&lt;TContext&gt;()</c>,
+    /// <c>cdc.UseMarten()</c> or <c>cdc.UseTables(...)</c>, from the matching Wallaby.Providers.* package.
+    /// If only external slots are declared (no sink), Wallaby
     /// runs provision-only: it creates/reconciles those slots and never opens a primary slot or streams.
     /// Wallaby owns a pooled <c>NpgsqlDataSource</c> built from the connection string for all non-replication work.
     /// <see cref="WallabyOptions"/> participates in the standard options pipeline: <c>Configure&lt;WallabyOptions&gt;</c>

@@ -55,7 +55,8 @@ internal sealed class ResolvedProviderSet
         {
             throw new WallabyConfigurationException(
                 "Capturing requires a storage provider. Register one with " +
-                "UseEntityFrameworkCore<TContext>() (from Wallaby.Providers.EntityFrameworkCore).");
+                "UseEntityFrameworkCore<TContext>() (Wallaby.Providers.EntityFrameworkCore), UseMarten() " +
+                "(Wallaby.Providers.Marten) or UseTables(...) (Wallaby.Providers.Tables).");
         }
 
         var modelProviders = config.Providers
