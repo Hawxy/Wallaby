@@ -4,8 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.Sinks.Elasticsearch</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>Elasticsearch destination/sink for Wallaby: keep Elasticsearch indices in sync with Postgres changes.</Description>
-    <PackageTags>elasticsearch;search;sink</PackageTags>
+    <Description>Keep Elasticsearch indices in sync with Postgres from .NET. Change data capture sink for Wallaby: logical replication streams every insert, update and delete through the _bulk API, keyed by a stable document id. Works with self-managed Elasticsearch and Elastic Cloud.</Description>
+    <PackageTags>elasticsearch;search;search-engine;sink;sync;indexing</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

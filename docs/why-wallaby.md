@@ -1,4 +1,5 @@
 ---
+title: "CDC vs dual writes for .NET search indexing"
 description: "Why change data capture beats publish-on-write for keeping search indexes and read models in sync, and what Wallaby handles for you."
 ---
 

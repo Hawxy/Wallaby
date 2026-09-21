@@ -1,15 +1,20 @@
 ---
-description: "Postgres change data capture for .NET: stream row changes through typed transforms into search indexes, webhooks, and custom sinks."
+description: "Postgres change data capture for .NET: stream row changes through typed transforms into Meilisearch, Elasticsearch, OpenSearch, Kafka, pgvector or any HTTP endpoint."
+titleTemplate: "Postgres CDC for .NET"
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
 hero:
   name: "Wallaby"
   text: "Postgres CDC Engine for .NET"
+  tagline: "Stream Postgres changes into search indexes, vector stores and event streams."
   actions:
     - theme: brand
       text: Get Started
       link: /getting-started
+    - theme: alt
+      text: Browse Sinks
+      link: /sinks/
     - theme: alt
       text: Star on GitHub
       link: https://github.com/Hawxy/Wallaby
@@ -25,3 +30,4 @@ features:
     details: Automatically run backfill operations as output shape is changed. Ensure your destination is always up to date.
 ---
 
+<SinkLogos />

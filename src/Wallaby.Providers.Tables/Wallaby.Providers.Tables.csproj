@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Plain-table storage provider for Wallaby: maps Postgres tables to annotated POCOs with no ORM, and hands transforms an NpgsqlDataSource for enrichment.</Description>
+    <Description>Postgres change data capture with no ORM. Storage provider for Wallaby: maps Postgres tables to annotated POCOs and hands transforms an NpgsqlDataSource for Dapper or raw Npgsql enrichment.</Description>
     <PackageTags>dapper;npgsql;poco</PackageTags>
   </PropertyGroup>
 

@@ -1,25 +1,31 @@
 ---
-description: "Producing Postgres changes to Kafka topics, keyed by document id with tombstone deletes, idempotency keys, and optional topic auto-creation."
+title: "Stream Postgres changes to Kafka from .NET"
+description: "Produce Postgres inserts, updates and deletes to Kafka topics from C#: keyed by document id, tombstone deletes, commit order preserved, no Debezium or Connect."
 ---
 
 # Kafka Sink
 
-The `Wallaby.Sinks.Kafka` package produces changes to Kafka topics. Each record becomes one message on
-the topic named by its destination, **keyed by the document id**. Every change to a
-document lands on the same partition in commit order, and a compacted topic converges to each document's
-latest state. Deletes are emitted as **tombstones** (a null value under the same key), aligning with the Kafka-native delete.
+Stream Postgres changes to Kafka topics from your .NET application, with no Debezium and no Kafka
+Connect. The `Wallaby.Sinks.Kafka` package produces each record as one message on the topic named by
+its destination, **keyed by the document id**. Every change to a document lands on the same
+partition in commit order, and a compacted topic converges to each document's latest state. Deletes
+are emitted as **tombstones** (a null value under the same key), aligning with the Kafka-native
+delete.
 
 Built on [Dekaf](https://github.com/thomhurst/Dekaf), a pure C# Kafka client.
 
-## Install
+## Quickstart
 
 ```bash
 dotnet add package Wallaby.Sinks.Kafka
 ```
 
-## Register
+Register Wallaby, point it at a storage provider, add the sink, and map an entity. The mapping's
+destination is the **topic name**; listing it under `Topics` creates it on startup.
 
-```csharp
+::: code-group
+
+```csharp [EF Core]
 builder.Services.AddWallaby(cdc =>
 {
     cdc.UseEntityFrameworkCore<AppDbContext>()
@@ -27,7 +33,7 @@ builder.Services.AddWallaby(cdc =>
        .AddKafkaSink("kafka", k =>
        {
            k.BootstrapServers = "broker-1:9092,broker-2:9092";
-           k.Topics.Add(new KafkaTopicConfig       // optional: create on startup
+           k.Topics.Add(new KafkaTopicConfig
            {
                Name = "products",
                Partitions = 6,
@@ -36,10 +42,60 @@ builder.Services.AddWallaby(cdc =>
        })
        .WithMappings(sink => sink
            .Map<Product>()
-           .ToDestination("products")              // the topic
+           .ToDestination("products")
            .UsingTransform(/* ... */));
 });
 ```
+
+```csharp [Marten]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseMarten()
+       .UseConnectionString(conn)
+       .AddKafkaSink("kafka", k =>
+       {
+           k.BootstrapServers = "broker-1:9092,broker-2:9092";
+           k.Topics.Add(new KafkaTopicConfig
+           {
+               Name = "products",
+               Partitions = 6,
+               Config = { ["cleanup.policy"] = "compact" },
+           });
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+```csharp [Plain tables]
+builder.Services.AddWallaby(cdc =>
+{
+    cdc.UseTables(tables => tables.Add<Product>())
+       .UseConnectionString(conn)
+       .AddKafkaSink("kafka", k =>
+       {
+           k.BootstrapServers = "broker-1:9092,broker-2:9092";
+           k.Topics.Add(new KafkaTopicConfig
+           {
+               Name = "products",
+               Partitions = 6,
+               Config = { ["cleanup.policy"] = "compact" },
+           });
+       })
+       .WithMappings(sink => sink
+           .Map<Product>()
+           .ToDestination("products")
+           .UsingTransform(/* ... */));
+});
+```
+
+:::
+
+The transform shapes each change into the message body; see [mappings](/mappings#transforms). For
+the Postgres server settings Wallaby needs, see
+[getting started](/getting-started#server-prerequisites).
 
 ## Options
 

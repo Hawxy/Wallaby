@@ -4,8 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.Sinks.Meilisearch</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>Meilisearch destination/sink for Wallaby: keep a Meilisearch index in sync with Postgres changes.</Description>
-    <PackageTags>meilisearch;search;sink</PackageTags>
+    <Description>Keep a Meilisearch index in sync with Postgres from .NET. Change data capture sink for Wallaby: logical replication streams every insert, update and delete into your index as idempotent upserts, with versioned backfill and declarative index configuration.</Description>
+    <PackageTags>meilisearch;search;search-engine;sink;sync;indexing</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

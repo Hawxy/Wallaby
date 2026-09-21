@@ -4,8 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wallaby.Sinks.OpenSearch</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>OpenSearch destination/sink for Wallaby: keep OpenSearch indexes in sync with Postgres changes.</Description>
-    <PackageTags>opensearch;search;sink</PackageTags>
+    <Description>Keep OpenSearch indexes in sync with Postgres from .NET. Change data capture sink for Wallaby: logical replication streams every insert, update and delete through the _bulk API, keyed by a stable document id. Works with self-managed OpenSearch and Amazon OpenSearch Service.</Description>
+    <PackageTags>opensearch;search;search-engine;sink;sync;indexing;aws</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

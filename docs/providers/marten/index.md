@@ -1,5 +1,6 @@
 ---
-description: "Capturing Marten document changes: JSONB rehydration through the store's serializer, soft deletes, multi-tenancy, and backfills."
+title: "Postgres CDC for Marten"
+description: "Postgres change data capture for Marten documents in .NET: JSONB rehydration through the store serializer, soft deletes, multi-tenancy, and backfills."
 ---
 
 # Marten

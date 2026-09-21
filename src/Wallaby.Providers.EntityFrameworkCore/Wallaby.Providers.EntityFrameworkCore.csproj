@@ -5,8 +5,8 @@
     <PackageId>Wallaby.Providers.EntityFrameworkCore</PackageId>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>EF Core storage provider for Wallaby: drives capture from your EF Core model — table/key discovery, entity materialization with value converters, DbContext-based transforms/enrichment, and DependsOn navigation fan-out.</Description>
-    <PackageTags>efcore;entity-framework-core</PackageTags>
+    <Description>Postgres change data capture driven by your EF Core model. Storage provider for Wallaby: table and key discovery from the EF model, entity materialization with value converters, DbContext-based transforms and enrichment, and DependsOn navigation fan-out.</Description>
+    <PackageTags>efcore;entity-framework-core;ef-core</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
