@@ -31,6 +31,8 @@ const sinks = [
 </template>
 
 <style scoped>
+/* Plain icon marks at rest; on hover a tile takes the shape of the pipeline
+   chips and .wb-btn links: hairline border, 2px corners, amber glow. */
 .sink-logos {
   display: flex;
   flex-wrap: wrap;
@@ -53,33 +55,33 @@ const sinks = [
   min-width: 104px;
   padding: 16px 12px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 2px;
   color: var(--vp-c-text-1);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   text-decoration: none;
-  opacity: 0.55;
-  transition: opacity 0.2s, transform 0.2s, border-color 0.2s, background-color 0.2s;
-}
-
-.sink-logos a:hover,
-.sink-logos a:focus-visible {
-  opacity: 1;
-  transform: translateY(-2px);
-  border-color: var(--vp-c-divider);
-  background-color: var(--vp-c-bg-soft);
-}
-
-.sink-logos a:hover svg,
-.sink-logos a:focus-visible svg {
-  color: var(--vp-c-brand-1);
+  transition: color 0.25s, border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
 }
 
 .sink-logos svg {
   width: 26px;
   height: 26px;
-  transition: color 0.2s;
+  color: var(--vp-c-text-2);
+  transition: color 0.25s;
+}
+
+.sink-logos a:hover,
+.sink-logos a:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  background-color: var(--vp-code-block-bg);
+  color: var(--vp-c-brand-1);
+  box-shadow: var(--wb-glow-amber);
+}
+
+.sink-logos a:hover svg,
+.sink-logos a:focus-visible svg {
+  color: var(--vp-c-brand-1);
 }
 
 @media (max-width: 640px) {
@@ -92,17 +94,6 @@ const sinks = [
   .sink-logos svg {
     width: 22px;
     height: 22px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sink-logos a {
-    transition: opacity 0.2s, border-color 0.2s, background-color 0.2s;
-  }
-
-  .sink-logos a:hover,
-  .sink-logos a:focus-visible {
-    transform: none;
   }
 }
 </style>
