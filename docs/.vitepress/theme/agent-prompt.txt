@@ -2,7 +2,9 @@ You are setting up Wallaby, a Postgres change data capture library for .NET, in 
 Wallaby streams row changes from Postgres logical replication, materializes them into EF Core
 entities, Marten documents, or annotated POCOs, runs a transform, and delivers the resulting
 documents to a sink (Meilisearch, Elasticsearch, OpenSearch, Kafka, pgvector, HTTP, or custom).
-Requires Postgres 15+ and .NET 10+. Docs: https://wallabycdc.net/
+Requires Postgres 15+ and .NET 10+. Docs: https://wallabycdc.net/ (the full docs as one file:
+https://wallabycdc.net/llms-full.txt, index: https://wallabycdc.net/llms.txt). Read the pages for
+the chosen provider and sink before implementing.
 
 Work in three phases: infer, ask, implement. Do not write code before phase 2 is answered.
 
@@ -66,22 +68,27 @@ and proceed with the default for anything left unanswered. Skip a question when 
    entity, lowercase plural of the type name.
 2. What should each document contain? A flat field list per entity is enough. Default: the
    entity's scalar properties, keyed by the primary key. Ask whether any document needs data from
-   a related table; that decides DependsOn(...) on EF Core, a second registered type on plain
-   tables.
+   a related table; that decides DependsOn(...) on EF Core. Marten documents are self-contained,
+   and plain tables cannot re-emit a parent document when a related table changes, so flag that
+   limitation instead.
 3. Which sink? Default: the destination already in the project, otherwise Meilisearch for search,
    Kafka for events, HTTP for a custom receiver. Ask where the sink endpoint and credential live
-   (configuration key name only).
+   (configuration key name only). For pgvector, also ask which embedding model to use (and where
+   its credential lives), or whether the transform supplies the vector itself.
 4. Where should Wallaby run: an existing worker, a new worker project, or inside the web app?
    Default: an existing worker if one exists, otherwise a new Worker project, because CDC scales
    independently of the API.
 5. Slot and publication names. Default: "<app>_cdc_slot" and "<app>_cdc_pub" derived from the
-   solution name. One slot per Wallaby cluster; a second worker needs its own pair.
+   solution name. Replicas of the same worker share one slot through leader election; only a
+   separately configured worker (different mappings or sinks) needs its own pair.
 6. May Wallaby's role receive the REPLICATION attribute, and may migrations set
-   REPLICA IDENTITY FULL on captured tables where needed? Wallaby never alters tables itself.
+   REPLICA IDENTITY FULL on captured tables where needed? Wallaby's startup checks only report the
+   DDL; they never alter tables.
 7. Multi-tenancy, only if phase 1 found a tenant signal: should documents be routed to a
    per-tenant destination (ScopedBy + ScopedDestination) or just enriched per tenant?
 8. Managed platform authentication, only if phase 1 found RDS, Azure, or Cloud SQL: password or
-   short-lived token via UsePasswordProvider?
+   short-lived token via UsePasswordProvider? With a token, the connection string must not contain
+   Password or Passfile; startup rejects the combination.
 9. Should an initial backfill of existing rows run on first start? Default: yes
    (AutoBackfillNewTables is on by default).
 
@@ -99,10 +106,12 @@ of inventing a method.
      Wallaby.Providers.Tables
    - one sink: Wallaby.Sinks.Meilisearch, Wallaby.Sinks.Elasticsearch, Wallaby.Sinks.OpenSearch,
      Wallaby.Sinks.Kafka, Wallaby.Sinks.Pgvector, or Wallaby.Sinks.Http
-   - optional: Wallaby.AspNetCore.HealthChecks, Wallaby.Testing (test project only)
-2. Registration in Program.cs, in this order on the builder returned by AddWallaby:
-   provider, UseConnectionString(...), ConfigureOptions(o => { o.SlotName; o.PublicationName; }),
-   Add<Sink>Sink("name", opts => ...), WithMappings(sink => sink.Map<TEntity>()...).
+   - optional: Wallaby.AspNetCore.HealthChecks, Wallaby.Testing (test project only),
+     Wallaby.Client (external control from migrations or ops tooling)
+2. Registration in Program.cs, in this conventional order on the builder passed to the
+   AddWallaby(cdc => ...) callback: provider, UseConnectionString(...),
+   ConfigureOptions(o => { o.SlotName; o.PublicationName; }), Add<Sink>Sink("name", opts => ...),
+   WithMappings(sink => sink.Map<TEntity>()...). WithMappings chains onto the sink it routes to.
    Read connection strings and sink settings through the IServiceProvider overloads of
    UseConnectionString and the sink options when they come from IConfiguration.
    The connection string must be supplied to Wallaby even when EF Core or Marten already has one.
@@ -117,27 +126,62 @@ of inventing a method.
    one WallabyDocument per change key; an omitted key is a delete, never a skip. Deletes never
    reach the transform.
 4. Provider specifics:
-   - EF Core: add DependsOn(nav) when a transform reads a related table. Use Consumes(...) or
-     ConsumesAllExcept(...) to keep large columns off the wire when no transform reads them.
-   - Marten: map only documents registered up front. Soft-deleted documents need
-     REPLICA IDENTITY FULL.
+   - EF Core: add DependsOn(nav) when a transform reads a related table. Stored computed columns
+     (before PostgreSQL 18) and virtual generated columns (any version) stop startup unless
+     excluded with ConsumesAllExcept(...). Owned collections, OwnsOne with ToTable, and ToJson
+     members are not captured and stay at their defaults. For tenancy, pair ScopedBy(...) with
+     cdc.UseScopedDbContext(...) and/or ScopedDestination(...); ScopedBy alone has no effect.
+   - Marten: map only documents registered up front; document hierarchies cannot be captured.
+     For conjoined tenancy use ScopedByTenant() with UseTenantSessions(); separate-database
+     tenancy is not supported.
    - Plain tables: register each type with tables.Add<T>(), call UseSnakeCase() when column names
      are snake_case, declare composite keys with HasKey(...). JSON columns map only to string,
      and DependsOn is unavailable.
-5. Replica identity. KeyedBy(...), entity-derived ScopedDestination, and Marten soft deletes
-   require REPLICA IDENTITY FULL. Add "ALTER TABLE <schema.table> REPLICA IDENTITY FULL;" to a
-   migration for those tables only. Otherwise leave identity at DEFAULT; Wallaby heals missing
-   TOAST values by re-reading the row.
-6. Postgres prerequisites, as a checklist in the summary and as compose or infra edits when the
+   - EF Core and plain tables: use Consumes(...) or ConsumesAllExcept(...) to keep large columns
+     off the wire when no transform reads them. A narrowed table's columns cannot be altered or
+     dropped while Wallaby's publication lists them; say in the summary that such migrations
+     need WidenPublicationsAsync/RestorePublicationsAsync (Wallaby.Client) around them.
+5. Replica identity. KeyedBy(...) and entity-derived ScopedDestination require
+   REPLICA IDENTITY FULL, and startup fails without it. Transforms that project from a change's
+   old values, or read a large (TOASTed) column, also need it; Marten soft-deleted documents
+   should have it. Apply it for those tables only:
+   - EF Core: migrationBuilder.SetReplicaIdentityFull("table", schema: "...") in a migration.
+   - Marten: chain .ManageWallabyReplicaIdentity() onto AddMarten(...) (register AddMarten before
+     AddWallaby).
+   - Plain tables: "ALTER TABLE <schema.table> REPLICA IDENTITY FULL;" in the project's migrations.
+   Otherwise leave identity at DEFAULT; Wallaby heals missing TOAST values by re-reading the row
+   and logs a warning for each one.
+6. Sink rules. Check these for the chosen sink; each one otherwise fails startup or halts the
+   pipeline:
+   - Meilisearch: every searchable, filterable, and sortable attribute declared in
+     ConfigureIndex must be present in every document. Do not add an id field; the sink injects
+     PrimaryKey itself.
+   - Elasticsearch/OpenSearch: index names must be lowercase. The sink never creates indices, so
+     fields that need an explicit mapping (dense_vector, analyzers) need the index created first.
+   - Kafka: deletes are tombstones, so entity topics should use cleanup.policy=compact (declare
+     them in Topics to have the sink create them). Configure TLS/SASL through ConfigureClient.
+   - HTTP: SigningSecret must decode to at least 16 bytes; an unset environment variable fails
+     startup. The receiver must be idempotent and ignore unknown fields.
+   - pgvector: ConnectionString and Dimensions are required. Either set EmbeddingGenerator,
+     EmbedText, and EmbeddingVersion, or have the transform supply the vector in VectorField.
+     Destination table names allow only letters, digits, and underscores.
+7. Postgres prerequisites, as a checklist in the summary and as compose or infra edits when the
    project owns them: wal_level=logical (not on PG 19), a role with REPLICATION, headroom in
    max_replication_slots and max_wal_senders. Do not create the slot or publication by hand;
    Wallaby self-configures both from the model and fails fast with guidance when a prerequisite is
    missing.
-7. Optional wiring, matched to what phase 1 found: AddHealthChecks().AddWallaby() when health
+8. Optional wiring, matched to what phase 1 found: AddHealthChecks().AddWallaby() when health
    checks exist; AddMeter("Wallaby") and AddSource("Wallaby") when OpenTelemetry exists; a
-   Wallaby.Testing end-to-end test using CaptureSink when a Testcontainers-based test project
-   exists.
-8. Verify. Build the solution. If Docker is available and the project has a compose file, start
+   Wallaby.Testing end-to-end test when a Testcontainers-based test project exists. The test runs
+   the app's own AddWallaby registration and:
+   - starts Postgres with .WithCommand("-c", "wal_level=logical") and migrates before the host
+     starts
+   - swaps the sink with services.ReplaceWallabySink("<name>", captureSink) and gives the test its
+     own slot and publication via services.ConfigureWallabyOptions(...)
+   - awaits WallabyReadiness.WaitForStreamingAsync(services) before seeding rows
+   - asserts only on the ids it seeded, via LatestByDocumentId(), never on record counts, and
+     never wipes the wallaby schema
+9. Verify. Build the solution. If Docker is available and the project has a compose file, start
    Postgres and the sink, run the worker, insert a row, and confirm the document lands. Report
    exactly what was verified and what was not.
 

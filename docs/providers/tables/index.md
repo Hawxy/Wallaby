@@ -93,7 +93,7 @@ coercion can bridge: the numeric types, `string`, `char`, `bool`, `Guid`, `DateT
 text or number), nullable versions of those, and
 single-dimension arrays of them. A property of any other type (a nested class, a collection,
 `JsonElement`) fails registration with the remedy: mark it `[NotMapped]` or `Ignore(...)` it. JSON
-columns are not supported in this version.
+columns can only be captured into a `string` property in this version.
 
 Key properties are further limited to the types a backfill cursor can persist: numbers, strings,
 `Guid`, dates and times, and `byte[]`. An enum key is rejected at registration.
