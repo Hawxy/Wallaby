@@ -114,6 +114,29 @@ than falling back to the primary key. The same applies to an entity-derived `Sco
 `ScopedDestination` (deletes must resolve their destination); the `ChangeEvent` overload of `ScopedBy`
 reads captured columns instead and carries no such requirement.
 
+Return a tuple for a composite id, e.g. `KeyedBy(p => (p.TenantId, p.Sku))`. When several rows select the
+same id, the last change in commit order wins within a batch.
+
+### Id format
+
+Every sink receives the same canonical id, built from the key values:
+
+| Key | Id |
+| --- | --- |
+| Single value | The value itself: `42`, `3f2b8c1e-…`, `sku-1` |
+| Composite key | Values joined with `\|`: `tenant-a\|42` |
+| `DateTime` / `DateTimeOffset` / `TimeOnly` | ISO 8601 round-trip form: `2026-09-17T10:30:15.1230000Z` |
+| `DateOnly` | `2026-09-17` |
+| `byte[]` | Lowercase hex |
+| `null` | Empty |
+
+A `%` or `|` inside a value is escaped as `%25` or `%7C`, so two keys of one table never share an id.
+`DocumentKey.SplitId(id)` turns an id back into its values. Tables that share a destination share one id
+space, so give them distinct ids (for example with `KeyedBy`) when their keys can overlap.
+
+Sinks whose ids have a restricted alphabet re-encode this id reversibly; see
+[Meilisearch](/sinks/meilisearch#document-ids).
+
 ## Documents
 
 A document is a `WallabyDocument`, simply a field bag keyed by destination field name. It derives from

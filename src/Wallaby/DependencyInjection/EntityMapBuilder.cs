@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 using Wallaby.Abstractions;
 using Wallaby.Providers;
 
@@ -29,10 +30,12 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
     }
 
     /// <summary>
-    /// Override the document id (defaults to the source primary key). The selected value is rendered
-    /// culture-invariantly, like <see cref="DocumentKey.ToString"/>. Because deletes must also compute
+    /// Override the document id (defaults to the source primary key). The selected value is rendered as a
+    /// canonical document id (see <see cref="DocumentKey.ToString"/>); a tuple such as
+    /// <c>p =&gt; (p.TenantId, p.Sku)</c> becomes a composite id. Because deletes must also compute
     /// the id, the table requires <c>REPLICA IDENTITY FULL</c> so the full old row is present on delete;
-    /// self-configuration fails at startup when it is missing.
+    /// self-configuration fails at startup when it is missing. When several rows select the same id, the
+    /// last change in commit order wins within a batch.
     /// </summary>
     public EntityMapBuilder<TEntity> KeyedBy(Func<TEntity, object> keySelector)
     {
@@ -57,9 +60,26 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
                     $"'{change.Metadata.QualifiedTableName}' (primary key {change.Key}). The key columns are " +
                     "likely missing from the replicated old row; run: " +
                     $"ALTER TABLE {change.Metadata.QualifiedTableName} REPLICA IDENTITY FULL;");
-            return DocumentKey.Format(key);
+            var id = key is ITuple tuple ? ToDocumentKey(tuple).ToString() : DocumentKey.FormatId(key);
+            if (id.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    $"KeyedBy selector for '{typeof(TEntity).Name}' produced an empty document id on {change.Action} " +
+                    $"of '{change.Metadata.QualifiedTableName}' (primary key {change.Key}).");
+            }
+            return id;
         };
         return this;
+    }
+
+    private static DocumentKey ToDocumentKey(ITuple tuple)
+    {
+        var values = new object?[tuple.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            values[i] = tuple[i];
+        }
+        return new DocumentKey(values);
     }
 
     /// <summary>Bump this when the transform/projection changes to trigger an automatic re-backfill.</summary>

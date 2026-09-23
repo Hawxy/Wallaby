@@ -251,10 +251,10 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
             return DeliveryResult.Success;
         }
-        catch (MeilisearchDocumentValidationException ex)
+        catch (Exception ex) when (ex is MeilisearchDocumentValidationException or MeilisearchDocumentIdException)
         {
-            // A configured attribute is absent from the document — a configuration/transform bug. Retrying
-            // would never succeed, so fail permanently (the dispatcher halts the pipeline).
+            // A configured attribute is absent, or the id is too long: a configuration/transform bug.
+            // Retrying would never succeed, so fail permanently (the dispatcher halts the pipeline).
             return DeliveryResult.Permanent(ex.Message, ex);
         }
         catch (MeilisearchTaskFailedException ex)
@@ -380,7 +380,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
                 ordered.Add(group);
             }
 
-            var id = SanitizeId(record.DocumentId);
+            var id = MeilisearchDocumentIds.Encode(record.DocumentId);
             if (record.IsDeletion)
             {
                 group.Deletions.Add(id);
@@ -484,19 +484,6 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
 
         copy[_options.PrimaryKey] = id;
         return copy;
-    }
-
-    /// <summary>Meilisearch document ids allow only [a-zA-Z0-9-_]; replace anything else (e.g. composite-key separators).</summary>
-    private static string SanitizeId(string id)
-    {
-        Span<char> buffer = id.Length <= 512 ? stackalloc char[id.Length] : new char[id.Length];
-        for (var i = 0; i < id.Length; i++)
-        {
-            var ch = id[i];
-            buffer[i] = ch is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '-' or '_' ? ch : '_';
-        }
-        var result = new string(buffer);
-        return result.Length <= 511 ? result : result[..511];
     }
 
     private sealed class IndexGroup(string index)

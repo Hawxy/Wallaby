@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Wallaby.Model;
 
 namespace Wallaby.Providers.Tables.Internal;
@@ -101,7 +102,7 @@ internal sealed class TablesModelProvider(IReadOnlyDictionary<Type, TableRegistr
             },
             Registration = registration,
             Captured = captured,
-            ColumnsByName = columnsByName,
+            ColumnsByName = columnsByName.ToFrozenDictionary(StringComparer.Ordinal),
             ConstructorArguments = constructorArguments,
             Assignments = [.. assignments],
         };

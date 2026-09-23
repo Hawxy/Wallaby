@@ -138,6 +138,42 @@ public class MeilisearchSinkTests(TestModelPostgresFixture pg, MeilisearchFixtur
     }
 
     [Test]
+    public async Task Composite_keys_differing_only_in_disallowed_characters_stay_separate_documents()
+    {
+        var index = $"ids_{Guid.NewGuid():N}";
+        var probe = new MeiliProbe(meili);
+        var sink = Sink();
+        var tenantDot = new DocumentKey(["acme.io", 7]).ToString();
+        var tenantUnderscore = new DocumentKey(["acme_io", 7]).ToString();
+        var meta = new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UtcNow, 1, 0, false);
+        try
+        {
+            var upserts = await sink.DeliverAsync(new SinkBatch("meili",
+            [
+                new SinkRecord(index, tenantDot, new WallabyDocument { ["name"] = "dot" }, IsDeletion: false, meta),
+                new SinkRecord(index, tenantUnderscore, new WallabyDocument { ["name"] = "underscore" }, IsDeletion: false, meta),
+            ]), CancellationToken.None);
+            upserts.Status.ShouldBe(DeliveryStatus.Success);
+
+            (await probe.GetAsync(index, MeilisearchDocumentIds.Encode(tenantDot)))!["name"]!.GetValue<string>().ShouldBe("dot");
+            (await probe.GetAsync(index, MeilisearchDocumentIds.Encode(tenantUnderscore)))!["name"]!.GetValue<string>()
+                .ShouldBe("underscore");
+
+            var delete = await sink.DeliverAsync(new SinkBatch("meili",
+                [new SinkRecord(index, tenantDot, null, IsDeletion: true, meta with { Action = ChangeAction.Delete })]),
+                CancellationToken.None);
+            delete.Status.ShouldBe(DeliveryStatus.Success);
+
+            (await probe.GetAsync(index, MeilisearchDocumentIds.Encode(tenantDot))).ShouldBeNull();
+            (await probe.GetAsync(index, MeilisearchDocumentIds.Encode(tenantUnderscore))).ShouldNotBeNull();
+        }
+        finally
+        {
+            await probe.DropAsync(index);
+        }
+    }
+
+    [Test]
     public async Task Granular_filterable_attribute_pattern_is_validated_like_a_plain_name()
     {
         // The Meilisearch 0.20 granular form (opting comparison/facet-search out) uses AttributePatterns

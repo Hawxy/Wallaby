@@ -57,6 +57,24 @@ public class MappingChangeRouterTests
     }
 
     [Test]
+    public async Task Byte_array_keys_collapse_by_content()
+    {
+        var routed = await Router().RouteAsync(
+            [ByteKeyChange(ChangeAction.Update), ByteKeyChange(ChangeAction.Delete)], CancellationToken.None);
+
+        routed.Count.ShouldBe(1);
+        routed[0].Record.IsDeletion.ShouldBeTrue();
+    }
+
+    // A fresh array per change, as the decoder produces for a bytea key.
+    private static ChangeEvent ByteKeyChange(ChangeAction action)
+        => new(action, new ChangeMetadata("public", "t", action, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false),
+            Entity: null, new Dictionary<string, object?>(), Changes: null, [new byte[] { 1, 2 }])
+        {
+            EntityClrType = typeof(Doc),
+        };
+
+    [Test]
     public async Task Distinct_keys_are_routed_independently()
     {
         var routed = await Router().RouteAsync(
@@ -68,12 +86,62 @@ public class MappingChangeRouterTests
     }
 
     [Test]
+    public async Task Records_are_emitted_in_commit_order()
+    {
+        var routed = await Router().RouteAsync(
+            [Change(ChangeAction.Insert, 1), Change(ChangeAction.Delete, 2), Change(ChangeAction.Update, 3)],
+            CancellationToken.None);
+
+        routed.Select(r => (r.Record.DocumentId, r.Record.IsDeletion))
+            .ShouldBe([("1", false), ("2", true), ("3", false)]);
+    }
+
+    [Test]
     public async Task Transform_failure_always_halts()
     {
         var router = Router(new ThrowingTransform());
 
         await Should.ThrowAsync<InvalidOperationException>(
             async () => await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None));
+    }
+
+    private static MappingChangeRouter KeyedRouter(Func<ChangeEvent, string> documentId)
+        => new([TestChanges.Mapping(typeof(Doc), new RecordingTransform(), new FakeSessionProvider()) with
+        {
+            DocumentIdSelector = documentId,
+        }]);
+
+    [Test]
+    public async Task Custom_id_shared_by_a_deleted_and_an_inserted_row_routes_the_later_upsert()
+    {
+        var routed = await KeyedRouter(_ => "shared").RouteAsync(
+            [Change(ChangeAction.Delete, 1), Change(ChangeAction.Insert, 2)], CancellationToken.None);
+
+        var record = routed.ShouldHaveSingleItem().Record;
+        record.DocumentId.ShouldBe("shared");
+        record.IsDeletion.ShouldBeFalse();
+        record.Document!["id"].ShouldBe("2");
+    }
+
+    [Test]
+    public async Task Custom_id_shared_by_an_inserted_and_a_deleted_row_routes_the_later_deletion()
+    {
+        var routed = await KeyedRouter(_ => "shared").RouteAsync(
+            [Change(ChangeAction.Insert, 2), Change(ChangeAction.Delete, 1)], CancellationToken.None);
+
+        var record = routed.ShouldHaveSingleItem().Record;
+        record.DocumentId.ShouldBe("shared");
+        record.IsDeletion.ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Distinct_custom_ids_are_routed_independently()
+    {
+        var routed = await KeyedRouter(c => $"doc-{c.Key}").RouteAsync(
+            [Change(ChangeAction.Delete, 1), Change(ChangeAction.Insert, 2), Change(ChangeAction.Update, 3)],
+            CancellationToken.None);
+
+        routed.Select(r => r.Record.DocumentId).ShouldBe(["doc-1", "doc-2", "doc-3"], ignoreOrder: true);
     }
 
     private sealed class OtherDoc;
@@ -100,7 +168,7 @@ public class MappingChangeRouterTests
     }
 
     [Test]
-    public async Task Scope_groups_route_deletes_first_then_scopes_in_first_occurrence_order()
+    public async Task Scoped_changes_are_emitted_in_commit_order()
     {
         var router = new MappingChangeRouter(
             [TestChanges.Mapping(typeof(Doc), new RecordingTransform(), new FakeSessionProvider(), ScopeOf)]);
@@ -115,7 +183,7 @@ public class MappingChangeRouterTests
             ],
             CancellationToken.None);
 
-        routed.Select(r => r.Record.DocumentId).ShouldBe(["9", "1", "4", "2", "3"]);
+        routed.Select(r => r.Record.DocumentId).ShouldBe(["9", "1", "2", "3", "4"]);
         routed[0].Record.IsDeletion.ShouldBeTrue();
     }
 

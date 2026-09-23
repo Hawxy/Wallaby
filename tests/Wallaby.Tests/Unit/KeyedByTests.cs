@@ -69,6 +69,24 @@ public class KeyedByTests
     }
 
     [Test]
+    public void Keyed_by_tuple_becomes_a_composite_id()
+    {
+        var selector = Selector(m => m.KeyedBy(d => (d.Sku, d.Id)));
+
+        selector(Change(new Doc { Id = 7, Sku = "a|b" })).ShouldBe("a%7Cb|7");
+    }
+
+    [Test]
+    public void Keyed_by_empty_id_fails_loudly()
+    {
+        var selector = Selector(m => m.KeyedBy(d => d.Sku!));
+
+        var ex = Should.Throw<InvalidOperationException>(() => selector(Change(new Doc { Id = 7, Sku = "" })));
+
+        ex.Message.ShouldContain("empty document id");
+    }
+
+    [Test]
     public void Keyed_by_without_entity_fails_loudly()
     {
         var selector = Selector(m => m.KeyedBy(d => d.Sku!));
