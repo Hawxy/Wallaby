@@ -53,6 +53,24 @@ public class DocumentKeyTests
     }
 
     [Test]
+    public void Values_longer_than_the_format_buffer_render_in_full()
+    {
+        var bytes = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
+        new DocumentKey([bytes, 1]).ToString().ShouldBe(Convert.ToHexStringLower(bytes) + "|1");
+    }
+
+    [Test]
+    public void Format_id_matches_a_single_value_key()
+    {
+        object?[] values = ["a|b%c", 42, Guid.NewGuid(), new DateTime(2026, 9, 17, 1, 2, 3, DateTimeKind.Utc), null, true];
+        foreach (var value in values)
+        {
+            DocumentKey.FormatId(value).ShouldBe(new DocumentKey(value).ToString());
+        }
+        DocumentKey.FormatId("a|b%c").ShouldBe("a%7Cb%25c");
+    }
+
+    [Test]
     public void Composite_keys_join_with_a_pipe_and_null_renders_empty()
     {
         new DocumentKey([42, "tenant-a", null]).ToString().ShouldBe("42|tenant-a|");

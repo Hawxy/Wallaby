@@ -253,7 +253,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         }
         catch (Exception ex) when (ex is MeilisearchDocumentValidationException or MeilisearchDocumentIdException)
         {
-            // A configured attribute is absent, or the id can't be stored: a configuration/transform bug.
+            // A configured attribute is absent, or the id is too long: a configuration/transform bug.
             // Retrying would never succeed, so fail permanently (the dispatcher halts the pipeline).
             return DeliveryResult.Permanent(ex.Message, ex);
         }
@@ -388,7 +388,7 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             else
             {
                 ValidateConfiguredAttributes(indexName, record.DocumentId, record.Document!);
-                group.Upserts.Add(BuildUpsertDocument(indexName, record.DocumentId, record.Document!, id));
+                group.Upserts.Add(BuildUpsertDocument(record.Document!, id));
             }
         }
 
@@ -471,21 +471,9 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         }
     }
 
-    private IReadOnlyDictionary<string, object?> BuildUpsertDocument(string indexName, string documentId,
-        IReadOnlyDictionary<string, object?> document, string id)
+    private IReadOnlyDictionary<string, object?> BuildUpsertDocument(IReadOnlyDictionary<string, object?> document,
+        string id)
     {
-        // A primary-key field the transform emitted must already hold the id: stamping over a different value
-        // would make readers mistake the id for their own key.
-        if (document.TryGetValue(_options.PrimaryKey, out var emitted) && emitted is not null
-            && new DocumentKey(emitted).ToString() != id)
-        {
-            throw new MeilisearchDocumentIdException(documentId,
-                $"Document '{documentId}' routed to Meilisearch index '{indexName}' has a '{_options.PrimaryKey}' " +
-                $"field ('{emitted}') that differs from its Meilisearch id '{id}'. The sink stores the document id " +
-                $"in that field; drop it from the transform, or set {nameof(MeilisearchSinkOptions.PrimaryKey)} " +
-                "to another field name.");
-        }
-
         // Documents are field bags. Copy defensively (so a transform-returned dictionary isn't mutated)
         // and stamp the primary key.
         var copy = new Dictionary<string, object?>(document.Count + 1, StringComparer.Ordinal);

@@ -55,26 +55,30 @@ public static class MeilisearchDocumentIds
         ArgumentNullException.ThrowIfNull(id);
         ArgumentOutOfRangeException.ThrowIfLessThan(keyParts, 1);
 
+        string documentId;
         if (id.StartsWith(EncodedPrefix, StringComparison.Ordinal))
         {
-            return Encoding.UTF8.GetString(Base64Url.DecodeFromChars(id.AsSpan(EncodedPrefix.Length)));
+            documentId = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(id.AsSpan(EncodedPrefix.Length)));
         }
-
-        if (id.Length == 0 || id[0] == '_' || id.AsSpan().ContainsAnyExcept(IdChars))
+        else if (keyParts == 1)
         {
-            throw new FormatException($"'{id}' is not a Meilisearch document id produced by Wallaby.");
+            documentId = id;
         }
-
-        if (keyParts == 1)
+        else if (id.AsSpan().Count('_') == keyParts - 1)
         {
-            return id;
+            documentId = id.Replace('_', '|');
         }
-
-        if (id.AsSpan().Count('_') != keyParts - 1)
+        else
         {
             throw new FormatException($"'{id}' does not hold a key of {keyParts} values.");
         }
-        return id.Replace('_', '|');
+
+        // Only ids Encode produces decode, so the rules live in one place.
+        if (id.Length > MaxLength || Encode(documentId) != id)
+        {
+            throw new FormatException($"'{id}' is not a Meilisearch document id produced by Wallaby.");
+        }
+        return documentId;
     }
 
     private static string? Readable(string documentId)

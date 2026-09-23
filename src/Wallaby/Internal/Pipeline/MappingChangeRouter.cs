@@ -97,49 +97,52 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         }
                     }
 
-                    foreach (var (scopeKey, subset) in upserts is null ? [] : GroupByScopePreservingOrder(mapping, upserts))
+                    if (upserts is not null)
                     {
-                        var destination = mapping.ResolveDestination(scopeKey);
-                        var session = GetOrCreateSession(sessions ??= [], mapping.Sessions, scopeKey);
-                        var entityName = mapping.EntityClrType.Name;
+                        foreach (var (scopeKey, subset) in GroupByScopePreservingOrder(mapping, upserts))
+                        {
+                            var destination = mapping.ResolveDestination(scopeKey);
+                            var session = GetOrCreateSession(sessions ??= [], mapping.Sessions, scopeKey);
+                            var entityName = mapping.EntityClrType.Name;
 
-                        using var activity = _instr.StartTransform();
-                        if (activity is not null)
-                        {
-                            activity.SetTag(WallabyInstrumentation.EntityTag, entityName);
-                            activity.SetTag(WallabyInstrumentation.SinkTag, mapping.SinkName);
-                            activity.SetTag(WallabyInstrumentation.DestinationTag, destination);
-                            activity.SetTag("wallaby.batch.size", subset.Count);
-                        }
-
-                        var transformStart = WallabyInstrumentation.StartTimer();
-                        IReadOnlyDictionary<DocumentKey, WallabyDocument?> documents;
-                        try
-                        {
-                            // A transform exception always propagates and halts the pipeline.
-                            documents = await mapping.Transform.InvokeAsync(session, subset, ct);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
-                        {
-                            throw new InvalidOperationException(
-                                $"Transform for {entityName} (sink '{mapping.SinkName}', destination '{destination}') " +
-                                $"failed on a batch of {subset.Count} change(s) from {subset[0].Metadata.QualifiedTableName} " +
-                                $"starting at commit {new NpgsqlLogSequenceNumber(subset[0].Metadata.CommitLsn)}: {ex.Message}", ex);
-                        }
-                        _instr.RecordTransformDuration(entityName, mapping.SinkName, transformStart);
-
-                        foreach (var change in subset)
-                        {
-                            if (documents.TryGetValue(change.Key, out var document) && document is not null)
+                            using var activity = _instr.StartTransform();
+                            if (activity is not null)
                             {
-                                routed.Add(Upsert(mapping, change, document, destination));
+                                activity.SetTag(WallabyInstrumentation.EntityTag, entityName);
+                                activity.SetTag(WallabyInstrumentation.SinkTag, mapping.SinkName);
+                                activity.SetTag(WallabyInstrumentation.DestinationTag, destination);
+                                activity.SetTag("wallaby.batch.size", subset.Count);
                             }
-                            else
+
+                            var transformStart = WallabyInstrumentation.StartTimer();
+                            IReadOnlyDictionary<DocumentKey, WallabyDocument?> documents;
+                            try
                             {
-                                // Omitted from the transform output (or mapped to null) => delete it from the sink.
-                                routed.Add(Deletion(mapping, change, destination));
+                                // A transform exception always propagates and halts the pipeline.
+                                documents = await mapping.Transform.InvokeAsync(session, subset, ct);
                             }
-                            positions?.Add(lastByKey[change.Key].Position);
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Transform for {entityName} (sink '{mapping.SinkName}', destination '{destination}') " +
+                                    $"failed on a batch of {subset.Count} change(s) from {subset[0].Metadata.QualifiedTableName} " +
+                                    $"starting at commit {new NpgsqlLogSequenceNumber(subset[0].Metadata.CommitLsn)}: {ex.Message}", ex);
+                            }
+                            _instr.RecordTransformDuration(entityName, mapping.SinkName, transformStart);
+
+                            foreach (var change in subset)
+                            {
+                                if (documents.TryGetValue(change.Key, out var document) && document is not null)
+                                {
+                                    routed.Add(Upsert(mapping, change, document, destination));
+                                }
+                                else
+                                {
+                                    // Omitted from the transform output (or mapped to null) => delete it from the sink.
+                                    routed.Add(Deletion(mapping, change, destination));
+                                }
+                                positions?.Add(lastByKey[change.Key].Position);
+                            }
                         }
                     }
 

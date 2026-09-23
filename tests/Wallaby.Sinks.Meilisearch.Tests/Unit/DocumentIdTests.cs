@@ -119,7 +119,7 @@ public class DocumentIdTests
     }
 
     [Test]
-    public async Task A_primary_key_field_that_differs_from_the_id_fails_permanently()
+    public async Task The_encoded_id_replaces_a_primary_key_field_the_transform_emitted()
     {
         var stub = new StubHandler();
         var sink = Sink(stub);
@@ -127,21 +127,8 @@ public class DocumentIdTests
 
         var result = await sink.DeliverAsync(Batch(record), CancellationToken.None);
 
-        result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
-        result.Error!.ShouldContain("PrimaryKey");
-        stub.Requests.ShouldBeEmpty();
-    }
-
-    [Test]
-    public async Task A_primary_key_field_equal_to_the_id_is_accepted()
-    {
-        var stub = new StubHandler();
-        var sink = Sink(stub);
-        var id = Guid.NewGuid();
-        var record = new SinkRecord("products", id.ToString(), new WallabyDocument { ["id"] = id }, IsDeletion: false, Meta());
-
-        var result = await sink.DeliverAsync(Batch(record), CancellationToken.None);
-
         result.Status.ShouldBe(DeliveryStatus.Success);
+        var body = await stub.Requests.First(r => r.Method == HttpMethod.Post).Content!.ReadAsStringAsync();
+        JsonDocument.Parse(body).RootElement[0].GetProperty("id").GetString().ShouldBe(MeilisearchDocumentIds.Encode("a.b"));
     }
 }

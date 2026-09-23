@@ -197,12 +197,12 @@ If a way to customize this would be useful, open an issue.
 
 - Your transform's `WallabyDocument` fields become the Meilisearch document. Wallaby stamps the configured
   `PrimaryKey` field with the record's document id (derived from the source primary key, or your
-  `KeyedBy(...)` rule) - so you don't include it yourself.
+  `KeyedBy(...)` rule) - so you don't include it yourself. A field of that name from your transform is
+  replaced.
 - Values are encoded by the same reflection-free writer the other sinks use (dates as ISO 8601,
   `byte[]` as base64, vectors as number arrays); any other value type goes through `SerializerOptions`,
   and a value that cannot be encoded fails delivery permanently.
-- Ids are encoded for Meilisearch's alphabet (see [Document ids](#document-ids)). A transform field named
-  like `PrimaryKey` that holds a different value fails delivery permanently instead of being overwritten.
+- Ids are encoded for Meilisearch's alphabet (see [Document ids](#document-ids)).
 - A transform that returns `null` for a key (or omits it) issues a **delete** for that id.
 - Records are grouped by index; within an index, upserts are applied before deletes (each split into
   requests of at most `MaxRecordsPerRequest` records), and distinct indexes are dispatched in parallel.
@@ -222,7 +222,7 @@ The encoding is reversible and never gives two keys of one table the same id. An
 bytes fails delivery permanently; use `KeyedBy(...)` to derive a shorter one.
 
 ::: warning
-A search hit's `id` is only your source key for integer, Guid, and similar plain keys. Before using it to
+A search hit's `id` is only your source key for integer, Guid, and similar plain keys. If using it to
 load or authorize a record, decode it with `MeilisearchDocumentIds.Decode(id, keyParts)` (and
 `DocumentKey.SplitId` for composite keys), or read the key from a field your transform emits.
 :::

@@ -60,7 +60,7 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
                     $"'{change.Metadata.QualifiedTableName}' (primary key {change.Key}). The key columns are " +
                     "likely missing from the replicated old row; run: " +
                     $"ALTER TABLE {change.Metadata.QualifiedTableName} REPLICA IDENTITY FULL;");
-            var id = ToDocumentKey(key).ToString();
+            var id = key is ITuple tuple ? ToDocumentKey(tuple).ToString() : DocumentKey.FormatId(key);
             if (id.Length == 0)
             {
                 throw new InvalidOperationException(
@@ -72,13 +72,8 @@ public sealed class EntityMapBuilder<TEntity> where TEntity : class
         return this;
     }
 
-    private static DocumentKey ToDocumentKey(object key)
+    private static DocumentKey ToDocumentKey(ITuple tuple)
     {
-        if (key is not ITuple tuple)
-        {
-            return new DocumentKey(key);
-        }
-
         var values = new object?[tuple.Length];
         for (var i = 0; i < values.Length; i++)
         {
