@@ -7,10 +7,11 @@ using Wallaby.Abstractions;
 namespace Wallaby.Internal.Cluster;
 
 /// <summary>
-/// Default <see cref="IClusterLock"/> backed by DistributedLock.Postgres: a transaction-scoped advisory
-/// lock on a dedicated connection the library owns and monitors.
+/// Default <see cref="IClusterLock"/> backed by DistributedLock.Postgres: a session-scoped advisory lock
+/// multiplexed onto a shared connection the library owns and monitors, or a transaction-scoped lock on a
+/// dedicated connection when <paramref name="transactional"/> is set.
 /// </summary>
-internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource) : IClusterLock
+internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource, bool transactional = false) : IClusterLock
 {
     // One long-lived lock object per key, reused across every acquisition attempt.
     private readonly ConcurrentDictionary<string, PostgresDistributedLock> _locks = new(StringComparer.Ordinal);
@@ -19,11 +20,22 @@ internal sealed class PostgresAdvisoryLock(NpgsqlDataSource dataSource) : IClust
     {
         var advisoryLock = _locks.GetOrAdd(
             key,
-            static (k, ds) => new PostgresDistributedLock(
+            static (k, state) => new PostgresDistributedLock(
                 new PostgresAdvisoryLockKey(StableKey(k)),
-                ds,
-                o => o.UseTransaction()),
-            dataSource);
+                state.dataSource,
+                o =>
+                {
+                    // Multiplexing can't be combined with transaction-scoped locks
+                    if (state.transactional)
+                    {
+                        o.UseTransaction();
+                    }
+                    else
+                    {
+                        o.UseMultiplexing();
+                    }
+                }),
+            (dataSource, transactional));
 
         var handle = await advisoryLock.TryAcquireAsync(TimeSpan.Zero, ct);
         return handle is null ? null : new Handle(handle);

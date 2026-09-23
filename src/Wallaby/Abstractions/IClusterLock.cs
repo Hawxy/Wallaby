@@ -2,8 +2,9 @@ namespace Wallaby.Abstractions;
 
 /// <summary>
 /// Distributed lock used for leader election so that exactly one node owns the replication slot
-/// and runs backfills. The default implementation is a Postgres transaction-scoped advisory lock keyed
-/// on the slot name; it is replaceable (e.g. Redis/ZooKeeper) without touching the pipeline.
+/// and runs backfills. The default implementation is a Postgres advisory lock keyed on the slot name
+/// (see <c>WallabyAdvancedOptions.TransactionalClusterLock</c>); it is replaceable (e.g. Redis/ZooKeeper)
+/// without touching the pipeline.
 /// </summary>
 public interface IClusterLock
 {

@@ -40,6 +40,14 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// When false (the default), the built-in cluster lock uses session-scoped advisory locks multiplexed
+    /// onto one shared connection per node. Set to true to hold each lock in a transaction on its own
+    /// connection instead, which is required when the lock's connections go through a pooler in
+    /// transaction mode (e.g. PgBouncer <c>pool_mode = transaction</c>).
+    /// </summary>
+    public bool TransactionalClusterLock { get; set; }
+
+    /// <summary>
     /// How often, while a single transaction is being processed, Wallaby sends a replication status
     /// update to keep the connection alive, covering slow transforms/sinks when the consumer isn't
     /// reading the stream (so Npgsql can't answer the server's keepalives). Keep it well under the
