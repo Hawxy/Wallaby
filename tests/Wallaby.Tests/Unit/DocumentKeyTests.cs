@@ -53,6 +53,17 @@ public class DocumentKeyTests
     }
 
     [Test]
+    public void Byte_arrays_compare_by_content()
+    {
+        var key = new DocumentKey([new byte[] { 1, 2 }, 7]);
+        var sameContent = new DocumentKey([new byte[] { 1, 2 }, 7]);
+
+        key.ShouldBe(sameContent);
+        key.GetHashCode().ShouldBe(sameContent.GetHashCode());
+        key.ShouldNotBe(new DocumentKey([new byte[] { 1, 3 }, 7]));
+    }
+
+    [Test]
     public void Values_longer_than_the_format_buffer_render_in_full()
     {
         var bytes = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();

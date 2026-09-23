@@ -57,6 +57,24 @@ public class MappingChangeRouterTests
     }
 
     [Test]
+    public async Task Byte_array_keys_collapse_by_content()
+    {
+        var routed = await Router().RouteAsync(
+            [ByteKeyChange(ChangeAction.Update), ByteKeyChange(ChangeAction.Delete)], CancellationToken.None);
+
+        routed.Count.ShouldBe(1);
+        routed[0].Record.IsDeletion.ShouldBeTrue();
+    }
+
+    // A fresh array per change, as the decoder produces for a bytea key.
+    private static ChangeEvent ByteKeyChange(ChangeAction action)
+        => new(action, new ChangeMetadata("public", "t", action, DateTimeOffset.UtcNow, 1, 0, IsBackfill: false),
+            Entity: null, new Dictionary<string, object?>(), Changes: null, [new byte[] { 1, 2 }])
+        {
+            EntityClrType = typeof(Doc),
+        };
+
+    [Test]
     public async Task Distinct_keys_are_routed_independently()
     {
         var routed = await Router().RouteAsync(

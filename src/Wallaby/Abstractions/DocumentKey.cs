@@ -35,10 +35,14 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
         if (Values.Count != other.Values.Count) return false;
         for (var i = 0; i < Values.Count; i++)
         {
-            if (!Equals(Values[i], other.Values[i])) return false;
+            if (!ValueEquals(Values[i], other.Values[i])) return false;
         }
         return true;
     }
+
+    // Byte arrays (bytea keys) compare by content; every other key value by its own Equals.
+    private static bool ValueEquals(object? left, object? right)
+        => left is byte[] a && right is byte[] b ? a.AsSpan().SequenceEqual(b) : Equals(left, right);
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => Equals(obj as DocumentKey);
@@ -50,7 +54,14 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
         var hash = new HashCode();
         for (var i = 0; i < Values.Count; i++)
         {
-            hash.Add(Values[i]);
+            if (Values[i] is byte[] bytes)
+            {
+                hash.AddBytes(bytes);
+            }
+            else
+            {
+                hash.Add(Values[i]);
+            }
         }
         return hash.ToHashCode();
     }
