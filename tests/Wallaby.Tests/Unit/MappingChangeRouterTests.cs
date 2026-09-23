@@ -86,6 +86,17 @@ public class MappingChangeRouterTests
     }
 
     [Test]
+    public async Task Records_are_emitted_in_commit_order()
+    {
+        var routed = await Router().RouteAsync(
+            [Change(ChangeAction.Insert, 1), Change(ChangeAction.Delete, 2), Change(ChangeAction.Update, 3)],
+            CancellationToken.None);
+
+        routed.Select(r => (r.Record.DocumentId, r.Record.IsDeletion))
+            .ShouldBe([("1", false), ("2", true), ("3", false)]);
+    }
+
+    [Test]
     public async Task Transform_failure_always_halts()
     {
         var router = Router(new ThrowingTransform());
@@ -157,7 +168,7 @@ public class MappingChangeRouterTests
     }
 
     [Test]
-    public async Task Scope_groups_route_deletes_first_then_scopes_in_first_occurrence_order()
+    public async Task Scoped_changes_are_emitted_in_commit_order()
     {
         var router = new MappingChangeRouter(
             [TestChanges.Mapping(typeof(Doc), new RecordingTransform(), new FakeSessionProvider(), ScopeOf)]);
@@ -172,7 +183,7 @@ public class MappingChangeRouterTests
             ],
             CancellationToken.None);
 
-        routed.Select(r => r.Record.DocumentId).ShouldBe(["9", "1", "4", "2", "3"]);
+        routed.Select(r => r.Record.DocumentId).ShouldBe(["9", "1", "2", "3", "4"]);
         routed[0].Record.IsDeletion.ShouldBeTrue();
     }
 
