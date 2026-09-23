@@ -98,17 +98,17 @@ The transform shapes each change into the document you want indexed; see
 
 ## Indices
 
-The sink does not create or configure indices: an index auto-creates on first write with dynamic
-mapping (provided the cluster's `action.auto_create_index` setting allows it, as it does by
+The sink doesn't create or configure indices. An index is created automatically on first write with
+dynamic mapping, as long as the cluster's `action.auto_create_index` setting allows it (it does by
 default). For explicit settings or mappings (analyzers, `dense_vector` fields, shard counts, …),
-create the index up front — via Kibana Dev Tools, your infrastructure tooling, or a deployment
-script. In-sink index bootstrapping is planned.
+create the index up front with Kibana Dev Tools, your infrastructure tooling, or a deployment script.
+In-sink index bootstrapping is planned.
 
 ## Vector search
 
-A transform can emit an embedding as a `float[]` or `ReadOnlyMemory<float>` field - the sink writes
-either as a plain JSON number array, with no `SerializerOptions` needed. Dynamic mapping would infer
-an ordinary `float` field, so pre-create the index with an explicit `dense_vector` mapping:
+A transform can emit an embedding as a `float[]` or `ReadOnlyMemory<float>` field. The sink writes
+either as a plain JSON number array, so no `SerializerOptions` are needed. Dynamic mapping would infer
+an ordinary `float` field, so create the index up front with an explicit `dense_vector` mapping:
 
 ```json
 PUT /products
@@ -121,21 +121,25 @@ PUT /products
 }
 ```
 
-Don't pass a quantized vector as `byte[]` - byte arrays serialize as base64 strings, not arrays.
+Don't pass a quantized vector as `byte[]`: byte arrays serialize as base64 strings, not arrays.
 
-Elasticsearch can also embed for you: map the field as
+Elasticsearch can also do the embedding for you. Map the field as
 [`semantic_text`](https://www.elastic.co/docs/solutions/search/semantic-search/semantic-search-semantic-text)
-(backed by an inference endpoint) and sync plain text - the cluster chunks and embeds at index
-time, with no vectors in your pipeline at all. Two things to check first: the
-inference API needs an appropriate Elastic subscription (and the default ELSER endpoint needs ML
-nodes), and inference runs on every indexed document - live changes embed incrementally, but a
-[backfill](/backfill) re-runs inference over the whole corpus. See [RAG & Embeddings](/rag).
+(backed by an inference endpoint) and sync plain text, and the cluster chunks and embeds it at index
+time, with no vectors in your pipeline at all. Check two things first:
+
+- The inference API needs an appropriate Elastic subscription, and the default ELSER endpoint needs
+  ML nodes.
+- Inference runs on every indexed document. Live changes embed incrementally, but a
+  [backfill](/backfill) re-runs inference over the whole corpus.
+
+See [RAG & Embeddings](/rag).
 
 ## Authentication
 
-`ApiKey` or `Username`/`Password` cover the common schemes. Everything else — Elastic Cloud ids,
-certificate fingerprints, client certificates, connection pools, proxies — is configured by taking
-over construction of the client's settings with `ConfigureConnection`:
+`ApiKey` or `Username`/`Password` cover the common schemes. For anything else (Elastic Cloud ids,
+certificate fingerprints, client certificates, connection pools, proxies), take over construction of
+the client's settings with `ConfigureConnection`:
 
 ```csharp
 // Self-managed cluster with the self-signed certificate Elasticsearch generates on setup:
@@ -151,15 +155,16 @@ cdc.AddElasticsearchSink("search", s =>
 s.ConfigureConnection = _ => new ElasticsearchClientSettings(cloudId, new ApiKey(apiKey));
 ```
 
-When `ConfigureConnection` is set, leave `ApiKey`/`Username`/`Password` unset (registration fails
-otherwise) and configure authentication on the returned settings; `Timeout` still applies per request.
+When `ConfigureConnection` is set, leave `ApiKey`, `Username` and `Password` unset (registration
+fails otherwise) and configure authentication on the returned settings. `Timeout` still applies per
+request.
 
 ## Purging
 
 The sink implements [purge-then-backfill](/backfill#purging-before-a-backfill): a purge runs
-`_delete_by_query` with `match_all` against the mapping's index (`conflicts=proceed`, `refresh=true`),
-synchronously and under the per-request `Timeout`, so a very large index may need a longer timeout.
-An index that does not exist yet is nothing to purge.
+`_delete_by_query` with `match_all` against the mapping's index (`conflicts=proceed`, `refresh=true`).
+It runs synchronously under the per-request `Timeout`, so a very large index may need a longer
+timeout. If the index doesn't exist yet, there's nothing to purge.
 
 ## Delivery semantics
 
@@ -169,13 +174,14 @@ sequential `_bulk` requests so commit order is preserved.
 
 Failures are classified per response *and* per bulk item:
 
-- Throttling and server errors (`408`/`429`/`5xx`, connection failures, timeouts) are **retryable** —
+- Throttling and server errors (`408`/`429`/`5xx`, connection failures, timeouts) are **retryable**:
   the dispatcher backs off and re-sends.
 - Request or item rejections (e.g. `mapper_parsing_exception` from a mapping conflict) are
-  **permanent** — they indicate a transform/configuration bug, so the pipeline halts rather than
-  silently dropping documents.
-- Deleting an already-absent document reports `404` per item; the sink treats that as success.
+  **permanent**. They point to a bug in a transform or the configuration, so the pipeline halts
+  rather than silently dropping documents.
+- Deleting a document that's already gone reports `404` for that item, which the sink treats as
+  success.
 
-By default documents become searchable on the index's refresh interval (typically 1s) after the
-batch is acknowledged; set `Refresh = true` to make each batch searchable before it is acknowledged,
-at an indexing-throughput cost.
+By default, documents become searchable on the index's refresh interval (typically 1s) after the
+batch is acknowledged. Set `Refresh = true` to make each batch searchable before it's acknowledged,
+at a cost to indexing throughput.

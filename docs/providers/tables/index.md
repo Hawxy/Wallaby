@@ -5,13 +5,13 @@ description: "Postgres change data capture with no ORM in .NET: annotated POCOs,
 
 # Plain Tables
 
-The `Wallaby.Providers.Tables` package drives capture from tables you describe with plain C# types.
-There is no ORM in between: you register a POCO per table, Wallaby derives the table, columns and key
-from `System.ComponentModel.DataAnnotations` attributes, fluent overrides or a naming convention, and
-each change materializes into an instance of your type. Transforms receive an `NpgsqlDataSource`, so
-enrichment queries use Dapper, raw Npgsql, or anything else that takes a connection.
+The `Wallaby.Providers.Tables` package drives capture from tables you describe with plain C# types,
+with no ORM in between. You register a POCO per table, and Wallaby works out the table, columns and key
+from `System.ComponentModel.DataAnnotations` attributes, fluent overrides or a naming convention. Each
+change then materializes into an instance of your type. Transforms receive an `NpgsqlDataSource`, so
+enrichment queries can use Dapper, raw Npgsql, or anything else that takes a connection.
 
-Use it when the application is not on EF Core or Marten, or for the odd table that lives outside your
+Use it when the application isn't on EF Core or Marten, or for the odd table that lives outside your
 model. It [combines](/providers/overview#combining-providers) with the other providers on one slot.
 
 ## Install
@@ -22,10 +22,12 @@ dotnet add package Wallaby.Providers.Tables
 
 ## Register
 
-Chain `UseTables(...)` and register every type to capture. Only registered types are handled, so a
-class that also belongs to an EF Core model is never claimed twice.
+Chain `UseTables(...)` and register every type you want captured. Only registered types are handled,
+so a class that also belongs to an EF Core model is never claimed twice.
 
-You must also supply a connection string via `UseConnectionString(...)`, or any other [options-pattern mechanism](/configuration#options-pattern) such as configuration binding. Multi-host connection strings are supported, but Wallaby will only connect to your primary node.
+You also need to supply a connection string, either with `UseConnectionString(...)` or any other
+[options-pattern mechanism](/configuration#options-pattern) such as configuration binding.
+Multi-host connection strings are supported, but Wallaby only connects to the primary.
 
 ```csharp
 using System.ComponentModel.DataAnnotations.Schema;
@@ -38,6 +40,9 @@ public enum OrderStatus { Pending, Paid, Shipped }
 [Table("orders", Schema = "sales")]
 public sealed record Order(int Id, string CustomerRef, decimal Total, OrderStatus Status, DateTimeOffset CreatedAt);
 
+[Table("order_lines", Schema = "sales")]
+public sealed record OrderLine(int OrderId, int LineNo, string Sku, int Quantity);
+
 builder.Services.AddWallaby(cdc =>
 {
     cdc.UseTables(tables =>
@@ -48,7 +53,7 @@ builder.Services.AddWallaby(cdc =>
        })
        .UseConnectionString(conn)
 
-        // Sink configuration below - example
+       // Example sink configuration
        .AddMeilisearchSink("meili", m => { /* ... */ })
        .WithMappings(sink => sink
             .Map<Order>()
@@ -65,13 +70,13 @@ builder.Services.AddWallaby(cdc =>
 });
 ```
 
-Registration errors (no key, an unsupported property type, an ambiguous constructor) throw from
+Registration errors (a missing key, an unsupported property type, an ambiguous constructor) throw from
 `UseTables` itself, before the host starts.
 
 ## Mapping rules
 
-Each registered type maps public instance properties with a getter to columns. The rules, in order of
-precedence:
+Each registered type maps its public instance properties that have a getter to columns. Where more
+than one rule applies, fluent configuration wins over attributes, and attributes win over convention:
 
 | Aspect | Fluent | Attribute | Convention |
 |---|---|---|---|
@@ -80,53 +85,61 @@ precedence:
 | Key | `HasKey(o => o.A, o => o.B)`, in argument order | `[Key]` members, ordered by `[Column(Order = n)]` then declaration | A property named `Id` or `{Type}Id` |
 | Skip | `Ignore(o => o.Scratch)` | `[NotMapped]` | A property with no getter |
 
-`UseSnakeCase()` turns unannotated names into snake_case with the same rules as EFCore.NamingConventions
-(`OrderLine` to `order_line`, `HTTPStatus` to `http_status`); attribute and fluent names are always used
-verbatim. Names are matched against the
-relation exactly as Postgres reports them, so a quoted mixed-case identifier needs the same casing.
+`UseSnakeCase()` converts unannotated names to snake_case using the same rules as
+EFCore.NamingConventions (`OrderLine` to `order_line`, `HTTPStatus` to `http_status`). Names from
+attributes and fluent calls are always used verbatim. Names are matched against the relation exactly
+as Postgres reports them, so a quoted mixed-case identifier needs the same casing.
 
 ### Types
 
-A property maps to a single column when its type is a scalar the pgoutput decoder produces or value
-coercion can bridge: the numeric types, `string`, `char`, `bool`, `Guid`, `DateTime`, `DateTimeOffset`,
-`DateOnly`, `TimeOnly`, `TimeSpan`, `byte[]`, `IPAddress`, `PhysicalAddress`, `BitArray`, enums (from
-text or number), nullable versions of those, and
-single-dimension arrays of them. A property of any other type (a nested class, a collection,
-`JsonElement`) fails registration with the remedy: mark it `[NotMapped]` or `Ignore(...)` it. JSON
-columns can only be captured into a `string` property in this version.
+A property maps to a single column when its type is a scalar that the pgoutput decoder produces or
+value coercion can convert to:
+
+- the numeric types, `string`, `char`, `bool` and `Guid`
+- `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly` and `TimeSpan`
+- `byte[]`, `IPAddress`, `PhysicalAddress` and `BitArray`
+- enums (from text or number)
+- nullable versions of all of these, and single-dimension arrays of them
+
+A property of any other type (a nested class, a collection, `JsonElement`) fails registration, and the
+error tells you to mark it `[NotMapped]` or `Ignore(...)` it. JSON columns can only be captured into a
+`string` property in this version.
 
 Key properties are further limited to the types a backfill cursor can persist: numbers, strings,
 `Guid`, dates and times, and `byte[]`. An enum key is rejected at registration.
 
 ### Records and constructors
 
-A type needs a public parameterless constructor, or exactly one public constructor whose parameters
-all match public properties by name (case-insensitive). Positional records satisfy the second rule:
+A type needs either a public parameterless constructor, or exactly one public constructor whose
+parameters all match public properties by name (case-insensitive). Positional records satisfy the
+second rule:
 
 ```csharp
 public sealed record Order(int Id, string CustomerRef, decimal Total);
 ```
 
-Constructor parameters take the row values, and a parameter for an ignored or `[NotMapped]` property
-receives its default; remaining properties with a setter (`init` included) are assigned afterwards. A property with a getter only is still captured into `ChangeEvent.Record` but
-never assigned. A column absent from the change (a narrowed selection, or a delete under
+Constructor parameters receive the row values, and a parameter for an ignored or `[NotMapped]`
+property receives its default. Any remaining properties with a setter (`init` included) are assigned
+afterwards. A get-only property is still captured into `ChangeEvent.Record`, but never assigned.
+
+A column that's absent from the change (because of a narrowed selection, or a delete under
 `REPLICA IDENTITY DEFAULT`) leaves its member at the default value.
 
 ## Transforms
 
 Transforms receive the provider's `NpgsqlDataSource`. Open a pooled connection for each batch and let
-it return to the pool when the transform ends. Three `UsingTransform` overloads are available: one
-taking a standalone `IWallabyTablesTransform<T>` instance, a container-resolved
-`UsingTransform<TEntity, TTransform>()`, or an inline lambda.
+it return to the pool when the transform ends. There are three `UsingTransform` overloads: one taking a
+standalone `IWallabyTablesTransform<T>` instance, a container-resolved
+`UsingTransform<TEntity, TTransform>()`, and an inline lambda.
 
-The data source is the `NpgsqlDataSource` registered in the container (`AddNpgsqlDataSource`, or your
-own singleton) when there is one, else the one Wallaby builds from its own connection string, which
-also carries any [password provider](/configuration#authentication-with-short-lived-tokens). Pass a
-factory to `UseTables(sp => ..., tables => ...)` to choose explicitly, for example a read replica.
+If an `NpgsqlDataSource` is registered in the container (`AddNpgsqlDataSource`, or your own singleton),
+transforms get that one. Otherwise Wallaby builds one from its own connection string, which also
+carries any [password provider](/configuration#authentication-with-short-lived-tokens). To choose
+explicitly, for example a read replica, pass a factory to `UseTables(sp => ..., tables => ...)`.
 
 ### Class-based transforms
 
-For anything with dependencies, implement `IWallabyTablesTransform<TEntity>` as a class. It is resolved
+For anything with dependencies, implement `IWallabyTablesTransform<TEntity>` as a class. It's resolved
 from the container:
 
 ```csharp
@@ -136,17 +149,17 @@ public sealed class OrderSearchTransform : IWallabyTablesTransform<Order>
         NpgsqlDataSource dataSource, IReadOnlyList<ChangeEvent<Order>> changes, CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
-        var customerIds = changes.Select(c => c.Entity!.CustomerId).Distinct().ToArray();
-        var names = (await connection.QueryAsync<(int Id, string Name)>(               // Dapper
-                "SELECT id, name FROM crm.customers WHERE id = ANY(@ids)", new { ids = customerIds }))
-            .ToDictionary(c => c.Id, c => c.Name);
+        var customerRefs = changes.Select(c => c.Entity!.CustomerRef).Distinct().ToArray();
+        var names = (await connection.QueryAsync<(string Ref, string Name)>(           // Dapper
+                "SELECT ref, name FROM crm.customers WHERE ref = ANY(@refs)", new { refs = customerRefs }))
+            .ToDictionary(c => c.Ref, c => c.Name);
 
         var docs = new Dictionary<DocumentKey, WallabyDocument?>(changes.Count);
         foreach (var c in changes)
             docs[c.Key] = new WallabyDocument
             {
-                ["number"] = c.Entity!.Number,
-                ["customer"] = names.GetValueOrDefault(c.Entity!.CustomerId),
+                ["total"] = c.Entity!.Total,
+                ["customer"] = names.GetValueOrDefault(c.Entity!.CustomerRef),
             };
         return docs;
     }
@@ -166,8 +179,8 @@ The registration itself can also live outside `AddWallaby` as a
 ## Declaring consumed columns
 
 By default Wallaby captures every mapped property. A mapping can narrow that with `Consumes(...)` or
-`ConsumesAllExcept(...)`; the entity's captured set is the union across its mappings plus the key,
-and the table is published with a [column list](/configuration#publication-column-lists) so
+`ConsumesAllExcept(...)`. The entity's captured columns are the union across all its mappings, plus
+the key, and the table is published with a [column list](/configuration#publication-column-lists) so
 unselected columns never leave the server:
 
 ```csharp
@@ -181,29 +194,31 @@ sink.Map<Document>()
 ```
 
 Unselected properties keep their default value on the materialized entity and are absent from
-`ChangeEvent.Record`. A key property cannot be excluded.
+`ChangeEvent.Record`. A key property can't be excluded.
 
 ## Deletes and the old tuple
 
-A delete's `ChangeEvent.Entity` is built from the old tuple: only the key columns under
-`REPLICA IDENTITY DEFAULT`, the whole row under `REPLICA IDENTITY FULL`. `ChangeEvent.Changes` on an
-update likewise lists the previous values of the columns the old tuple carries. Mappings that derive
-delete-time identity or routing from the entity ([`KeyedBy(...)`](/mappings#document-ids), an
-entity-scoped destination) therefore need `REPLICA IDENTITY FULL`; self-config reports the missing
-identity at startup.
+A delete's `ChangeEvent.Entity` is built from the old tuple, which holds only the key columns under
+`REPLICA IDENTITY DEFAULT` and the whole row under `REPLICA IDENTITY FULL`. Likewise, `ChangeEvent.Changes`
+on an update lists the previous values of whichever columns the old tuple carries.
+
+So mappings that derive a delete's identity or routing from the entity
+([`KeyedBy(...)`](/mappings#document-ids), or an entity-scoped destination) need
+`REPLICA IDENTITY FULL`. Self-config reports a missing identity at startup.
 
 ## Replica identity
 
-Wallaby never alters your tables. Apply the identity in your own migrations where a table needs it:
+Wallaby never alters your tables. Set the identity in your own migrations where a table needs it:
 
 ```sql
 ALTER TABLE sales.orders REPLICA IDENTITY FULL;
 ```
 
-Without it, an update that leaves a large (TOASTed) column untouched omits that value from the change,
-and Wallaby [heals the change by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect)
-(a warning per healed change; a hard failure when [`ReselectUnavailableValues`](/configuration) is
-disabled). `ConsumesAllExcept(...)` on the large column avoids both.
+Without it, an update that leaves a large (TOASTed) column untouched omits that value from the change.
+Wallaby then [heals the change by re-reading the row](/how-it-works#unavailable-value-self-healing-reselect)
+and logs a warning for each one, or fails the change if
+[`ReselectUnavailableValues`](/configuration) is disabled. If no transform reads the large column,
+`ConsumesAllExcept(...)` on it avoids both.
 
 ## Backfills
 
@@ -214,14 +229,15 @@ keys page in the declared key order.
 ## NativeAOT
 
 `Wallaby.Providers.Tables` is trim- and NativeAOT-compatible (`IsAotCompatible`). `Add<T>()` carries
-the annotations the trimmer needs to keep your type's public properties and constructors; no
+the annotations the trimmer needs to keep your type's public properties and constructors, and no
 serializer is involved.
 
 ## Limitations (v1)
 
-- **JSON columns are not supported**: a `jsonb` column can only be captured into a `string` property.
-- **`DependsOn(...)` is not supported**: a POCO has no navigations to resolve; capture the dependent
-  table as its own type instead.
-- **`ScopedByTenant()` is not supported**: scope by a property with `ScopedBy(e => e.TenantId)`.
-- **No catalog discovery**: every type is registered explicitly; Wallaby does not read `pg_catalog` to
+- **JSON columns are captured as text only**: a `jsonb` column can only be captured into a `string`
+  property.
+- **`DependsOn(...)` is not supported**: a POCO has no navigations to resolve. You can capture the
+  related table as its own type, but its changes won't re-emit the parent's document.
+- **`ScopedByTenant()` is not supported**: scope by a property instead, with `ScopedBy(e => e.TenantId)`.
+- **No catalog discovery**: every type is registered explicitly. Wallaby doesn't read `pg_catalog` to
   find tables or keys.

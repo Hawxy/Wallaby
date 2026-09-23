@@ -100,17 +100,17 @@ The transform shapes each change into the document you want indexed; see
 
 ## Indexes
 
-The sink does not create or configure indexes: an index auto-creates on first write with dynamic
-mapping (provided the cluster's `action.auto_create_index` setting allows it, as it does by
+The sink doesn't create or configure indexes. An index is created automatically on first write with
+dynamic mapping, as long as the cluster's `action.auto_create_index` setting allows it (it does by
 default). For explicit settings or mappings (analyzers, `knn_vector` fields, shard counts, …),
-create the index up front — via Dev Tools, your infrastructure tooling, or a deployment script.
+create the index up front with Dev Tools, your infrastructure tooling, or a deployment script.
 In-sink index bootstrapping is planned.
 
 ## Vector search
 
-A transform can emit an embedding as a `float[]` or `ReadOnlyMemory<float>` field - the sink writes
-either as a plain JSON number array, with no `SerializerOptions` needed. Dynamic mapping would infer
-an ordinary `float` field, so pre-create the index with an explicit `knn_vector` mapping:
+A transform can emit an embedding as a `float[]` or `ReadOnlyMemory<float>` field. The sink writes
+either as a plain JSON number array, so no `SerializerOptions` are needed. Dynamic mapping would infer
+an ordinary `float` field, so create the index up front with an explicit `knn_vector` mapping:
 
 ```json
 PUT /products
@@ -124,20 +124,20 @@ PUT /products
 }
 ```
 
-Don't pass a quantized vector as `byte[]` - byte arrays serialize as base64 strings, not arrays.
+Don't pass a quantized vector as `byte[]`: byte arrays serialize as base64 strings, not arrays.
 
-OpenSearch can also embed for you: attach a
+OpenSearch can also do the embedding for you. Attach a
 [neural-search ingest pipeline](https://docs.opensearch.org/latest/vector-search/ai-search/semantic-search/)
-(a `text_embedding` processor over a deployed model) to the index and sync plain text - the cluster
-computes vectors at index time, with none in your pipeline at all. Note the pipeline runs on every
-indexed document, so live changes embed incrementally but a [backfill](/backfill) re-runs the model
-over the whole corpus. See [RAG & Embeddings](/rag).
+(a `text_embedding` processor over a deployed model) to the index and sync plain text, and the cluster
+computes vectors at index time, with none in your pipeline at all. The pipeline runs on every indexed
+document, so live changes embed incrementally, but a [backfill](/backfill) re-runs the model over the
+whole corpus. See [RAG & Embeddings](/rag).
 
 ## Authentication
 
-`Username`/`Password` cover basic auth. Everything else — AWS SigV4, client certificates,
-connection pools, proxies — is configured by taking over construction of the client's connection
-settings with `ConfigureConnection`:
+`Username`/`Password` cover basic auth. For anything else (AWS SigV4, client certificates,
+connection pools, proxies), take over construction of the client's connection settings with
+`ConfigureConnection`:
 
 ```csharp
 // Amazon OpenSearch Service, signed with the host's AWS credentials
@@ -150,15 +150,16 @@ cdc.AddOpenSearchSink("search", s =>
 });
 ```
 
-When `ConfigureConnection` is set, leave `Username`/`Password` unset (registration fails otherwise)
-and configure all authentication on the returned settings; `Timeout` still applies per request.
+When `ConfigureConnection` is set, leave `Username` and `Password` unset (registration fails
+otherwise) and configure all authentication on the returned settings. `Timeout` still applies per
+request.
 
 ## Purging
 
 The sink implements [purge-then-backfill](/backfill#purging-before-a-backfill): a purge runs
-`_delete_by_query` with `match_all` against the mapping's index (`conflicts=proceed`, `refresh=true`),
-synchronously and under the per-request `Timeout`, so a very large index may need a longer timeout.
-An index that does not exist yet is nothing to purge.
+`_delete_by_query` with `match_all` against the mapping's index (`conflicts=proceed`, `refresh=true`).
+It runs synchronously under the per-request `Timeout`, so a very large index may need a longer
+timeout. If the index doesn't exist yet, there's nothing to purge.
 
 ## Delivery semantics
 
@@ -168,13 +169,14 @@ sequential `_bulk` requests so commit order is preserved.
 
 Failures are classified per response *and* per bulk item:
 
-- Throttling and server errors (`408`/`429`/`5xx`, connection failures, timeouts) are **retryable** —
+- Throttling and server errors (`408`/`429`/`5xx`, connection failures, timeouts) are **retryable**:
   the dispatcher backs off and re-sends.
 - Request or item rejections (e.g. `mapper_parsing_exception` from a mapping conflict) are
-  **permanent** — they indicate a transform/configuration bug, so the pipeline halts rather than
-  silently dropping documents.
-- Deleting an already-absent document reports `404` per item; the sink treats that as success.
+  **permanent**. They point to a bug in a transform or the configuration, so the pipeline halts
+  rather than silently dropping documents.
+- Deleting a document that's already gone reports `404` for that item, which the sink treats as
+  success.
 
-By default documents become searchable on the index's refresh interval (typically 1s) after the
-batch is acknowledged; set `Refresh = true` to make each batch searchable before it is acknowledged,
-at an indexing-throughput cost.
+By default, documents become searchable on the index's refresh interval (typically 1s) after the
+batch is acknowledged. Set `Refresh = true` to make each batch searchable before it's acknowledged,
+at a cost to indexing throughput.
