@@ -9,7 +9,7 @@ import InternalsFlow from './.vitepress/theme/InternalsFlow.vue'
 
 # How It Works
 
-Wallaby is quite complex internally and instead of writing a wall of text, I thought a diagram 
+Wallaby is quite complex internally. Instead of writing a wall of text, I thought a diagram 
 that explains a few primary flows would make more sense.
 
 Pick a flow to watch it move through the engine and click any stage for what it does:
@@ -18,8 +18,8 @@ Pick a flow to watch it move through the engine and click any stage for what it 
 
 ## Additional Notes
 
-These cover edge cases the engine handles on its own. You don't need them to use Wallaby, but they
-explain the warnings you may see in the logs and the options that tune each behavior.
+These cover edge cases the engine handles on its own. You don't need to know any of this, but it will
+explain some warnings you may see in the logs in certain situations.
 
 ### Slot-loss gap detection
 
