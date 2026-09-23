@@ -76,6 +76,45 @@ public class MappingChangeRouterTests
             async () => await router.RouteAsync([Change(ChangeAction.Insert, 1)], CancellationToken.None));
     }
 
+    private static MappingChangeRouter KeyedRouter(Func<ChangeEvent, string> documentId)
+        => new([TestChanges.Mapping(typeof(Doc), new RecordingTransform(), new FakeSessionProvider()) with
+        {
+            DocumentIdSelector = documentId,
+        }]);
+
+    [Test]
+    public async Task Custom_id_shared_by_a_deleted_and_an_inserted_row_routes_the_later_upsert()
+    {
+        var routed = await KeyedRouter(_ => "shared").RouteAsync(
+            [Change(ChangeAction.Delete, 1), Change(ChangeAction.Insert, 2)], CancellationToken.None);
+
+        var record = routed.ShouldHaveSingleItem().Record;
+        record.DocumentId.ShouldBe("shared");
+        record.IsDeletion.ShouldBeFalse();
+        record.Document!["id"].ShouldBe("2");
+    }
+
+    [Test]
+    public async Task Custom_id_shared_by_an_inserted_and_a_deleted_row_routes_the_later_deletion()
+    {
+        var routed = await KeyedRouter(_ => "shared").RouteAsync(
+            [Change(ChangeAction.Insert, 2), Change(ChangeAction.Delete, 1)], CancellationToken.None);
+
+        var record = routed.ShouldHaveSingleItem().Record;
+        record.DocumentId.ShouldBe("shared");
+        record.IsDeletion.ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Distinct_custom_ids_are_routed_independently()
+    {
+        var routed = await KeyedRouter(c => $"doc-{c.Key}").RouteAsync(
+            [Change(ChangeAction.Delete, 1), Change(ChangeAction.Insert, 2), Change(ChangeAction.Update, 3)],
+            CancellationToken.None);
+
+        routed.Select(r => r.Record.DocumentId).ShouldBe(["doc-1", "doc-2", "doc-3"], ignoreOrder: true);
+    }
+
     private sealed class OtherDoc;
 
     [Test]

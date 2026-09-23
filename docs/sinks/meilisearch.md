@@ -201,11 +201,31 @@ If a way to customize this would be useful, open an issue.
 - Values are encoded by the same reflection-free writer the other sinks use (dates as ISO 8601,
   `byte[]` as base64, vectors as number arrays); any other value type goes through `SerializerOptions`,
   and a value that cannot be encoded fails delivery permanently.
-- Document ids are sanitized to Meilisearch's allowed set (`[a-zA-Z0-9-_]`); composite-key separators are
-  replaced, so composite keys work transparently.
+- Ids are encoded for Meilisearch's alphabet (see [Document ids](#document-ids)). A transform field named
+  like `PrimaryKey` that holds a different value fails delivery permanently instead of being overwritten.
 - A transform that returns `null` for a key (or omits it) issues a **delete** for that id.
 - Records are grouped by index; within an index, upserts are applied before deletes (each split into
   requests of at most `MaxRecordsPerRequest` records), and distinct indexes are dispatched in parallel.
+
+## Document ids
+
+Meilisearch ids allow only `[a-zA-Z0-9-_]` and at most 511 bytes, so the sink re-encodes the
+[canonical document id](/mappings#id-format) with `MeilisearchDocumentIds.Encode`:
+
+| Canonical id | Meilisearch id |
+| --- | --- |
+| A single value of allowed characters, not starting with `_` (`42`, a Guid, `order_line`) | Unchanged |
+| A composite id whose values all match `[a-zA-Z0-9-]+` (`tenant-a\|42`) | Values joined with `_`: `tenant-a_42` |
+| Anything else (`a.b@x.com`, `acme_eu\|42`) | `_e` + base64url of the UTF-8 id: `_eYS5iQHguY29t` |
+
+The encoding is reversible and never gives two keys of one table the same id. An id that would exceed 511
+bytes fails delivery permanently; use `KeyedBy(...)` to derive a shorter one.
+
+::: warning
+A search hit's `id` is only your source key for integer, Guid, and similar plain keys. Before using it to
+load or authorize a record, decode it with `MeilisearchDocumentIds.Decode(id, keyParts)` (and
+`DocumentKey.SplitId` for composite keys), or read the key from a field your transform emits.
+:::
 
 ## Delivery semantics
 

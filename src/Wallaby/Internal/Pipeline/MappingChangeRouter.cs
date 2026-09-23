@@ -46,10 +46,10 @@ internal sealed class MappingChangeRouter : IChangeRouter
                 // deleted (or deleted and then re-inserted) within the same batch must resolve to its
                 // FINAL action: exactly one routed record per mapping, never both an upsert and a
                 // deletion. (Groups preserve source order, and the batch is in commit order.)
-                var lastByKey = new Dictionary<DocumentKey, ChangeEvent>();
-                foreach (var change in group)
+                var lastByKey = new Dictionary<DocumentKey, (ChangeEvent Change, int Position)>();
+                for (var i = 0; i < group.Count; i++)
                 {
-                    lastByKey[change.Key] = change;
+                    lastByKey[group[i].Key] = (group[i], i);
                 }
 
                 // Split the collapsed changes once; the final action is mapping-independent. A key whose
@@ -58,7 +58,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                 // mapping's transform.
                 List<ChangeEvent>? deletes = null;
                 List<ChangeEvent>? upserts = null;
-                foreach (var change in lastByKey.Values)
+                foreach (var (change, _) in lastByKey.Values)
                 {
                     if (change.Action == ChangeAction.Delete)
                     {
@@ -72,6 +72,11 @@ internal sealed class MappingChangeRouter : IChangeRouter
 
                 foreach (var mapping in typeMappings)
                 {
+                    // A custom document id can be shared by several source rows, so its records are
+                    // collapsed again by id once the mapping has routed (positions are commit order).
+                    var start = routed.Count;
+                    var positions = mapping.DocumentIdSelector is not null ? new List<int>() : null;
+
                     if (deletes is not null)
                     {
                         foreach (var change in deletes)
@@ -80,6 +85,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                             {
                                 var scopeKey = mapping.GetScopeKey(change);
                                 routed.Add(Deletion(mapping, change, mapping.ResolveDestination(scopeKey)));
+                                positions?.Add(lastByKey[change.Key].Position);
                             }
                             catch (Exception ex) when (ex is not OperationCanceledException)
                             {
@@ -91,12 +97,7 @@ internal sealed class MappingChangeRouter : IChangeRouter
                         }
                     }
 
-                    if (upserts is null)
-                    {
-                        continue;
-                    }
-
-                    foreach (var (scopeKey, subset) in GroupByScopePreservingOrder(mapping, upserts))
+                    foreach (var (scopeKey, subset) in upserts is null ? [] : GroupByScopePreservingOrder(mapping, upserts))
                     {
                         var destination = mapping.ResolveDestination(scopeKey);
                         var session = GetOrCreateSession(sessions ??= [], mapping.Sessions, scopeKey);
@@ -138,7 +139,13 @@ internal sealed class MappingChangeRouter : IChangeRouter
                                 // Omitted from the transform output (or mapped to null) => delete it from the sink.
                                 routed.Add(Deletion(mapping, change, destination));
                             }
+                            positions?.Add(lastByKey[change.Key].Position);
                         }
+                    }
+
+                    if (positions is not null)
+                    {
+                        KeepLastPerDocumentId(routed, start, positions);
                     }
                 }
             }
@@ -155,6 +162,41 @@ internal sealed class MappingChangeRouter : IChangeRouter
         }
 
         return routed;
+    }
+
+    /// <summary>
+    /// Keeps, per (destination, document id), only the record from the latest change among
+    /// <paramref name="routed"/>[<paramref name="start"/>..], so a sink never receives both an upsert and a
+    /// deletion of one document in a batch. <paramref name="positions"/> holds each record's commit-order position.
+    /// </summary>
+    private static void KeepLastPerDocumentId(List<RoutedDocument> routed, int start, List<int> positions)
+    {
+        var winners = new Dictionary<(string?, string), int>(positions.Count);
+        for (var i = 0; i < positions.Count; i++)
+        {
+            var record = routed[start + i].Record;
+            var id = (record.Destination, record.DocumentId);
+            if (!winners.TryGetValue(id, out var best) || positions[i] > positions[best])
+            {
+                winners[id] = i;
+            }
+        }
+
+        if (winners.Count == positions.Count)
+        {
+            return;
+        }
+
+        var write = start;
+        for (var i = 0; i < positions.Count; i++)
+        {
+            var record = routed[start + i].Record;
+            if (winners[(record.Destination, record.DocumentId)] == i)
+            {
+                routed[write++] = routed[start + i];
+            }
+        }
+        routed.RemoveRange(write, routed.Count - write);
     }
 
     /// <summary>
