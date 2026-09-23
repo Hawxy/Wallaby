@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Globalization;
-using System.Text;
+using System.Runtime.CompilerServices;
 
 namespace Wallaby.Abstractions;
 
@@ -68,17 +68,17 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
             return FormatId(Values[0]);
         }
 
-        var sb = new StringBuilder();
+        var builder = new DefaultInterpolatedStringHandler(0, 0, null, stackalloc char[FormatBufferSize]);
         Span<char> buffer = stackalloc char[FormatBufferSize];
         for (var i = 0; i < Values.Count; i++)
         {
             if (i > 0)
             {
-                sb.Append(Separator);
+                builder.AppendFormatted(Separator);
             }
-            AppendEscaped(sb, Format(Values[i], buffer));
+            AppendEscaped(ref builder, Format(Values[i], buffer));
         }
-        return sb.ToString();
+        return builder.ToStringAndClear();
     }
 
     /// <summary>
@@ -108,89 +108,55 @@ public sealed class DocumentKey : IEquatable<DocumentKey>
         ArgumentNullException.ThrowIfNull(documentId);
 
         var parts = new List<string>();
-        var rest = documentId.AsSpan();
-        while (true)
+        foreach (var range in documentId.AsSpan().Split(Separator))
         {
-            var end = rest.IndexOf(Separator);
-            var part = end < 0 ? rest : rest[..end];
-            parts.Add(Unescape(part, documentId));
-            if (end < 0)
-            {
-                return parts;
-            }
-            rest = rest[(end + 1)..];
+            parts.Add(Unescape(documentId.AsSpan(range), documentId));
         }
+        return parts;
     }
 
     private static string Unescape(ReadOnlySpan<char> part, string documentId)
     {
-        var escapes = part.Count('%');
-        if (escapes == 0)
+        if (!part.Contains('%'))
         {
             // The whole id as one value needs no copy.
             return part.Length == documentId.Length ? documentId : new string(part);
         }
 
-        for (var i = 0; i < part.Length; i++)
+        var builder = new DefaultInterpolatedStringHandler(0, 0, null, stackalloc char[FormatBufferSize]);
+        int index;
+        while ((index = part.IndexOf('%')) >= 0)
         {
-            if (part[i] == '%')
-            {
-                var escape = part[(i + 1)..];
-                if (!escape.StartsWith("25") && !escape.StartsWith("7C"))
-                {
-                    throw new FormatException(
-                        $"Document id '{documentId}' has an invalid escape; only %25 and %7C are produced.");
-                }
-                i += 2;
-            }
+            var escape = part[index..];
+            builder.AppendFormatted(part[..index]);
+            builder.AppendFormatted(
+                escape.StartsWith("%25") ? '%'
+                : escape.StartsWith("%7C") ? Separator
+                : throw new FormatException(
+                    $"Document id '{documentId}' has an invalid escape; only %25 and %7C are produced."));
+            part = escape[3..];
         }
-
-        return string.Create(part.Length - 2 * escapes, part, static (destination, source) =>
-        {
-            var written = 0;
-            for (var i = 0; i < source.Length; i++)
-            {
-                if (source[i] == '%')
-                {
-                    destination[written++] = source[i + 1] == '2' ? '%' : Separator;
-                    i += 2;
-                }
-                else
-                {
-                    destination[written++] = source[i];
-                }
-            }
-        });
+        builder.AppendFormatted(part);
+        return builder.ToStringAndClear();
     }
 
     private static string Escape(ReadOnlySpan<char> value)
-        => string.Create(value.Length + 2 * (value.Count('%') + value.Count(Separator)), value, static (destination, source) =>
-        {
-            var written = 0;
-            foreach (var ch in source)
-            {
-                if (ch is '%' or Separator)
-                {
-                    destination[written++] = '%';
-                    destination[written++] = ch == '%' ? '2' : '7';
-                    destination[written++] = ch == '%' ? '5' : 'C';
-                }
-                else
-                {
-                    destination[written++] = ch;
-                }
-            }
-        });
+    {
+        var builder = new DefaultInterpolatedStringHandler(0, 0, null, stackalloc char[FormatBufferSize]);
+        AppendEscaped(ref builder, value);
+        return builder.ToStringAndClear();
+    }
 
-    private static void AppendEscaped(StringBuilder sb, ReadOnlySpan<char> value)
+    private static void AppendEscaped(ref DefaultInterpolatedStringHandler builder, ReadOnlySpan<char> value)
     {
         int index;
         while ((index = value.IndexOfAny(Reserved)) >= 0)
         {
-            sb.Append(value[..index]).Append(value[index] == '%' ? "%25" : "%7C");
+            builder.AppendFormatted(value[..index]);
+            builder.AppendFormatted(value[index] == '%' ? "%25" : "%7C");
             value = value[(index + 1)..];
         }
-        sb.Append(value);
+        builder.AppendFormatted(value);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
@@ -56,7 +57,7 @@ internal static class EntityPlanBuilder
         {
             ClrType = entityType.ClrType,
             Root = root,
-            ColumnsByName = byColumn,
+            ColumnsByName = byColumn.ToFrozenDictionary(StringComparer.Ordinal),
             PrimaryKey = primaryKey,
             SlotCount = leaves.Count,
         };

@@ -113,6 +113,15 @@ public class DocumentKeyTests
     }
 
     [Test]
+    public void Escaped_values_longer_than_the_format_buffer_round_trip()
+    {
+        var value = string.Concat(Enumerable.Repeat("a|%", 50));
+
+        DocumentKey.SplitId(new DocumentKey(value).ToString()).ShouldBe([value]);
+        DocumentKey.SplitId(new DocumentKey([value, value]).ToString()).ShouldBe([value, value]);
+    }
+
+    [Test]
     [Arguments("a%")]
     [Arguments("a%2")]
     [Arguments("a%41")]
