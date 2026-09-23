@@ -43,7 +43,7 @@ builder.Services.AddWallaby(cdc =>
             .Map<Product>()
             .ToDestination("products")
             .WithBackfillVersion("v1")
-            .UsingTransform(/** **/);
+            .UsingTransform(/** **/));
 });
 
 await builder.Build().RunAsync();
@@ -61,19 +61,22 @@ If option values need services (e.g. `IConfiguration`), use the provider-aware o
 
 ### What gets tracked
 
-Only entities you **declare** are captured and added to the publication. `Map<T>()` inside a sink's
-`WithMappings(...)` declares a table *and* routes it to that sink. Captured tables must have a
-primary key. The same entity may be mapped under several sinks, it is captured once and each sink's
-mapping runs its own transform.
+Only entities you **declare** are captured and added to the publication. Calling `Map<T>()` inside a
+sink's `WithMappings(...)` both declares the table *and* routes it to that sink. Captured tables must
+have a primary key.
 
-Entities in a **TPH hierarchy** cannot be captured: hierarchy members share one table, so rows would
-materialize as one arbitrary type and lose subclass data. Map hierarchies with TPT or TPC instead.
+The same entity can be mapped under several sinks. It's captured once, and each sink's mapping runs
+its own transform.
+
+Entities in a **TPH hierarchy** can't be captured. Every member of the hierarchy shares one table, so
+rows would materialize as one arbitrary type and lose subclass data. Map hierarchies with TPT or TPC
+instead.
 
 ### Dependent tables
 
-When a transform reads from a *related* table, changes to that table won't trigger a re-emit on their
-own. Declare the relationship with `DependsOn(...)` so Wallaby captures the related table and fans its changes out to synthetic updates
-of your entity:
+When a transform reads from a *related* table, changes to that table don't re-emit your entity on
+their own. Declare the relationship with `DependsOn(...)` and Wallaby captures the related table too,
+fanning its changes out as synthetic updates of your entity:
 
 ```csharp
 sink.Map<Product>()
@@ -83,18 +86,18 @@ sink.Map<Product>()
     .UsingTransform(/* reads Category + Labels */);
 ```
 
-The navigation is resolved against the EF model at startup; it must be a single one-hop navigation.
-A change to `categories` or the `product_labels` join table then re-emits the affected products through
-the same transform.
+The navigation is resolved against the EF model at startup and must be a single one-hop navigation.
+With the mapping above, a change to `categories` or the `product_labels` join table re-emits the
+affected products through the same transform.
 
-A dependent table that isn't mapped & consumed is captured (and
-[published](/configuration#publication-column-lists)) as just its primary-key and lookup columns 
-to reduce the amount of data sent over the wire.
+If a dependent table isn't also mapped and consumed in its own right, Wallaby only captures (and
+[publishes](/configuration#publication-column-lists)) its primary-key and lookup columns, which keeps
+the amount of data sent over the wire down.
 
 ### Declaring consumed columns
 
-Each mapping can optionally declare which properties its transform consumes, from either direction. 
-This is useful to reduce the amount of data sent over the wire:
+Each mapping can optionally declare which properties its transform consumes, either as the columns
+to keep or the columns to leave out. Anything no mapping consumes isn't sent over the wire:
 
 ```csharp
 sink.WithMappings(m =>
@@ -109,18 +112,18 @@ sink.WithMappings(m =>
 });
 ```
 
-The entity's captured column set is the **union across its mappings** - map `Product` to a second
-sink whose transform reads `Description` (or declares no selection at all) and the column is captured
-again automatically. Primary-key properties and columns `DependsOn(...)` resolves through
-are always captured. A mapping without a selection keeps the entity at consume-all.
+An entity's captured columns are the **union across all its mappings**. If you map `Product` to a
+second sink whose transform reads `Description` (or declares no selection at all), that column is
+captured again automatically. Primary-key properties and the columns `DependsOn(...)` resolves through
+are always captured, and a mapping without a selection keeps the entity at consume-all.
 
-An unselected property is dropped from capture entirely. Its column is left out of the
-[publication column list](/configuration#publication-column-lists) (the value never leaves the server),
-skipped during materialization, and never read during backfill.
+An unselected property is dropped from capture entirely: its column is left out of the
+[publication column list](/configuration#publication-column-lists) (so the value never leaves the
+server), it's skipped during materialization, and it's never read during backfill.
 
-Both methods also accept **EF model property names as strings**, for members a
-lambda can't name. Such as properties not visible from the assembly doing the configuration, shadow
-properties, or a single owned/complex leaf via its dotted path:
+Both methods also accept **EF model property names as strings**, for members a lambda can't reach:
+properties that aren't visible from the assembly doing the configuration, shadow properties, or a
+single owned/complex leaf via its dotted path:
 
 ```csharp
 m.Map<Invoice>()
@@ -128,59 +131,61 @@ m.Map<Invoice>()
     .UsingTransform(...);
 ```
 
-Names are validated against the EF model at startup, and string and lambda calls accumulate freely.
-A selected shadow property has no CLR member to materialize into; read it from `ChangeEvent.Record`
-in the transform.
+Names are validated against the EF model at startup, and you can mix string and lambda calls freely.
+A selected shadow property has no CLR member to materialize into, so read it from
+`ChangeEvent.Record` in the transform.
 
 ::: warning
-Missing columns will result in missing data within your transform. An excluded property a transform
-does read stays at its CLR default with no error. A selection is an optimization for columns that no
-transform consumes - it is not the fix for a large (TOASTed) column a transform *does* read, that
-table needs [`REPLICA IDENTITY FULL`](#replica-identity-in-migrations).
+Excluding a property your transform actually reads doesn't raise an error. The property just stays at
+its CLR default. A selection is an optimization for columns that *no* transform consumes. It isn't the
+fix for a large (TOASTed) column a transform *does* read: that table needs
+[`REPLICA IDENTITY FULL`](#replica-identity-in-migrations).
 :::
 
 ### Owned and complex types
 
-Whether a value-object member is captured follows from where its data physically lives:
+Whether a value-object member is captured depends on where its data physically lives:
 
 | Member shape | Behavior |
 | --- | --- |
 | Same-table `OwnsOne` reference (including nested) | Captured and materialized with the owner |
 | Complex property (`ComplexProperty`, column-mapped) | Captured and materialized with the owner |
-| Owned collection (`OwnsMany`) | Not captured - startup warning, member stays at its default |
-| `OwnsOne` mapped to its own table (`ToTable`) | Not captured - startup warning, member stays at its default |
-| Owned or complex member mapped to JSON (`ToJson`) | Not captured - startup warning, member stays at its default |
+| Owned collection (`OwnsMany`) | Not captured (startup warning; member stays at its default) |
+| `OwnsOne` mapped to its own table (`ToTable`) | Not captured (startup warning; member stays at its default) |
+| Owned or complex member mapped to JSON (`ToJson`) | Not captured (startup warning; member stays at its default) |
 
-Captured members behave like ordinary properties, with their columns joining the
-[publication column list](/configuration#publication-column-lists), backfills reading them, and the
-materialized entity carrying the constructed instances.
-In `ChangeEvent.Record` and `Changes`, their keys use the dotted member path, e.g.
-`"Address.Street"`. An optional member whose columns are all null stays null, mirroring EF. A
-captured entity whose owned or complex type cannot be constructed from column values (for example a
-constructor that injects the `DbContext`) fails at startup.
+Captured members behave like ordinary properties: their columns join the
+[publication column list](/configuration#publication-column-lists), backfills read them, and the
+materialized entity carries the constructed instances. In `ChangeEvent.Record` and `Changes`, their
+keys use the dotted member path, e.g. `"Address.Street"`. An optional member whose columns are all
+null stays null, mirroring EF. If a captured entity has an owned or complex type that can't be
+constructed from column values (for example, one whose constructor injects the `DbContext`), startup
+fails.
 
-For the uncapturable shapes, the data lives outside the entity's rows, so the materialized member
-stays at its default and Wallaby logs one warning per member at startup. The warning is silenced by
-expressing intent either way:
+For the shapes that can't be captured, the data lives outside the entity's rows, so the materialized
+member stays at its default and Wallaby logs one warning per member at startup. To silence the
+warning, state your intent either way:
 
-- `DependsOn(e => e.Lines)` - the member's side table re-emits the entity when it changes (the
-  member itself is still not populated; read it in the transform via the `DbContext`).
-- `ConsumesAllExcept(e => e.Lines)` - acknowledges the member is not consumed.
+- `DependsOn(e => e.Lines)`: changes to the member's side table re-emit the entity. The member itself
+  still isn't populated, so read it in the transform via the `DbContext`.
+- `ConsumesAllExcept(e => e.Lines)`: acknowledges that the member isn't consumed.
 
 ### Computed columns
 
-A property mapped with `HasComputedColumnSql(..., stored: true)` is a Postgres stored generated column.
-Logical replication publishes those only from **PostgreSQL 18** with older servers never putting them on the
-wire. Virtual generated columns (the PostgreSQL 18 default for `GENERATED ALWAYS AS`) are never
-published on any version. Because a backfill reads the real value while a live change would carry the
-property's default, Wallaby refuses to start when a captured column falls in either category and
-names the columns. Either exclude the property from every mapping of the entity with
+A property mapped with `HasComputedColumnSql(..., stored: true)` is a Postgres stored generated
+column. Logical replication only publishes these from **PostgreSQL 18**; older servers never put them
+on the wire. Virtual generated columns (the PostgreSQL 18 default for `GENERATED ALWAYS AS`) aren't
+published on any version.
+
+Since a backfill would read the real value while a live change would carry the property's default,
+Wallaby refuses to start when a captured column falls into either category, and names the offending
+columns. Either exclude the property from every mapping of the entity with
 `ConsumesAllExcept(e => e.Computed)`, or (for stored columns) upgrade to PostgreSQL 18+.
 
-On PostgreSQL 18+ a managed publication is created with `publish_generated_columns = stored`, so
+On PostgreSQL 18+, a managed publication is created with `publish_generated_columns = stored`, so
 stored computed columns arrive on live changes like any other column. An unmanaged publication
-(`ManagePublicationTables = false`) must set that option itself, with Wallaby warning at startup when it
-doesn't.
+(`ManagePublicationTables = false`) has to set that option itself, and Wallaby warns at startup when
+it doesn't.
 
 ## Transforms
 
