@@ -319,7 +319,7 @@
 
 /* ---- Hero pipeline column ---- */
 
-/* The hero "image" slot holds the live pipeline (HeroPipeline.vue),
+/* The hero "image" slot holds the live switchboard (HeroSwitchboard.vue),
    not a logo - undo VitePress's logo-oriented sizing: the fixed 320px
    square, the negative pull-up margins that put a logo above the title
    on mobile, and the desktop translate offset. On mobile the pipeline
@@ -337,7 +337,19 @@
   transform: none;
 }
 
-@media (min-width: 960px) {
+/* The switchboard needs ~500px beside the text, which the side-by-side
+   layout only has from 1280px; below that it stacks under the actions. */
+@media (min-width: 960px) and (max-width: 1279px) {
+  .VPHome .VPHero .container {
+    flex-direction: column;
+  }
+
+  .VPHome .VPHero.has-image .main {
+    width: auto;
+  }
+}
+
+@media (min-width: 1280px) {
   .VPHome .VPHero .image {
     order: 2;
     margin: 0;
