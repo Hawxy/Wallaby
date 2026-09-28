@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, watch, type Ref } from 'vue';
+import { onMounted, onUnmounted, readonly, ref, watch, type Ref } from 'vue';
 import type { Timeline } from 'animejs';
 
 // Shared playback for the animated diagrams: plays a chain of timelines,
@@ -15,7 +15,7 @@ export function useTimelineLoop(
   let started = false;
   let running = false;
   let inView = false;
-  let reduced = false;
+  const reduced = ref(false);
   let observer: IntersectionObserver | undefined;
 
   function start() {
@@ -29,7 +29,7 @@ export function useTimelineLoop(
   }
 
   function sync() {
-    const run = inView && !document.hidden && !reduced && (opts.active?.value ?? true);
+    const run = inView && !document.hidden && !reduced.value && (opts.active?.value ?? true);
     if (run === running) return;
     running = run;
     if (!run) current?.pause();
@@ -48,7 +48,7 @@ export function useTimelineLoop(
   if (opts.active) watch(opts.active, sync);
 
   onMounted(() => {
-    reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    reduced.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     observer = new IntersectionObserver(([entry]) => {
       inView = entry.isIntersecting;
       sync();
@@ -68,6 +68,7 @@ export function useTimelineLoop(
   return {
     reset,
     isRunning: () => running,
-    isReduced: () => reduced,
+    /** prefers-reduced-motion, read on mount */
+    reduced: readonly(reduced),
   };
 }

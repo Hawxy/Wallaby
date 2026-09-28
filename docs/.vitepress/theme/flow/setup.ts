@@ -136,20 +136,22 @@ export interface Choice {
   externalSlot: boolean;
 }
 
-export function installCommands({ provider, sinks }: Choice) {
-  return [provider.pkg, ...sinks.flatMap(s => (s.pkg ? [s.pkg] : []))]
+function packages({ provider, sinks }: Choice) {
+  return [provider.pkg, ...sinks.flatMap(s => (s.pkg ? [s.pkg] : []))];
+}
+
+export function installCommands(choice: Choice) {
+  return packages(choice)
     .map(pkg => `dotnet add package ${pkg}`)
     .join('\n');
 }
 
-export function programCs({ provider, sinks, externalSlot }: Choice) {
+export function programCs(choice: Choice) {
+  const { provider, sinks, externalSlot } = choice;
   const chain = [`cdc.${provider.use}`, '   .UseConnectionString(conn)'];
   for (const s of sinks) {
-    if (s.body) {
-      chain.push(`   .${s.add}`, '   {', ...s.body.map(l => `       ${l}`), '   })');
-    } else {
-      chain.push(`   .${s.add}`);
-    }
+    chain.push(`   .${s.add}`);
+    if (s.body) chain.push('   {', ...s.body.map(l => `       ${l}`), '   })');
     chain.push(
       '   .WithMappings(sink => sink',
       '       .Map<Product>()',
@@ -166,11 +168,7 @@ export function programCs({ provider, sinks, externalSlot }: Choice) {
   }
   chain[chain.length - 1] += ';';
 
-  const usings = [
-    'Wallaby.DependencyInjection',
-    provider.pkg,
-    ...sinks.flatMap(s => (s.pkg ? [s.pkg] : [])),
-  ];
+  const usings = ['Wallaby.DependencyInjection', ...packages(choice)];
   return [
     ...usings.map(ns => `using ${ns};`),
     '',

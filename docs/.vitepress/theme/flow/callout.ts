@@ -91,7 +91,7 @@ function leader(card: Rect, node: Rect): Callout['leader'] {
   return [x1, y1, x2, y2];
 }
 
-const nodeRects = new Map(nodes.map(n => [n.id, { x: n.x, y: n.y, w: n.w, h: n.h } as Rect]));
+const nodeRects = new Map<string, Rect>(nodes.map(n => [n.id, n]));
 
 const edgeRects = edges.map(e => ({
   id: e.id,

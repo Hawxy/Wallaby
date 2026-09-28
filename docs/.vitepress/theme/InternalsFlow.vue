@@ -5,9 +5,9 @@ import { formatCount } from './flow/format';
 import FlowChip from './flow/FlowChip.vue';
 import { phaseTimeline, type Tween } from './flow/timeline';
 import { useTimelineLoop } from './flow/useTimelineLoop';
-import { placeCallout, type Callout } from './flow/callout';
+import { placeCallout } from './flow/callout';
 import {
-  CANVAS, nodes, edges, groups, scenarios,
+  CANVAS, nodes, edges, groups, scenarios, stepStages,
   type IntEdge, type IntNode,
 } from './flow/internals';
 
@@ -24,6 +24,9 @@ import {
 const SINK_IDS = new Set(['meili', 'http', 'kafka']);
 const STEP_MS = 2600;
 const LOOP_PAUSE_MS = 2400;
+const MAX_SCALE = 1.5;
+// expanded: controls + steps + caption + padding around the canvas
+const CHROME_PX = 248;
 
 // deterministic starts - SSR hydration
 const flushed = ref(lsn.value);
@@ -34,7 +37,6 @@ let inFlightLsn = lsn.value;
 const scenarioId = ref('live');
 const stepIndex = ref(-1); // -1 = idle, before the first step
 const playing = ref(true);
-const reduced = ref(false);
 const selected = ref<IntNode | null>(null);
 const isFullscreen = ref(false);
 const isOverlay = ref(false); // fallback when the Fullscreen API is unavailable
@@ -48,6 +50,7 @@ const steps = computed(() => scenario.value.steps);
 const step = computed(() => (stepIndex.value >= 0 ? steps.value[stepIndex.value] : undefined));
 const stepBlue = computed(() => step.value?.blue ?? false);
 const caption = computed(() => step.value?.caption ?? scenario.value.blurb);
+const counter = computed(() => `[${stepIndex.value + 1}/${steps.value.length}]`);
 
 const activeNodes = computed(() => new Set(step.value?.nodes ?? []));
 const activeEdges = computed(() => new Set(step.value?.edges ?? []));
@@ -55,34 +58,27 @@ const warnNodes = computed(() => new Set(step.value?.warn ?? []));
 
 // everything the scenario touches at any step; the rest of the map dims
 const involved = computed(() => ({
-  nodes: new Set(steps.value.flatMap(s => [...(s.nodes ?? []), ...(s.warn ?? [])])),
+  nodes: new Set(steps.value.flatMap(stepStages)),
   edges: new Set(steps.value.flatMap(s => s.edges ?? [])),
 }));
 
 // the current step's caption sits beside its stages once the canvas is big
 // enough to read it there; smaller, it stays on the line below
-const calloutCache = new Map<string, Callout>();
-const callout = computed(() => {
+const placement = computed(() => {
   const s = step.value;
-  if (!s || scale.value < 0.8) return undefined;
-  const key = `${scenarioId.value}:${stepIndex.value}`;
-  let placed = calloutCache.get(key);
-  if (!placed) {
-    const anchors = s.nodes?.length ? s.nodes : (s.warn ?? []);
-    const next = steps.value[stepIndex.value + 1];
-    placed = placeCallout({
-      next: [...(next?.nodes ?? []), ...(next?.warn ?? [])],
-      passed: new Set(steps.value.slice(0, stepIndex.value).flatMap(p => p.nodes ?? [])),
-      text: `[${stepIndex.value + 1}/${steps.value.length}] ${s.caption}`,
-      anchors,
-      avoidNodes: [...anchors, ...(s.warn ?? [])],
-      avoidEdges: s.edges ?? [],
-      involved: involved.value.nodes,
-    });
-    calloutCache.set(key, placed);
-  }
-  return placed;
+  if (!s) return undefined;
+  const anchors = s.nodes?.length ? s.nodes : (s.warn ?? []);
+  return placeCallout({
+    next: stepStages(steps.value[stepIndex.value + 1]),
+    passed: new Set(steps.value.slice(0, stepIndex.value).flatMap(p => p.nodes ?? [])),
+    text: `${counter.value} ${s.caption}`,
+    anchors,
+    avoidNodes: stepStages(s),
+    avoidEdges: s.edges ?? [],
+    involved: involved.value.nodes,
+  });
 });
+const callout = computed(() => (scale.value < 0.8 ? undefined : placement.value));
 
 // everything the walkthrough has already touched keeps a faint tint,
 // colored by whether it was visited by live (amber) or snapshot (blue)
@@ -182,6 +178,7 @@ function walkthrough() {
 }
 
 const loop = useTimelineLoop(root, walkthrough, { active: playing, threshold: 0.15 });
+const { reduced } = loop;
 
 function restartAt(from: number, lead: number) {
   resumeAt = from;
@@ -189,12 +186,15 @@ function restartAt(from: number, lead: number) {
   loop.reset();
 }
 
-function selectScenario(id: string) {
-  if (scenarioId.value === id) return;
+function restartScenario(id: string) {
   scenarioId.value = id;
   stepIndex.value = -1;
-  setProgress(0);
   restartAt(0, 900);
+}
+
+function selectScenario(id: string) {
+  if (scenarioId.value === id) return;
+  restartScenario(id);
   writeHash();
 }
 
@@ -232,14 +232,12 @@ function readHash() {
   const m = /^#flow-([a-z]+)(?:-step-(\d+))?$/.exec(location.hash);
   const target = m && scenarios.find(s => s.id === m[1]);
   if (!m || !target) return;
-  scenarioId.value = target.id;
   if (m[2]) {
+    scenarioId.value = target.id;
     goTo(+m[2] - 1);
   } else {
-    stepIndex.value = -1;
-    setProgress(0);
     playing.value = !reduced.value;
-    restartAt(0, 900);
+    restartScenario(target.id);
   }
   requestAnimationFrame(() => root.value?.scrollIntoView({ block: 'start' }));
 }
@@ -286,8 +284,8 @@ function recomputeScale() {
   // a scrollbar it caused comes and goes
   const w = frame.value?.offsetWidth ?? CANVAS.w;
   if (expanded.value) {
-    const h = window.innerHeight - 248; // controls + steps + caption + padding
-    scale.value = Math.max(0.5, Math.min(1.5, w / CANVAS.w, h / CANVAS.h));
+    const h = window.innerHeight - CHROME_PX;
+    scale.value = Math.max(0.5, Math.min(MAX_SCALE, w / CANVAS.w, h / CANVAS.h));
   } else {
     // below this the labels stop being readable - hold and let it scroll
     scale.value = Math.max(0.62, Math.min(1, w / CANVAS.w));
@@ -299,11 +297,17 @@ const stageWrapStyle = computed(() => ({
   height: `${CANVAS.h * scale.value}px`,
 }));
 const stageStyle = computed(() => ({ transform: `scale(${scale.value})` }));
+// the expanded grid's canvas column repeats the scale formula in CSS
+const rootStyle = {
+  '--wb-int-chrome': `${CHROME_PX}px`,
+  '--wb-int-aspect': CANVAS.w / CANVAS.h,
+  '--wb-int-max-w': `${CANVAS.w * MAX_SCALE}px`,
+};
 
 let resizeObserver: ResizeObserver | undefined;
 
 onMounted(() => {
-  reduced.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // the loop's own mount hook has read reduced by now
   if (reduced.value) playing.value = false;
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('keydown', onKeydown);
@@ -327,6 +331,7 @@ onUnmounted(() => {
     ref="root"
     class="wb-int"
     :class="{ 'is-overlay': isOverlay, 'is-expanded': expanded }"
+    :style="rootStyle"
     role="group"
     aria-label="Interactive diagram of Wallaby's internals: postgres WAL, publication and replication slot feed the leader's decode, materialize, transform and dispatch stages; backfill and dependent fan-out feed the same pipeline; sinks acknowledge back to the slot and checkpoint."
   >
@@ -471,7 +476,7 @@ onUnmounted(() => {
                 class="wb-int-callout"
                 :style="{ left: callout.x + 'px', top: callout.y + 'px', width: callout.w + 'px' }"
               >
-                <span class="wb-int-count">[{{ stepIndex + 1 }}/{{ steps.length }}]</span> {{ step?.caption }}
+                <span class="wb-int-count">{{ counter }}</span> {{ step?.caption }}
               </div>
             </div>
           </Transition>
@@ -504,7 +509,7 @@ onUnmounted(() => {
 
     <div class="wb-int-caption">
       <span class="wb-int-prompt">$</span>
-      <span v-if="stepIndex >= 0 && !callout" class="wb-int-count">[{{ stepIndex + 1 }}/{{ steps.length }}]</span>
+      <span v-if="stepIndex >= 0 && !callout" class="wb-int-count">{{ counter }}</span>
       <span class="wb-int-caption-text">{{ callout ? scenario.blurb : caption }}</span>
       <span class="wb-int-legend" aria-hidden="true">
         <span class="wb-int-swatch is-amber"></span>live
@@ -532,6 +537,9 @@ onUnmounted(() => {
   scroll-margin-top: calc(var(--vp-nav-height) + 24px);
   font-family: var(--vp-font-family-mono);
   --wb-chip-decay: 0.7s;
+  /* trail left by visited stages and wires */
+  --wb-int-tint-amber: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  --wb-int-tint-blue: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
 }
 
 .wb-int.is-overlay {
@@ -560,7 +568,11 @@ onUnmounted(() => {
        and side panel hugging the diagram instead of the viewport edges
        on ultrawide screens */
     grid-template-columns:
-      min(1056px, calc(100vw - 410px), calc(0.8224 * (100vh - 248px)))
+      min(
+        var(--wb-int-max-w),
+        calc(100vw - 410px),
+        calc(var(--wb-int-aspect) * (100vh - var(--wb-int-chrome)))
+      )
       320px;
     grid-template-rows: auto 1fr auto auto;
     grid-template-areas:
@@ -771,11 +783,11 @@ onUnmounted(() => {
 
 /* trail arrowheads keep the same soft tint as their visited wires */
 .wb-int-arrow.is-amber-soft {
-  fill: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  fill: var(--wb-int-tint-amber);
 }
 
 .wb-int-arrow.is-blue-soft {
-  fill: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  fill: var(--wb-int-tint-blue);
 }
 
 .wb-int-wire.is-dashed {
@@ -783,11 +795,11 @@ onUnmounted(() => {
 }
 
 .wb-int-wire.is-visited {
-  stroke: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  stroke: var(--wb-int-tint-amber);
 }
 
 .wb-int-wire.is-visited.is-blue {
-  stroke: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  stroke: var(--wb-int-tint-blue);
 }
 
 .wb-int-wire.is-active {
@@ -811,6 +823,7 @@ onUnmounted(() => {
   color: var(--vp-c-text-3);
   white-space: nowrap;
   pointer-events: none;
+  transition: opacity 0.3s;
 }
 
 .wb-int-wire-label.is-vertical {
@@ -823,11 +836,6 @@ onUnmounted(() => {
 .wb-int-wire-label.is-dim,
 .wb-int-node.is-dim {
   opacity: 0.3;
-}
-
-.wb-int-wire-label,
-.wb-int-node {
-  transition: opacity 0.3s;
 }
 
 .wb-int-node.is-dim:hover {
@@ -844,6 +852,7 @@ onUnmounted(() => {
   text-align: left;
   font-family: inherit;
   cursor: pointer;
+  transition: opacity 0.3s;
 }
 
 .wb-int-node .wb-chip {
@@ -855,11 +864,11 @@ onUnmounted(() => {
 }
 
 .wb-int-node.is-visited .wb-chip {
-  border-color: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  border-color: var(--wb-int-tint-amber);
 }
 
 .wb-int-node.is-visited.is-blue-visited .wb-chip {
-  border-color: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  border-color: var(--wb-int-tint-blue);
 }
 
 .wb-int-node.is-selected .wb-chip {
@@ -1008,12 +1017,12 @@ onUnmounted(() => {
 
 /* no fade in: the base colour under the current step's fill would show through */
 .wb-int-step.is-done i {
-  background: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  background: var(--wb-int-tint-amber);
   transition: none;
 }
 
 .wb-int-step.is-done.is-blue i {
-  background: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  background: var(--wb-int-tint-blue);
 }
 
 .wb-int-step.is-current i::after {

@@ -47,6 +47,11 @@ export type IntStep = {
   fx?: 'tick' | 'deliver' | 'deliver-partial' | 'flush';
 };
 
+/** stages a step lights, warn states included */
+export function stepStages(s: IntStep | undefined) {
+  return [...(s?.nodes ?? []), ...(s?.warn ?? [])];
+}
+
 export type IntScenario = {
   id: string;
   label: string;

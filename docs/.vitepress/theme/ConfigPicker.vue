@@ -21,27 +21,25 @@ const providerId = ref('');
 const sinkIds = ref<string[]>([]);
 const externalSlot = ref(false);
 
-const hasChoice = computed(() => !!providerId.value || sinkIds.value.length > 0 || externalSlot.value);
+// somewhere to deliver or provision
+const hasTarget = computed(() => sinkIds.value.length > 0 || externalSlot.value);
+const hasChoice = computed(() => !!providerId.value || hasTarget.value);
 const provider = computed(() => providers.find(p => p.id === providerId.value));
 
-// setup code needs a provider plus somewhere to deliver or provision
+// setup code needs a provider plus a target
 const missing = computed(() => {
-  if (!provider.value) return sinkIds.value.length || externalSlot.value ? 'a provider' : 'a provider and a sink';
-  return sinkIds.value.length || externalSlot.value ? '' : 'a sink or the external slot';
+  if (!provider.value) return hasTarget.value ? 'a provider' : 'a provider and a sink';
+  return hasTarget.value ? '' : 'a sink or the external slot';
 });
 const choice = computed(() => ({
   provider: provider.value!,
   sinks: sinks.filter(s => sinkIds.value.includes(s.id)),
   externalSlot: externalSlot.value,
 }));
-const installHtml = computed(() => (missing.value ? '' : highlight(installCommands(choice.value), 'bash')));
-const programHtml = computed(() => (missing.value ? '' : highlight(programCs(choice.value), 'csharp')));
-
-function toggleSink(id: string) {
-  sinkIds.value = sinkIds.value.includes(id)
-    ? sinkIds.value.filter(s => s !== id)
-    : sinks.flatMap(s => (s.id === id || sinkIds.value.includes(s.id) ? [s.id] : []));
-}
+const codeBlocks = computed(() => (missing.value ? [] : [
+  { label: 'install', lang: 'bash', html: highlight(installCommands(choice.value), 'bash') },
+  { label: 'program.cs', lang: 'csharp', html: highlight(programCs(choice.value), 'csharp') },
+]));
 
 // --- animation ---------------------------------------------------------
 
@@ -206,11 +204,11 @@ watch([providerId, sinkIds, externalSlot], () => loop.reset());
             :flash="flash.includes(s.id)"
           >
             <input
+              v-model="sinkIds"
               class="wb-pick-input"
               type="checkbox"
-              :checked="sinkIds.includes(s.id)"
+              :value="s.id"
               :aria-label="`${s.title}: ${s.sub}`"
-              @change="toggleSink(s.id)"
             >
             <div class="wb-pick-head">
               <span class="wb-chip-title">{{ s.title }}</span>
@@ -237,28 +235,19 @@ watch([providerId, sinkIds, externalSlot], () => loop.reset());
       <span class="wb-config-prompt">$</span> pick {{ missing }} to generate the setup
     </div>
     <div v-else class="wb-config-code">
-      <div class="wb-config-group-label">install</div>
-      <div class="language-bash">
-        <button title="Copy code" data-copied="Copied" class="copy"></button>
-        <span class="lang">bash</span>
-        <pre
-          class="shiki shiki-themes github-light-high-contrast ayu-dark"
-          style="--shiki-light:#0e1116;--shiki-dark:#bfbdb6;--shiki-light-bg:#ffffff;--shiki-dark-bg:#0d1017;"
-          tabindex="0"
-          dir="ltr"
-        ><code v-html="installHtml"></code></pre>
-      </div>
-      <div class="wb-config-group-label">program.cs</div>
-      <div class="language-csharp">
-        <button title="Copy code" data-copied="Copied" class="copy"></button>
-        <span class="lang">csharp</span>
-        <pre
-          class="shiki shiki-themes github-light-high-contrast ayu-dark"
-          style="--shiki-light:#0e1116;--shiki-dark:#bfbdb6;--shiki-light-bg:#ffffff;--shiki-dark-bg:#0d1017;"
-          tabindex="0"
-          dir="ltr"
-        ><code v-html="programHtml"></code></pre>
-      </div>
+      <template v-for="b in codeBlocks" :key="b.label">
+        <div class="wb-config-group-label">{{ b.label }}</div>
+        <div :class="'language-' + b.lang">
+          <button title="Copy code" data-copied="Copied" class="copy"></button>
+          <span class="lang">{{ b.lang }}</span>
+          <pre
+            class="shiki shiki-themes github-light-high-contrast ayu-dark"
+            style="--shiki-light:#0e1116;--shiki-dark:#bfbdb6;--shiki-light-bg:#ffffff;--shiki-dark-bg:#0d1017;"
+            tabindex="0"
+            dir="ltr"
+          ><code v-html="b.html"></code></pre>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -295,6 +284,10 @@ watch([providerId, sinkIds, externalSlot], () => loop.reset());
   display: flex;
   flex-direction: column;
   padding-inline: 12px;
+}
+
+.wb-pick,
+.wb-chip.is-consumer {
   transition: border-color var(--wb-chip-decay, 0.4s), opacity 0.2s;
 }
 
@@ -373,7 +366,6 @@ watch([providerId, sinkIds, externalSlot], () => loop.reset());
 /* the external slot's reader, not an option itself */
 .wb-chip.is-consumer {
   align-self: start;
-  transition: border-color var(--wb-chip-decay, 0.4s), opacity 0.2s;
 }
 
 /* group boxes: a frame around the provider and sink chips */
