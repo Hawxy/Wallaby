@@ -2,7 +2,8 @@
 import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { formatCount } from './flow/format';
 import FlowChip from './flow/FlowChip.vue';
-import { createTimeline } from './flow/timeline';
+import { cubicBezier, type Timeline } from 'animejs';
+import { phaseTimeline, type Cue, type Tween } from './flow/timeline';
 import {
   OP_GLYPH, SINKS, fieldLine, formatLsn, mulberry32, pathLength,
   pickOp, pickTable, pointAt, recordLines, type Field, type Op, type Pt, type TableDef,
@@ -16,9 +17,11 @@ import {
 // document (transform); the batch fans out to the sinks each table maps
 // to (deliver); an ack returns to postgres, the slot's flush position
 // advances and the tape markers turn blue. Then a short rest.
-// DOM holds the text; one canvas, redrawn every frame, holds the rails
-// and packets. Telemetry is fake, so the whole widget is hidden from
-// assistive tech.
+// Each cycle is one anime.js timeline (flow/timeline.ts): tweens move the
+// packets and scramble the record text, cues change the readouts. DOM
+// holds the text; one canvas, redrawn on each timeline update, holds the
+// rails and packets. Telemetry is fake, so the whole widget is hidden
+// from assistive tech.
 
 // cycle timeline, ms
 const WRITE_GAP = 110; // between tape lines
@@ -29,13 +32,17 @@ const OUT_MS = 900; // lane slot to sink
 const OUT_GAP = 60;
 const SETTLE_MS = 150; // pause after the commit, and after the last landing
 const ACK_MS = 550;
+const SCRAMBLE_MS = 420;
+const RIPPLE_MS = 450;
 const REST_MS = 700;
 
 const SLOTS = 8;
-const TRAIL = 6; // comet tail samples, one per 18ms of travel
+const TRAIL = 6; // comet tail samples
+const TRAIL_STEP = 17; // ms between tail samples
 const SLOW_MO = 40; // displayed rate and lag are scaled back to real time
 const TAPE_MAX = 16;
 const GLYPHS = '0123456789ABCDEF#*+=<>/';
+const easeInOut = cubicBezier(0.42, 0, 0.58, 1);
 
 interface TapeLine {
   id: number;
@@ -58,8 +65,8 @@ interface Change {
 interface Packet {
   c: Change;
   slot: number;
-  leaveAt: number; // sim time it leaves postgres
-  flushAt: number; // sim time it leaves its slot, Infinity until the flush
+  leg: 'wait' | 'in' | 'parked' | 'out' | 'gone';
+  u: number; // linear progress along the current leg
 }
 
 // ---- deterministic opening state (SSR hydration) ----
@@ -118,27 +125,11 @@ function setSinkRef(el: unknown, i: number) {
 // ---- simulation ----
 
 let rnd = mulberry32(0x5eed);
-let now = 0;
-const timeline = createTimeline();
 let lsnNum = BASE_LSN;
 let xid = 88209;
 let packets: Packet[] = [];
-let ackAt = -1; // sim time the ack leaves the lane, -1 when none
-let ripples: { x: number; y: number; t0: number }[] = [];
-// flash tokens: sinks 0-3, postgres 4, batch label 5
-const flashTok = [0, 0, 0, 0, 0, 0];
-
-function after(ms: number, fn: () => void) {
-  timeline.schedule(now + ms, fn);
-}
-
-function flash(i: number, set: (on: boolean) => void, ms = 320) {
-  const tok = ++flashTok[i];
-  set(true);
-  after(ms, () => {
-    if (flashTok[i] === tok) set(false);
-  });
-}
+let ackU = 0; // ack progress back up to postgres, drawn while between 0 and 1
+let ripples: { sink: number; at: number; t: number }[] = [];
 
 function addTape(line: Omit<TapeLine, 'id'>) {
   tape.value.push({ id: lineId++, ...line });
@@ -160,140 +151,163 @@ function writeChange(c: Change) {
   addTape({ kind: 'change', text: c.table.name, glyph: OP_GLYPH[c.op], key: `${c.key}`, lsn: lsnNum });
 }
 
-function land(sink: number, perSink: number[], left: number[]) {
-  const s = sinks[sink];
-  s.count += 1;
-  flash(sink, on => (s.flash = on));
-  const end = geo!.tails[sink][geo!.tails[sink].length - 1];
-  ripples.push({ x: end[0], y: end[1], t0: now });
-  if (--left[sink] === 0) {
-    s.meter = [...s.meter.slice(1), perSink[sink]];
-    s.fresh = true;
-    after(600, () => (s.fresh = false));
+// a highlight switched on at offset and off again ms later
+function pulse(offset: number, set: (on: boolean) => void, ms = 320): Cue[] {
+  return [[offset, () => set(true)], [offset + ms, () => set(false)]];
+}
+
+// the record panel's lines scramble from whatever they show into `to`
+function scramble(offset: number, to: string[]): Tween[] {
+  return to.map((line, i): Tween => {
+    let from: string | undefined;
+    let res: number[] = [];
+    return [offset, SCRAMBLE_MS, v => {
+      if (from === undefined) {
+        from = rec.lines[i];
+        const n = Math.max(from.length, line.length);
+        res = Array.from({ length: n }, (_, c) => (c / n) * 0.5 + rnd() * 0.5);
+      }
+      rec.lines[i] = v >= 1 ? line : scrambled(from, line, res, v);
+    }];
+  });
+}
+
+function scrambled(from: string, to: string, res: number[], p: number) {
+  let out = '';
+  for (let c = 0; c < res.length; c++) {
+    const a = to[c] ?? ' ';
+    const b = from[c] ?? ' ';
+    out += p >= res[c] ? a : a === ' ' && b === ' ' ? ' ' : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
   }
+  return out.trimEnd();
+}
+
+// a packet's progress along one leg of its trip; easing is applied when
+// drawing, so the comet tail can sample earlier points on the leg
+function travel(p: Packet, leg: 'in' | 'out') {
+  return (v: number) => {
+    p.leg = v < 1 ? leg : leg === 'in' ? 'parked' : 'gone';
+    p.u = v;
+  };
 }
 
 // One wave per cycle, as back-to-back phases, so the stages always read
 // in the same order and rhythm and only one thing moves at a time.
-function startCycle() {
+function startCycle(lead = 0) {
   const changes = Array.from({ length: 2 + Math.floor(rnd() * 3) }, newChange);
   const n = changes.length;
   const head = changes[0];
   const title = `${OP_GLYPH[head.op]} ${head.op.toUpperCase()} ${head.table.name} ${head.key}`;
-  const perSink = [0, 0, 0, 0];
-  for (const c of changes) for (const s of c.table.sinks) perSink[s] += 1;
-  const left = [...perSink];
-  let committedAt = 0;
+  packets = changes.map((c, j) => ({ c, slot: j, leg: 'wait', u: 0 }));
+  // one per copy landing on a sink, timed from the start of deliver
+  ripples = changes.flatMap((c, j) => c.table.sinks.map(sink => ({ sink, at: j * OUT_GAP + OUT_MS, t: 0 })));
+  ackU = 0;
 
-  const total = timeline.play(now, [
-    // write: begin, one tape line per change
+  // each sink flashes from its first landing to its last, then logs the batch
+  const sinkCues: Cue[] = [];
+  SINKS.forEach((_, s) => {
+    const hits = ripples.filter(r => r.sink === s).map(r => r.at);
+    if (!hits.length) return;
+    const first = hits[0];
+    const last = hits[hits.length - 1];
+    const sink = sinks[s];
+    sinkCues.push(
+      ...pulse(first, on => (sink.flash = on), last - first + 320),
+      [last, () => (sink.meter = [...sink.meter.slice(1), hits.length])],
+      ...pulse(last, on => (sink.fresh = on), 600),
+    );
+  });
+
+  const tl: Timeline = phaseTimeline([
+    { name: 'lead', ms: lead },
+    // begin, one tape line per change
     {
+      name: 'write',
       ms: WRITE_GAP * (n + 1),
       run: () => addTape({ kind: 'begin', text: `begin ${++xid}`, lsn: lsnNum }),
-      at: changes.map((c, j): [number, () => void] => [WRITE_GAP * (j + 1), () => writeChange(c)]),
+      at: changes.map((c, j): Cue => [WRITE_GAP * (j + 1), () => writeChange(c)]),
     },
-    // commit: changes only leave postgres once the transaction commits
+    // changes only leave postgres once the transaction commits
     {
+      name: 'commit',
       ms: SETTLE_MS,
       run: () => {
         lsnNum += 0x30;
         walLsn.value = lsnNum;
-        committedAt = now;
         addTape({ kind: 'commit', text: 'commit', lsn: lsnNum });
       },
     },
-    // decode: the train crosses into wallaby and parks in the lane
+    // the train crosses into wallaby and parks in the lane
     {
+      name: 'decode',
       ms: (n - 1) * TRAIN_GAP + IN_MS,
-      run: () => {
-        packets = changes.map((c, j) => ({ c, slot: j, leaveAt: now + j * TRAIN_GAP, flushAt: Infinity }));
-      },
       at: [
         [IN_MS * 0.4, () => {
           stage.value = 1;
           rec.stale = false;
           rec.blue = [false, false, false, false];
-          scrambleTo([title, ...[0, 1, 2].map(i => fieldLine(head.raw[i]))]);
         }],
-        ...changes.map((_, j): [number, () => void] => [j * TRAIN_GAP + IN_MS, () => (batchCount.value += 1)]),
+        ...packets.map((_, j): Cue => [j * TRAIN_GAP + IN_MS, () => (batchCount.value += 1)]),
+      ],
+      tweens: [
+        ...packets.map((p, j): Tween => [j * TRAIN_GAP, IN_MS, travel(p, 'in')]),
+        ...scramble(IN_MS * 0.4, [title, ...[0, 1, 2].map(i => fieldLine(head.raw[i]))]),
       ],
     },
-    // transform: the batch holds while the followed record changes shape
+    // the batch holds while the followed record changes shape
     {
+      name: 'transform',
       ms: HOLD_MS,
       run: () => {
         stage.value = 2;
         rec.blue = [false, ...[0, 1, 2].map(i => !!head.doc[i]?.enrich)];
-        scrambleTo([title, ...[0, 1, 2].map(i => fieldLine(head.doc[i]))]);
       },
+      tweens: scramble(0, [title, ...[0, 1, 2].map(i => fieldLine(head.doc[i]))]),
     },
-    // deliver: the batch fans out, each copy landing on its sink
+    // the batch fans out, each copy landing on its sink
     {
+      name: 'deliver',
       ms: (n - 1) * OUT_GAP + OUT_MS + SETTLE_MS,
       run: () => {
         stage.value = 3;
         batchCount.value = 0;
-        flash(5, on => (flushing.value = on), 260);
-        packets.forEach((p, j) => (p.flushAt = now + j * OUT_GAP));
       },
-      at: changes.flatMap((c, j) => c.table.sinks.map((s): [number, () => void] =>
-        [j * OUT_GAP + OUT_MS, () => land(s, perSink, left)])),
+      at: [
+        ...pulse(0, on => (flushing.value = on), 260),
+        ...ripples.map((r): Cue => [r.at, () => (sinks[r.sink].count += 1)]),
+        ...sinkCues,
+      ],
+      tweens: [
+        ...packets.map((p, j): Tween => [j * OUT_GAP, OUT_MS, travel(p, 'out')]),
+        ...ripples.map((r): Tween => [r.at, RIPPLE_MS, v => (r.t = v)]),
+      ],
     },
-    // ack: back to postgres
+    // back to postgres; lag runs from the commit to here
     {
+      name: 'ack',
       ms: ACK_MS,
-      run: () => {
-        ackAt = now;
-        lag.value = Math.round((now - committedAt) / SLOW_MO);
-      },
+      run: () => (lag.value = Math.round((tl.labels.ack - tl.labels.commit) / SLOW_MO)),
+      tweens: [[0, ACK_MS, v => (ackU = v)]],
     },
-    // rest: the slot confirms, the tape markers turn blue
+    // the slot confirms, the tape markers turn blue
     {
+      name: 'rest',
       ms: REST_MS,
       run: () => {
-        ackAt = -1;
-        packets = [];
         stage.value = 0;
         rec.stale = true;
         flushLsn.value = lsnNum;
-        flash(4, on => (pgFlash.value = on));
-        rate.value = Math.round(0.7 * rate.value + 0.3 * (n / (total / 1000)) * SLOW_MO);
+        rate.value = Math.round(0.7 * rate.value + 0.3 * (n / (tl.duration / 1000)) * SLOW_MO);
       },
+      at: pulse(0, on => (pgFlash.value = on)),
     },
-    { ms: 0, run: startCycle },
-  ]);
-}
-
-// ---- record panel: character scramble between raw row and document ----
-
-const scr: ({ from: string; to: string; t0: number; res: number[] } | null)[] = [null, null, null, null];
-
-function scrambleTo(lines: string[]) {
-  lines.forEach((to, i) => {
-    const from = rec.lines[i];
-    if (from === to) return;
-    const n = Math.max(from.length, to.length);
-    scr[i] = { from, to, t0: now, res: Array.from({ length: n }, (_, c) => (c / n) * 0.5 + rnd() * 0.5) };
+  ], {
+    onUpdate: draw,
+    onComplete: () => cycle === tl && startCycle(),
   });
-}
 
-function tickScramble() {
-  scr.forEach((s, i) => {
-    if (!s) return;
-    const p = (now - s.t0) / 420;
-    if (p >= 1) {
-      rec.lines[i] = s.to;
-      scr[i] = null;
-      return;
-    }
-    let out = '';
-    for (let c = 0; c < s.res.length; c++) {
-      const a = s.to[c] ?? ' ';
-      const b = s.from[c] ?? ' ';
-      out += p >= s.res[c] ? a : a === ' ' && b === ' ' ? ' ' : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-    }
-    rec.lines[i] = out.trimEnd();
-  });
+  cycle = tl;
+  if (running) tl.play();
 }
 
 // ---- geometry, measured from the DOM ----
@@ -401,16 +415,6 @@ function outPath(slot: number, sink: number): Pt[] {
   return [[slotX(slot), geo!.laneY], ...geo!.tails[sink]];
 }
 
-function ease(t: number) {
-  const u = Math.min(1, Math.max(0, t));
-  return u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
-}
-
-// where a tween along a path is at sim time t
-function along(path: Pt[], start: number, dur: number, t: number): Pt {
-  return pointAt(path, ease((t - start) / dur) * pathLength(path));
-}
-
 // ---- drawing ----
 
 function hline(c: CanvasRenderingContext2D, x1: number, x2: number, y: number) {
@@ -428,7 +432,7 @@ function polyline(c: CanvasRenderingContext2D, p: Pt[]) {
   }
 }
 
-function frame(c: CanvasRenderingContext2D, x: number, y: number, s: number) {
+function outline(c: CanvasRenderingContext2D, x: number, y: number, s: number) {
   hline(c, x, x + s - 1, y);
   hline(c, x, x + s - 1, y + s - 1);
   vline(c, x, y, y + s - 1);
@@ -460,19 +464,20 @@ function reticle(c: CanvasRenderingContext2D, [x, y]: Pt) {
   }
 }
 
-// a moving packet: head plus a tail sampled from where it just was, so
-// the tail shortens as the tween eases in and out
-function comet(c: CanvasRenderingContext2D, path: Pt[], start: number, dur: number, color: string, size = 5) {
+// a packet eased along a leg lasting `ms`: head plus a tail drawn where it
+// was a few steps earlier, so the tail shortens as the leg eases in and out
+function comet(c: CanvasRenderingContext2D, path: Pt[], u: number, ms: number, color: string, size = 5) {
+  const len = pathLength(path);
   for (let j = TRAIL; j >= 1; j--) {
-    const t = now - j * 18;
-    if (t < start) continue;
+    const back = u - (j * TRAIL_STEP) / ms;
+    if (back < 0) continue;
     c.globalAlpha = 0.5 * (1 - j / (TRAIL + 1));
-    square(c, along(path, start, dur, t), color, j > 2 ? 3 : Math.min(size, 5));
+    square(c, pointAt(path, easeInOut(back) * len), color, j > 2 ? 3 : Math.min(size, 5));
   }
   c.globalAlpha = 1;
   c.shadowBlur = col.dark ? 6 * dpr : 0;
   c.shadowColor = color;
-  const head = along(path, start, dur, now);
+  const head = pointAt(path, easeInOut(u) * len);
   square(c, head, color, size);
   c.shadowBlur = 0;
   return head;
@@ -496,43 +501,43 @@ function drawRails(c: CanvasRenderingContext2D) {
   }
 
   c.fillStyle = col.slot;
-  for (let i = 0; i < SLOTS; i++) frame(c, slotX(i) - 4, g.laneY - 4, 9);
+  for (let i = 0; i < SLOTS; i++) outline(c, slotX(i) - 4, g.laneY - 4, 9);
 }
 
 function draw() {
-  const g = geo!;
-  const c = ctx!;
+  if (!geo || !ctx) return;
+  const g = geo;
+  const c = ctx;
   drawRails(c);
 
-  ripples = ripples.filter(r => now - r.t0 < 450);
   for (const rp of ripples) {
-    const t = (now - rp.t0) / 450;
-    const s = Math.round(5 + t * 16) | 1;
-    c.globalAlpha = 1 - t;
+    if (rp.t <= 0 || rp.t >= 1) continue;
+    const [x, y] = g.tails[rp.sink][g.tails[rp.sink].length - 1];
+    const s = Math.round(5 + rp.t * 16) | 1;
+    c.globalAlpha = 1 - rp.t;
     c.fillStyle = col.blue;
-    frame(c, Math.round(rp.x) - (s - 1) / 2, Math.round(rp.y) - (s - 1) / 2, s);
+    outline(c, Math.round(x) - (s - 1) / 2, Math.round(y) - (s - 1) / 2, s);
   }
   c.globalAlpha = 1;
 
   packets.forEach((p, j) => {
     let at: Pt | null = null;
-    if (now < p.leaveAt) return;
-    if (now < p.leaveAt + IN_MS) {
-      at = comet(c, inPath(p.slot), p.leaveAt, IN_MS, col.amber);
-    } else if (now < p.flushAt) {
+    if (p.leg === 'in') {
+      at = comet(c, inPath(p.slot), p.u, IN_MS, col.amber);
+    } else if (p.leg === 'parked') {
       at = [slotX(p.slot), g.laneY];
       c.shadowBlur = col.dark ? 6 * dpr : 0;
       c.shadowColor = col.amber;
       square(c, at, col.amber);
       c.shadowBlur = 0;
-    } else if (now < p.flushAt + OUT_MS) {
-      const heads = p.c.table.sinks.map(s => comet(c, outPath(p.slot, s), p.flushAt, OUT_MS, col.amber));
+    } else if (p.leg === 'out') {
+      const heads = p.c.table.sinks.map(s => comet(c, outPath(p.slot, s), p.u, OUT_MS, col.amber));
       at = heads[0];
     }
     if (j === 0 && at) reticle(c, at);
   });
 
-  if (ackAt >= 0) comet(c, g.ackRoute, ackAt, ACK_MS, col.blue, 3);
+  if (ackU > 0 && ackU < 1) comet(c, g.ackRoute, ackU, ACK_MS, col.blue, 3);
 }
 
 // reduced motion, or before the loop starts: rails plus a parked batch
@@ -544,38 +549,19 @@ function drawStatic() {
 
 // ---- loop lifecycle ----
 
-let raf = 0;
-let lastTs = 0;
+let cycle: Timeline | undefined;
 let running = false;
-let started = false;
 let inView = false;
 let reduced = false;
 
-function tick(ts: number) {
-  raf = requestAnimationFrame(tick);
-  const dtMs = Math.min(50, ts - lastTs);
-  lastTs = ts;
-  if (!geo || !ctx || dtMs <= 0) return;
-  now += dtMs;
-  timeline.runDue(now);
-  tickScramble();
-  draw();
-}
-
+// plays while on screen in a visible tab; pausing freezes the cycle mid-wave
 function sync() {
   const run = inView && !document.hidden && !reduced;
-  if (run && !running) {
-    running = true;
-    if (!started) {
-      started = true;
-      after(400, startCycle);
-    }
-    lastTs = performance.now();
-    raf = requestAnimationFrame(tick);
-  } else if (!run && running) {
-    running = false;
-    cancelAnimationFrame(raf);
-  }
+  if (run === running) return;
+  running = run;
+  if (!run) cycle?.pause();
+  else if (cycle) cycle.play();
+  else startCycle(400);
 }
 
 let resizeObserver: ResizeObserver | undefined;
@@ -604,8 +590,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  cancelAnimationFrame(raf);
   running = false;
+  cycle?.cancel();
+  cycle = undefined;
   resizeObserver?.disconnect();
   intersectionObserver?.disconnect();
   themeObserver?.disconnect();
@@ -710,7 +697,7 @@ onUnmounted(() => {
 .wb-sb.is-wide {
   display: grid;
   grid-template-columns: minmax(0, 136fr) 20px minmax(0, 214fr) 30px minmax(0, 128fr);
-  height: 312px;
+  height: 316px;
 }
 
 .is-wide .wb-sb-pg {
