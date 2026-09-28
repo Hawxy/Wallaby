@@ -5,6 +5,7 @@ import { formatCount } from './flow/format';
 import FlowChip from './flow/FlowChip.vue';
 import { phaseTimeline, type Tween } from './flow/timeline';
 import { useTimelineLoop } from './flow/useTimelineLoop';
+import { placeCallout, type Callout } from './flow/callout';
 import {
   CANVAS, nodes, edges, groups, scenarios,
   type IntEdge, type IntNode,
@@ -12,8 +13,9 @@ import {
 
 // The "How It Works" internals diagram: every data flow in the engine on
 // one canvas. Five scenario walkthroughs animate over it step by step,
-// dimming the stages a scenario never touches; a step strip scrubs
-// through them, each stage is clickable for a detail panel, and the whole
+// dimming the stages a scenario never touches, with each step's caption
+// in a callout beside its stages; a step strip scrubs through them, each
+// stage is clickable for a detail panel, and the whole
 // thing can go full screen. Amber packets are live WAL changes, blue ones
 // are snapshot reads - the same color language as the other diagrams.
 // #flow-<scenario>-step-<n> links straight to a step (slug-shaped, so
@@ -56,6 +58,31 @@ const involved = computed(() => ({
   nodes: new Set(steps.value.flatMap(s => [...(s.nodes ?? []), ...(s.warn ?? [])])),
   edges: new Set(steps.value.flatMap(s => s.edges ?? [])),
 }));
+
+// the current step's caption sits beside its stages once the canvas is big
+// enough to read it there; smaller, it stays on the line below
+const calloutCache = new Map<string, Callout>();
+const callout = computed(() => {
+  const s = step.value;
+  if (!s || scale.value < 0.8) return undefined;
+  const key = `${scenarioId.value}:${stepIndex.value}`;
+  let placed = calloutCache.get(key);
+  if (!placed) {
+    const anchors = s.nodes?.length ? s.nodes : (s.warn ?? []);
+    const next = steps.value[stepIndex.value + 1];
+    placed = placeCallout({
+      next: [...(next?.nodes ?? []), ...(next?.warn ?? [])],
+      passed: new Set(steps.value.slice(0, stepIndex.value).flatMap(p => p.nodes ?? [])),
+      text: `[${stepIndex.value + 1}/${steps.value.length}] ${s.caption}`,
+      anchors,
+      avoidNodes: [...anchors, ...(s.warn ?? [])],
+      avoidEdges: s.edges ?? [],
+      involved: involved.value.nodes,
+    });
+    calloutCache.set(key, placed);
+  }
+  return placed;
+});
 
 // everything the walkthrough has already touched keeps a faint tint,
 // colored by whether it was visited by live (amber) or snapshot (blue)
@@ -429,6 +456,25 @@ onUnmounted(() => {
             </FlowChip>
           </button>
 
+          <Transition name="wb-int-callout">
+            <div
+              v-if="callout"
+              :key="scenarioId + ':' + stepIndex"
+              class="wb-int-callout-layer"
+              :class="{ 'is-blue': stepBlue }"
+            >
+              <svg class="wb-int-leader" :viewBox="`0 0 ${CANVAS.w} ${CANVAS.h}`" aria-hidden="true">
+                <line :x1="callout.leader[0]" :y1="callout.leader[1]" :x2="callout.leader[2]" :y2="callout.leader[3]" />
+                <circle :cx="callout.leader[2]" :cy="callout.leader[3]" r="2" />
+              </svg>
+              <div
+                class="wb-int-callout"
+                :style="{ left: callout.x + 'px', top: callout.y + 'px', width: callout.w + 'px' }"
+              >
+                <span class="wb-int-count">[{{ stepIndex + 1 }}/{{ steps.length }}]</span> {{ step?.caption }}
+              </div>
+            </div>
+          </Transition>
         </div>
       </div>
     </div>
@@ -458,8 +504,8 @@ onUnmounted(() => {
 
     <div class="wb-int-caption">
       <span class="wb-int-prompt">$</span>
-      <span v-if="stepIndex >= 0" class="wb-int-count">[{{ stepIndex + 1 }}/{{ steps.length }}]</span>
-      <span class="wb-int-caption-text">{{ caption }}</span>
+      <span v-if="stepIndex >= 0 && !callout" class="wb-int-count">[{{ stepIndex + 1 }}/{{ steps.length }}]</span>
+      <span class="wb-int-caption-text">{{ callout ? scenario.blurb : caption }}</span>
       <span class="wb-int-legend" aria-hidden="true">
         <span class="wb-int-swatch is-amber"></span>live
         <span class="wb-int-swatch is-blue"></span>snapshot
@@ -863,6 +909,65 @@ onUnmounted(() => {
     stroke-dashoffset: -1;
     opacity: 1;
   }
+}
+
+/* --- step callout ------------------------------------------------------
+   The caption card beside the current step's stages, tinted by the
+   step's color; it never takes clicks meant for the stages beneath. */
+
+.wb-int-callout-layer {
+  --wb-callout: var(--vp-c-brand-1);
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.wb-int-callout-layer.is-blue {
+  --wb-callout: var(--wb-accent-blue);
+}
+
+.wb-int-leader {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.wb-int-leader line {
+  stroke: var(--wb-callout);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.wb-int-leader circle {
+  fill: var(--wb-callout);
+}
+
+.wb-int-callout {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--wb-callout) 55%, var(--vp-c-divider));
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--wb-callout) 8%, var(--vp-c-bg));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--vp-c-text-1);
+}
+
+.wb-int-callout-enter-active {
+  transition: opacity 0.25s;
+}
+
+.wb-int-callout-leave-active {
+  transition: opacity 0.15s;
+}
+
+.wb-int-callout-enter-from,
+.wb-int-callout-leave-to {
+  opacity: 0;
 }
 
 /* --- step strip -------------------------------------------------------
