@@ -157,7 +157,8 @@ emitted via `pg_logical_emit_message`. The live reader records any keys that cha
 watermarks, so at the high watermark the chunk's surviving rows are emitted through the **same transform and
 sink path** as live changes. If a row is changed live during the window, the live version wins.
 
-Progress is persisted per table, so a backfill resumes from its last cursor after a restart.
+Progress is persisted per table, so a backfill resumes from its last cursor after a restart. You can
+[step through a backfill](/how-it-works#flow-backfill-step-1) on the internals diagram.
 
 A [partitioned table](/how-it-works#partitioned-tables) is snapshotted through its root, so one
 backfill covers every partition. That makes a [purge backfill](#purging-before-a-backfill) the
