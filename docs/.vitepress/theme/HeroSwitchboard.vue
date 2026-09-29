@@ -4,6 +4,7 @@ import { formatCount } from './flow/format';
 import FlowChip from './flow/FlowChip.vue';
 import { cubicBezier, type Timeline } from 'animejs';
 import { phaseTimeline, type Cue, type Tween } from './flow/timeline';
+import { useTimelineLoop } from './flow/useTimelineLoop';
 import {
   OP_GLYPH, SINKS, fieldLine, formatLsn, mulberry32, pathLength,
   pickOp, pickTable, pointAt, recordLines, type Field, type Op, type Pt, type TableDef,
@@ -193,7 +194,7 @@ function travel(p: Packet, leg: 'in' | 'out') {
 
 // One wave per cycle, as back-to-back phases, so the stages always read
 // in the same order and rhythm and only one thing moves at a time.
-function startCycle(lead = 0) {
+function startCycle(lead: number): Timeline {
   const changes = Array.from({ length: 2 + Math.floor(rnd() * 3) }, newChange);
   const n = changes.length;
   const head = changes[0];
@@ -301,13 +302,8 @@ function startCycle(lead = 0) {
       },
       at: pulse(0, on => (pgFlash.value = on)),
     },
-  ], {
-    onUpdate: draw,
-    onComplete: () => cycle === tl && startCycle(),
-  });
-
-  cycle = tl;
-  if (running) tl.play();
+  ], { onUpdate: draw });
+  return tl;
 }
 
 // ---- geometry, measured from the DOM ----
@@ -389,7 +385,7 @@ async function layout() {
   c.style.height = `${h}px`;
   ctx = c.getContext('2d');
   ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (!running) drawStatic();
+  if (!loop.isRunning()) drawStatic();
 }
 
 function readColors() {
@@ -547,56 +543,31 @@ function drawStatic() {
   for (let i = 0; i < 3; i++) square(ctx, [slotX(i), geo.laneY], col.amber);
 }
 
-// ---- loop lifecycle ----
-
-let cycle: Timeline | undefined;
-let running = false;
-let inView = false;
-let reduced = false;
+// ---- lifecycle ----
 
 // plays while on screen in a visible tab; pausing freezes the cycle mid-wave
-function sync() {
-  const run = inView && !document.hidden && !reduced;
-  if (run === running) return;
-  running = run;
-  if (!run) cycle?.pause();
-  else if (cycle) cycle.play();
-  else startCycle(400);
-}
+const loop = useTimelineLoop(root, first => startCycle(first ? 400 : 0));
 
 let resizeObserver: ResizeObserver | undefined;
-let intersectionObserver: IntersectionObserver | undefined;
 let themeObserver: MutationObserver | undefined;
 
 onMounted(() => {
-  reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   rnd = mulberry32(0x5eed);
   readColors();
   layout();
   document.fonts?.ready.then(layout);
   resizeObserver = new ResizeObserver(() => layout());
   resizeObserver.observe(root.value!);
-  intersectionObserver = new IntersectionObserver(([entry]) => {
-    inView = entry.isIntersecting;
-    sync();
-  });
-  intersectionObserver.observe(root.value!);
   themeObserver = new MutationObserver(() => {
     readColors();
-    if (!running) drawStatic();
+    if (!loop.isRunning()) drawStatic();
   });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  document.addEventListener('visibilitychange', sync);
 });
 
 onUnmounted(() => {
-  running = false;
-  cycle?.cancel();
-  cycle = undefined;
   resizeObserver?.disconnect();
-  intersectionObserver?.disconnect();
   themeObserver?.disconnect();
-  document.removeEventListener('visibilitychange', sync);
 });
 </script>
 

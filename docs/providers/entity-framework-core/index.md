@@ -88,7 +88,8 @@ sink.Map<Product>()
 
 The navigation is resolved against the EF model at startup and must be a single one-hop navigation.
 With the mapping above, a change to `categories` or the `product_labels` join table re-emits the
-affected products through the same transform.
+affected products through the same transform. The [fan-out walkthrough](/how-it-works#flow-fanout-step-4)
+shows the path a dependent change takes.
 
 If a dependent table isn't also mapped and consumed in its own right, Wallaby only captures (and
 [publishes](/configuration#publication-column-lists)) its primary-key and lookup columns, which keeps

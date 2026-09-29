@@ -47,6 +47,11 @@ export type IntStep = {
   fx?: 'tick' | 'deliver' | 'deliver-partial' | 'flush';
 };
 
+/** stages a step lights, warn states included */
+export function stepStages(s: IntStep | undefined) {
+  return [...(s?.nodes ?? []), ...(s?.warn ?? [])];
+}
+
 export type IntScenario = {
   id: string;
   label: string;
@@ -206,7 +211,7 @@ export const edges: IntEdge[] = [
   { id: 'pub-slot', points: [[124, 287], [124, 311]] },
   {
     id: 'slot-stream', points: [[222, 349], [240, 349], [240, 73], [266, 73]],
-    label: 'logical replication', lx: 245, ly: 300, vertical: true,
+    label: 'logical replication', lx: 233, ly: 146, vertical: true,
   },
   { id: 'stream-assemble', points: [[364, 103], [364, 127]] },
   { id: 'assemble-materialize', points: [[364, 204], [364, 228]] },
@@ -217,19 +222,19 @@ export const edges: IntEdge[] = [
   { id: 'fanout-transform', points: [[496, 368], [480, 368], [480, 410], [462, 410]] },
   {
     id: 'fanout-queue', points: [[590, 388], [590, 452]],
-    label: 'offload tail', lx: 600, ly: 392,
+    label: 'offload tail', lx: 596, ly: 397,
   },
   {
     id: 'queue-backfill', points: [[684, 490], [696, 490], [696, 166], [684, 166]],
-    label: 'notify', lx: 685, ly: 400, vertical: true,
+    label: 'notify', lx: 690, ly: 305, vertical: true,
   },
   {
     id: 'backfill-materialize', points: [[496, 166], [480, 166], [480, 257], [462, 257]],
-    label: 'snapshot rows', lx: 484, ly: 180, vertical: true,
+    label: 'snapshot rows', lx: 481, ly: 170, vertical: true,
   },
   {
     id: 'backfill-tables', points: [[632, 127], [632, 26], [168, 26], [168, 44]],
-    dashed: true, label: 'keyset reads', lx: 320, ly: 30,
+    dashed: true, label: 'keyset reads', lx: 317, ly: 30,
   },
   { id: 'dispatch-meili', points: [[300, 554], [300, 644], [124, 644], [124, 674]] },
   { id: 'dispatch-http', points: [[352, 554], [352, 674]] },
@@ -239,11 +244,11 @@ export const edges: IntEdge[] = [
   { id: 'kafka-ack', points: [[580, 733], [580, 758], [404, 758], [404, 769]] },
   {
     id: 'ack-slot', points: [[232, 807], [8, 807], [8, 349], [26, 349]],
-    label: 'advance slot', lx: 40, ly: 812,
+    label: 'advance slot', lx: 37, ly: 812,
   },
   {
     id: 'ack-checkpoint', points: [[472, 807], [696, 807], [696, 573], [684, 573]],
-    label: 'save checkpoint', lx: 500, ly: 812,
+    label: 'save checkpoint', lx: 497, ly: 812,
   },
 ];
 

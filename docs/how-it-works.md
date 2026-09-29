@@ -35,7 +35,8 @@ The replication slot is Wallaby's only source of live changes, and it can be los
   RDS/Aurora major-version upgrade. Resuming recovers through this same mechanism.
 
 A recreated slot only streams from its creation point forward, so every change between the last applied
-one and that point would be silently missed.
+one and that point would be silently missed. The [slot loss walkthrough](#flow-slotloss-step-1) above
+steps through detection and repair.
 
 **Detection.** Alongside acknowledgements, Wallaby records a checkpoint on the slot's
 `wallaby.slot_registry` row (at most one write per [`CheckpointSaveInterval`](/configuration)). When a

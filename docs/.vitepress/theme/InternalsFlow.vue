@@ -1,22 +1,32 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { lsn, tickLsn } from './lsn';
 import { formatCount } from './flow/format';
 import FlowChip from './flow/FlowChip.vue';
+import { phaseTimeline, type Tween } from './flow/timeline';
+import { useTimelineLoop } from './flow/useTimelineLoop';
+import { placeCallout } from './flow/callout';
 import {
-  CANVAS, nodes, edges, groups, scenarios,
+  CANVAS, nodes, edges, groups, scenarios, stepStages,
   type IntEdge, type IntNode,
 } from './flow/internals';
 
 // The "How It Works" internals diagram: every data flow in the engine on
-// one canvas. Four scenario walkthroughs animate over it step by step,
-// each stage is clickable for a detail panel, and the whole thing can go
-// full screen. Amber packets are live WAL changes, blue ones are
-// snapshot reads - the same color language as the other diagrams.
+// one canvas. Five scenario walkthroughs animate over it step by step,
+// dimming the stages a scenario never touches, with each step's caption
+// in a callout beside its stages; a step strip scrubs through them, each
+// stage is clickable for a detail panel, and the whole
+// thing can go full screen. Amber packets are live WAL changes, blue ones
+// are snapshot reads - the same color language as the other diagrams.
+// #flow-<scenario>-step-<n> links straight to a step (slug-shaped, so
+// VitePress leaves markdown links to it alone).
 
 const SINK_IDS = new Set(['meili', 'http', 'kafka']);
 const STEP_MS = 2600;
 const LOOP_PAUSE_MS = 2400;
+const MAX_SCALE = 1.5;
+// expanded: controls + steps + caption + padding around the canvas
+const CHROME_PX = 248;
 
 // deterministic starts - SSR hydration
 const flushed = ref(lsn.value);
@@ -27,25 +37,48 @@ let inFlightLsn = lsn.value;
 const scenarioId = ref('live');
 const stepIndex = ref(-1); // -1 = idle, before the first step
 const playing = ref(true);
-// the walkthrough only runs while the diagram is on screen
-const inView = ref(false);
-const reduced = ref(false);
 const selected = ref<IntNode | null>(null);
 const isFullscreen = ref(false);
 const isOverlay = ref(false); // fallback when the Fullscreen API is unavailable
 const scale = ref(1);
 const root = ref<HTMLElement>();
 const frame = ref<HTMLElement>();
+const strip = ref<HTMLElement>();
 
 const scenario = computed(() => scenarios.find(s => s.id === scenarioId.value)!);
 const steps = computed(() => scenario.value.steps);
 const step = computed(() => (stepIndex.value >= 0 ? steps.value[stepIndex.value] : undefined));
 const stepBlue = computed(() => step.value?.blue ?? false);
 const caption = computed(() => step.value?.caption ?? scenario.value.blurb);
+const counter = computed(() => `[${stepIndex.value + 1}/${steps.value.length}]`);
 
 const activeNodes = computed(() => new Set(step.value?.nodes ?? []));
 const activeEdges = computed(() => new Set(step.value?.edges ?? []));
 const warnNodes = computed(() => new Set(step.value?.warn ?? []));
+
+// everything the scenario touches at any step; the rest of the map dims
+const involved = computed(() => ({
+  nodes: new Set(steps.value.flatMap(stepStages)),
+  edges: new Set(steps.value.flatMap(s => s.edges ?? [])),
+}));
+
+// the current step's caption sits beside its stages once the canvas is big
+// enough to read it there; smaller, it stays on the line below
+const placement = computed(() => {
+  const s = step.value;
+  if (!s) return undefined;
+  const anchors = s.nodes?.length ? s.nodes : (s.warn ?? []);
+  return placeCallout({
+    next: stepStages(steps.value[stepIndex.value + 1]),
+    passed: new Set(steps.value.slice(0, stepIndex.value).flatMap(p => p.nodes ?? [])),
+    text: `${counter.value} ${s.caption}`,
+    anchors,
+    avoidNodes: stepStages(s),
+    avoidEdges: s.edges ?? [],
+    involved: involved.value.nodes,
+  });
+});
+const callout = computed(() => (scale.value < 0.8 ? undefined : placement.value));
 
 // everything the walkthrough has already touched keeps a faint tint,
 // colored by whether it was visited by live (amber) or snapshot (blue)
@@ -100,46 +133,118 @@ function runFx(fx: string) {
   }
 }
 
-let timer: ReturnType<typeof setTimeout> | undefined;
-
 function applyStep(i: number, withFx: boolean) {
   stepIndex.value = i;
   const s = steps.value[i];
   if (withFx && s?.fx) runFx(s.fx);
 }
 
-function schedule(delay: number) {
-  if (timer) clearTimeout(timer);
-  if (!playing.value || !inView.value) return;
-  timer = setTimeout(() => {
-    const atEnd = stepIndex.value >= steps.value.length - 1;
-    applyStep(atEnd ? 0 : stepIndex.value + 1, true);
-    schedule(stepIndex.value >= steps.value.length - 1 ? STEP_MS + LOOP_PAUSE_MS : STEP_MS);
-  }, delay);
+// --- playback ---------------------------------------------------------
+
+// where the next walkthrough picks up, and how long it waits first
+let resumeAt = 0;
+let leadMs = 700;
+
+// the current step's progress fills its segment of the step strip; set
+// directly so the per-frame update doesn't re-render the diagram
+function setProgress(v: number) {
+  strip.value?.style.setProperty('--wb-step-progress', String(v));
+}
+
+// the rest of the scenario from `resumeAt`, one phase per step, holding
+// on the last step before the walkthrough loops
+function walkthrough() {
+  const list = steps.value;
+  const from = resumeAt;
+  const lead = leadMs;
+  resumeAt = 0;
+  leadMs = 0;
+  return phaseTimeline([
+    { name: 'lead', ms: lead },
+    ...list.slice(from).map((_, j) => {
+      const k = from + j;
+      const fill: Tween = [0, STEP_MS, setProgress];
+      return {
+        name: `step-${k + 1}`,
+        ms: k === list.length - 1 ? STEP_MS + LOOP_PAUSE_MS : STEP_MS,
+        run: () => {
+          setProgress(0);
+          applyStep(k, true);
+        },
+        tweens: [fill],
+      };
+    }),
+  ]);
+}
+
+const loop = useTimelineLoop(root, walkthrough, { active: playing, threshold: 0.15 });
+const { reduced } = loop;
+
+function restartAt(from: number, lead: number) {
+  resumeAt = from;
+  leadMs = lead;
+  loop.reset();
+}
+
+function restartScenario(id: string) {
+  scenarioId.value = id;
+  stepIndex.value = -1;
+  restartAt(0, 900);
 }
 
 function selectScenario(id: string) {
   if (scenarioId.value === id) return;
-  scenarioId.value = id;
-  stepIndex.value = -1;
-  if (playing.value) schedule(900);
+  restartScenario(id);
+  writeHash();
 }
 
 function togglePlay() {
   playing.value = !playing.value;
-  if (playing.value) schedule(400);
-  else if (timer) clearTimeout(timer);
 }
 
-function stepBy(delta: number) {
+// jumping to a step pauses on it; play continues from the next one
+function goTo(i: number) {
+  const target = Math.min(steps.value.length - 1, Math.max(0, i));
   playing.value = false;
-  if (timer) clearTimeout(timer);
-  const next = Math.min(steps.value.length - 1, Math.max(0, stepIndex.value + delta));
-  applyStep(next, false);
+  applyStep(target, false);
+  setProgress(1);
+  restartAt(target + 1, 400);
+  writeHash();
+  return target;
+}
+
+function onStripKey(e: KeyboardEvent) {
+  const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+  if (!delta) return;
+  e.preventDefault();
+  const i = goTo(stepIndex.value + delta);
+  nextTick(() => (strip.value?.children[i] as HTMLElement | undefined)?.focus());
 }
 
 function selectNode(n: IntNode) {
   selected.value = selected.value?.id === n.id ? null : n;
+}
+
+// --- deep links -------------------------------------------------------
+
+// a link with a step holds on that step; one without plays the scenario
+function readHash() {
+  const m = /^#flow-([a-z]+)(?:-step-(\d+))?$/.exec(location.hash);
+  const target = m && scenarios.find(s => s.id === m[1]);
+  if (!m || !target) return;
+  if (m[2]) {
+    scenarioId.value = target.id;
+    goTo(+m[2] - 1);
+  } else {
+    playing.value = !reduced.value;
+    restartScenario(target.id);
+  }
+  requestAnimationFrame(() => root.value?.scrollIntoView({ block: 'start' }));
+}
+
+function writeHash() {
+  const stepPart = stepIndex.value >= 0 ? `-step-${stepIndex.value + 1}` : '';
+  history.replaceState(history.state, '', `#flow-${scenarioId.value}${stepPart}`);
 }
 
 // --- fullscreen -------------------------------------------------------
@@ -175,10 +280,12 @@ const expanded = computed(() => isFullscreen.value || isOverlay.value);
 // --- scaling: the canvas is fixed-size and scales to its container ----
 
 function recomputeScale() {
-  const w = frame.value?.clientWidth ?? CANVAS.w;
+  // offsetWidth includes any scrollbar, so the scale can't flip-flop as
+  // a scrollbar it caused comes and goes
+  const w = frame.value?.offsetWidth ?? CANVAS.w;
   if (expanded.value) {
-    const h = window.innerHeight - 220; // controls + caption + padding
-    scale.value = Math.max(0.5, Math.min(1.5, w / CANVAS.w, h / CANVAS.h));
+    const h = window.innerHeight - CHROME_PX;
+    scale.value = Math.max(0.5, Math.min(MAX_SCALE, w / CANVAS.w, h / CANVAS.h));
   } else {
     // below this the labels stop being readable - hold and let it scroll
     scale.value = Math.max(0.62, Math.min(1, w / CANVAS.w));
@@ -190,37 +297,32 @@ const stageWrapStyle = computed(() => ({
   height: `${CANVAS.h * scale.value}px`,
 }));
 const stageStyle = computed(() => ({ transform: `scale(${scale.value})` }));
+// the expanded grid's canvas column repeats the scale formula in CSS
+const rootStyle = {
+  '--wb-int-chrome': `${CHROME_PX}px`,
+  '--wb-int-aspect': CANVAS.w / CANVAS.h,
+  '--wb-int-max-w': `${CANVAS.w * MAX_SCALE}px`,
+};
 
 let resizeObserver: ResizeObserver | undefined;
-let intersectionObserver: IntersectionObserver | undefined;
 
 onMounted(() => {
-  reduced.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // the loop's own mount hook has read reduced by now
   if (reduced.value) playing.value = false;
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('keydown', onKeydown);
+  window.addEventListener('hashchange', readHash);
   resizeObserver = new ResizeObserver(recomputeScale);
   if (frame.value) resizeObserver.observe(frame.value);
   recomputeScale();
-  // the observer fires immediately with the initial visibility, which is
-  // also what kicks off the first cycle
-  intersectionObserver = new IntersectionObserver(([entry]) => {
-    inView.value = entry.isIntersecting;
-    if (!entry.isIntersecting) {
-      if (timer) clearTimeout(timer);
-    } else if (playing.value) {
-      schedule(700);
-    }
-  }, { threshold: 0.15 });
-  if (root.value) intersectionObserver.observe(root.value);
+  readHash();
 });
 
 onUnmounted(() => {
-  if (timer) clearTimeout(timer);
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   document.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('hashchange', readHash);
   resizeObserver?.disconnect();
-  intersectionObserver?.disconnect();
 });
 </script>
 
@@ -229,6 +331,7 @@ onUnmounted(() => {
     ref="root"
     class="wb-int"
     :class="{ 'is-overlay': isOverlay, 'is-expanded': expanded }"
+    :style="rootStyle"
     role="group"
     aria-label="Interactive diagram of Wallaby's internals: postgres WAL, publication and replication slot feed the leader's decode, materialize, transform and dispatch stages; backfill and dependent fan-out feed the same pipeline; sinks acknowledge back to the slot and checkpoint."
   >
@@ -245,11 +348,9 @@ onUnmounted(() => {
         >{{ s.label }}</button>
       </div>
       <div class="wb-int-buttons">
-        <button class="wb-int-btn" aria-label="previous step" @click="stepBy(-1)">‹</button>
         <button class="wb-int-btn is-play" :aria-label="playing ? 'pause' : 'play'" @click="togglePlay">
           {{ playing ? 'pause' : 'play' }}
         </button>
-        <button class="wb-int-btn" aria-label="next step" @click="stepBy(1)">›</button>
         <button class="wb-int-btn is-fs" @click="toggleFullscreen">
           {{ expanded ? 'exit' : 'fullscreen' }}
         </button>
@@ -293,6 +394,7 @@ onUnmounted(() => {
               class="wb-int-wire"
               :class="{
                 'is-dashed': e.dashed,
+                'is-dim': !involved.edges.has(e.id),
                 'is-active': activeEdges.has(e.id),
                 'is-blue': activeEdges.has(e.id) ? stepBlue : visited.edgeTint.get(e.id),
                 'is-visited': !activeEdges.has(e.id) && visited.edgeTint.has(e.id),
@@ -313,7 +415,7 @@ onUnmounted(() => {
             v-for="e in edges.filter(e => e.label)"
             :key="e.id + '-label'"
             class="wb-int-wire-label"
-            :class="{ 'is-vertical': e.vertical }"
+            :class="{ 'is-vertical': e.vertical, 'is-dim': !involved.edges.has(e.id) }"
             :style="{ left: e.lx + 'px', top: e.ly + 'px' }"
           >{{ e.label }}</span>
 
@@ -322,6 +424,7 @@ onUnmounted(() => {
             :key="n.id"
             class="wb-int-node"
             :class="{
+              'is-dim': !involved.nodes.has(n.id),
               'is-selected': selected?.id === n.id,
               'is-visited': !activeNodes.has(n.id) && visited.nodeTint.has(n.id),
               'is-blue-visited': !activeNodes.has(n.id) && visited.nodeTint.get(n.id),
@@ -358,14 +461,56 @@ onUnmounted(() => {
             </FlowChip>
           </button>
 
+          <Transition name="wb-int-callout">
+            <div
+              v-if="callout"
+              :key="scenarioId + ':' + stepIndex"
+              class="wb-int-callout-layer"
+              :class="{ 'is-blue': stepBlue }"
+            >
+              <svg class="wb-int-leader" :viewBox="`0 0 ${CANVAS.w} ${CANVAS.h}`" aria-hidden="true">
+                <line :x1="callout.leader[0]" :y1="callout.leader[1]" :x2="callout.leader[2]" :y2="callout.leader[3]" />
+                <circle :cx="callout.leader[2]" :cy="callout.leader[3]" r="2" />
+              </svg>
+              <div
+                class="wb-int-callout"
+                :style="{ left: callout.x + 'px', top: callout.y + 'px', width: callout.w + 'px' }"
+              >
+                <span class="wb-int-count">{{ counter }}</span> {{ step?.caption }}
+              </div>
+            </div>
+          </Transition>
         </div>
       </div>
     </div>
 
+    <div
+      ref="strip"
+      class="wb-int-steps"
+      role="group"
+      aria-label="walkthrough steps"
+      @keydown="onStripKey"
+    >
+      <button
+        v-for="(s, i) in steps"
+        :key="scenarioId + ':' + i"
+        class="wb-int-step"
+        :class="{
+          'is-current': i === stepIndex,
+          'is-done': i < stepIndex,
+          'is-blue': s.blue,
+        }"
+        :title="s.caption"
+        :aria-label="`step ${i + 1}: ${s.caption}`"
+        :aria-current="i === stepIndex ? 'step' : undefined"
+        @click="goTo(i)"
+      ><i /></button>
+    </div>
+
     <div class="wb-int-caption">
       <span class="wb-int-prompt">$</span>
-      <span v-if="stepIndex >= 0" class="wb-int-count">[{{ stepIndex + 1 }}/{{ steps.length }}]</span>
-      <span class="wb-int-caption-text">{{ caption }}</span>
+      <span v-if="stepIndex >= 0 && !callout" class="wb-int-count">{{ counter }}</span>
+      <span class="wb-int-caption-text">{{ callout ? scenario.blurb : caption }}</span>
       <span class="wb-int-legend" aria-hidden="true">
         <span class="wb-int-swatch is-amber"></span>live
         <span class="wb-int-swatch is-blue"></span>snapshot
@@ -389,8 +534,12 @@ onUnmounted(() => {
 <style scoped>
 .wb-int {
   margin: 32px 0;
+  scroll-margin-top: calc(var(--vp-nav-height) + 24px);
   font-family: var(--vp-font-family-mono);
   --wb-chip-decay: 0.7s;
+  /* trail left by visited stages and wires */
+  --wb-int-tint-amber: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  --wb-int-tint-blue: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
 }
 
 .wb-int.is-overlay {
@@ -419,12 +568,17 @@ onUnmounted(() => {
        and side panel hugging the diagram instead of the viewport edges
        on ultrawide screens */
     grid-template-columns:
-      min(1056px, calc(100vw - 410px), calc(0.8224 * (100vh - 220px)))
+      min(
+        var(--wb-int-max-w),
+        calc(100vw - 410px),
+        calc(var(--wb-int-aspect) * (100vh - var(--wb-int-chrome)))
+      )
       320px;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr auto auto;
     grid-template-areas:
       'controls controls'
       'frame    side'
+      'steps    side'
       'caption  side';
     column-gap: 24px;
     justify-content: center;
@@ -436,6 +590,10 @@ onUnmounted(() => {
 
   .wb-int.is-expanded .wb-int-frame {
     grid-area: frame;
+  }
+
+  .wb-int.is-expanded .wb-int-steps {
+    grid-area: steps;
   }
 
   .wb-int.is-expanded .wb-int-caption {
@@ -521,41 +679,25 @@ onUnmounted(() => {
   z-index: 1;
 }
 
-/* transport cluster: ‹ play › joined, fullscreen set apart; fixed slot
-   widths so the toggling labels don't shift the row */
+/* transport: play and fullscreen, with fixed widths so the toggling
+   labels don't shift the row */
 .wb-int-buttons {
   display: flex;
   align-items: center;
-  /* when the row wraps, the transport cluster right-aligns instead of
-     dangling under the tabs */
+  gap: 8px;
+  /* when the row wraps, the buttons right-align instead of dangling
+     under the tabs */
   margin-left: auto;
 }
 
-.wb-int-buttons .wb-int-btn {
-  position: relative;
-  margin-left: -1px;
-  border-radius: 0;
-}
-
-.wb-int-buttons .wb-int-btn:first-child {
-  margin-left: 0;
-  border-radius: 2px 0 0 2px;
-}
-
-.wb-int-buttons .wb-int-btn.is-play {
+.wb-int-btn.is-play {
   min-width: 58px;
   text-align: center;
 }
 
-.wb-int-buttons .wb-int-btn.is-fs {
-  margin-left: 12px;
-  border-radius: 2px;
+.wb-int-btn.is-fs {
   min-width: 96px;
   text-align: center;
-}
-
-.wb-int-buttons .wb-int-btn:nth-last-child(2) {
-  border-radius: 0 2px 2px 0;
 }
 
 /* --- stage ------------------------------------------------------------ */
@@ -607,7 +749,7 @@ onUnmounted(() => {
   fill: none;
   stroke: var(--vp-c-divider);
   stroke-width: 1;
-  transition: stroke 0.4s;
+  transition: stroke 0.4s, opacity 0.3s;
   marker-end: url(#wb-int-arrow);
 }
 
@@ -641,11 +783,11 @@ onUnmounted(() => {
 
 /* trail arrowheads keep the same soft tint as their visited wires */
 .wb-int-arrow.is-amber-soft {
-  fill: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  fill: var(--wb-int-tint-amber);
 }
 
 .wb-int-arrow.is-blue-soft {
-  fill: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  fill: var(--wb-int-tint-blue);
 }
 
 .wb-int-wire.is-dashed {
@@ -653,11 +795,11 @@ onUnmounted(() => {
 }
 
 .wb-int-wire.is-visited {
-  stroke: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  stroke: var(--wb-int-tint-amber);
 }
 
 .wb-int-wire.is-visited.is-blue {
-  stroke: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  stroke: var(--wb-int-tint-blue);
 }
 
 .wb-int-wire.is-active {
@@ -670,18 +812,34 @@ onUnmounted(() => {
   stroke: var(--wb-accent-blue);
 }
 
+/* labels knock out whatever wire runs beneath them, the same way group
+   labels sit on their borders */
 .wb-int-wire-label {
   position: absolute;
+  padding-inline: 3px;
+  background: var(--vp-c-bg);
   font-size: 11px;
   line-height: 14px;
   color: var(--vp-c-text-3);
   white-space: nowrap;
   pointer-events: none;
+  transition: opacity 0.3s;
 }
 
 .wb-int-wire-label.is-vertical {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
+}
+
+/* stages, wires and labels outside the current scenario step back */
+.wb-int-wire.is-dim,
+.wb-int-wire-label.is-dim,
+.wb-int-node.is-dim {
+  opacity: 0.3;
+}
+
+.wb-int-node.is-dim:hover {
+  opacity: 0.8;
 }
 
 /* --- nodes ------------------------------------------------------------ */
@@ -694,6 +852,7 @@ onUnmounted(() => {
   text-align: left;
   font-family: inherit;
   cursor: pointer;
+  transition: opacity 0.3s;
 }
 
 .wb-int-node .wb-chip {
@@ -705,11 +864,11 @@ onUnmounted(() => {
 }
 
 .wb-int-node.is-visited .wb-chip {
-  border-color: color-mix(in srgb, var(--vp-c-brand-1) 45%, var(--vp-c-divider));
+  border-color: var(--wb-int-tint-amber);
 }
 
 .wb-int-node.is-visited.is-blue-visited .wb-chip {
-  border-color: color-mix(in srgb, var(--wb-accent-blue) 45%, var(--vp-c-divider));
+  border-color: var(--wb-int-tint-blue);
 }
 
 .wb-int-node.is-selected .wb-chip {
@@ -759,6 +918,123 @@ onUnmounted(() => {
     stroke-dashoffset: -1;
     opacity: 1;
   }
+}
+
+/* --- step callout ------------------------------------------------------
+   The caption card beside the current step's stages, tinted by the
+   step's color; it never takes clicks meant for the stages beneath. */
+
+.wb-int-callout-layer {
+  --wb-callout: var(--vp-c-brand-1);
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.wb-int-callout-layer.is-blue {
+  --wb-callout: var(--wb-accent-blue);
+}
+
+.wb-int-leader {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.wb-int-leader line {
+  stroke: var(--wb-callout);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.wb-int-leader circle {
+  fill: var(--wb-callout);
+}
+
+.wb-int-callout {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--wb-callout) 55%, var(--vp-c-divider));
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--wb-callout) 8%, var(--vp-c-bg));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--vp-c-text-1);
+}
+
+.wb-int-callout-enter-active {
+  transition: opacity 0.25s;
+}
+
+.wb-int-callout-leave-active {
+  transition: opacity 0.15s;
+}
+
+.wb-int-callout-enter-from,
+.wb-int-callout-leave-to {
+  opacity: 0;
+}
+
+/* --- step strip -------------------------------------------------------
+   One segment per step: done steps keep a soft tint, the current one
+   fills as it plays (--wb-step-progress, set per frame). */
+
+.wb-int-steps {
+  display: flex;
+  gap: 3px;
+  margin-top: 12px;
+}
+
+.wb-int-step {
+  flex: 1;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.wb-int-step i {
+  position: relative;
+  display: block;
+  height: 3px;
+  background: var(--vp-c-divider);
+  transition: background-color 0.2s;
+}
+
+.wb-int-step:hover i {
+  background: var(--vp-c-text-3);
+}
+
+.wb-int-step:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 1px;
+}
+
+/* no fade in: the base colour under the current step's fill would show through */
+.wb-int-step.is-done i {
+  background: var(--wb-int-tint-amber);
+  transition: none;
+}
+
+.wb-int-step.is-done.is-blue i {
+  background: var(--wb-int-tint-blue);
+}
+
+.wb-int-step.is-current i::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--wb-step-progress, 1) * 100%);
+  background: var(--vp-c-brand-1);
+}
+
+.wb-int-step.is-current.is-blue i::after {
+  background: var(--wb-accent-blue);
 }
 
 /* --- caption + detail panel ------------------------------------------- */

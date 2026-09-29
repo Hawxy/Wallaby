@@ -54,7 +54,8 @@ retries) halts the pipeline; the batch is retried after the leader session resta
 so a batch is never silently dropped. The halt is pipeline-wide: every sink shares one replication slot
 and one acknowledgement point, so no sink receives further batches until the failing one accepts its
 batch. To isolate a destination whose reliability differs from the others, run it in its own Wallaby
-worker with its own `SlotName` and `PublicationName`.
+worker with its own `SlotName` and `PublicationName`. The [sink outage walkthrough](/how-it-works#flow-outage-step-3)
+shows the halt and recovery step by step.
 
 Throw `WallabyConfigurationException` for a configuration error (for example a record with no resolvable
 destination); any other exception thrown from `DeliverAsync` is treated as a permanent failure. Cancellation
