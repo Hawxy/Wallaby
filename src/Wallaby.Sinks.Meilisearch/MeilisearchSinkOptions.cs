@@ -19,12 +19,15 @@ public sealed class MeilisearchSinkOptions
     public string PrimaryKey { get; set; } = "id";
 
     /// <summary>
-    /// Maximum time to wait for an indexing task to complete. Every task is awaited to completion before
-    /// the batch is considered delivered, keeping delivery honest for at-least-once semantics.
+    /// Maximum time to wait for a batch's indexing tasks to complete. Every task is awaited to completion
+    /// before the batch is considered delivered, keeping delivery honest for at-least-once semantics.
     /// </summary>
     public TimeSpan WaitTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
-    /// <summary>Polling interval while waiting for a task.</summary>
+    /// <summary>
+    /// Polling interval while waiting for tasks. A batch's tasks across all its indexes are polled together,
+    /// one request per interval.
+    /// </summary>
     public TimeSpan WaitInterval { get; set; } = TimeSpan.FromMilliseconds(50);
 
     /// <summary>

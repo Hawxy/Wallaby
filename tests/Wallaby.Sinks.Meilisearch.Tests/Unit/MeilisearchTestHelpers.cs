@@ -28,14 +28,18 @@ internal sealed class StubHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        Requests.Add(request);
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
 
-        if (Throw is not null)
+        // Indexes enqueue in parallel; serialize so request order and task uids stay consistent.
+        lock (Requests)
         {
-            throw Throw;
+            Requests.Add(request);
+            if (Throw is not null)
+            {
+                throw Throw;
+            }
+            return Respond is not null ? Respond(request, body) : _simulator.Respond(request, body);
         }
-        return Respond is not null ? Respond(request, body) : _simulator.Respond(request, body);
     }
 }
 
@@ -50,10 +54,12 @@ internal sealed class MeiliSimulator
     {
         var path = request.RequestUri!.AbsolutePath;
 
-        if (request.Method == HttpMethod.Get && path.StartsWith("/tasks/", StringComparison.Ordinal))
+        if (request.Method == HttpMethod.Get && path == "/tasks")
         {
-            var uid = int.Parse(path["/tasks/".Length..]);
-            return MeilisearchTestHelpers.Json(HttpStatusCode.OK, MeilisearchTestHelpers.TaskResultJson(uid, "succeeded"));
+            var tasks = MeilisearchTestHelpers.PolledUids(request)
+                .Select(uid => MeilisearchTestHelpers.TaskJson(uid, "succeeded"))
+                .ToArray();
+            return MeilisearchTestHelpers.Json(HttpStatusCode.OK, MeilisearchTestHelpers.TasksPageJson(tasks));
         }
 
         if (request.Method == HttpMethod.Get && path.StartsWith("/indexes/", StringComparison.Ordinal))
@@ -86,12 +92,32 @@ internal static class MeilisearchTestHelpers
     public static string TaskInfoJson(int uid)
         => $$"""{"taskUid":{{uid}},"indexUid":"idx","status":"enqueued","type":"documentAdditionOrUpdate","enqueuedAt":"2026-01-01T00:00:00Z"}""";
 
+    /// <summary>A <c>GET /tasks</c> page holding the single task <paramref name="uid"/>.</summary>
     public static string TaskResultJson(int uid, string status, string? errorCode = null)
+        => TasksPageJson(TaskJson(uid, status, errorCode));
+
+    public static string TaskJson(int uid, string status, string? errorCode = null)
     {
         var error = errorCode is null
             ? string.Empty
             : $$""","error":{"message":"boom","code":"{{errorCode}}","type":"invalid_request","link":"https://docs.meilisearch.com/errors"}""";
         return $$"""{"uid":{{uid}},"indexUid":"idx","status":"{{status}}","type":"documentAdditionOrUpdate","enqueuedAt":"2026-01-01T00:00:00Z"{{error}}}""";
+    }
+
+    public static string TasksPageJson(params string[] tasks)
+        => $$"""{"results":[{{string.Join(",", tasks)}}],"limit":{{tasks.Length}},"from":null,"next":null,"total":{{tasks.Length}}}""";
+
+    /// <summary>The task uids a <c>GET /tasks?uids=</c> poll asked for.</summary>
+    public static IEnumerable<int> PolledUids(HttpRequestMessage request)
+    {
+        foreach (var pair in request.RequestUri!.Query.TrimStart('?').Split('&'))
+        {
+            if (pair.StartsWith("uids=", StringComparison.Ordinal))
+            {
+                return pair["uids=".Length..].Split(',').Select(int.Parse);
+            }
+        }
+        return [];
     }
 
     public static string ApiErrorJson(string code)
