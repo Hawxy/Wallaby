@@ -1,7 +1,9 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Meilisearch;
+using Meilisearch.QueryParameters;
 using Wallaby.Abstractions;
 using Wallaby.DependencyInjection;
 
@@ -34,6 +36,8 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             "bad_request",
         ],
         StringComparison.Ordinal);
+
+    private const int MaxUidsPerPoll = 100;
 
     private readonly MeilisearchSinkOptions _options;
     private readonly Func<HttpMessageHandler> _transport;
@@ -185,13 +189,13 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             if (!await IndexExistsAsync(client, config.Name, ct))
             {
                 var created = await client.CreateIndexAsync(config.Name, _options.PrimaryKey, ct);
-                await WaitAsync(index, created, ct);
+                await WaitAsync(client, created, ct);
             }
 
             if (config.Settings is not null)
             {
                 var updated = await index.UpdateSettingsAsync(config.Settings, ct);
-                await WaitAsync(index, updated, ct);
+                await WaitAsync(client, updated, ct);
             }
         }
     }
@@ -201,11 +205,11 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
     {
         var indexName = SinkDestination.Resolve(request, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
 
-        var index = CreateClient().Index(indexName);
+        var client = CreateClient();
         try
         {
-            var info = await index.DeleteAllDocumentsAsync(ct);
-            await WaitAsync(index, info, ct);
+            var info = await client.Index(indexName).DeleteAllDocumentsAsync(ct);
+            await WaitAsync(client, info, ct);
         }
         catch (Exception ex) when (IsIndexNotFound(ex))
         {
@@ -240,14 +244,20 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             var client = CreateClient();
             var groups = GroupByIndex(batch.Records);
 
-            // Index-level operations are independent; fan out across indexes in parallel.
-            // Within each index we still preserve the upsert-before-delete order.
-            var tasks = new Task[groups.Count];
+            // Indexes enqueue in parallel, then every task is awaited by a single poll loop, so the
+            // poll rate doesn't grow with the number of indexes in the batch.
+            var enqueues = new Task<List<EnqueuedTask>>[groups.Count];
             for (var i = 0; i < groups.Count; i++)
             {
-                tasks[i] = DispatchGroupAsync(client, groups[i], ct);
+                enqueues[i] = EnqueueGroupAsync(client, groups[i], ct);
             }
-            await Task.WhenAll(tasks);
+
+            var enqueued = new List<EnqueuedTask>();
+            foreach (var group in await Task.WhenAll(enqueues))
+            {
+                enqueued.AddRange(group);
+            }
+            await WaitAsync(client, enqueued, ct);
 
             return DeliveryResult.Success;
         }
@@ -290,17 +300,19 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             ? DeliveryResult.Permanent(description, exception)
             : DeliveryResult.Retry(description, exception);
 
-    private async Task DispatchGroupAsync(MeilisearchClient client, IndexGroup group, CancellationToken ct)
+    // Meilisearch applies an index's tasks in enqueue order, so enqueuing upserts before deletions is enough
+    // for a delete to win over an earlier upsert of the same document in the batch. Chunks keep each
+    // request payload well under Meilisearch's body limit.
+    private async Task<List<EnqueuedTask>> EnqueueGroupAsync(MeilisearchClient client, IndexGroup group, CancellationToken ct)
     {
         var index = client.Index(group.Index);
+        var enqueued = new List<EnqueuedTask>();
 
-        // Chunks keep each request payload well under Meilisearch's body limit; upserts complete before
-        // deletions so a delete always wins over an earlier upsert of the same document in the batch.
         for (var offset = 0; offset < group.Upserts.Count; offset += _options.MaxRecordsPerRequest)
         {
             var count = Math.Min(_options.MaxRecordsPerRequest, group.Upserts.Count - offset);
             var info = await index.AddDocumentsJsonAsync(WriteDocumentsJson(group.Upserts, offset, count), _options.PrimaryKey, ct);
-            await WaitAsync(index, info, ct);
+            enqueued.Add(new EnqueuedTask(info.TaskUid, IgnoreIndexNotFound: false));
         }
 
         for (var offset = 0; offset < group.Deletions.Count; offset += _options.MaxRecordsPerRequest)
@@ -309,16 +321,18 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
             try
             {
                 var info = await index.DeleteDocumentsAsync(group.Deletions.GetRange(offset, count), ct);
-                await WaitAsync(index, info, ct);
+                enqueued.Add(new EnqueuedTask(info.TaskUid, IgnoreIndexNotFound: true));
             }
             // Deletes don't auto-create the index (upserts do), so a delete-only batch to an index that
             // was never written has nothing to remove. Retrying can never create it; treating this as a
-            // failure would loop the whole batch forever.
-            catch (Exception ex) when (IsIndexNotFound(ex))
+            // failure would loop the whole batch forever. The same applies when the enqueued task fails.
+            catch (MeilisearchApiError ex) when (ex.Code == "index_not_found")
             {
                 break;
             }
         }
+
+        return enqueued;
     }
 
     // Documents are written with the shared reflection-free writer, so values encode exactly as the
@@ -345,24 +359,66 @@ public sealed class MeilisearchSink : ISink, ISinkInitializer, ISinkPurger
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
-    private async Task WaitAsync(global::Meilisearch.Index index, TaskInfo info, CancellationToken ct)
+    private Task WaitAsync(MeilisearchClient client, TaskInfo info, CancellationToken ct)
+        => WaitAsync(client, [new EnqueuedTask(info.TaskUid, IgnoreIndexNotFound: false)], ct);
+
+    // Every task is awaited to completion, so a batch is only reported delivered (and the LSN acked) once
+    // Meilisearch has actually applied it. All pending tasks are polled with one GET /tasks?uids= request
+    // per interval, and any failed task fails the wait.
+    private async Task WaitAsync(MeilisearchClient client, List<EnqueuedTask> tasks, CancellationToken ct)
     {
-        // Every task is awaited to completion, so a batch is only reported delivered (and the LSN acked)
-        // once Meilisearch has actually applied it.
-        var result = await index.WaitForTaskAsync(
-            info.TaskUid, _options.WaitTimeout.TotalMilliseconds, (int)_options.WaitInterval.TotalMilliseconds, ct);
-        if (result.Status is TaskInfoStatus.Failed or TaskInfoStatus.Canceled)
+        var pending = tasks.OrderBy(t => t.Uid).ToList();
+        var started = Stopwatch.GetTimestamp();
+
+        while (pending.Count > 0)
         {
-            string? code = null;
-            var detail = "(no detail)";
-            if (result.Error is not null)
+            // Bounds the query string; tasks finish in uid order, so the oldest pending ones go first.
+            var polled = pending.Take(MaxUidsPerPoll).ToList();
+            var page = await client.GetTasksAsync(
+                new TasksQuery { Uids = polled.ConvertAll(t => t.Uid), Limit = polled.Count }, ct);
+            var results = page.Results.ToDictionary(r => r.Uid);
+
+            foreach (var task in polled)
             {
-                result.Error.TryGetValue("code", out code);
-                detail = string.Join("; ", result.Error.Select(kv => $"{kv.Key}={kv.Value}"));
+                if (!results.TryGetValue(task.Uid, out var result)
+                    || result.Status is TaskInfoStatus.Enqueued or TaskInfoStatus.Processing)
+                {
+                    continue;
+                }
+
+                pending.Remove(task);
+                if (result.Status is TaskInfoStatus.Failed or TaskInfoStatus.Canceled)
+                {
+                    string? code = null;
+                    var detail = "(no detail)";
+                    if (result.Error is not null)
+                    {
+                        result.Error.TryGetValue("code", out code);
+                        detail = string.Join("; ", result.Error.Select(kv => $"{kv.Key}={kv.Value}"));
+                    }
+
+                    if (task.IgnoreIndexNotFound && code == "index_not_found")
+                    {
+                        continue;
+                    }
+                    throw new MeilisearchTaskFailedException(task.Uid, result.Status, code, detail);
+                }
             }
-            throw new MeilisearchTaskFailedException(info.TaskUid, result.Status, code, detail);
+
+            if (pending.Count == 0)
+            {
+                return;
+            }
+            if (Stopwatch.GetElapsedTime(started) >= _options.WaitTimeout)
+            {
+                throw new MeilisearchTimeoutError(
+                    $"{pending.Count} Meilisearch task(s) did not finish within {_options.WaitTimeout} (first pending: {pending[0].Uid}).");
+            }
+            await Task.Delay(_options.WaitInterval, ct);
         }
     }
+
+    private readonly record struct EnqueuedTask(int Uid, bool IgnoreIndexNotFound);
 
     private List<IndexGroup> GroupByIndex(IReadOnlyList<SinkRecord> records)
     {

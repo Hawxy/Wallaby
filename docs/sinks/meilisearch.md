@@ -91,8 +91,8 @@ The transform shapes each change into the document you want indexed; see
 | `ApiKey` | `null` | Master/write key; `null` for unsecured. |
 | `DefaultIndex` | `null` | Index used when a routed record has no destination. |
 | `PrimaryKey` | `id` | Document key field Wallaby injects into every document. |
-| `WaitTimeout` | `60s` | Max wait per indexing task (every task is awaited before the batch is acked). |
-| `WaitInterval` | `50ms` | Poll interval while waiting. |
+| `WaitTimeout` | `60s` | Max wait for a batch's indexing tasks (every task is awaited before the batch is acked). |
+| `WaitInterval` | `50ms` | Poll interval while waiting. All of a batch's tasks, across indexes, are checked in one request. |
 | `MaxRecordsPerRequest` | `500` | Max records per indexing request; larger batches split into sequential requests, keeping each payload under Meilisearch's body limit. |
 | `HttpClientName` | `null` | `IHttpClientFactory` client name to send through; `null` uses `MeilisearchSink.ClientNameFor(name)`. |
 | `ValidateConfiguredAttributes` | `true` | Check each upsert against its index's [configured attributes](#index-configuration); a document missing one fails delivery **permanently** instead of being silently indexed. |
