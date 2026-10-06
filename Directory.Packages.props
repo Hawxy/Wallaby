@@ -29,7 +29,7 @@
     <PackageVersion Include="Dekaf.Compression.Zstd" Version="1.13.0" />
     <PackageVersion Include="Dekaf.Compression.Snappy" Version="1.13.0" />
     <!-- Elasticsearch sink package -->
-    <PackageVersion Include="Elastic.Ingest.Elasticsearch" Version="0.51.1" />
+    <PackageVersion Include="Elastic.Ingest.Elasticsearch" Version="0.53.0" />
     <PackageVersion Include="Elastic.Transport" Version="0.17.3" />
     <!-- OpenSearch sink package -->
     <PackageVersion Include="OpenSearch.Client" Version="2.1.0" />
