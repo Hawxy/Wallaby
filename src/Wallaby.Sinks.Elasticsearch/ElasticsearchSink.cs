@@ -113,13 +113,13 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
                 // exactly as BulkJson.Write used to.
                 response = await _bulkSender.SendAsync(Slice(records, offset, count), ct);
             }
-            catch (Exception ex) when (ex is not WallabyConfigurationException)
-            {
-                return DeliveryResult.Permanent($"Elasticsearch bulk serialization failed: {ex.Message}", ex);
-            }
             catch (TransportException ex)
             {
                 return DeliveryResult.Retry($"Elasticsearch bulk request failed: {ex.Message}", ex);
+            }
+            catch (Exception ex) when (ex is not WallabyConfigurationException and not OperationCanceledException)
+            {
+                return DeliveryResult.Permanent($"Elasticsearch bulk serialization failed: {ex.Message}", ex);
             }
 
             var failure = ClassifyResponse(records, offset, count, response);

@@ -195,6 +195,26 @@ public class DeliveryTests
     }
 
     [Test]
+    public async Task Thrown_transport_exceptions_are_retryable()
+    {
+        // By default a bad response surfaces through ApiCallDetails.OriginalException without throwing
+        // (the case above). A caller's ConfigureConnection can opt into ThrowExceptions instead, in which
+        // case SendAsync throws TransportException directly; that must still classify as retryable, not
+        // fall through to the catch-all meant for serialization/mapping failures.
+        var invoker = new CapturingInvoker("""{"error":"unavailable"}""", 503);
+        var options = new ElasticsearchSinkOptions
+        {
+            Endpoint = "http://elasticsearch.local:9200",
+            ConfigureConnection = uri => new TransportConfiguration(new SingleNodePool(uri), invoker) { ThrowExceptions = true },
+        };
+        using var sink = new ElasticsearchSink(SinkName, options);
+
+        var result = await sink.DeliverAsync(Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
+    }
+
+    [Test]
     public async Task Record_without_a_resolvable_index_is_a_configuration_error_before_any_request()
     {
         var invoker = new CapturingInvoker(AllOk);
