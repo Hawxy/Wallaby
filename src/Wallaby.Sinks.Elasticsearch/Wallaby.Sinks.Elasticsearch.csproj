@@ -24,7 +24,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Elastic.Ingest.Elasticsearch" />
-    <PackageReference Include="Elastic.Transport" />
   </ItemGroup>
 
   <Import Project="../../Package.Build.props" />
