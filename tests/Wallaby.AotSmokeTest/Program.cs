@@ -15,6 +15,7 @@ using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.AotSmokeTest;
 using Wallaby.Sinks;
+using Wallaby.Sinks.Elasticsearch;
 using Wallaby.Sinks.Http;
 using Wallaby.Sinks.Http.Internal;
 using Wallaby.Sinks.Kafka;
@@ -256,6 +257,29 @@ Check("http and kafka envelopes write reflection-free and the sinks construct", 
     _ = new HttpSink("hook", new HttpSinkOptions { Endpoint = "http://localhost:8080/changes" }, new SmokeHttpClientFactory());
     var kafka = new KafkaSink("events", new KafkaSinkOptions { BootstrapServers = "localhost:9092" });
     kafka.DisposeAsync().AsTask().GetAwaiter().GetResult();
+});
+
+Check("elasticsearch bulk bodies write reflection-free and the sink constructs over Elastic.Ingest.Elasticsearch's transport", () =>
+{
+    var record = new SinkRecord(
+        Destination: "products",
+        DocumentId: "1",
+        Document: new WallabyDocument { ["name"] = "roo", ["day"] = new DateOnly(2024, 1, 2), ["raw"] = new byte[] { 1, 2 } },
+        IsDeletion: false,
+        Metadata: new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UnixEpoch, 27271208, 0, IsBackfill: false));
+
+    var buffer = new ArrayBufferWriter<byte>();
+    BulkJson.Write(buffer, "search", [record], 0, 1, defaultIndex: null, serializerOptions: null);
+    var bulk = Encoding.UTF8.GetString(buffer.WrittenSpan);
+    if (!bulk.Contains("\"_id\":\"1\"") || !bulk.Contains("\"day\":\"2024-01-02\"") || !bulk.Contains("\"raw\":\"AQI=\""))
+    {
+        throw new InvalidOperationException($"elasticsearch bulk body values not written natively: {bulk}");
+    }
+
+    // Construction validates options and builds the Elastic.Transport connection without connecting;
+    // the sink only depends on Elastic.Ingest.Elasticsearch's leaner, AOT-safe transport, not the full client.
+    var sink = new ElasticsearchSink("search", new ElasticsearchSinkOptions { Endpoint = "http://localhost:9200" });
+    sink.Dispose();
 });
 
 Check("tables capture plan derives and materializes a positional record", () =>

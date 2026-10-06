@@ -1,5 +1,4 @@
 using System.Text;
-using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Wallaby.Abstractions;
 using static Wallaby.Sinks.Elasticsearch.Tests.Unit.SinkTestHelpers;
@@ -47,7 +46,7 @@ public class DeliveryTests
         var options = new ElasticsearchSinkOptions
         {
             Endpoint = "http://elasticsearch.local:9200",
-            ConfigureConnection = uri => new ElasticsearchClientSettings(new SingleNodePool(uri), invoker),
+            ConfigureConnection = uri => new TransportConfiguration(new SingleNodePool(uri), invoker),
         };
         configure?.Invoke(options);
         return new ElasticsearchSink(SinkName, options);

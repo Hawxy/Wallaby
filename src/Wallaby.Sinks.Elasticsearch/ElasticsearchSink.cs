@@ -1,5 +1,4 @@
 using System.Buffers;
-using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Wallaby.Abstractions;
 using HttpMethod = Elastic.Transport.HttpMethod;
@@ -17,12 +16,12 @@ namespace Wallaby.Sinks.Elasticsearch;
 public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
 {
     private readonly ElasticsearchSinkOptions _options;
-    private readonly ElasticsearchClientSettings _settings;
-    private readonly ElasticsearchClient _client;
+    private readonly ITransportConfiguration _settings;
+    private readonly ITransport _transport;
 
     /// <summary>
     /// Creates a sink that delivers to the Elasticsearch cluster described by <paramref name="options"/>.
-    /// The underlying client (and its connection pool) is created once and reused for the lifetime of
+    /// The underlying transport (and its connection pool) is created once and reused for the lifetime of
     /// the sink.
     /// </summary>
     /// <param name="name">The sink's registration name (used for routing, telemetry, and test replacement).</param>
@@ -38,12 +37,12 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
         _settings = options.ConfigureConnection is not null
             ? options.ConfigureConnection(endpoint)
             : BuildSettings(endpoint, options);
-        _client = new ElasticsearchClient(_settings);
+        _transport = new DistributedTransport(_settings);
     }
 
-    private static ElasticsearchClientSettings BuildSettings(Uri endpoint, ElasticsearchSinkOptions options)
+    private static ITransportConfiguration BuildSettings(Uri endpoint, ElasticsearchSinkOptions options)
     {
-        var settings = new ElasticsearchClientSettings(endpoint);
+        var settings = new TransportConfigurationDescriptor(endpoint);
         if (options.ApiKey is not null)
         {
             settings.Authentication(new ApiKey(options.ApiKey));
@@ -98,7 +97,7 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
         var index = SinkDestination.Resolve(request, _options.DefaultIndex, Name, nameof(_options.DefaultIndex));
         var path = $"/{Uri.EscapeDataString(index)}/_delete_by_query?conflicts=proceed&refresh=true";
 
-        var response = await _client.Transport.RequestAsync<BytesResponse>(
+        var response = await _transport.RequestAsync<BytesResponse>(
             new EndpointPath(HttpMethod.POST, path), PostData.ReadOnlyMemory(BulkJson.MatchAllQuery), null, RequestConfig(), ct);
 
         var status = response.ApiCallDetails.HttpStatusCode;
@@ -129,7 +128,7 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
         BytesResponse response;
         try
         {
-            response = await _client.Transport.RequestAsync<BytesResponse>(
+            response = await _transport.RequestAsync<BytesResponse>(
                 new EndpointPath(HttpMethod.POST, path), PostData.ReadOnlyMemory(payload), null, RequestConfig(), ct);
         }
         catch (TransportException ex)
@@ -168,5 +167,5 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
     }
 
     /// <inheritdoc />
-    public void Dispose() => ((IDisposable)_settings).Dispose();
+    public void Dispose() => _settings.Dispose();
 }

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Elastic.Clients.Elasticsearch;
+using Elastic.Transport;
 
 namespace Wallaby.Sinks.Elasticsearch;
 
@@ -22,12 +22,12 @@ public sealed class ElasticsearchSinkOptions
     public string? ApiKey { get; set; }
 
     /// <summary>
-    /// Full override for building the client's settings from <see cref="Endpoint"/>: use it for Elastic
+    /// Full override for building the transport's settings from <see cref="Endpoint"/>: use it for Elastic
     /// Cloud ids, certificate fingerprints, client certificates, connection pools, or proxies. When set,
     /// <see cref="Username"/>/<see cref="Password"/>/<see cref="ApiKey"/> must be left unset (configure
     /// authentication on the returned settings); <see cref="Timeout"/> still applies per request.
     /// </summary>
-    public Func<Uri, ElasticsearchClientSettings>? ConfigureConnection { get; set; }
+    public Func<Uri, ITransportConfiguration>? ConfigureConnection { get; set; }
 
     /// <summary>Default index used when a routed record has no explicit destination.</summary>
     public string? DefaultIndex { get; set; }

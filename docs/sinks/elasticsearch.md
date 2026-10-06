@@ -11,6 +11,11 @@ replication and delivers them through the `_bulk` API: upserts are indexed with 
 stable document id (so updates are idempotent) and deletions remove by that same id. No polling, no
 dual writes, no reindex script. It works with self-managed Elasticsearch and Elastic Cloud.
 
+The sink talks to Elasticsearch through
+[`Elastic.Ingest.Elasticsearch`](https://github.com/elastic/elastic-ingest-dotnet), a lean transport
+built for exactly this kind of bulk ingestion, rather than the full `Elastic.Clients.Elasticsearch`
+client — so the sink is NativeAOT-safe (see [below](#nativeaot)).
+
 ## Quickstart
 
 ```bash
@@ -89,12 +94,12 @@ The transform shapes each change into the document you want indexed; see
 | `Endpoint` | *(required)* | Elasticsearch base URL. |
 | `ApiKey` | `null` | Base64 API key (as issued by Kibana or Elastic Cloud). |
 | `Username` / `Password` | `null` | Basic auth; mutually exclusive with `ApiKey`. |
-| `ConfigureConnection` | `null` | Full override for the client's settings ([see below](#authentication)). |
+| `ConfigureConnection` | `null` | Full override for the transport's settings ([see below](#authentication)). |
 | `DefaultIndex` | `null` | Index used when a routed record has no destination; a record with neither fails permanently. |
 | `MaxRecordsPerRequest` | `500` | Records per `_bulk` request; larger batches are split into sequential requests, preserving commit order. |
 | `Timeout` | `30s` | Per-request timeout. |
 | `Refresh` | `false` | When true, bulk requests use `refresh=wait_for` so documents are searchable before the batch is acknowledged. |
-| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (numbers, strings, dates, `byte[]`, vectors). |
+| `SerializerOptions` | `null` | Serializer for document values beyond the natively written scalar types (numbers, strings, dates, `byte[]`, vectors; required for such values on NativeAOT hosts — [see below](#nativeaot)). |
 
 ## Indices
 
@@ -139,25 +144,46 @@ See [RAG & Embeddings](/rag).
 
 `ApiKey` or `Username`/`Password` cover the common schemes. For anything else (Elastic Cloud ids,
 certificate fingerprints, client certificates, connection pools, proxies), take over construction of
-the client's settings with `ConfigureConnection`:
+the transport's settings with `ConfigureConnection`, returning any `Elastic.Transport.ITransportConfiguration`
+(typically a `TransportConfigurationDescriptor`):
 
 ```csharp
 // Self-managed cluster with the self-signed certificate Elasticsearch generates on setup:
 cdc.AddElasticsearchSink("search", s =>
 {
     s.Endpoint = "https://localhost:9200";
-    s.ConfigureConnection = uri => new ElasticsearchClientSettings(uri)
+    s.ConfigureConnection = uri => new TransportConfigurationDescriptor(uri)
         .CertificateFingerprint("A1:B2:...")   // printed during cluster setup
         .Authentication(new ApiKey(apiKey));
 });
 
 // Elastic Cloud (the cloud id encodes the endpoint, so the uri argument is unused):
-s.ConfigureConnection = _ => new ElasticsearchClientSettings(cloudId, new ApiKey(apiKey));
+s.ConfigureConnection = _ => new TransportConfigurationDescriptor(cloudId, new ApiKey(apiKey));
 ```
 
-When `ConfigureConnection` is set, leave `ApiKey`, `Username` and `Password` unset (registration
-fails otherwise) and configure authentication on the returned settings. `Timeout` still applies per
-request.
+`TransportConfigurationDescriptor` and the credential types (`ApiKey`, `BasicAuthentication`) live in
+`Elastic.Transport`, a transitive dependency of `Wallaby.Sinks.Elasticsearch`. When `ConfigureConnection`
+is set, leave `ApiKey`, `Username` and `Password` unset (registration fails otherwise) and configure
+authentication on the returned settings. `Timeout` still applies per request.
+
+## NativeAOT
+
+The sink depends on [`Elastic.Ingest.Elasticsearch`](https://github.com/elastic/elastic-ingest-dotnet)
+rather than the full `Elastic.Clients.Elasticsearch` client, and is marked `IsAotCompatible`: no
+reflection-based client serialization sits between your transform and the `_bulk` wire format.
+
+Bulk bodies are written without reflection for strings, numbers, booleans, `Guid`, date/time types,
+byte arrays (as base64), `ReadOnlyMemory<float>`/`float[]` vectors (as number arrays), nested
+dictionaries, and sequences of these. Any other document value type is serialized through
+`SerializerOptions`. On trimmed/NativeAOT hosts, point it at a source-generated context covering the
+types your transforms emit:
+
+```csharp
+s.SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = MyJsonContext.Default };
+```
+
+Without it, non-scalar values fall back to reflection-based serialization (fine on JIT hosts) and fail
+delivery permanently on AOT with an error naming the offending field.
 
 ## Purging
 
