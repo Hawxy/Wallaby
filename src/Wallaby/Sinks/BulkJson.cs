@@ -5,8 +5,8 @@ using Wallaby.Abstractions;
 namespace Wallaby.Sinks;
 
 /// <summary>
-/// The <c>_bulk</c> API dialect shared by Elasticsearch and OpenSearch (used by both sinks, and
-/// available to custom sinks): NDJSON request bodies and per-item response classification. A body is
+/// The <c>_bulk</c> API dialect shared by Elasticsearch and OpenSearch (and available to custom
+/// sinks): NDJSON request bodies and per-item response classification. A body is
 /// an action line (<c>index</c>/<c>delete</c> with <c>_index</c> and <c>_id</c>) followed by the
 /// document line for upserts; document values are written by <see cref="SinkEnvelopeJson"/>.
 /// </summary>
@@ -82,9 +82,6 @@ public static class BulkJson
             return DeliveryResult.Retry($"{sinkDisplayName} returned an empty bulk response body.");
         }
 
-        int retryable = 0, permanent = 0;
-        string? firstPermanent = null;
-
         try
         {
             using var doc = JsonDocument.Parse(body);
@@ -93,32 +90,41 @@ public static class BulkJson
                 return null;
             }
 
-            foreach (var wrapper in doc.RootElement.GetProperty("items").EnumerateArray())
-            {
-                // Each item is an object with a single property named after the action ("index"/"delete").
-                foreach (var action in wrapper.EnumerateObject())
-                {
-                    var status = action.Value.GetProperty("status").GetInt32();
-                    if (status < 300 || (status == 404 && action.Name == "delete"))
-                    {
-                        continue;
-                    }
-
-                    if (status is 408 or 429 or >= 500)
-                    {
-                        retryable++;
-                    }
-                    else
-                    {
-                        permanent++;
-                        firstPermanent ??= DescribeItem(action.Value, status);
-                    }
-                }
-            }
+            var items = ParseItems(doc.RootElement.GetProperty("items"));
+            return ClassifyItems(items, sinkDisplayName);
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
             return DeliveryResult.Retry($"{sinkDisplayName} returned an unrecognized bulk response: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Classify already-parsed bulk response items with the same rules as
+    /// <see cref="ClassifyItems(ReadOnlyMemory{byte}, string)"/>, for sinks whose client returns typed items.
+    /// Null when every action applied.
+    /// </summary>
+    public static DeliveryResult? ClassifyItems(IEnumerable<BulkItemResult> items, string sinkDisplayName)
+    {
+        int retryable = 0, permanent = 0;
+        string? firstPermanent = null;
+
+        foreach (var item in items)
+        {
+            if (item.Status < 300 || (item.Status == 404 && item.Action == "delete"))
+            {
+                continue;
+            }
+
+            if (item.Status is 408 or 429 or >= 500)
+            {
+                retryable++;
+            }
+            else
+            {
+                permanent++;
+                firstPermanent ??= $"_id '{item.Id}' failed with {item.Status} ({item.Error ?? "no detail"})";
+            }
         }
 
         return permanent > 0
@@ -161,16 +167,36 @@ public static class BulkJson
         }
     }
 
-    private static string DescribeItem(JsonElement action, int status)
+    private static IEnumerable<BulkItemResult> ParseItems(JsonElement items)
     {
-        var id = action.TryGetProperty("_id", out var idElement) ? idElement.GetString() : null;
-        string? error = null;
-        if (action.TryGetProperty("error", out var errorElement) && errorElement.ValueKind == JsonValueKind.Object)
+        foreach (var wrapper in items.EnumerateArray())
         {
-            var type = errorElement.TryGetProperty("type", out var t) ? t.GetString() : null;
-            var reason = errorElement.TryGetProperty("reason", out var r) ? r.GetString() : null;
-            error = $"{type}: {reason}";
+            // Each item is an object with a single property named after the action ("index"/"delete").
+            foreach (var action in wrapper.EnumerateObject())
+            {
+                var status = action.Value.GetProperty("status").GetInt32();
+                if (status < 300)
+                {
+                    // Applied items skip the name, id and error reads, so they allocate nothing.
+                    yield return new BulkItemResult("", status, null, null);
+                    continue;
+                }
+
+                var id = action.Value.TryGetProperty("_id", out var idElement) ? idElement.GetString() : null;
+                var error = DescribeError(action.Value);
+                yield return new BulkItemResult(action.Name, status, id, error);
+            }
         }
-        return $"_id '{id}' failed with {status} ({error ?? "no detail"})";
+    }
+
+    private static string? DescribeError(JsonElement action)
+    {
+        if (!action.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        var type = error.TryGetProperty("type", out var t) ? t.GetString() : null;
+        var reason = error.TryGetProperty("reason", out var r) ? r.GetString() : null;
+        return $"{type}: {reason}";
     }
 }

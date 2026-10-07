@@ -62,8 +62,6 @@ public class DeliveryTests
             Batch(Upsert("1", new Dictionary<string, object?> { ["name"] = "alpha" })), CancellationToken.None);
 
         result.Status.ShouldBe(DeliveryStatus.Success);
-        // BulkSender's fixed path has no leading slash and carries its own filter_path, unlike the raw
-        // "/_bulk" path the sink built by hand before adopting it.
         invoker.Urls.Single().ShouldStartWith("_bulk");
         invoker.Payloads.Single().ShouldContain("\"_id\":\"1\"");
     }
@@ -124,9 +122,7 @@ public class DeliveryTests
     [Test]
     public async Task Item_level_mapping_rejection_is_permanent_with_detail()
     {
-        // BulkResponseItem carries no _id (unlike the raw JSON items BulkJson.ClassifyItems used to parse),
-        // so the failing record's id is recovered positionally: response.Items[i] is guaranteed to line up
-        // with the i-th sent record. The batch below must match the response item-for-item for that reason.
+        // Response items line up positionally with the sent records, so each batch matches its response item-for-item.
         const string body = """
             {"took":1,"errors":true,"items":[
               {"index":{"_index":"products","_id":"1","status":201}},
@@ -178,7 +174,9 @@ public class DeliveryTests
             """;
         using var sink = Sink(new CapturingInvoker(body));
 
-        var result = await sink.DeliverAsync(Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
+        var result = await sink.DeliverAsync(Batch(
+            Upsert("1", new Dictionary<string, object?>()),
+            Upsert("2", new Dictionary<string, object?>())), CancellationToken.None);
 
         result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
     }

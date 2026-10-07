@@ -26,9 +26,7 @@ publication, so adding a second destination costs no extra load on Postgres.
 | [HTTP](/sinks/http) | `Wallaby.Sinks.Http` | Anything that exposes an endpoint | yes |
 | [Custom](/sinks/custom) | n/a | Everything else | your call |
 
-Meilisearch and OpenSearch depend on client SDKs that are not trim- or NativeAOT-safe.
-Elasticsearch is built on [`Elastic.Ingest.Elasticsearch`](https://github.com/elastic/elastic-ingest-dotnet),
-a lean, AOT-safe transport, rather than the full `Elastic.Clients.Elasticsearch` client. All other
+Meilisearch and OpenSearch depend on client SDKs that are not trim- or NativeAOT-safe. All other
 packages are marked `IsAotCompatible`. See each page's NativeAOT section for the `SerializerOptions`
 a trimmed host needs.
 
