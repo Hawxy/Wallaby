@@ -95,7 +95,7 @@ public class RegistrationTests
         Should.Throw<WallabyConfigurationException>(() => builder.AddElasticsearchSink("search", o =>
         {
             o.Endpoint = "http://elasticsearch.local:9200";
-            o.ConfigureConnection = uri => new global::Elastic.Clients.Elasticsearch.ElasticsearchClientSettings(uri);
+            o.ConfigureConnection = uri => new global::Elastic.Transport.TransportConfiguration(uri);
             o.ApiKey = "key";
         })).Message.ShouldContain("ConfigureConnection");
     }

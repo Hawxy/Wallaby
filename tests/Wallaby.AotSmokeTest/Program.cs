@@ -10,11 +10,13 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Marten;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
 using Wallaby.AotSmokeTest;
 using Wallaby.Sinks;
+using Wallaby.Sinks.Elasticsearch;
 using Wallaby.Sinks.Http;
 using Wallaby.Sinks.Http.Internal;
 using Wallaby.Sinks.Kafka;
@@ -256,6 +258,36 @@ Check("http and kafka envelopes write reflection-free and the sinks construct", 
     _ = new HttpSink("hook", new HttpSinkOptions { Endpoint = "http://localhost:8080/changes" }, new SmokeHttpClientFactory());
     var kafka = new KafkaSink("events", new KafkaSinkOptions { BootstrapServers = "localhost:9092" });
     kafka.DisposeAsync().AsTask().GetAwaiter().GetResult();
+});
+
+Check("elasticsearch bulk bodies write reflection-free via BulkDocumentBodyConverter and the sink constructs over Elastic.Ingest.Elasticsearch's transport", () =>
+{
+    var body = new BulkDocumentBody("1", new WallabyDocument { ["name"] = "roo", ["day"] = new DateOnly(2024, 1, 2), ["raw"] = new byte[] { 1, 2 } });
+
+    // Mirrors exactly what ElasticsearchSink's constructor builds: a converter-only JsonTypeInfo<TBody>
+    // via JsonMetadataServices, with no reflection-based TypeInfoResolver, so this proves the same
+    // construction path the sink depends on stays reflection-free under trimming/AOT.
+    var bodyTypeInfo = JsonMetadataServices.CreateValueInfo<BulkDocumentBody>(
+        new JsonSerializerOptions { TypeInfoResolver = JsonTypeInfoResolver.Combine() },
+        new BulkDocumentBodyConverter(serializerOptions: null));
+
+    var buffer = new ArrayBufferWriter<byte>();
+    using (var writer = new Utf8JsonWriter(buffer))
+    {
+        JsonSerializer.Serialize(writer, body, bodyTypeInfo);
+    }
+    // _id isn't part of the body: BulkSender's own NDJSON writer carries it on the action line
+    // (from the BulkAction the sink resolves), the document line only ever had the document's fields.
+    var json = Encoding.UTF8.GetString(buffer.WrittenSpan);
+    if (!json.Contains("\"day\":\"2024-01-02\"") || !json.Contains("\"raw\":\"AQI=\""))
+    {
+        throw new InvalidOperationException($"elasticsearch bulk body values not written natively: {json}");
+    }
+
+    // Construction validates options and builds the Elastic.Transport connection without connecting;
+    // the sink only depends on Elastic.Ingest.Elasticsearch's leaner, AOT-safe transport, not the full client.
+    var sink = new ElasticsearchSink("search", new ElasticsearchSinkOptions { Endpoint = "http://localhost:9200" });
+    sink.Dispose();
 });
 
 Check("tables capture plan derives and materializes a positional record", () =>

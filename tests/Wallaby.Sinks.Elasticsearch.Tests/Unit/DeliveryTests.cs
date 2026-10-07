@@ -1,5 +1,4 @@
 using System.Text;
-using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Wallaby.Abstractions;
 using static Wallaby.Sinks.Elasticsearch.Tests.Unit.SinkTestHelpers;
@@ -47,7 +46,7 @@ public class DeliveryTests
         var options = new ElasticsearchSinkOptions
         {
             Endpoint = "http://elasticsearch.local:9200",
-            ConfigureConnection = uri => new ElasticsearchClientSettings(new SingleNodePool(uri), invoker),
+            ConfigureConnection = uri => new TransportConfiguration(new SingleNodePool(uri), invoker),
         };
         configure?.Invoke(options);
         return new ElasticsearchSink(SinkName, options);
@@ -63,7 +62,9 @@ public class DeliveryTests
             Batch(Upsert("1", new Dictionary<string, object?> { ["name"] = "alpha" })), CancellationToken.None);
 
         result.Status.ShouldBe(DeliveryStatus.Success);
-        invoker.Urls.Single().ShouldStartWith("/_bulk");
+        // BulkSender's fixed path has no leading slash and carries its own filter_path, unlike the raw
+        // "/_bulk" path the sink built by hand before adopting it.
+        invoker.Urls.Single().ShouldStartWith("_bulk");
         invoker.Payloads.Single().ShouldContain("\"_id\":\"1\"");
     }
 
@@ -123,6 +124,9 @@ public class DeliveryTests
     [Test]
     public async Task Item_level_mapping_rejection_is_permanent_with_detail()
     {
+        // BulkResponseItem carries no _id (unlike the raw JSON items BulkJson.ClassifyItems used to parse),
+        // so the failing record's id is recovered positionally: response.Items[i] is guaranteed to line up
+        // with the i-th sent record. The batch below must match the response item-for-item for that reason.
         const string body = """
             {"took":1,"errors":true,"items":[
               {"index":{"_index":"products","_id":"1","status":201}},
@@ -130,7 +134,9 @@ public class DeliveryTests
             """;
         using var sink = Sink(new CapturingInvoker(body));
 
-        var result = await sink.DeliverAsync(Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
+        var result = await sink.DeliverAsync(Batch(
+            Upsert("1", new Dictionary<string, object?>()),
+            Upsert("2", new Dictionary<string, object?>())), CancellationToken.None);
 
         result.Status.ShouldBe(DeliveryStatus.PermanentFailure);
         result.Error!.ShouldContain("mapper_parsing_exception");
@@ -186,6 +192,26 @@ public class DeliveryTests
 
         result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
         result.Error!.ShouldContain("connection refused");
+    }
+
+    [Test]
+    public async Task Thrown_transport_exceptions_are_retryable()
+    {
+        // By default a bad response surfaces through ApiCallDetails.OriginalException without throwing
+        // (the case above). A caller's ConfigureConnection can opt into ThrowExceptions instead, in which
+        // case SendAsync throws TransportException directly; that must still classify as retryable, not
+        // fall through to the catch-all meant for serialization/mapping failures.
+        var invoker = new CapturingInvoker("""{"error":"unavailable"}""", 503);
+        var options = new ElasticsearchSinkOptions
+        {
+            Endpoint = "http://elasticsearch.local:9200",
+            ConfigureConnection = uri => new TransportConfiguration(new SingleNodePool(uri), invoker) { ThrowExceptions = true },
+        };
+        using var sink = new ElasticsearchSink(SinkName, options);
+
+        var result = await sink.DeliverAsync(Batch(Upsert("1", new Dictionary<string, object?>())), CancellationToken.None);
+
+        result.Status.ShouldBe(DeliveryStatus.RetryableFailure);
     }
 
     [Test]
