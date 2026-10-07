@@ -1,10 +1,7 @@
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using Elastic.Ingest.Elasticsearch.Bulk;
 using Elastic.Ingest.Elasticsearch.Serialization;
 using Elastic.Transport;
 using Wallaby.Abstractions;
-using Wallaby.Sinks;
 using HttpMethod = Elastic.Transport.HttpMethod;
 
 namespace Wallaby.Sinks.Elasticsearch;
@@ -22,7 +19,7 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
     private readonly ElasticsearchSinkOptions _options;
     private readonly ITransportConfiguration _settings;
     private readonly ITransport _transport;
-    private readonly BulkSender<SinkRecord, BulkDocumentBody> _bulkSender;
+    private readonly BulkSender<SinkRecord, SinkRecord> _bulkSender;
 
     /// <summary>
     /// Creates a sink that delivers to the Elasticsearch cluster described by <paramref name="options"/>.
@@ -43,30 +40,14 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
             ? options.ConfigureConnection(endpoint)
             : BuildSettings(endpoint, options);
         _transport = new DistributedTransport(_settings);
-
-        // A custom JsonConverter<BulkDocumentBody> is the bridge between BulkSender's static
-        // JsonTypeInfo<TBody> contract and the sink's dynamic per-record field bag: the converter just
-        // delegates to the same reflection-free SinkEnvelopeJson.WriteDocument the sink always used.
-        // ApplyLibrarySerializerDefaults is disabled because its re-resolution path
-        // (copy.GetTypeInfo(typeof(TBody))) assumes a resolver-backed JsonSerializerOptions, which this
-        // converter-only JsonTypeInfo does not have.
-        // A dedicated, empty-resolver options instance, independent of options.SerializerOptions: STJ requires
-        // *some* non-null TypeInfoResolver before a JsonTypeInfo can be used, even when (as here) a converter
-        // is supplied directly and the resolver itself is never consulted. JsonTypeInfoResolver.Combine()
-        // with no arguments satisfies that without pulling in reflection or touching the caller's own options
-        // object (which BulkDocumentBodyConverter still receives separately, for SinkEnvelopeJson's fallback).
-        var bodyTypeInfo = JsonMetadataServices.CreateValueInfo<BulkDocumentBody>(
-            new JsonSerializerOptions { TypeInfoResolver = JsonTypeInfoResolver.Combine() },
-            new BulkDocumentBodyConverter(options.SerializerOptions));
-
-        _bulkSender = new BulkSender<SinkRecord, BulkDocumentBody>(new BulkSenderOptions<SinkRecord, BulkDocumentBody>
+        _bulkSender = new BulkSender<SinkRecord, SinkRecord>(new BulkSenderOptions<SinkRecord, SinkRecord>
         {
             Transport = _transport,
             Action = ResolveAction,
-            Body = r => new BulkDocumentBody(r.DocumentId, r.Document!),
-            BodyTypeInfo = bodyTypeInfo,
+            Body = static r => r,
+            BodyTypeInfo = BulkDocumentConverter.CreateTypeInfo(options.SerializerOptions),
             Retry = BulkRetryPolicy.None, // Wallaby's SinkDispatcher owns retry/backoff; one request per call.
-            ApplyLibrarySerializerDefaults = false,
+            ApplyLibrarySerializerDefaults = false, // The defaults re-resolve the body type, which needs a real resolver.
             Refresh = options.Refresh ? BulkRefresh.WaitFor : null,
             RequestTimeout = options.Timeout,
         });
@@ -98,20 +79,14 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
     /// <inheritdoc />
     public async Task<DeliveryResult> DeliverAsync(SinkBatch batch, CancellationToken ct)
     {
-        var records = batch.Records;
-
         // Chunks are sent sequentially so commit order is preserved across requests.
-        for (var offset = 0; offset < records.Count; offset += _options.MaxRecordsPerRequest)
+        foreach (var chunk in batch.Records.Chunk(_options.MaxRecordsPerRequest))
         {
-            var count = Math.Min(_options.MaxRecordsPerRequest, records.Count - offset);
-
             BulkResponse response;
             try
             {
-                // BulkSender.SendAsync serializes synchronously, so a record whose document value the
-                // body converter can't encode (or an unresolvable destination) throws from this call,
-                // exactly as BulkJson.Write used to.
-                response = await _bulkSender.SendAsync(Slice(records, offset, count), ct);
+                // Serialization runs synchronously, so an unencodable value or unresolvable destination throws here.
+                response = await _bulkSender.SendAsync(chunk, ct);
             }
             catch (TransportException ex)
             {
@@ -122,7 +97,7 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
                 return DeliveryResult.Permanent($"Elasticsearch bulk serialization failed: {ex.Message}", ex);
             }
 
-            var failure = ClassifyResponse(records, offset, count, response);
+            var failure = ClassifyResponse(chunk, response);
             if (failure is not null)
             {
                 return failure;
@@ -132,16 +107,8 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
         return DeliveryResult.Success;
     }
 
-    private static IEnumerable<SinkRecord> Slice(IReadOnlyList<SinkRecord> records, int offset, int count)
-    {
-        for (var i = offset; i < offset + count; i++)
-        {
-            yield return records[i];
-        }
-    }
-
     /// <summary>Classify one chunk's bulk response; null on success, otherwise the classified failure.</summary>
-    private static DeliveryResult? ClassifyResponse(IReadOnlyList<SinkRecord> records, int offset, int count, BulkResponse response)
+    private static DeliveryResult? ClassifyResponse(SinkRecord[] chunk, BulkResponse response)
     {
         var status = response.ApiCallDetails.HttpStatusCode;
         if (status is null)
@@ -170,59 +137,23 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
                 response.ApiCallDetails.OriginalException);
         }
 
-        return ClassifyItems(records, offset, count, response);
-    }
-
-    /// <summary>
-    /// Classify a 2xx bulk response: per-item failures are reported under <see cref="BulkResponse.Errors"/>/
-    /// <see cref="BulkResponse.Items"/>, which line up positionally with the sent records (guaranteed by
-    /// <see cref="BulkSender{TItem,TBody}"/>, even if a retry policy were enabled). Deleting an already-absent
-    /// document is success (deletes are idempotent under at-least-once delivery); throttling/server item
-    /// failures are retryable (re-sending the whole chunk is safe; actions are idempotent by <c>_id</c>); other
-    /// item rejections (mapping/parse) are permanent. A permanent item outweighs retryable ones. Null when
-    /// every action applied.
-    /// </summary>
-    private static DeliveryResult? ClassifyItems(IReadOnlyList<SinkRecord> records, int offset, int count, BulkResponse response)
-    {
         if (response.Errors is not true || response.Items is null)
         {
             return null;
         }
 
-        int retryable = 0, permanent = 0;
-        string? firstPermanent = null;
-        var i = 0;
-        foreach (var item in response.Items)
+        var items = ToItemResults(response.Items, chunk);
+        return BulkJson.ClassifyItems(items, "Elasticsearch");
+    }
+
+    private static IEnumerable<BulkItemResult> ToItemResults(IEnumerable<BulkResponseItem> items, SinkRecord[] chunk)
+    {
+        // Response items line up positionally with the sent records, which supply the ids failure messages name.
+        foreach (var (item, record) in items.Zip(chunk))
         {
-            var status = item.Status;
-            var isDelete = item.Action == "delete";
-            if (status < 300 || (status == 404 && isDelete))
-            {
-                i++;
-                continue;
-            }
-
-            if (status is 408 or 429 or >= 500)
-            {
-                retryable++;
-            }
-            else
-            {
-                permanent++;
-                if (firstPermanent is null)
-                {
-                    var id = i < count ? records[offset + i].DocumentId : "?";
-                    firstPermanent = $"_id '{id}' failed with {status} ({item.Error?.ToString() ?? "no detail"})";
-                }
-            }
-            i++;
+            var error = item.Error is { } cause ? $"{cause.Type}: {cause.Reason}" : null;
+            yield return new BulkItemResult(item.Action, item.Status, record.DocumentId, error);
         }
-
-        return permanent > 0
-            ? DeliveryResult.Permanent($"Elasticsearch rejected {permanent} bulk action(s); first: {firstPermanent}")
-            : retryable > 0
-                ? DeliveryResult.Retry($"Elasticsearch reported {retryable} retryable bulk action failure(s).")
-                : null;
     }
 
     /// <inheritdoc />

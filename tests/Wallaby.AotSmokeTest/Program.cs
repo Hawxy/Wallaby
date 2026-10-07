@@ -10,7 +10,6 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 using Marten;
 using NpgsqlTypes;
 using Wallaby.Abstractions;
@@ -260,32 +259,28 @@ Check("http and kafka envelopes write reflection-free and the sinks construct", 
     kafka.DisposeAsync().AsTask().GetAwaiter().GetResult();
 });
 
-Check("elasticsearch bulk bodies write reflection-free via BulkDocumentBodyConverter and the sink constructs over Elastic.Ingest.Elasticsearch's transport", () =>
+Check("elasticsearch bulk documents write reflection-free and the sink constructs", () =>
 {
-    var body = new BulkDocumentBody("1", new WallabyDocument { ["name"] = "roo", ["day"] = new DateOnly(2024, 1, 2), ["raw"] = new byte[] { 1, 2 } });
+    var record = new SinkRecord(
+        Destination: "products",
+        DocumentId: "1",
+        Document: new WallabyDocument { ["name"] = "roo", ["day"] = new DateOnly(2024, 1, 2), ["raw"] = new byte[] { 1, 2 } },
+        IsDeletion: false,
+        Metadata: new ChangeMetadata("public", "products", ChangeAction.Insert, DateTimeOffset.UnixEpoch, 27271208, 0, IsBackfill: false));
 
-    // Mirrors exactly what ElasticsearchSink's constructor builds: a converter-only JsonTypeInfo<TBody>
-    // via JsonMetadataServices, with no reflection-based TypeInfoResolver, so this proves the same
-    // construction path the sink depends on stays reflection-free under trimming/AOT.
-    var bodyTypeInfo = JsonMetadataServices.CreateValueInfo<BulkDocumentBody>(
-        new JsonSerializerOptions { TypeInfoResolver = JsonTypeInfoResolver.Combine() },
-        new BulkDocumentBodyConverter(serializerOptions: null));
-
+    var typeInfo = BulkDocumentConverter.CreateTypeInfo(serializerOptions: null);
     var buffer = new ArrayBufferWriter<byte>();
     using (var writer = new Utf8JsonWriter(buffer))
     {
-        JsonSerializer.Serialize(writer, body, bodyTypeInfo);
+        JsonSerializer.Serialize(writer, record, typeInfo);
     }
-    // _id isn't part of the body: BulkSender's own NDJSON writer carries it on the action line
-    // (from the BulkAction the sink resolves), the document line only ever had the document's fields.
     var json = Encoding.UTF8.GetString(buffer.WrittenSpan);
     if (!json.Contains("\"day\":\"2024-01-02\"") || !json.Contains("\"raw\":\"AQI=\""))
     {
-        throw new InvalidOperationException($"elasticsearch bulk body values not written natively: {json}");
+        throw new InvalidOperationException($"elasticsearch bulk document values not written natively: {json}");
     }
 
-    // Construction validates options and builds the Elastic.Transport connection without connecting;
-    // the sink only depends on Elastic.Ingest.Elasticsearch's leaner, AOT-safe transport, not the full client.
+    // Construction validates options and builds the transport without connecting.
     var sink = new ElasticsearchSink("search", new ElasticsearchSinkOptions { Endpoint = "http://localhost:9200" });
     sink.Dispose();
 });

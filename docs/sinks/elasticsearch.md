@@ -7,14 +7,14 @@ description: "Keep Elasticsearch indices in sync with Postgres from C#: bulk ups
 
 Keep Elasticsearch indices in sync with Postgres from your .NET application. The
 `Wallaby.Sinks.Elasticsearch` package streams committed row changes out of Postgres logical
-replication and delivers them through the `_bulk` API: upserts are indexed with `_id` set to a
-stable document id (so updates are idempotent) and deletions remove by that same id. No polling, no
-dual writes, no reindex script. It works with self-managed Elasticsearch and Elastic Cloud.
+replication and delivers them through the `_bulk` API. Upserts are indexed with `_id` set to a
+stable document id (so updates are idempotent) and deletions remove by that same id. 
+This sink works with both self-managed Elasticsearch and Elastic Cloud.
 
 The sink talks to Elasticsearch through
 [`Elastic.Ingest.Elasticsearch`](https://github.com/elastic/elastic-ingest-dotnet), a lean transport
-built for exactly this kind of bulk ingestion, rather than the full `Elastic.Clients.Elasticsearch`
-client — so the sink is NativeAOT-safe (see [below](#nativeaot)).
+built for this kind of bulk ingestion, rather than the full `Elastic.Clients.Elasticsearch`
+client.
 
 ## Quickstart
 
@@ -107,7 +107,7 @@ The sink doesn't create or configure indices. An index is created automatically 
 dynamic mapping, as long as the cluster's `action.auto_create_index` setting allows it (it does by
 default). For explicit settings or mappings (analyzers, `dense_vector` fields, shard counts, …),
 create the index up front with Kibana Dev Tools, your infrastructure tooling, or a deployment script.
-In-sink index bootstrapping is planned.
+In-sink index bootstrapping might be implemented in the future.
 
 ## Vector search
 
@@ -167,10 +167,6 @@ is set, leave `ApiKey`, `Username` and `Password` unset (registration fails othe
 authentication on the returned settings. `Timeout` still applies per request.
 
 ## NativeAOT
-
-The sink depends on [`Elastic.Ingest.Elasticsearch`](https://github.com/elastic/elastic-ingest-dotnet)
-rather than the full `Elastic.Clients.Elasticsearch` client, and is marked `IsAotCompatible`: no
-reflection-based client serialization sits between your transform and the `_bulk` wire format.
 
 Bulk bodies are written without reflection for strings, numbers, booleans, `Guid`, date/time types,
 byte arrays (as base64), `ReadOnlyMemory<float>`/`float[]` vectors (as number arrays), nested
