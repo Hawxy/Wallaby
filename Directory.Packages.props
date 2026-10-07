@@ -3,6 +3,11 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
+  <PropertyGroup>
+    <Verify_SponsorshipExemption>OpenSource</Verify_SponsorshipExemption>
+    <Verify_SponsorshipExemptionUntil>2027-10</Verify_SponsorshipExemptionUntil>
+  </PropertyGroup>
+  
   <ItemGroup>
     <!-- Core runtime dependencies -->
     <PackageVersion Include="Patched.DistributedLock.Postgres" Version="1.3.3" />
