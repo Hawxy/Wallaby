@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Wallaby.Aspire.Hosting</PackageId>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Aspire AppHost integration for Wallaby: enables logical replication on Aspire's Postgres container and adds a dashboard resource that shows a Wallaby installation's slots, backfill progress and suspension state, with commands to backfill, suspend, resume and widen publications.</Description>
+    <PackageTags>aspire;hosting;dashboard;backfill;npgsql</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wallaby.Aspire.Hosting.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNet.ReproducibleBuilds">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wallaby.Client\Wallaby.Client.csproj" />
+  </ItemGroup>
+
+  <Import Project="../../Package.Build.props" />
+
+</Project>

@@ -41,6 +41,18 @@ public sealed record WallabyBackfillState(
     /// <summary>When the run started fresh (a resumed run keeps it); null when written by a host older than schema version 10.</summary>
     public DateTimeOffset? StartedAt { get; init; }
 
+    /// <summary>
+    /// Consecutive failed runs since the table last backfilled cleanly; 0 when healthy or written by a host
+    /// older than schema version 7.
+    /// </summary>
+    public int Attempts { get; init; }
+
+    /// <summary>When the leader retries a failing table; null unless <see cref="Attempts"/> is above 0.</summary>
+    public DateTimeOffset? NextAttemptAt { get; init; }
+
+    /// <summary>The most recent failure's message; null when the table has not failed.</summary>
+    public string? LastError { get; init; }
+
     /// <summary>Fraction complete (0 to 1) when an estimate exists; null otherwise.</summary>
     public double? Progress => EstimatedRows is > 0 ? Math.Min(1d, RowsCopied / (double)EstimatedRows.Value) : null;
 

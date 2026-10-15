@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "docs"],
       "port": 4174
+    },
+    {
+      "name": "aspire-sample",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "samples/Wallaby.Aspire.Sample.AppHost", "--launch-profile", "http"],
+      "port": 15180
     }
   ]
 }

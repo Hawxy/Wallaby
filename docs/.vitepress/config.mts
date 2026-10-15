@@ -142,6 +142,7 @@ export default defineConfig({
           { text: 'Observability', link: '/operations/observability' },
           { text: 'Health Checks', link: '/operations/health-checks' },
           { text: 'External Control', link: '/operations/external-control' },
+          { text: 'Aspire', link: '/operations/aspire' },
           { text: 'Upgrading Wallaby', link: '/operations/upgrades' },
           { text: 'Upgrading Postgres', link: '/operations/major-version-upgrades' }
         ]

@@ -19,6 +19,9 @@ services.AddOpenTelemetry()
         .AddNpgsql());                 // nests enrichment queries under Wallaby's transform spans
 ```
 
+In an Aspire solution this belongs in ServiceDefaults; see [Aspire](/operations/aspire) for the
+dashboard resource that complements it.
+
 The meter and source names are also exposed as constants: `WallabyInstrumentation.MeterName` and
 `WallabyInstrumentation.ActivitySourceName`.
 

@@ -342,6 +342,9 @@ public sealed class WallabyControlClient : IAsyncDisposable
             {
                 EstimatedRows = r.EstimatedRows,
                 StartedAt = r.StartedAt,
+                Attempts = r.Attempts,
+                NextAttemptAt = r.Attempts > 0 ? r.NextAttemptAt : null,
+                LastError = r.LastError,
             })
             .ToList();
     }

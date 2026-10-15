@@ -37,11 +37,17 @@
     <PackageVersion Include="Elastic.Ingest.Elasticsearch" Version="0.53.0" />
     <!-- OpenSearch sink package -->
     <PackageVersion Include="OpenSearch.Client" Version="2.2.0" />
+    <!-- Aspire hosting package, sample AppHost and its tests -->
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.1" />
+    <PackageVersion Include="Aspire.Hosting.Dotnet" Version="13.6.1-preview.1.26506.6" />
+    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Meilisearch" Version="13.6.0" />
     <!-- Sample / test infrastructure -->
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
-    <!-- Trace demo (tests/Wallaby.TraceDemo only) -->
+    <!-- Trace demo and the Aspire sample worker -->
     <PackageVersion Include="OpenTelemetry" Version="1.19.1" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
     <!-- Test stack -->
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.Testing" Version="10.9.0" />
     <PackageVersion Include="StandardWebhooks" Version="1.1.2" />

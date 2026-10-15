@@ -22,7 +22,7 @@ public class BackfillClientTests(PostgresFixture pg)
     private Task EnsureBackfillTableAsync() => WallabyStateSchema.EnsureAsync(pg.DataSource);
 
     [Test]
-    public async Task Status_carries_the_progress_facts_and_tolerates_rows_without_them()
+    public async Task Status_carries_the_progress_and_retry_facts_and_tolerates_rows_without_them()
     {
         var table = $"public.orders_{Guid.NewGuid():N}";
         await using var client = new WallabyControlClient(pg.ConnectionString);
@@ -34,6 +34,11 @@ public class BackfillClientTests(PostgresFixture pg)
                   INSERT INTO wallaby.backfill_state (table_qualified, status, rows_copied, updated_at, estimated_rows, started_at)
                   VALUES ('{table}', 'InProgress', 250, now(), 1000, now() - interval '5 minutes'),
                          ('{table}_legacy', 'Completed', 7, now(), NULL, NULL)
+                  """);
+            await ExecAsync(
+                $"""
+                  INSERT INTO wallaby.backfill_state (table_qualified, status, rows_copied, attempts, next_attempt_at, last_error)
+                  VALUES ('{table}_failing', 'Requested', 0, 3, now() + interval '40 seconds', 'sink unreachable')
                   """);
 
             var status = await client.GetBackfillStatusAsync();
@@ -48,6 +53,14 @@ public class BackfillClientTests(PostgresFixture pg)
             legacy.EstimatedRows.ShouldBeNull();
             legacy.StartedAt.ShouldBeNull();
             legacy.Progress.ShouldBeNull();
+            legacy.Attempts.ShouldBe(0);
+            legacy.NextAttemptAt.ShouldBeNull();
+            legacy.LastError.ShouldBeNull();
+
+            var failing = status.Single(s => s.Table == $"{table}_failing");
+            failing.Attempts.ShouldBe(3);
+            failing.NextAttemptAt.ShouldNotBeNull().ShouldBeGreaterThan(DateTimeOffset.UtcNow);
+            failing.LastError.ShouldBe("sink unreachable");
         }
         finally
         {

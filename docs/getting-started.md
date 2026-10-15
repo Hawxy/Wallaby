@@ -23,6 +23,11 @@ Your Postgres 15+ server must already have:
 Wallaby validates these on startup - including the server version - and fails fast with an actionable
 error if something is missing.
 
+::: tip Aspire
+With an Aspire AppHost, `AddPostgres(...).WithLogicalReplication()` from
+[Wallaby.Aspire.Hosting](/operations/aspire) sets these up on Aspire's Postgres container.
+:::
+
 ## Choose your configuration
 
 Wallaby is configured through `AddWallaby`, with a **storage provider** supplying the model of what to

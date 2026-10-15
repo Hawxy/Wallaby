@@ -7,6 +7,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Wallaby.AspNetCore.HealthChecks/Wallaby.AspNetCore.HealthChecks.csproj" />
+    <Project Path="src/Wallaby.Aspire.Hosting/Wallaby.Aspire.Hosting.csproj" />
     <Project Path="src/Wallaby.Client/Wallaby.Client.csproj" />
     <Project Path="src/Wallaby.Providers.EntityFrameworkCore/Wallaby.Providers.EntityFrameworkCore.csproj" />
     <Project Path="src/Wallaby.Providers.Marten/Wallaby.Providers.Marten.csproj" />
@@ -22,6 +23,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Wallaby.AotSmokeTest/Wallaby.AotSmokeTest.csproj" />
+    <Project Path="tests/Wallaby.Aspire.Hosting.Tests/Wallaby.Aspire.Hosting.Tests.csproj" />
     <Project Path="tests/Wallaby.Benchmarks/Wallaby.Benchmarks.csproj" />
     <Project Path="tests/Wallaby.Client.Tests/Wallaby.Client.Tests.csproj" />
     <Project Path="tests/Wallaby.Providers.EntityFrameworkCore.Tests/Wallaby.Providers.EntityFrameworkCore.Tests.csproj" />
@@ -40,6 +42,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/Sample.MartenWorkerApp/Sample.MartenWorkerApp.csproj" />
     <Project Path="samples/Sample.WorkerApp/Sample.WorkerApp.csproj" />
+    <Project Path="samples/Wallaby.Aspire.Sample.AppHost/Wallaby.Aspire.Sample.AppHost.csproj" />
   </Folder>
   <Project Path="build/_build.csproj" />
 </Solution>

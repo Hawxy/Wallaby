@@ -5,7 +5,8 @@ namespace Wallaby.Client.Internal;
 /// <summary>A <c>wallaby.backfill_state</c> row as the remote client reads it.</summary>
 internal sealed record BackfillStateRow(
     string TableQualified, string Status, long RowsCopied, DateTimeOffset UpdatedAt,
-    long? EstimatedRows, DateTimeOffset? StartedAt);
+    long? EstimatedRows, DateTimeOffset? StartedAt,
+    int Attempts, DateTimeOffset? NextAttemptAt, string? LastError);
 
 /// <summary>
 /// Request/cancel/read SQL against <see cref="BackfillContract.Table"/>, shared verbatim between the
@@ -72,14 +73,18 @@ internal static class BackfillOperations
     {
         try
         {
-            // The progress columns arrived in schema version 10; reading them through to_jsonb keeps this
-            // status read (which is not schema-gated) working against an older host's table.
+            // The retry columns arrived in schema version 7 and the progress columns in 10; reading them
+            // through to_jsonb keeps this status read (which is not schema-gated) working against an older
+            // host's table.
             await using var cmd = dataSource.CreateCommand(
                 $"""
                  SELECT table_qualified, status, rows_copied, updated_at,
-                        (to_jsonb(b) ->> 'estimated_rows')::bigint,
-                        (to_jsonb(b) ->> 'started_at')::timestamptz
-                 FROM {BackfillContract.Table} b ORDER BY table_qualified
+                        (j ->> 'estimated_rows')::bigint,
+                        (j ->> 'started_at')::timestamptz,
+                        coalesce((j ->> 'attempts')::int, 0),
+                        (j ->> 'next_attempt_at')::timestamptz,
+                        j ->> 'last_error'
+                 FROM {BackfillContract.Table} b, LATERAL to_jsonb(b) j ORDER BY table_qualified
                  """);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             var states = new List<BackfillStateRow>();
@@ -89,7 +94,10 @@ internal static class BackfillOperations
                     reader.GetString(0), reader.GetString(1), reader.GetInt64(2),
                     reader.GetFieldValue<DateTimeOffset>(3),
                     reader.IsDBNull(4) ? null : reader.GetInt64(4),
-                    reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5)));
+                    reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+                    reader.GetInt32(6),
+                    reader.IsDBNull(7) ? null : reader.GetFieldValue<DateTimeOffset>(7),
+                    reader.IsDBNull(8) ? null : reader.GetString(8)));
             }
             return states;
         }

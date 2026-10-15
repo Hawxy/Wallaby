@@ -49,7 +49,7 @@ public sealed class ElasticsearchSink : ISink, ISinkPurger, IDisposable
             Retry = BulkRetryPolicy.None, // Wallaby's SinkDispatcher owns retry/backoff; one request per call.
             ApplyLibrarySerializerDefaults = false, // The defaults re-resolve the body type, which needs a real resolver.
             Refresh = options.Refresh ? BulkRefresh.WaitFor : null,
-            RequestTimeout = options.Timeout,
+            RequestTimeout = options.Timeout
         });
     }
 
