@@ -40,31 +40,40 @@ internal static class WallabyMonitor
                 return;
             }
 
-            await using var client = new WallabyControlClient(connectionString);
+            var client = new WallabyControlClient(connectionString);
             resource.Monitor.Client = client;
-            await notifications.PublishUpdateAsync(resource, s => s with
+            try
             {
-                State = KnownResourceStates.Running,
-                StartTimeStamp = DateTime.UtcNow,
-            });
-
-            WallabyObservation? previous = null;
-            while (!ct.IsCancellationRequested)
-            {
-                var current = await PollAsync(client, previous, ct);
-                resource.Monitor.Latest = current;
-                WallabyChangeLog.Write(logger, previous, current);
-                // Publishing an unchanged snapshot is a no-op, so this only reaches the dashboard on change.
-                // Aspire re-runs a healthy resource's checks only every 30 seconds, so the poll also writes
-                // the same verdict into the snapshot's health report to show changes right away.
-                var properties = WallabyObservationMapper.Properties(current);
-                var health = WallabyObservationMapper.Health(current);
-                await notifications.PublishUpdateAsync(resource, s => (s with
+                await notifications.PublishUpdateAsync(resource, s => s with
                 {
-                    Properties = WallabyObservationMapper.MergeProperties(s.Properties, properties),
-                }).WithHealthReports(WallabyObservationMapper.MergeHealthReport(s.HealthReports, resource.HealthCheckKey, health)));
-                previous = current;
-                await resource.Monitor.WaitForNextPollAsync(resource.PollInterval, ct);
+                    State = KnownResourceStates.Running,
+                    StartTimeStamp = DateTime.UtcNow,
+                });
+
+                WallabyObservation? previous = null;
+                while (!ct.IsCancellationRequested)
+                {
+                    var current = await PollAsync(client, previous, ct);
+                    resource.Monitor.Latest = current;
+                    WallabyChangeLog.Write(logger, previous, current);
+                    // Publishing an unchanged snapshot is a no-op, so this only reaches the dashboard on change.
+                    // Aspire re-runs a healthy resource's checks only every 30 seconds, so the poll also writes
+                    // the same verdict into the snapshot's health report to show changes right away.
+                    var properties = WallabyObservationMapper.Properties(current);
+                    var health = WallabyObservationMapper.Health(current);
+                    await notifications.PublishUpdateAsync(resource, s => (s with
+                    {
+                        Properties = WallabyObservationMapper.MergeProperties(s.Properties, properties),
+                    }).WithHealthReports(WallabyObservationMapper.MergeHealthReport(s.HealthReports, resource.HealthCheckKey, health)));
+                    previous = current;
+                    await resource.Monitor.WaitForNextPollAsync(resource.PollInterval, ct);
+                }
+            }
+            finally
+            {
+                // Unpublish before disposing so commands don't pick up a disposed client.
+                resource.Monitor.Client = null;
+                await client.DisposeAsync();
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -75,10 +84,6 @@ internal static class WallabyMonitor
             // E.g. a dependency that failed to start; the loop runs detached, so surface it here.
             logger.MonitorFailed(ex);
             await notifications.PublishUpdateAsync(resource, s => s with { State = KnownResourceStates.FailedToStart });
-        }
-        finally
-        {
-            resource.Monitor.Client = null;
         }
     }
 
