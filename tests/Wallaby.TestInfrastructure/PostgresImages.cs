@@ -5,7 +5,7 @@ public static class PostgresImages
 {
     /// <summary>
     /// The image every version-agnostic fixture uses. Overridable through <c>WALLABY_TEST_PG_IMAGE</c>
-    /// so the whole suite can run against another major (the Nuke build's Postgres matrix does this).
+    /// so the whole suite can run against another major (the Fallout build's Postgres matrix does this).
     /// </summary>
     public static string Default { get; } =
         Environment.GetEnvironmentVariable("WALLABY_TEST_PG_IMAGE") is { Length: > 0 } image ? image : "postgres:17";

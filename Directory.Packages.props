@@ -21,7 +21,7 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.12" />
-    <PackageVersion Include="Nuke.Common" Version="10.1.0" />
+    <PackageVersion Include="Fallout.Common" Version="10.4.0" />
     <PackageVersion Include="Polly.Core" Version="8.8.0" />
     <!-- Pgvector sink package -->
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
@@ -38,9 +38,9 @@
     <!-- OpenSearch sink package -->
     <PackageVersion Include="OpenSearch.Client" Version="2.2.0" />
     <!-- Aspire hosting package, sample AppHost and its tests -->
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.Dotnet" Version="13.6.1-preview.1.26506.6" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.3" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.3" />
+    <PackageVersion Include="Aspire.Hosting.Dotnet" Version="13.6.3-preview.1.26521.2" />
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Meilisearch" Version="13.6.0" />
     <!-- Sample / test infrastructure -->
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
