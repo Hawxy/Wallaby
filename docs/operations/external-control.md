@@ -173,7 +173,8 @@ foreach (var table in status.Where(t => t.Status == WallabyBackfillStatus.InProg
 ```
 
 `Progress` and `EstimatedRemaining` derive from the [progress facts](/backfill#progress-and-eta) the host
-records; both are null when the table has no row estimate.
+records; both are null when the table has no row estimate. A table whose backfill keeps
+[failing](/backfill#failure-handling) carries its `Attempts`, `LastError` and `NextAttemptAt` retry time.
 
 Identical semantics to the in-host manager: the request is persisted (it survives restarts), the current
 leader is signalled instantly, and a request made while the table is already backfilling wins.

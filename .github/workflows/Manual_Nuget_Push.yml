@@ -9,7 +9,7 @@
 #
 #     - To trigger manual generation invoke:
 #
-#         nuke --generate-configuration GitHubActions_Manual_Nuget_Push --host GitHubActions
+#         fallout --generate-configuration GitHubActions_Manual_Nuget_Push --host GitHubActions
 #
 # </auto-generated>
 # ------------------------------------------------------------------------------
@@ -23,15 +23,21 @@ jobs:
     name: ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - name: 'Cache: .nuke/temp, ~/.nuget/packages'
-        uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - name: 'Cache: .fallout/temp, ~/.nuget/packages'
+        uses: actions/cache@v6
         with:
           path: |
-            .nuke/temp
+            .fallout/temp
             ~/.nuget/packages
           key: ${{ runner.os }}-${{ hashFiles('**/global.json', '**/*.csproj', '**/Directory.Packages.props') }}
+      - name: 'Setup: .NET SDK'
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: 'Restore: dotnet tools'
+        run: dotnet tool restore
       - name: 'Run: NugetPush'
-        run: ./build.cmd NugetPush
+        run: dotnet fallout NugetPush
         env:
           NugetApiKey: ${{ secrets.NUGET_API_KEY }}

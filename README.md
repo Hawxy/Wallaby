@@ -38,6 +38,7 @@ Requires Postgres 15+ and .NET 10+.
 | `Wallaby.Client`                        | Standalone remote control plane (suspend/resume, backfills, inspection) via Postgres. |
 | `Wallaby.Testing`                       | End-to-end pipeline test harness with real logical replication.                       |
 | `Wallaby.AspNetCore.HealthChecks`       | ASP.NET Core liveness health check for Wallaby nodes.                                 |
+| `Wallaby.Aspire.Hosting`                | Aspire AppHost integration: logical replication and a Wallaby dashboard resource.     |
 
 ## Quick start
 

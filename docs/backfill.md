@@ -181,7 +181,8 @@ last saved cursor. A manual request for a table that is mid-backoff is served wh
 not immediately.
 
 Failures are visible in three places: the leader's log (one error per attempt), the `attempts`/`last_error`
-columns surfaced through `IWallabyBackfillManager.GetStatusAsync`, and the
+columns surfaced through `IWallabyBackfillManager.GetStatusAsync` and the
+[control client](/operations/external-control#triggering-backfills), and the
 [health check](/operations/health-checks), which grades **Degraded** once the worst failing table crosses
 `BackfillFailureThreshold` consecutive failures.
 
