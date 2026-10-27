@@ -12,7 +12,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Full history so lastUpdated (and the sitemap's lastmod) reflects each page's last commit
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install Node.js
         uses: actions/setup-node@v6

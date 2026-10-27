@@ -1,9 +1,9 @@
 ---
-title: "Stream Postgres changes to Kafka from .NET"
+title: "Stream Postgres changes to Kafka from C# / .NET"
 description: "Produce Postgres inserts, updates and deletes to Kafka topics from C#: keyed by document id, tombstone deletes, commit order preserved, no Debezium or Connect."
 ---
 
-# Kafka Sink
+# Postgres to Kafka Streaming
 
 Stream Postgres changes to Kafka topics from your .NET application, with no Debezium and no Kafka
 Connect. The `Wallaby.Sinks.Kafka` package produces each record as one message on the topic named by

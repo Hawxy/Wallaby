@@ -1,16 +1,15 @@
 ---
-title: "Sync Postgres to Meilisearch from .NET"
+title: "Sync Postgres to Meilisearch from C# / .NET"
 description: "Keep a Meilisearch index in sync with Postgres from C#: install Wallaby.Sinks.Meilisearch, map an EF Core entity or Marten document, and changes stream in live."
 ---
 
-# Meilisearch Sink
+# Postgres to Meilisearch Sync
 
 Keep a Meilisearch index in sync with Postgres from your .NET application. The
 `Wallaby.Sinks.Meilisearch` package streams committed row changes out of Postgres logical
-replication and writes them to Meilisearch as idempotent upserts and deletes: no polling, no dual
-writes, and no reindex script. The sink also supports
-[purge-then-backfill](/backfill#purging-before-a-backfill): a purge deletes all of an index's
-documents (the index and its settings survive) so the backfill rebuilds it from scratch.
+replication and writes them to Meilisearch as idempotent upserts and deletes. The sink also supports
+[purge-then-backfill](/backfill#purging-before-a-backfill), a purge deletes all of an index's
+documents and the backfill rebuilds it from scratch.
 
 ## Quickstart
 

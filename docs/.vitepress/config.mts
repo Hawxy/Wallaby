@@ -14,6 +14,8 @@ export default defineConfig({
   description: SITE_DESCRIPTION,
   base: '/',
   cleanUrls: true,
+  // Also feeds the sitemap's lastmod.
+  lastUpdated: true,
   sitemap: {
     hostname: HOSTNAME
   },

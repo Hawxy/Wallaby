@@ -1,9 +1,9 @@
 ---
-title: "Send Postgres changes to a webhook from .NET"
+title: "Send Postgres changes to a webhook from C# / .NET"
 description: "POST Postgres inserts, updates and deletes to any HTTP endpoint from C#: JSON envelope, Standard Webhooks signing, idempotency keys, at-least-once delivery."
 ---
 
-# HTTP (Webhook) Sink
+# Postgres to Webhook (HTTP)
 
 Send Postgres changes to any webhook or HTTP endpoint from your .NET application. The
 `Wallaby.Sinks.Http` package POSTs batches of changes as a JSON envelope of upsert/delete records.

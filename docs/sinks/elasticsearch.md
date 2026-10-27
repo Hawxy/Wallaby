@@ -1,9 +1,9 @@
 ---
-title: "Sync Postgres to Elasticsearch from .NET"
+title: "Sync Postgres to Elasticsearch from C# / .NET"
 description: "Keep Elasticsearch indices in sync with Postgres from C#: bulk upserts and deletes driven by logical replication, mapped from your EF Core or Marten model."
 ---
 
-# Elasticsearch Sink
+# Postgres to Elasticsearch Sync
 
 Keep Elasticsearch indices in sync with Postgres from your .NET application. The
 `Wallaby.Sinks.Elasticsearch` package streams committed row changes out of Postgres logical

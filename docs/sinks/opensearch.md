@@ -1,15 +1,14 @@
 ---
-title: "Sync Postgres to OpenSearch from .NET"
+title: "Sync Postgres to OpenSearch from C# / .NET"
 description: "Keep OpenSearch indexes in sync with Postgres from C#: bulk upserts and deletes via logical replication. Works with self-managed and Amazon OpenSearch Service."
 ---
 
-# OpenSearch Sink
+# Postgres to OpenSearch Sync
 
 Keep OpenSearch indexes in sync with Postgres from your .NET application. The
 `Wallaby.Sinks.OpenSearch` package streams committed row changes out of Postgres logical replication
 and delivers them through the `_bulk` API: upserts are indexed with `_id` set to a stable document id
-(so updates are idempotent) and deletions remove by that same id. No polling, no dual writes, no
-reindex script. It works with self-managed OpenSearch and Amazon OpenSearch Service.
+(so updates are idempotent) and deletions remove by that same id. It works with self-managed OpenSearch and Amazon OpenSearch Service.
 
 ## Quickstart
 

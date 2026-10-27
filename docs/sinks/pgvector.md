@@ -1,9 +1,9 @@
 ---
-title: "Sync Postgres to pgvector embeddings from .NET"
+title: "Sync Postgres to pgvector embeddings from C# / .NET"
 description: "Keep pgvector tables and embeddings in sync with Postgres from C#: sink-side embedding re-embeds only changed text, so restarts and backfills never re-embed."
 ---
 
-# Pgvector Sink
+# Postgres to pgvector Sync
 
 Keep [pgvector](https://github.com/pgvector/pgvector) tables and their embeddings in sync with
 Postgres from your .NET application: the "my RAG corpus is just Postgres" setup, with no extra

@@ -444,3 +444,8 @@ html {
   font-size: 12px;
   text-transform: uppercase;
 }
+
+/* lastUpdated is enabled only for the sitemap's lastmod, so the footer date stays hidden */
+.VPDocFooter .edit-info {
+  display: none;
+}
