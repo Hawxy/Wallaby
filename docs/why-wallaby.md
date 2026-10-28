@@ -1,6 +1,6 @@
 ---
-title: "CDC vs dual writes for .NET search indexing"
-description: "Why change data capture beats publish-on-write for keeping search indexes and read models in sync, and what Wallaby handles for you."
+title: "CDC vs dual writes, Debezium and Sequin for .NET"
+description: "Why change data capture beats publish-on-write for keeping search indexes and read models in sync, and how Wallaby compares to Debezium and Sequin."
 ---
 
 # Why Wallaby?
@@ -24,6 +24,50 @@ Change data capture works by reading committed changes from the database's write
 The only thing to note is that CDC captures *state changes*, not intent. If consumers need to know **why** something changed, such as a
 domain event carrying business meaning, a message bus is still the right tool. Wallaby covers the cases
 where the goal is "the data changed, keep the downstream copy in sync".
+
+## Compared to Debezium and Sequin
+
+[Debezium](https://debezium.io) and [Sequin](https://sequinstream.com) are both excellent CDC tools, and
+all three read committed changes from Postgres logical replication. The difference is where the engine
+lives and what your code works with.
+
+Debezium and Sequin are **services you run next to your database**. They emit a generic row-change
+event, and you shape it with their transform mechanism or in a consumer downstream. Wallaby is a
+**.NET library**: it runs inside a .NET host, materializes each change into your EF Core entity, Marten
+document or POCO, and a C# transform shapes the document before it reaches the sink.
+
+| | Wallaby | Debezium | Sequin |
+| --- | --- | --- | --- |
+| **Runs as** | NuGet package in a .NET host | Kafka Connect connector, Debezium Server, or embedded engine (JVM) | Standalone Docker container (Elixir) |
+| **Sources** | Postgres 15+ | Postgres, MySQL, SQL Server, Oracle, MongoDB and more | Postgres 14+ |
+| **What you transform** | Your EF Core entities, Marten documents or POCOs | Debezium change event (`before`/`after` envelope) | Row-change message |
+| **Transform language** | C#, with your `DbContext` or `IQuerySession` for enrichment | Java SMTs, or a downstream consumer | Elixir functions |
+| **Configuration** | Code, derived from your model; publication and slot self-configured | Connector properties | Web console, YAML, CLI or API |
+| **Backfill** | Versioned: a mapping's version bump triggers a reindex | Initial and incremental snapshots | Initial and on-demand backfills |
+| **Delivery** | At-least-once, commit order per document | At-least-once by default | Ordered, with idempotency keys |
+
+### Choose Wallaby when
+
+- **Your app is already .NET on Postgres.** Mappings are derived from the model you already built, so a
+  schema change that breaks a mapping is an instead compile error.
+- **The destination needs a shaped document, not a row.** Transforms are plain C#: join related data
+  through your `DbContext`, flatten it, and send it on. There is no event format to learn and no separate
+  consumer to write.
+- **You don't want another service to operate.** No Kafka, no JVM and no extra container. Wallaby runs in
+  a .NET host you deploy like any other, with [leader election](/configuration) across nodes,
+  [OpenTelemetry](/operations/observability) and [health checks](/operations/health-checks) built in.
+- **Your output shape changes over time.** Bump a mapping's version and Wallaby
+  [backfills](/backfill) the destination while live changes keep flowing.
+
+### Choose Debezium or Sequin when
+
+- **You capture from more than Postgres.** Debezium covers most major databases; Wallaby is Postgres only.
+- **Your services aren't .NET**, or you want CDC owned by a platform team rather than an application.
+- **You need a destination Wallaby doesn't ship**, such as SQS, NATS or Pub/Sub, and don't want to write
+  a [custom sink](/sinks/custom).
+
+If another tool already reads from the same database, Wallaby can still
+[provision and maintain its publication and slot](/external-slots).
 
 ## Prior Art
 
