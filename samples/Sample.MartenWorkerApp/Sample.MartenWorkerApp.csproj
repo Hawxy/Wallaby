@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <TargetFrameworks />
+    <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <UserSecretsId>wallaby-sample-marten-worker</UserSecretsId>
   </PropertyGroup>

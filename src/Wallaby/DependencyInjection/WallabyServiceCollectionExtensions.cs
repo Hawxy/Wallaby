@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Wallaby.Abstractions;
 using Wallaby.Diagnostics;
@@ -108,7 +109,8 @@ public static class WallabyServiceCollectionExtensions
         services.AddSingleton<IClusterLock>(sp =>
             new Internal.Cluster.PostgresAdvisoryLock(
                 sp.GetRequiredService<WallabyDataSource>().Source,
-                sp.GetRequiredService<WallabyOptions>().Advanced.TransactionalClusterLock));
+                sp.GetRequiredService<WallabyOptions>().Advanced.TransactionalClusterLock,
+                sp.GetRequiredService<ILogger<Internal.Cluster.PostgresAdvisoryLock>>()));
 
         // Capture runtime: registered unconditionally as lazy factories; only the hosted-service dispatch
         // below (or a consumer resolving IWallabyBackfillManager) materializes it. Providers and their

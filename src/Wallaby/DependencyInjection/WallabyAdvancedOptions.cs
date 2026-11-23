@@ -40,10 +40,12 @@ public sealed class WallabyAdvancedOptions
     public TimeSpan LeaderRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// When false (the default), the built-in cluster lock uses session-scoped advisory locks multiplexed
-    /// onto one shared connection per node. Set to true to hold each lock in a transaction on its own
-    /// connection instead, which is required when the lock's connections go through a pooler in
-    /// transaction mode (e.g. PgBouncer <c>pool_mode = transaction</c>).
+    /// When false (the default), the built-in cluster lock is a session-scoped advisory lock held on its
+    /// own connection. Set to true to hold it in a transaction on that connection instead, which is
+    /// required when the lock's connections go through a pooler in transaction mode (e.g. PgBouncer
+    /// <c>pool_mode = transaction</c>). The lock's connection runs a keepalive query every 30 seconds and is
+    /// otherwise idle (idle in transaction when this is true), so an idle-session reaper such as
+    /// <c>idle_session_timeout</c> or <c>idle_in_transaction_session_timeout</c> must allow longer than that.
     /// </summary>
     public bool TransactionalClusterLock { get; set; }
 

@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "samples/Wallaby.Aspire.Sample.AppHost/Wallaby.Aspire.Sample.AppHost.csproj"
+  }
+}
