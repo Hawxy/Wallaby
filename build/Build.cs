@@ -36,7 +36,7 @@ using static Fallout.Common.Tools.DotNet.DotNetTasks;
     On = [GitHubActionsTrigger.WorkflowDispatch],
     InvokedTargets = [nameof(NugetPush)],
     ImportSecrets = [nameof(NugetApiKey)])]
-class Build : FalloutBuild
+class Build : FalloutBuild, IConfigureGitHubActions
 {
     public static int Main () => Execute<Build>(x => x.Compile);
     
@@ -124,14 +124,18 @@ class Build : FalloutBuild
         .Executes(() =>
         {
             var project = Solution.AllProjects.Single(x => x.Name == "Wallaby.AotSmokeTest");
-            var output = ArtifactsDirectory / "aot-smoke";
-            DotNetPublish(_ => _
-                .SetProject(project)
-                .SetConfiguration("Release")
-                .SetOutput(output));
+            foreach (var framework in project.GetTargetFrameworks())
+            {
+                var output = ArtifactsDirectory / "aot-smoke" / framework;
+                DotNetPublish(_ => _
+                    .SetProject(project)
+                    .SetConfiguration("Release")
+                    .SetFramework(framework)
+                    .SetOutput(output));
 
-            var exe = output / (OperatingSystem.IsWindows() ? "Wallaby.AotSmokeTest.exe" : "Wallaby.AotSmokeTest");
-            ProcessTasks.StartProcess(exe, workingDirectory: output).AssertZeroExitCode();
+                var exe = output / (OperatingSystem.IsWindows() ? "Wallaby.AotSmokeTest.exe" : "Wallaby.AotSmokeTest");
+                ProcessTasks.StartProcess(exe, workingDirectory: output).AssertZeroExitCode();
+            }
         });
 
     // Every project under src/ ships as a package; tests/ and samples/ never do.
@@ -186,5 +190,15 @@ class Build : FalloutBuild
         Assert.True(reference == $"refs/tags/v{version}",
             $"Release tag '{reference}' does not match the package version {version} in Package.Build.props.");
     }
+
+    // global.json pins the .NET 11 SDK; the net10.0 builds, tests and the fallout tool also need the
+    // .NET 10 runtime, installed side by side ahead of the generated SDK setup.
+    public void ConfigureSteps(GitHubActionsStepPipeline pipeline) =>
+        pipeline.Insert(GitHubActionsStepPosition.PreRun, new GitHubActionsCustomStep
+        {
+            Name = "Setup: .NET 10",
+            Uses = "actions/setup-dotnet@v6",
+            With = { ["dotnet-version"] = "10.0.x" },
+        });
 
 }

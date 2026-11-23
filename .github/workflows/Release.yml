@@ -34,6 +34,10 @@ jobs:
             .fallout/temp
             ~/.nuget/packages
           key: ${{ runner.os }}-${{ hashFiles('**/global.json', '**/*.csproj', '**/Directory.Packages.props') }}
+      - name: 'Setup: .NET 10'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
       - name: 'Setup: .NET SDK'
         uses: actions/setup-dotnet@v6
         with:

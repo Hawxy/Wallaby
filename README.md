@@ -17,7 +17,8 @@ documents to pluggable **destinations** (sinks) with at-least-once delivery. It 
 the publication and replication slot from your model, supports **versioned backfill** (initial
 snapshots and shape-change reindexes), and is **cluster-safe** via leader election.
 
-Requires Postgres 15+ and .NET 10+.
+Requires Postgres 15+ and .NET 10+. On .NET 10 the packages use Npgsql 10 (and EF Core 10 for the
+EF Core provider); on .NET 11 they use Npgsql 11 and EF Core 11.
 
 📖 **Full documentation: [wallabycdc.net](https://wallabycdc.net/)**
 
@@ -76,8 +77,11 @@ Each package has one test project under `tests/` (`Wallaby.Tests`, `Wallaby.Prov
 All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Postgres container) live in
 `tests/Wallaby.TestInfrastructure`.
 
-- Everything: `dotnet test` or `.\build.ps1 Test`
-- One package: `dotnet run -c Release --project tests/Wallaby.Providers.EntityFrameworkCore.Tests`
+Libraries and tests target `net10.0` and `net11.0` (the .NET 11 SDK is required, plus the .NET 10 SDK
+or runtime to run the `net10.0` tests; `net11.0` builds compile with runtime async).
+
+- Everything, on both frameworks: `dotnet test` or `.\build.ps1 Test`
+- One package: `dotnet run -c Release -f net11.0 --project tests/Wallaby.Providers.EntityFrameworkCore.Tests`
 - Unit tests only (no Docker): append `-- --treenode-filter "/*/*.Unit*/*/*"`
 
 ### Viewing traces
