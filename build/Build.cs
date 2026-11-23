@@ -24,18 +24,18 @@ using static Fallout.Common.Tools.DotNet.DotNetTasks;
     OnPushBranches = ["main"],
     OnCronSchedule = "0 3 * * 1",
     InvokedTargets = [nameof(TestPostgresMatrix)])]
-[GitHubActions(
+[TrustedPublishingGitHubActions(
     "Release",
     GitHubActionsImage.UbuntuLatest,
     OnPushTags = ["v*"],
     InvokedTargets = [nameof(Test), nameof(AotSmoke), nameof(NugetPush)],
-    ImportSecrets = [nameof(NugetApiKey)])]
-[GitHubActions(
+    NugetUser = "${{ secrets.NUGET_USER }}")]
+[TrustedPublishingGitHubActions(
     "Manual Nuget Push",
     GitHubActionsImage.UbuntuLatest,
     On = [GitHubActionsTrigger.WorkflowDispatch],
     InvokedTargets = [nameof(NugetPush)],
-    ImportSecrets = [nameof(NugetApiKey)])]
+    NugetUser = "${{ secrets.NUGET_USER }}")]
 class Build : FalloutBuild, IConfigureGitHubActions
 {
     public static int Main () => Execute<Build>(x => x.Compile);
@@ -157,7 +157,7 @@ class Build : FalloutBuild, IConfigureGitHubActions
             }
         });
     
-    [Parameter("Nuget Api Key")] [Secret] readonly string NugetApiKey;
+    [Parameter("NuGet API key, short-lived key issued by NuGet/login via trusted publishing")] [Secret] readonly string NugetApiKey;
 
     Target NugetPush => _ => _
         .DependsOn(NugetPack)
