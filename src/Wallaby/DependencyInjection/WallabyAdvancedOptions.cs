@@ -46,6 +46,10 @@ public sealed class WallabyAdvancedOptions
     /// <c>pool_mode = transaction</c>). The lock's connection runs a keepalive query every 30 seconds and is
     /// otherwise idle (idle in transaction when this is true), so an idle-session reaper such as
     /// <c>idle_session_timeout</c> or <c>idle_in_transaction_session_timeout</c> must allow longer than that.
+    /// When the connection string enables Npgsql <c>KeepAlive</c> or <c>Multiplexing</c>, the connection
+    /// instead runs back-to-back 30-second <c>pg_sleep</c> queries and is never idle; those queries lift
+    /// <c>statement_timeout</c> for themselves. <c>transaction_timeout</c> is lifted for the lock in either mode.
+    /// Npgsql <c>Multiplexing</c> requires this to be true.
     /// </summary>
     public bool TransactionalClusterLock { get; set; }
 

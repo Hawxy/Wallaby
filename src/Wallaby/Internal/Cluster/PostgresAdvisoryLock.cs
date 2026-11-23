@@ -76,6 +76,11 @@ internal sealed class PostgresAdvisoryLock : IClusterLock
                     ct,
                     ("key", lockKey)))
             {
+                if (transaction is not null && HasTransactionTimeout(connection))
+                {
+                    // The lock's transaction stays open for as long as the lock is held.
+                    await PgExec.ExecuteAsync(connection, "SELECT set_config('transaction_timeout', '0', true)", ct);
+                }
                 return new Handle(this, key, connection, transaction, lockKey);
             }
         }
@@ -89,6 +94,10 @@ internal sealed class PostgresAdvisoryLock : IClusterLock
         await ReleaseAsync(key, connection, transaction, unlockKey: null);
         return null;
     }
+
+    // transaction_timeout (PostgreSQL 17+) ends the session, not just the transaction; earlier servers
+    // reject the setting.
+    private static bool HasTransactionTimeout(NpgsqlConnection connection) => connection.PostgreSqlVersion.Major >= 17;
 
     /// <summary>
     /// Deterministic 64-bit key derived from the name (FNV-1a), used as the advisory lock id. Every node
@@ -212,16 +221,13 @@ internal sealed class PostgresAdvisoryLock : IClusterLock
         private async Task WaitPassivelyAsync()
         {
             // WaitAsync also returns (true) whenever any message arrives, so wait out the rest of the slice.
+            // It takes whole milliseconds and treats 0 as infinite, so a sub-millisecond remainder ends the slice.
             var start = Stopwatch.GetTimestamp();
             var slice = TimeSpan.FromSeconds(MonitorSliceSeconds);
             var remaining = slice;
-            while (await _connection.WaitAsync(remaining, _stop.Token))
+            while (remaining >= TimeSpan.FromMilliseconds(1) && await _connection.WaitAsync(remaining, _stop.Token))
             {
                 remaining = slice - Stopwatch.GetElapsedTime(start);
-                if (remaining <= TimeSpan.Zero)
-                {
-                    return;
-                }
             }
         }
 
@@ -236,13 +242,15 @@ internal sealed class PostgresAdvisoryLock : IClusterLock
 
         private async Task SleepAsync()
         {
-            // One batch runs as one implicit transaction, so the local setting lifts any statement_timeout
-            // for the sleep without leaking into the pooled session.
+            // One batch runs as one implicit transaction, so the local settings lift any statement_timeout
+            // and transaction_timeout for the sleep without leaking into the pooled session.
             await using var batch = new NpgsqlBatch(_connection, _transaction)
             {
                 BatchCommands =
                 {
-                    new NpgsqlBatchCommand("SELECT set_config('statement_timeout', '0', true)"),
+                    new NpgsqlBatchCommand(HasTransactionTimeout(_connection)
+                        ? "SELECT set_config('statement_timeout', '0', true), set_config('transaction_timeout', '0', true)"
+                        : "SELECT set_config('statement_timeout', '0', true)"),
                     new NpgsqlBatchCommand($"SELECT pg_sleep({MonitorSliceSeconds})"),
                 },
                 Timeout = MonitorSliceSeconds + MonitorGraceSeconds,

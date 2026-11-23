@@ -77,8 +77,8 @@ Each package has one test project under `tests/` (`Wallaby.Tests`, `Wallaby.Prov
 All test projects use [TUnit](https://tunit.dev/); shared fixtures (e.g. the Postgres container) live in
 `tests/Wallaby.TestInfrastructure`.
 
-Libraries and tests target `net10.0` and `net11.0` (the .NET 11 SDK is required; `net11.0` builds
-compile with runtime async).
+Libraries and tests target `net10.0` and `net11.0` (the .NET 11 SDK is required, plus the .NET 10 SDK
+or runtime to run the `net10.0` tests; `net11.0` builds compile with runtime async).
 
 - Everything, on both frameworks: `dotnet test` or `.\build.ps1 Test`
 - One package: `dotnet run -c Release -f net11.0 --project tests/Wallaby.Providers.EntityFrameworkCore.Tests`

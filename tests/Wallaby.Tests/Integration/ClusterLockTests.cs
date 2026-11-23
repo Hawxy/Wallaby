@@ -61,7 +61,7 @@ public class ClusterLockTests(PostgresFixture pg)
         var key = $"slot_{Guid.NewGuid():N}";
         var locker = new PostgresAdvisoryLock(pg.DataSource, transactional);
 
-        var handle = await locker.TryAcquireAsync(key, CancellationToken.None);
+        await using var handle = await locker.TryAcquireAsync(key, CancellationToken.None);
         handle.ShouldNotBeNull();
         (await CountHoldersAsync(key)).ShouldBe(1);
 
@@ -82,7 +82,10 @@ public class ClusterLockTests(PostgresFixture pg)
         var builder = new NpgsqlConnectionStringBuilder(pg.ConnectionString)
         {
             ApplicationName = applicationName,
-            Options = "-c statement_timeout=500",
+            // transaction_timeout exists from PostgreSQL 17
+            Options = await ServerMajorVersionAsync() >= 17
+                ? "-c statement_timeout=500 -c transaction_timeout=500"
+                : "-c statement_timeout=500",
             KeepAlive = npgsqlKeepAlive,
         };
         await using var dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
@@ -105,7 +108,7 @@ public class ClusterLockTests(PostgresFixture pg)
                 },
                 TimeSpan.FromSeconds(10));
 
-            // Past the statement_timeout, which must not cut a monitoring sleep short
+            // Past the timeouts, which must cut neither a monitoring sleep nor the lock's transaction short
             await Task.Delay(TimeSpan.FromSeconds(1));
             handle!.Lost.IsCancellationRequested.ShouldBeFalse();
             handle.IsHeld.ShouldBeTrue();
@@ -129,6 +132,42 @@ public class ClusterLockTests(PostgresFixture pg)
         {
             await handle!.DisposeAsync();
         }
+    }
+
+#if !NET11_0_OR_GREATER
+    [Test]
+    public async Task Transactional_lock_excludes_and_releases_over_multiplexing()
+    {
+        // Npgsql 11 removed multiplexing
+        var builder = new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Multiplexing = true };
+        await using var node1Source = NpgsqlDataSource.Create(builder.ConnectionString);
+        await using var node2Source = NpgsqlDataSource.Create(builder.ConnectionString);
+        var node1 = new PostgresAdvisoryLock(node1Source, transactional: true);
+        var node2 = new PostgresAdvisoryLock(node2Source, transactional: true);
+        var key = $"slot_{Guid.NewGuid():N}";
+
+        await using var first = await node1.TryAcquireAsync(key, CancellationToken.None);
+        first.ShouldNotBeNull();
+        node1.MonitorsPassively.ShouldBeFalse();
+        (await node2.TryAcquireAsync(key, CancellationToken.None)).ShouldBeNull();
+
+        // Held through monitoring
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        first!.IsHeld.ShouldBeTrue();
+        (await CountHoldersAsync(key)).ShouldBe(1);
+
+        await first.DisposeAsync();
+        (await CountHoldersAsync(key)).ShouldBe(0);
+
+        await using var second = await node2.TryAcquireAsync(key, CancellationToken.None);
+        second.ShouldNotBeNull();
+    }
+#endif
+
+    private async Task<int> ServerMajorVersionAsync()
+    {
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        return connection.PostgreSqlVersion.Major;
     }
 
     private async Task<long> CountHoldersAsync(string key)
